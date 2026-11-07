@@ -1,7 +1,8 @@
-// Gemeinsamer Zustand für Startseite und Feintuning plus kleine Helfer, die beide Ansichten brauchen.
+// Gemeinsamer Zustand für Start- und Spielseite plus kleine Helfer, die beide Seiten brauchen.
 import { STYLE_PRESETS } from '../index.js';
 import { detectLanguage } from '../i18n/index.js';
 import { progressionFor } from '../core/progressions.js';
+import { loadLayout } from './layout-state.js';
 
 export const ROOTS = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
 // Skala ist nur Oberflächen-Zustand; der Generator kennt nur den Modus
@@ -30,6 +31,15 @@ export function readLang() {
   return detectLanguage(navigator.language);
 }
 
+// Schon der Zugriff auf localStorage kann werfen (gesperrter Speicher); null speichert nichts
+export const layoutStorage = (() => {
+  try {
+    return localStorage;
+  } catch {
+    return null;
+  }
+})();
+
 export function saveLang(lang) {
   try {
     localStorage.setItem(STORAGE_KEY, lang);
@@ -51,10 +61,11 @@ export const state = {
   style: 'funk',
   playing: false,
   lang: readLang(),
-  tuningOpen: false,
+  page: 'start', // 'start' | 'play'
+  layout: loadLayout(layoutStorage), // Leisten, Ansichten, Beschriftung; Änderungen über saveLayout
   current: null, // { bar, chord } aus onBar
   errors: [], // [{ code, params }], übersetzt erst in render()
-  notice: null, // Schlüssel einer Hinweis-Meldung im Feintuning, z. B. volle Folge
+  notice: null, // Schlüssel einer Hinweis-Meldung der Akkordfolge, z. B. volle Folge
 };
 
 // Folge aus Tonart und Variante; überschreibt eigene Änderungen (nur bei Tonart, Skala, Variante)

@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 import { allowedChords } from '../../src/core/music.js';
 import { progressionFor } from '../../src/core/progressions.js';
 
-const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category)\.[A-Za-z.]+$/;
+const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view)\.[A-Za-z.]+$/;
 const SYMBOLS = { maj: '', min: 'm', dim: 'dim' };
 const namesIn = (root, mode) => allowedChords({ root, mode }).map((c) => c.root + SYMBOLS[c.quality]);
 const BAR_TIMEOUT = 10_000; // ein Takt bei 100 bpm dauert 2,4 s; unter Last großzügig
@@ -40,6 +40,13 @@ async function open(page) {
 
 const sentence = (page) => page.locator('#sentence');
 const go = (page) => page.locator('#go');
+// Los startet und öffnet die Spielseite; zurück zur Startseite, die Wiedergabe läuft weiter
+async function goAndBack(page) {
+  await go(page).click();
+  await expect(page.locator('#play')).toBeVisible();
+  await page.locator('#play-back').click();
+  await expect(page.locator('#start')).toBeVisible();
+}
 const contexts = (page) => page.evaluate(() => window.__audioContexts);
 // angezeigte Folge "Am – Am – Dm – E" als Liste
 const shownChords = async (page) => (await page.locator('#chords').textContent()).split(' – ').map((s) => s.trim());
@@ -69,7 +76,7 @@ async function checkNoRawKeys(page) {
   }
 }
 
-test('Startsatz auf Deutsch, Feintuning-Bereich versteckt, kein AudioContext beim Laden', async ({ page }) => {
+test('Startsatz auf Deutsch, Spielseite versteckt, kein AudioContext beim Laden', async ({ page }) => {
   await expect(page.locator('html')).toHaveAttribute('lang', 'de');
   await expect(page.locator('#tonight')).toHaveText('Heute Abend:');
   const text = await normalized(sentence(page));
@@ -78,15 +85,15 @@ test('Startsatz auf Deutsch, Feintuning-Bereich versteckt, kein AudioContext bei
   await expect(go(page)).toHaveText('Los');
   await expect(page.getByRole('spinbutton', { name: 'Variante', exact: true })).toHaveValue(/^\d{1,4}$/);
   expect(await shownChords(page)).toHaveLength(4);
-  await expect(page.locator('#tuning')).toBeAttached();
-  await expect(page.locator('#tuning')).toBeHidden();
+  await expect(page.locator('#play')).toBeAttached();
+  await expect(page.locator('#play')).toBeHidden();
   expect(await contexts(page)).toBe(0);
 });
 
 test('Los startet mit aktuellem Akkord und Taktzeile, Stopp hält an; ein AudioContext für alle Starts', async ({ page }) => {
   const chords = await shownChords(page);
   expect(await contexts(page)).toBe(0);
-  await go(page).click();
+  await goAndBack(page);
   await expect(go(page)).toHaveText('Stopp');
   const now = page.locator('#now-chord');
   await expect(now).toHaveText(/\S/, { timeout: BAR_TIMEOUT });
@@ -98,7 +105,7 @@ test('Los startet mit aktuellem Akkord und Taktzeile, Stopp hält an; ein AudioC
   await expect(go(page)).toHaveText('Los');
   await expect(now).toHaveText('');
   await expect(position).toHaveText('');
-  await go(page).click();
+  await goAndBack(page);
   await expect(now).toHaveText(/\S/, { timeout: BAR_TIMEOUT });
   await go(page).click();
   await expect(go(page)).toHaveText('Los');
@@ -167,7 +174,7 @@ test('andere Tonart und Skala: Satz und Akkorde folgen, auch während der Wieder
   for (const c of await shownChords(page)) expect(namesIn('D', 'major')).toContain(c);
 
   await page.keyboard.press('Escape');
-  await go(page).click();
+  await goAndBack(page);
   await expect(page.locator('#now-chord')).toHaveText(/\S/, { timeout: BAR_TIMEOUT });
   await page.locator('#key-btn').click();
   await pop.getByRole('button', { name: 'Eb', exact: true }).click();
@@ -268,7 +275,7 @@ test('ungültige Variantennummer (0, 10000, Buchstaben, leer) wird ignoriert, Fe
 });
 
 test('Variantennummer während der Wiedergabe startet neu; auf Englisch ohne rohe Schlüssel', async ({ page }) => {
-  await go(page).click();
+  await goAndBack(page);
   const position = page.locator('#position');
   await expect(position).toHaveText('Takt 2 von 96', { timeout: BAR_TIMEOUT });
   const field = page.locator('#variant');
@@ -290,7 +297,7 @@ test('Variantennummer während der Wiedergabe startet neu; auf Englisch ohne roh
 });
 
 test('Tempo-Regler während der Wiedergabe: kein Neustart, kein Fehler', async ({ page }) => {
-  await go(page).click();
+  await goAndBack(page);
   const position = page.locator('#position');
   await expect(position).toHaveText('Takt 2 von 96', { timeout: BAR_TIMEOUT });
   await page.locator('#tempo-btn').click();
@@ -321,7 +328,7 @@ test('Sprachumschalter: Englisch ohne Neuladen, bleibt nach Neuladen, keine rohe
   await expect(page.locator('#new-variant')).toHaveText('another variant');
   await expect(page.getByRole('spinbutton', { name: 'Variant', exact: true })).toHaveValue(/^\d+$/);
   await checkNoRawKeys(page);
-  await go(page).click();
+  await goAndBack(page);
   await expect(page.locator('#position')).toHaveText(/^Bar \d+ of 96$/, { timeout: BAR_TIMEOUT });
   await go(page).click();
 
@@ -361,10 +368,13 @@ test('ohne localStorage (Zugriff wirft) läuft die Seite weiter', async ({ page 
   await expect(page.locator('#tonight')).toHaveText('Heute Abend:');
   await page.getByRole('button', { name: /^EN/i }).click();
   await expect(page.locator('#tonight')).toHaveText('Tonight:');
-  await go(page).click();
+  await goAndBack(page);
   await expect(go(page)).toHaveText('Stop');
   await go(page).click();
   await expect(go(page)).toHaveText('Go');
+  // Feintuning merkt die Leisten: ohne Speicher nur bis zum Neuladen, ohne Fehler
+  await page.locator('#tune-btn').click();
+  await expect(page.locator('#play')).toBeVisible();
 });
 
 test('Startfehler stürzt nicht ab: Meldung in der gewählten Sprache', async ({ page }) => {

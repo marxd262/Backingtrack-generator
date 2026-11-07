@@ -1,8 +1,8 @@
-// Feintuning-Ansicht: Schnellauswahl, Schlagworte, Tempo, Länge, Schichten, Verlauf, Akkordfolge, Akkordrad.
+// Spielseite (über Feintuning geöffnet): Schnellauswahl, Schlagworte, Tempo, Länge, Schichten, Verlauf, Akkordfolge, Akkordrad.
 import { test, expect } from '@playwright/test';
 import { layoutWheel } from '../../src/ui/wheel-geometry.js';
 
-const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category)\.[A-Za-z.]+$/;
+const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view)\.[A-Za-z.]+$/;
 const BAR_TIMEOUT = 10_000; // ein Takt bei 100 bpm dauert 2,4 s; unter Last großzügig
 const SYMBOLS = { maj: '', min: 'm', dim: 'dim' };
 const AM = { root: 'A', mode: 'minor' };
@@ -24,36 +24,36 @@ test.afterEach(() => {
 });
 
 const tuneBtn = (page) => page.locator('#tune-btn');
-const tuning = (page) => page.locator('#tuning');
-const tuningGo = (page) => page.locator('#tuning-go');
-const position = (page) => page.locator('#position');
+const playPage = (page) => page.locator('#play');
+const playGo = (page) => page.locator('#play-go');
+const position = (page) => page.locator('#play-position');
 const progression = (page) => page.locator('#progression button');
 const shownChords = async (page) => (await page.locator('#chords').textContent()).split(' – ').map((s) => s.trim());
 const pressedTags = (page) => page.locator('#tags button[aria-pressed="true"]')
   .evaluateAll((els) => els.map((el) => `${el.dataset.category}.${el.dataset.tag}`).sort());
 
-async function openTuning(page) {
+async function openPlayPage(page) {
   await tuneBtn(page).click();
-  await expect(tuning(page)).toBeVisible();
+  await expect(playPage(page)).toBeVisible();
 }
 
 // Wiedergabe bei 200 bpm (1,2 s je Takt), damit Taktwechsel schnell kommen
 async function playFast(page) {
   await page.locator('#tuning-tempo').fill('200');
-  await tuningGo(page).click();
+  await playGo(page).click();
   await expect(position(page)).toHaveText(/^Takt 1 von \d+$/, { timeout: BAR_TIMEOUT });
 }
 
-// Fokus bleibt in der Ansicht auf einem bedienbaren Element
+// Fokus bleibt auf der Spielseite auf einem bedienbaren Element
 const focusState = (page) => page.evaluate(() => {
   const el = document.activeElement;
   return {
-    inTuning: document.querySelector('#tuning').contains(el),
+    inPlay: document.querySelector('#play').contains(el),
     body: el === document.body,
     disabled: el.disabled === true || el.getAttribute('aria-disabled') === 'true',
   };
 });
-const usableFocus = { inTuning: true, body: false, disabled: false };
+const usableFocus = { inPlay: true, body: false, disabled: false };
 
 async function rawKeysIn(page) {
   return page.evaluate((source) => {
@@ -78,33 +78,39 @@ async function wheelPoint(page, root, quality, ring = 'outer') {
   return { x: node.x, y: node.y };
 }
 
-test('Feintuning öffnet und schließt: aria-expanded, hidden, Fokus', async ({ page }) => {
+test('Feintuning öffnet die Spielseite, zurück zur Startseite: aria-expanded, hidden, Fokus', async ({ page }) => {
   await expect(tuneBtn(page)).toHaveText('Feintuning');
   await expect(tuneBtn(page)).toHaveAttribute('aria-expanded', 'false');
-  await expect(tuneBtn(page)).toHaveAttribute('aria-controls', 'tuning');
-  await expect(tuning(page)).toBeHidden();
+  await expect(tuneBtn(page)).toHaveAttribute('aria-controls', 'play');
+  await expect(playPage(page)).toBeHidden();
   await tuneBtn(page).click();
-  await expect(tuning(page)).toBeVisible();
+  await expect(playPage(page)).toBeVisible();
   await expect(tuneBtn(page)).toHaveAttribute('aria-expanded', 'true');
-  await expect(page.locator('#tuning-title')).toBeFocused();
-  await expect(page.locator('#tuning-title')).toHaveAttribute('tabindex', '-1');
-  // Startsatz und Variante bleiben erreichbar
-  await expect(page.locator('#style-btn')).toBeVisible();
-  await expect(page.locator('#new-variant')).toBeVisible();
-  await page.locator('#back').click();
-  await expect(tuning(page)).toBeHidden();
+  await expect(page.locator('#play-title')).toBeFocused();
+  await expect(page.locator('#play-title')).toHaveAttribute('tabindex', '-1');
+  // Startsatz und Variantenwahl gehören nur zur Startseite; die Variante steht als Anzeige in der Kopfzeile
+  await expect(page.locator('#style-btn')).toBeHidden();
+  await expect(page.locator('#new-variant')).toBeHidden();
+  await expect(page.locator('#play-variant')).toHaveText(`Variante ${await page.locator('#variant').inputValue()}`);
+  await page.locator('#play-back').click();
+  await expect(playPage(page)).toBeHidden();
   await expect(tuneBtn(page)).toHaveAttribute('aria-expanded', 'false');
   await expect(tuneBtn(page)).toBeFocused();
-  // der Knopf schaltet auch wieder zu
-  await tuneBtn(page).click();
-  await expect(tuning(page)).toBeVisible();
-  await tuneBtn(page).click();
-  await expect(tuning(page)).toBeHidden();
+  // Startsatz und Variante wieder erreichbar
+  await expect(page.locator('#style-btn')).toBeVisible();
+  await expect(page.locator('#new-variant')).toBeVisible();
+  // per Tastatur hin und zurück
+  await page.keyboard.press('Enter');
+  await expect(playPage(page)).toBeVisible();
+  await expect(page.locator('#play-title')).toBeFocused();
+  await page.locator('#play-back').focus();
+  await page.keyboard.press('Enter');
+  await expect(playPage(page)).toBeHidden();
   await expect(tuneBtn(page)).toBeFocused();
 });
 
 test('Schnellauswahl Träumerisch belegt Schlagworte und 80 bpm vor', async ({ page }) => {
-  await openTuning(page);
+  await openPlayPage(page);
   const pick = page.locator('#quick-pick button');
   await expect(pick).toHaveCount(3);
   await expect(page.locator('#quick-pick [data-style="funk"]')).toHaveAttribute('aria-pressed', 'true');
@@ -127,7 +133,7 @@ test('Schnellauswahl Träumerisch belegt Schlagworte und 80 bpm vor', async ({ p
 });
 
 test('Schlagworte nach Kategorien, mehrere pro Kategorie wählbar', async ({ page }) => {
-  await openTuning(page);
+  await openPlayPage(page);
   const groups = page.locator('#tags [role="group"]');
   await expect(groups).toHaveCount(6);
   await expect(page.getByRole('group', { name: 'Entwicklung' })).toBeVisible();
@@ -142,7 +148,7 @@ test('Schlagworte nach Kategorien, mehrere pro Kategorie wählbar', async ({ pag
 });
 
 test('Schlagworte ohne Wirkung: gedämpft, mit Hinweis in beiden Sprachen, weiter wählbar', async ({ page }) => {
-  await openTuning(page);
+  await openPlayPage(page);
   const gritty = page.locator('#tags [data-tag="gritty"]');
   await expect(gritty).toHaveClass(/\binert\b/);
   await expect(gritty).toHaveAttribute('title', 'noch ohne Wirkung');
@@ -164,7 +170,7 @@ test('Schlagworte ohne Wirkung: gedämpft, mit Hinweis in beiden Sprachen, weite
 });
 
 test('Schlagwort während der Wiedergabe: Neustart ohne Fehler, Taktzeile läuft weiter', async ({ page }) => {
-  await openTuning(page);
+  await openPlayPage(page);
   await playFast(page);
   await expect(position(page)).toHaveText('Takt 2 von 96', { timeout: BAR_TIMEOUT });
   await page.locator('#tags [data-tag="swing"]').click();
@@ -172,14 +178,14 @@ test('Schlagwort während der Wiedergabe: Neustart ohne Fehler, Taktzeile läuft
   // Neustart beginnt wieder bei Takt 1, ohne Neustart käme Takt 1 erst nach 96 Takten
   await expect(position(page)).toHaveText('Takt 1 von 96', { timeout: BAR_TIMEOUT });
   await expect(position(page)).toHaveText('Takt 2 von 96', { timeout: BAR_TIMEOUT });
-  await expect(tuningGo(page)).toHaveText('Stopp');
-  await tuningGo(page).click();
-  await expect(tuningGo(page)).toHaveText('Los');
+  await expect(playGo(page)).toHaveText('Stopp');
+  await playGo(page).click();
+  await expect(playGo(page)).toHaveText('Los');
   await expect(page.locator('#go')).toHaveText('Los');
 });
 
-test('Tempo im Feintuning ändert das Tempo im Satz', async ({ page }) => {
-  await openTuning(page);
+test('Tempo in der Leiste Klang ändert das Tempo im Satz', async ({ page }) => {
+  await openPlayPage(page);
   await page.locator('#tuning-tempo').fill('150');
   await expect(page.locator('#tempo-btn')).toHaveText('150 bpm');
   await expect(page.locator('#tuning-tempo-out')).toHaveText('150');
@@ -187,7 +193,7 @@ test('Tempo im Feintuning ändert das Tempo im Satz', async ({ page }) => {
 });
 
 test('Länge ändert die Gesamtzahl in der Taktzeile, auch während der Wiedergabe', async ({ page }) => {
-  await openTuning(page);
+  await openPlayPage(page);
   const length = page.locator('#length');
   await expect(length).toHaveValue('96');
   expect(await length.locator('option').evaluateAll((os) => os.map((o) => o.value))).toEqual(['24', '48', '96', '192']);
@@ -196,11 +202,11 @@ test('Länge ändert die Gesamtzahl in der Taktzeile, auch während der Wiederga
   await expect(position(page)).toHaveText('Takt 1 von 48');
   await length.selectOption('24');
   await expect(position(page)).toHaveText('Takt 1 von 24', { timeout: BAR_TIMEOUT });
-  await tuningGo(page).click();
+  await playGo(page).click();
 });
 
 test('Schichten: Knöpfe schalten live, alle aus läuft weiter', async ({ page }) => {
-  await openTuning(page);
+  await openPlayPage(page);
   const layers = page.locator('#lane-buttons button');
   await expect(layers).toHaveCount(4);
   expect(await layers.allTextContents()).toEqual(['Schlagzeug', 'Bass', 'Akkorde', 'Pad']);
@@ -214,25 +220,25 @@ test('Schichten: Knöpfe schalten live, alle aus läuft weiter', async ({ page }
   await expect(position(page)).toHaveText('Takt 3 von 96', { timeout: BAR_TIMEOUT });
   await layers.nth(0).click();
   await expect(layers.nth(0)).toHaveAttribute('aria-pressed', 'true');
-  await tuningGo(page).click();
+  await playGo(page).click();
 
   for (const b of await layers.all()) await b.click();
   for (const b of await layers.all()) await expect(b).toHaveAttribute('aria-pressed', 'false');
-  await tuningGo(page).click();
-  await expect(tuningGo(page)).toHaveText('Stopp');
+  await playGo(page).click();
+  await expect(playGo(page)).toHaveText('Stopp');
   await expect(position(page)).toHaveText('Takt 1 von 96', { timeout: BAR_TIMEOUT });
-  const first = await page.locator('#now-chord').textContent();
+  const first = await page.locator('#play-now').textContent();
   expect(await shownChords(page)).toContain(first);
   await expect(position(page)).toHaveText('Takt 2 von 96', { timeout: BAR_TIMEOUT });
   // einschalten während der Wiedergabe geht ohne Neustart
   await layers.nth(2).click();
   expect(await position(page).textContent()).toMatch(/^Takt [2-9] von 96$/);
   await expect(position(page)).toHaveText('Takt 3 von 96', { timeout: BAR_TIMEOUT });
-  await tuningGo(page).click();
+  await playGo(page).click();
 });
 
 test('Verlauf: Canvas zeichnet, Zeiger wandert beim Spielen', async ({ page }) => {
-  await openTuning(page);
+  await openPlayPage(page);
   const lanes = page.locator('#lanes');
   await expect(lanes).toHaveAttribute('role', 'img');
   await expect(lanes).toHaveAttribute('aria-label', /\S/);
@@ -252,11 +258,11 @@ test('Verlauf: Canvas zeichnet, Zeiger wandert beim Spielen', async ({ page }) =
   const firstBar = await lanes.evaluate((c) => c.toDataURL());
   await expect(position(page)).toHaveText(/^Takt [3-9] von 96$/, { timeout: BAR_TIMEOUT });
   await expect.poll(() => lanes.evaluate((c) => c.toDataURL()), { timeout: BAR_TIMEOUT }).not.toBe(firstBar);
-  await tuningGo(page).click();
+  await playGo(page).click();
 });
 
 test('Akkordrad: Canvas mit Beschriftung, Klick auf passenden Akkord fügt an, auf fremden nicht', async ({ page }) => {
-  await openTuning(page);
+  await openPlayPage(page);
   const wheel = page.locator('#wheel');
   await expect(wheel).toHaveAttribute('role', 'img');
   await expect(wheel).toHaveAttribute('aria-label', /\S/);
@@ -279,7 +285,7 @@ test('Akkordrad: Canvas mit Beschriftung, Klick auf passenden Akkord fügt an, a
 });
 
 test('Tastatur: Akkord-Knöpfe fügen an und entfernen, nie leer, höchstens 8', async ({ page }) => {
-  await openTuning(page);
+  await openPlayPage(page);
   const add = page.locator('#add-chords button');
   await expect(add).toHaveCount(8); // A-Moll: sieben leitereigene plus E-Dur
   expect(await add.allTextContents()).toEqual(['Am', 'Bdim', 'C', 'Dm', 'Em', 'F', 'G', 'E']);
@@ -331,7 +337,7 @@ test('Tastatur: Akkord-Knöpfe fügen an und entfernen, nie leer, höchstens 8',
 });
 
 test('Live-Region: Hinweis bleibt bei Taktwechseln still, zweite Ablehnung meldet sich neu', async ({ page }) => {
-  await openTuning(page);
+  await openPlayPage(page);
   const add = page.locator('#add-chords button');
   while ((await progression(page).count()) < 8) await add.first().click();
   await playFast(page);
@@ -345,7 +351,8 @@ test('Live-Region: Hinweis bleibt bei Taktwechseln still, zweite Ablehnung melde
       .observe(document.querySelector('#tuning-message'), { childList: true, characterData: true, subtree: true });
     // Bedienelemente, die sich beim Taktwechsel nicht ändern: nichts neu schreiben
     const quiet = new MutationObserver((list) => { window.__controls += list.length; });
-    for (const id of ['#tags', '#quick-pick', '#lane-buttons', '#length', '#add-chords', '#tuning-title', '#back']) {
+    for (const id of ['#tags', '#quick-pick', '#lane-buttons', '#length', '#add-chords', '#play-title', '#play-back',
+      '#play-variant', '#side-key-chips', '#side-scale-chips', '#side-left-title', '#side-right-title']) {
       quiet.observe(document.querySelector(id), { childList: true, characterData: true, subtree: true, attributes: true });
     }
   });
@@ -359,11 +366,11 @@ test('Live-Region: Hinweis bleibt bei Taktwechseln still, zweite Ablehnung melde
   await expect(message).toHaveText(/8/);
   // Ablehnung startet die Wiedergabe nicht neu
   expect(await position(page).textContent()).toMatch(/^Takt \d+ von 96$/);
-  await tuningGo(page).click();
+  await playGo(page).click();
 });
 
 test('eigene Folge übersteht Stilwahl, Variante und Tonart leiten neu ab', async ({ page }) => {
-  await openTuning(page);
+  await openPlayPage(page);
   await page.locator('#add-chords button', { hasText: /^G$/ }).click();
   await page.locator('#add-chords button', { hasText: /^C$/ }).click();
   const edited = await shownChords(page);
@@ -371,26 +378,31 @@ test('eigene Folge übersteht Stilwahl, Variante und Tonart leiten neu ab', asyn
   await page.locator('#quick-pick [data-style="psych"]').click();
   await expect(page.locator('#style-btn')).toHaveText('Psychedelischer Indie');
   expect(await shownChords(page)).toEqual(edited);
+  // Variante und Tonart im Startsatz wählen: zurück zur Startseite und wieder hin
+  await page.locator('#play-back').click();
   await page.locator('#new-variant').click();
   await expect.poll(async () => (await shownChords(page)).length).toBe(4);
+  await openPlayPage(page);
   await expect(progression(page)).toHaveCount(4);
 
   await page.locator('#add-chords button', { hasText: /^G$/ }).click();
   expect(await shownChords(page)).toHaveLength(5);
+  await page.locator('#play-back').click();
   await page.locator('#key-btn').click();
   await page.locator('#key-pop').getByRole('button', { name: 'D', exact: true }).click();
   await page.keyboard.press('Escape');
   await expect.poll(async () => (await shownChords(page)).length).toBe(4);
+  await openPlayPage(page);
   // Akkord-Knöpfe folgen der Tonart
   expect(await page.locator('#add-chords button').allTextContents()).toEqual(['Dm', 'Edim', 'F', 'Gm', 'Am', 'Bb', 'C', 'A']);
 });
 
-test('keine rohen Schlüssel in beiden Sprachen mit offenem Feintuning', async ({ page }) => {
-  await openTuning(page);
+test('keine rohen Schlüssel in beiden Sprachen auf der Spielseite', async ({ page }) => {
+  await openPlayPage(page);
   expect(await rawKeysIn(page)).toEqual([]);
   await page.locator('[data-lang="en"]').click();
   await expect(tuneBtn(page)).toHaveText('Fine-tune');
-  await expect(page.locator('#back')).toHaveText('back');
+  await expect(page.locator('#play-back')).toHaveText('To start page');
   expect(await rawKeysIn(page)).toEqual([]);
   for (const id of ['#lanes', '#wheel']) {
     const label = await page.locator(id).getAttribute('aria-label');
@@ -402,11 +414,11 @@ test('keine rohen Schlüssel in beiden Sprachen mit offenem Feintuning', async (
   await expect(page.getByRole('group', { name: 'Entwicklung' })).toBeVisible();
 });
 
-test('360 px breit mit offenem Feintuning: kein waagerechtes Scrollen, Knöpfe mindestens 44 px', async ({ page }) => {
+test('360 px breit auf der Spielseite: kein waagerechtes Scrollen, Knöpfe mindestens 44 px', async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 740 });
-  await openTuning(page);
+  await openPlayPage(page);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
-  const small = await page.evaluate(() => [...document.querySelectorAll('#tuning button, #tuning input, #tuning select')]
+  const small = await page.evaluate(() => [...document.querySelectorAll('#play button, #play input, #play select')]
     .filter((el) => el.checkVisibility())
     .map((el) => ({ el: el.id || el.textContent.trim(), r: el.getBoundingClientRect() }))
     .filter(({ r }) => r.width < 44 || r.height < 44)
@@ -417,17 +429,17 @@ test('360 px breit mit offenem Feintuning: kein waagerechtes Scrollen, Knöpfe m
   expect(wheel.x + wheel.width).toBeLessThanOrEqual(360);
 });
 
-test('Wiedergabe: Rad färbt den aktuellen Akkord, große Akkordanzeige ist im Feintuning versteckt', async ({ page }) => {
-  await openTuning(page);
+test('Wiedergabe: Rad färbt den aktuellen Akkord, große Akkordanzeige der Startseite ist auf der Spielseite versteckt', async ({ page }) => {
+  await openPlayPage(page);
   await expect(page.locator('#now-chord')).toBeHidden();
   const wheel = page.locator('#wheel');
   const still = await wheel.evaluate((c) => c.toDataURL());
   await playFast(page);
   await expect.poll(() => wheel.evaluate((c) => c.toDataURL())).not.toBe(still);
   await expect(page.locator('#progression [aria-current="true"]')).toHaveCount(1);
-  await tuningGo(page).click();
+  await playGo(page).click();
   await expect(page.locator('#progression [aria-current="true"]')).toHaveCount(0);
   await expect.poll(() => wheel.evaluate((c) => c.toDataURL())).toBe(still);
-  await page.locator('#back').click();
+  await page.locator('#play-back').click();
   await expect(page.locator('#now-chord')).toBeAttached();
 });

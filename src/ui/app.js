@@ -1,9 +1,10 @@
-// Startseite: ein Zustandsobjekt (state.js), render() schreibt daraus alle Texte und Attribute neu.
+// Start- und Spielseite: ein Zustandsobjekt (state.js), render() schreibt daraus alle Texte und Attribute neu.
 import { play, STYLE_PRESETS, validateTrack, t, setLanguage } from '../index.js';
-import { SCALE_NAMES } from '../core/music.js';
 import { positionLabel } from './position.js';
-import { $, ROOTS, SCALE_MODE, LAYERS, ALL_LAYERS, state, chordName, rollVariant, preset, pressed, setText, setAttr, saveLang, deriveBars, applyStyle } from './state.js';
+import { $, LAYERS, ALL_LAYERS, state, layoutStorage, chordName, rollVariant, preset, pressed, setText, setAttr, saveLang, deriveBars, applyStyle } from './state.js';
+import { saveLayout } from './layout-state.js';
 import { initTuning } from './tuning.js';
+import { buildKeyScale } from './key-scale.js';
 
 // Dekoratives 16tel-Bild je Stil, 1 = Schlag
 const RHYTHMS = { funk: '1001001010100110', psych: '1010101010101010', dreamy: '1000000010000000' };
@@ -57,22 +58,9 @@ function chip(parent, data, onClick) {
   return b;
 }
 
-for (const root of ROOTS) {
-  chip($('key-chips'), { root }, () => {
-    state.track.key = { root, mode: SCALE_MODE[state.scale] };
-    deriveBars();
-    restartIfPlaying();
-  }).textContent = root; // Tonnamen international, nicht übersetzt
-}
-
-for (const scale of SCALE_NAMES) {
-  chip($('scale-chips'), { scale }, () => {
-    state.scale = scale;
-    state.track.key = { root: state.track.key.root, mode: SCALE_MODE[scale] };
-    deriveBars();
-    restartIfPlaying();
-  });
-}
+// Tonart und Skala: im Popover der Startseite und in der rechten Leiste der Spielseite
+const keyScales = [['key-chips', 'scale-chips'], ['side-key-chips', 'side-scale-chips']].map(([keyChips, scaleChips]) =>
+  buildKeyScale({ keyChips: $(keyChips), scaleChips: $(scaleChips) }, { restartIfPlaying, render: () => render() }));
 
 for (const { id } of STYLE_PRESETS) {
   const card = chip($('style-cards'), { style: id }, () => {
@@ -85,7 +73,7 @@ for (const { id } of STYLE_PRESETS) {
   for (const step of RHYTHMS[id]) card.lastChild.append(Object.assign(document.createElement('i'), { className: step === '1' ? 'on' : '' }));
 }
 
-// Tempo-Regler im Popover und im Feintuning teilen sich den Zustand
+// Tempo-Regler im Popover und in der Leiste "Klang" teilen sich den Zustand
 for (const id of ['tempo', 'tuning-tempo']) {
   $(id).addEventListener('input', (e) => {
     state.track.bpm = Number(e.target.value);
@@ -94,13 +82,44 @@ for (const id of ['tempo', 'tuning-tempo']) {
   });
 }
 
-for (const id of ['go', 'tuning-go']) {
-  $(id).addEventListener('click', () => {
-    if (state.playing) stop();
-    else start();
-    render();
-  });
+// Seitenwechsel; die Wiedergabe läuft weiter. sidebars (optional) wird ins gemerkte Layout geschrieben.
+let opener = 'tune-btn'; // Knopf der Startseite, der die Spielseite zuletzt geöffnet hat
+function showPage(page, { sidebars } = {}) {
+  if (sidebars) {
+    state.layout = { ...state.layout, sidebars: { ...sidebars } };
+    saveLayout(layoutStorage, state.layout);
+  }
+  state.page = page;
+  render();
+  if (page === 'play') $('play-title').focus();
+  // "Zur Spielseite" ist im Stand versteckt: dann auf Los
+  else ($(opener).checkVisibility() ? $(opener) : $('go')).focus();
 }
+
+function openFrom(id, opts) {
+  opener = id;
+  showPage('play', opts);
+}
+
+// Los auf der Startseite: im Stand starten und zur Spielseite, beim Spielen stoppen und bleiben
+$('go').addEventListener('click', () => {
+  if (state.playing) {
+    stop();
+    render();
+    return;
+  }
+  start();
+  if (state.playing) openFrom('go');
+  else render(); // Start gescheitert: die Meldung steht auf der Startseite
+});
+$('play-go').addEventListener('click', () => {
+  if (state.playing) stop();
+  else start();
+  render();
+});
+$('tune-btn').addEventListener('click', () => openFrom('tune-btn', { sidebars: { left: true, right: true } }));
+$('to-play').addEventListener('click', () => openFrom('to-play'));
+$('play-back').addEventListener('click', () => showPage('start'));
 
 function setVariant(seed) {
   state.track.seed = seed;
@@ -116,14 +135,6 @@ $('variant').addEventListener('change', (e) => {
   if (e.target.value !== '' && Number.isInteger(n) && n >= 1 && n <= 9999) setVariant(n);
 });
 $('variant').addEventListener('blur', (e) => { e.target.value = String(state.track.seed); });
-
-function setTuning(open) {
-  state.tuningOpen = open;
-  render();
-  (open ? $('tuning-title') : $('tune-btn')).focus();
-}
-$('tune-btn').addEventListener('click', () => setTuning(!state.tuningOpen));
-$('back').addEventListener('click', () => setTuning(false));
 
 for (const b of document.querySelectorAll('[data-lang]')) {
   b.addEventListener('click', () => {
@@ -148,8 +159,10 @@ for (const button of document.querySelectorAll('[popovertarget]')) {
 const renderTuning = initTuning({ render: () => render(), restartIfPlaying, player: () => player });
 
 // --- Darstellung ---
+const show = (el, on) => { if (el.hidden === on) el.hidden = !on; };
+
 function render() {
-  const { track, scale, style, playing, lang, current, errors, tuningOpen } = state;
+  const { track, scale, style, playing, lang, current, errors, page } = state;
   setLanguage(lang);
   document.documentElement.lang = lang;
   document.title = t('ui.title');
@@ -161,38 +174,40 @@ function render() {
   }
   for (const b of document.querySelectorAll('[data-lang]')) pressed(b, b.dataset.lang === lang);
 
-  $('key-btn').textContent = t('ui.keyScale', { root: track.key.root, scale: t(`scale.${scale}`) });
-  $('style-btn').textContent = t(`style.${style}`);
-  $('tempo-btn').textContent = `${track.bpm} ${t('ui.bpm')}`;
-  $('tempo').value = track.bpm;
-  $('tempo-out').value = track.bpm;
+  setText($('key-btn'), t('ui.keyScale', { root: track.key.root, scale: t(`scale.${scale}`) }));
+  setText($('style-btn'), t(`style.${style}`));
+  setText($('tempo-btn'), `${track.bpm} ${t('ui.bpm')}`);
+  // nur bei Änderung: <output>.value ersetzt den Textknoten
+  for (const id of ['tempo', 'tempo-out']) if ($(id).value !== String(track.bpm)) $(id).value = String(track.bpm);
 
-  for (const b of $('key-chips').children) pressed(b, b.dataset.root === track.key.root);
-  for (const b of $('scale-chips').children) {
-    b.textContent = t(`scale.${b.dataset.scale}`);
-    pressed(b, b.dataset.scale === scale);
-  }
+  for (const k of keyScales) k.render();
   for (const card of $('style-cards').children) {
     const { id, bpm } = preset(card.dataset.style);
-    card.querySelector('.card-name').textContent = t(`style.${id}`);
-    card.querySelector('.card-bpm').textContent = `${bpm} ${t('ui.bpm')}`;
-    card.querySelector('.card-hint').textContent = t(`style.${id}.hint`);
+    setText(card.querySelector('.card-name'), t(`style.${id}`));
+    setText(card.querySelector('.card-bpm'), `${bpm} ${t('ui.bpm')}`);
+    setText(card.querySelector('.card-hint'), t(`style.${id}.hint`));
     pressed(card, id === style);
   }
 
   // während der Eingabe nicht überschreiben (render läuft je Takt)
   if (document.activeElement !== $('variant') && $('variant').value !== String(track.seed)) $('variant').value = String(track.seed);
-  $('chords').textContent = track.bars.map((b) => chordName(b.chord)).join(' – ');
-  for (const id of ['go', 'tuning-go']) {
-    $(id).textContent = t(playing ? 'ui.stop' : 'ui.go');
+  setText($('chords'), track.bars.map((b) => chordName(b.chord)).join(' – '));
+  const now = current ? chordName(current.chord) : '';
+  const bar = current ? positionLabel(current.bar, track.length) : '';
+  const message = errors.map((e) => t(`err.${e.code}`, e.params)).join(' ');
+  for (const id of ['go', 'play-go']) {
+    setText($(id), t(playing ? 'ui.stop' : 'ui.go'));
     $(id).classList.toggle('playing', playing);
   }
-  $('now-chord').textContent = current ? chordName(current.chord) : '';
-  $('position').textContent = current ? positionLabel(current.bar, track.length) : '';
-  $('message').textContent = errors.map((e) => t(`err.${e.code}`, e.params)).join(' ');
-  $('tune-btn').setAttribute('aria-expanded', String(tuningOpen));
-  document.body.classList.toggle('tuning-open', tuningOpen);
-  $('tuning').hidden = !tuningOpen;
+  for (const [id, text] of [['now-chord', now], ['play-now', now], ['position', bar], ['play-position', bar],
+    ['message', message], ['play-message', message], ['play-variant', t('ui.variantShown', { n: track.seed })]]) {
+    setText($(id), text);
+  }
+
+  setAttr($('tune-btn'), 'aria-expanded', String(page === 'play'));
+  show($('start'), page === 'start');
+  show($('play'), page === 'play');
+  show($('to-play'), playing);
   renderTuning();
 }
 

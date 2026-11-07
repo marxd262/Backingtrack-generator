@@ -18,7 +18,7 @@
 </header>
 <main>
   <h1 class="visually-hidden" data-i18n="ui.title"></h1>
-  <section class="start">
+  <section class="start" id="start">
     <p class="tonight" id="tonight" data-i18n="ui.tonight"></p>
     <p class="sentence" id="sentence">
       <button type="button" class="word" id="key-btn" popovertarget="key-pop" aria-haspopup="dialog" aria-expanded="false" aria-controls="key-pop"></button>
@@ -59,46 +59,73 @@
     </div>
     <p class="message" id="message" aria-live="polite"></p>
     <p class="actions">
+      <button type="button" class="chip" id="to-play" data-i18n="ui.toPlayPage" hidden></button>
       <button type="button" class="chip" id="new-variant" data-i18n="ui.newVariant"></button>
-      <button type="button" class="chip" id="tune-btn" aria-expanded="false" aria-controls="tuning" data-i18n="ui.fineTune"></button>
+      <button type="button" class="chip" id="tune-btn" aria-expanded="false" aria-controls="play" data-i18n="ui.fineTune"></button>
     </p>
   </section>
 
-  <!-- Feintuning: zweite Ansicht auf demselben Zustand; Knöpfe der Gruppen baut tuning.js -->
-  <section class="tuning" id="tuning" aria-labelledby="tuning-title" hidden>
-    <div class="tuning-head">
-      <h2 id="tuning-title" tabindex="-1" data-i18n="ui.fineTune"></h2>
-      <button type="button" class="chip" id="back" data-i18n="ui.back"></button>
+  <!-- Spielseite: Kopfzeile, darunter Leiste "Klang", Blöcke (Visualisierungen) und Leiste "Akkorde"; Knöpfe baut tuning.js -->
+  <section class="play" id="play" aria-labelledby="play-title" hidden>
+    <div class="play-head">
+      <button type="button" class="chip" id="play-back" data-i18n="ui.toStart"></button>
+      <h2 class="visually-hidden" id="play-title" tabindex="-1" data-i18n="ui.playPage"></h2>
+      <p class="play-now" id="play-now"></p>
+      <p class="play-next" id="play-next"></p>
+      <p class="position" id="play-position"></p>
+      <button type="button" class="go" id="play-go"></button>
+      <p class="play-variant" id="play-variant"></p>
+      <p class="message" id="play-message" aria-live="polite"></p>
     </div>
-    <button type="button" class="go" id="tuning-go"></button>
 
-    <h3 class="label" data-i18n="ui.course"></h3>
-    <div class="lanes">
-      <div class="lane-buttons" id="lane-buttons" role="group" data-i18n-label="ui.layers"></div>
-      <canvas id="lanes" role="img" data-i18n-label="ui.lanesLabel"></canvas>
-    </div>
+    <div class="stage">
+      <aside class="side" id="side-left" aria-labelledby="side-left-title">
+        <h3 class="side-title" id="side-left-title" data-i18n="ui.sidebarSound"></h3>
+        <h4 class="label" id="quick-title" data-i18n="ui.quickPick"></h4>
+        <div class="chips" id="quick-pick" role="group" aria-labelledby="quick-title"></div>
+        <div class="settings">
+          <label class="label" for="tuning-tempo" data-i18n="ui.tempo"></label>
+          <div class="tempo-row">
+            <input type="range" id="tuning-tempo" min="40" max="200" step="1">
+            <span><output id="tuning-tempo-out" for="tuning-tempo"></output> <span data-i18n="ui.bpm"></span></span>
+          </div>
+          <label class="label" for="length" data-i18n="ui.length"></label>
+          <select id="length"></select>
+        </div>
+        <h4 class="label" data-i18n="ui.tags"></h4>
+        <div id="tags"></div>
+      </aside>
 
-    <div class="settings">
-      <label class="label" for="tuning-tempo" data-i18n="ui.tempo"></label>
-      <div class="tempo-row">
-        <input type="range" id="tuning-tempo" min="40" max="200" step="1">
-        <span><output id="tuning-tempo-out" for="tuning-tempo"></output> <span data-i18n="ui.bpm"></span></span>
+      <div class="blocks" id="blocks">
+        <section class="block" data-view="fretboard" aria-labelledby="view-fretboard-title">
+          <h3 class="block-title" id="view-fretboard-title" data-i18n="view.fretboard"></h3>
+        </section>
+        <section class="block" data-view="lanes" aria-labelledby="view-lanes-title">
+          <h3 class="block-title" id="view-lanes-title" data-i18n="view.lanes"></h3>
+          <div class="lanes">
+            <div class="lane-buttons" id="lane-buttons" role="group" data-i18n-label="ui.layers"></div>
+            <canvas id="lanes" role="img" data-i18n-label="ui.lanesLabel"></canvas>
+          </div>
+        </section>
+        <section class="block" data-view="wheel" aria-labelledby="view-wheel-title">
+          <h3 class="block-title" id="view-wheel-title" data-i18n="view.wheel"></h3>
+          <canvas class="wheel" id="wheel" role="img" width="380" height="380" data-i18n-label="ui.wheelLabel"></canvas>
+        </section>
       </div>
-      <label class="label" for="length" data-i18n="ui.length"></label>
-      <select id="length"></select>
+
+      <aside class="side" id="side-right" aria-labelledby="side-right-title">
+        <h3 class="side-title" id="side-right-title" data-i18n="ui.sidebarChords"></h3>
+        <h4 class="label" id="side-key-label" data-i18n="ui.key"></h4>
+        <div class="chips" role="group" aria-labelledby="side-key-label" id="side-key-chips"></div>
+        <h4 class="label" id="side-scale-label" data-i18n="ui.scale"></h4>
+        <div class="chips" role="group" aria-labelledby="side-scale-label" id="side-scale-chips"></div>
+        <h4 class="label" id="progression-title" data-i18n="ui.progression"></h4>
+        <div class="chips" id="progression" role="group" aria-labelledby="progression-title"></div>
+        <p class="message" id="tuning-message" aria-live="polite"></p>
+        <h4 class="label" id="add-title" data-i18n="ui.addChord"></h4>
+        <div class="chips" id="add-chords" role="group" aria-labelledby="add-title"></div>
+      </aside>
     </div>
-
-    <h3 class="label" id="progression-title" data-i18n="ui.progression"></h3>
-    <div class="chips" id="progression" role="group" aria-labelledby="progression-title"></div>
-    <p class="message" id="tuning-message" aria-live="polite"></p>
-    <h3 class="label" id="add-title" data-i18n="ui.addChord"></h3>
-    <canvas class="wheel" id="wheel" role="img" width="380" height="380" data-i18n-label="ui.wheelLabel"></canvas>
-    <div class="chips" id="add-chords" role="group" aria-labelledby="add-title"></div>
-
-    <h3 class="label" id="quick-title" data-i18n="ui.quickPick"></h3>
-    <div class="chips" id="quick-pick" role="group" aria-labelledby="quick-title"></div>
-    <h3 class="label" data-i18n="ui.tags"></h3>
-    <div id="tags"></div>
   </section>
 </main>
 </body>

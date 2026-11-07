@@ -1,5 +1,6 @@
-// Feintuning-Ansicht: Schnellauswahl, Schlagworte, Tempo, Länge, Schichten mit Verlauf, Akkordfolge und Rad.
-// Teilt den Zustand mit der Startseite; app.js ruft die zurückgegebene Funktion in jedem render() auf.
+// Bedienelemente der Spielseite: Schnellauswahl, Schlagworte, Tempo, Länge (Leiste "Klang"), Schichten mit Verlauf,
+// Akkordrad (Blöcke), Akkordfolge (Leiste "Akkorde"). Teilt den Zustand mit der Startseite; app.js ruft die
+// zurückgegebene Funktion in jedem render() auf.
 import { STYLE_PRESETS, buildEvents, t } from '../index.js';
 import { $, LAYERS, ALL_LAYERS, LENGTHS, state, pressed, setText, preset, applyStyle } from './state.js';
 import { buildTags, renderTags, toggleTag, sameTags } from './tags-ui.js';
@@ -59,7 +60,7 @@ export function initTuning({ render, restartIfPlaying, player }) {
   }
 
   function drawCanvases() {
-    if (!state.tuningOpen) return;
+    if (state.page !== 'play') return;
     const { events, starts } = laneEvents();
     const sec = state.current ? starts[state.current.bar % state.track.length] ?? 0 : 0;
     drawLanes($('lanes'), events, sec, state.track.layers);
@@ -69,7 +70,7 @@ export function initTuning({ render, restartIfPlaying, player }) {
   new ResizeObserver(drawCanvases).observe($('wheel'));
 
   return function renderTuning() {
-    if (!state.tuningOpen) return;
+    if (state.page !== 'play') return;
     const { track } = state;
     for (const b of $('quick-pick').children) {
       const p = preset(b.dataset.style);
