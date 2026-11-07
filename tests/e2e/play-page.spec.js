@@ -461,6 +461,50 @@ test.describe('Seitenleisten', () => {
     await expect(toggle(page, 'left')).toBeFocused();
   });
 
+  test('schmal (360, 800 px): offene Schublade dunkelt die Seite dahinter ab, nur Optik; zu oder breit keine Abdunklung', async ({ page }) => {
+    const backdrop = page.locator('.drawer-backdrop');
+    // was an einem Punkt sichtbar oben liegt: Schublade, Abdunklung oder etwas anderes. Inertes übergeht die Trefferprüfung,
+    // und die Abdunklung ist als Geschwister der Schublade inert: für die Messung kurz aufheben (im selben Zug zurück)
+    const topAt = (x, y) => page.evaluate(([px, py]) => {
+      const inert = [...document.querySelectorAll('[inert]')];
+      for (const el of inert) el.inert = false;
+      const el = document.elementFromPoint(px, py);
+      for (const e of inert) e.inert = true;
+      return el.closest('.side')?.id ?? (el.classList.contains('drawer-backdrop') ? 'backdrop' : el.id || el.className || el.nodeName);
+    }, [x, y]);
+    for (const width of [360, 800]) {
+      await page.setViewportSize({ width, height: 740 });
+      await page.goto('/ui/index.html');
+      await openWithGo(page);
+      await expect(backdrop).toBeHidden();
+      for (const side of ['left', 'right']) {
+        await toggle(page, side).click();
+        await expect(backdrop, `${width} ${side}`).toBeVisible();
+        await expect(backdrop).toHaveAttribute('aria-hidden', 'true');
+        const style = await backdrop.evaluate((el) => ({ color: getComputedStyle(el).backgroundColor, events: getComputedStyle(el).pointerEvents }));
+        expect(style.color, `${width} ${side}`).toMatch(/^rgba\(\d+, \d+, \d+, 0?\.\d+\)$/); // halbdurchsichtig, nicht leer
+        expect(Number(style.color.match(/[\d.]+\)$/)[0].slice(0, -1))).toBeGreaterThanOrEqual(0.2);
+        expect(await backdrop.boundingBox()).toEqual({ x: 0, y: 0, width, height: 740 });
+        // liegt über der Seite und unter der Schublade
+        const drawer = await box(page, `#side-${side}`);
+        expect(await topAt(drawer.x + drawer.width / 2, 400), `${width} ${side} Schublade`).toBe(`side-${side}`);
+        const outside = side === 'left' ? (drawer.x + drawer.width + width) / 2 : drawer.x / 2;
+        expect(await topAt(outside, 400), `${width} ${side} daneben`).toBe('backdrop');
+        expect(await topAt(outside, 20), `${width} ${side} Kopfzeile`).toBe('backdrop');
+        expect(await noScrollX(page), `${width} ${side}`).toBe(true);
+        await page.keyboard.press('Escape');
+        await expectSides(page, false, false);
+        await expect(backdrop).toBeHidden();
+      }
+    }
+    // breit mit beiden Leisten: keine Abdunklung
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.locator('#play-back').click();
+    await page.locator('#tune-btn').click();
+    await expectSides(page, true, true);
+    await expect(backdrop).toBeHidden();
+  });
+
   test('Wechsel von 1280 auf 800 px mit beiden offen: eine Schublade bleibt, das Layout merkt es', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.locator('#tune-btn').click();
