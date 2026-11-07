@@ -107,6 +107,7 @@ export default {
   'ui.sidebarSound': 'Klang',
   'ui.sidebarChords': 'Akkorde',
   'ui.close': 'Schließen',
+  'ui.views': 'Ansichten',
   'ui.nextChord': 'Als Nächstes',
   'ui.variantShown': 'Variante {n}',
   'ui.fretboardLabel': 'Griffbrett: Töne der Leiter, des jetzigen und des folgenden Akkords',

@@ -107,6 +107,7 @@ export default {
   'ui.sidebarSound': 'Sound',
   'ui.sidebarChords': 'Chords',
   'ui.close': 'Close',
+  'ui.views': 'Views',
   'ui.nextChord': 'Next',
   'ui.variantShown': 'Variant {n}',
   'ui.fretboardLabel': 'Fretboard: notes of the scale, the current and the next chord',

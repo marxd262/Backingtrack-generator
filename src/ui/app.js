@@ -6,6 +6,7 @@ import { saveLayout } from './layout-state.js';
 import { initTuning } from './tuning.js';
 import { buildKeyScale } from './key-scale.js';
 import { initSidebar } from './sidebar.js';
+import { initViews } from './blocks.js';
 
 // Dekoratives 16tel-Bild je Stil, 1 = Schlag
 const RHYTHMS = { funk: '1001001010100110', psych: '1010101010101010', dreamy: '1000000010000000' };
@@ -172,6 +173,17 @@ const sidebars = ['left', 'right'].map((side) => initSidebar({
   },
 }));
 
+// Ansichten: Schalter in der rechten Leiste, Zustand im gemerkten Layout
+const views = initViews($('views'), {
+  isVisible: (id) => state.layout.views[id] !== false,
+  setVisible: (id, on) => {
+    if (state.layout.views[id] === on) return;
+    state.layout = { ...state.layout, views: { ...state.layout.views, [id]: on } };
+    saveLayout(layoutStorage, state.layout);
+    render();
+  },
+});
+
 // --- Darstellung ---
 const show = (el, on) => { if (el.hidden === on) el.hidden = !on; };
 
@@ -222,6 +234,7 @@ function render() {
   show($('play'), page === 'play');
   show($('to-play'), playing);
   for (const s of sidebars) s.render(); // nach dem Seitenwechsel: modal nur, wenn die Schublade sichtbar ist
+  views.render(); // vor renderTuning: das Akkordrad zeichnet nur, wenn sein Block sichtbar ist
   renderTuning();
 }
 

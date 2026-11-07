@@ -226,6 +226,9 @@ main {
 .rhythm i { height: 8px; background: var(--staff); border-radius: 1px; }
 .rhythm i.on { background: var(--ink); }
 
+.view-switch { display: flex; align-items: center; gap: 10px; min-height: var(--target); cursor: pointer; }
+.view-switch input { width: 1.5rem; height: 1.5rem; margin: 0; accent-color: var(--ink); }
+
 .tempo-row { display: flex; align-items: center; gap: 12px; }
 .tempo-row input { flex: 1; min-width: 0; height: var(--target); accent-color: var(--ink); }
 .tempo-row output { display: inline-block; min-width: 3ch; text-align: right; font-variant-numeric: tabular-nums; }

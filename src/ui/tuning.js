@@ -82,12 +82,15 @@ export function initTuning({ render, restartIfPlaying, player }) {
     return memo;
   }
 
+  // Akkordrad zeichnet nur bei sichtbarem Block (Ansichten-Schalter); beim Einblenden ruft render() erneut
+  const wheelShown = () => !$('wheel').closest('section[data-view]').hidden;
+
   function drawCanvases() {
     if (state.page !== 'play') return;
     const { events, starts } = laneEvents();
     const sec = state.current ? starts[state.current.bar % state.track.length] ?? 0 : 0;
     drawLanes($('lanes'), events, sec, state.track.layers);
-    wheel.update(wheelState());
+    if (wheelShown()) wheel.update(wheelState());
   }
   new ResizeObserver(drawCanvases).observe($('lanes'));
   new ResizeObserver(drawCanvases).observe($('wheel'));
