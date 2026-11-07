@@ -5,7 +5,10 @@
 Der Generator läuft allein (eigene Oberfläche unter `src/ui`). Die Lern-App Interactive Scales benutzt ausschließlich diese Schnittstelle, den Einstieg `src/index.js`. Er lädt auch in reinem Node, ohne Browser-Globals beim Import.
 
 ```js
-import { play, buildEvents, chordTimeline, validateTrack, TAG_CATEGORIES, STYLE_PRESETS, t, setLanguage, getLanguage } from './src/index.js';
+import {
+  play, buildEvents, chordTimeline, validateTrack, VALIDATION_CODES, allowedChords,
+  TAG_CATEGORIES, STYLE_PRESETS, t, setLanguage, getLanguage,
+} from './src/index.js';
 ```
 
 ## Track (Eingabe)
@@ -32,7 +35,7 @@ import { play, buildEvents, chordTimeline, validateTrack, TAG_CATEGORIES, STYLE_
 | `bpm` | ja | - | 20 bis 400 |
 | `bars` | ja | - | nicht leer; je Eintrag `chord: {root, quality}` und `beats` (ganze Zahl > 0) |
 | `length` | nein | `24` | Anzahl Takte, 1 bis 512; `bars` läuft im Kreis darüber |
-| `meter` | nein | `[4, 4]` | im Format vorhanden, angeboten wird nur 4/4 |
+| `meter` | nein | `[4, 4]` | im Format vorhanden, wird aber derzeit ignoriert: das Raster ergibt sich aus `beats`; angeboten wird nur 4/4 |
 | `tags` | nein | `{}` | `{Kategorie: [Schlagwort-IDs]}`, siehe unten |
 | `layers` | nein | alle `true` | `drums`, `bass`, `chords`, `pad`; `false` lässt die Schicht aus dem Strom weg |
 | `seed` | nein | `1` | siehe Seed-Regel |
@@ -40,7 +43,7 @@ import { play, buildEvents, chordTimeline, validateTrack, TAG_CATEGORIES, STYLE_
 Weitere Felder (`id`, `title`, `style` ...) stören nicht und werden ignoriert. Ein Track im alten Format von Interactive Scales (`{ id, title, key, bpm, bars }`) ist gültig.
 
 - Akkordarten: `maj`, `min`, `dim`. Akkordsymbole bleiben international (`B` bleibt `B`, nie das deutsche `H`).
-- Jeder Akkord muss zur Tonart gehören: diatonisch, in Moll zusätzlich die Dur-Dominante (`allowedChords(key)` in `src/core/music.js`). Sonst meldet `validateTrack` `chordNotInKey`.
+- Jeder Akkord muss zur Tonart gehören: diatonisch, in Moll zusätzlich die Dur-Dominante (`allowedChords(key)` aus `src/index.js`). Sonst meldet `validateTrack` `chordNotInKey`.
 
 ## Schlagworte und Stile
 
@@ -59,11 +62,14 @@ Weitere Felder (`id`, `title`, `style` ...) stören nicht und werden ignoriert. 
 Berechnet vorab, ohne Audio, den nach `t` sortierten Strom (bei gleichem `t`: `chord`, dann `marker`, dann der Rest). Wirft bei ungültigem Track einen `Error` mit `err.errors` (siehe Prüfung).
 
 ```js
-{ t: 12.5, bar: 3, beat: 0,   type: 'chord',  chord: { root: 'D', quality: 'min' } }   // ein Ereignis je Takt
-{ t: 14.0, bar: 3,            type: 'marker', name: 'fill' }
-{ t: 12.5, bar: 3, beat: 2.5, type: 'hit',  layer: 'drums', name: 'snare', vel: 0.8 }
-{ t: 12.5, bar: 3, beat: 2.5, type: 'note', layer: 'bass',  midi: 33, vel: 0.9, dur: 0.25 }
+// Beispiel bei 120 bpm, lauter 4/4-Takte (ein Takt = 2 s): Takt 3 beginnt bei t = 6.0
+{ t: 6.0,  bar: 3, beat: 0,   type: 'chord',  chord: { root: 'D', quality: 'min' } }   // ein Ereignis je Takt
+{ t: 6.0,  bar: 3,            type: 'marker', name: 'fill' }                           // am Taktanfang
+{ t: 7.25, bar: 3, beat: 2.5, type: 'hit',  layer: 'drums', name: 'snare', vel: 0.8 }  // 6.0 + 2.5 * 0.5
+{ t: 7.25, bar: 3, beat: 2.5, type: 'note', layer: 'bass',  midi: 33, vel: 0.9, dur: 0.25 }
 ```
+
+(Die echten Zeiten von `hit` und `note` weichen durch Swing und leichtes Timing-Jitter um wenige Millisekunden von der Rasterzeit ab.)
 
 - `t`: Sekunden ab Start (auf 6 Stellen gerundet). `bar`: 0-basierter Takt. `beat`: 0-basierte Rasterposition im Takt in Schlägen (Sechzehntel = 0.25).
 - `hit` hat `layer: 'drums'` und einen Namen aus `kick`, `snare`, `hat`, `openHat`, `tomHigh`, `tomMid`, `tomLow` (`DRUM_NAMES` in `src/core/events.js`). Geisternoten sind `snare` mit `vel < 0.3`.
@@ -99,7 +105,7 @@ const h = play(ctx, track, { loops: 1, onBar: ({ bar, chord }) => {}, onEvent: (
 
 ## Prüfung
 
-`validateTrack(track)` wirft nie und liefert `{ code, params }[]` (leer heißt gültig). Codes (`VALIDATION_CODES` in `src/core/track.js`): `emptyBars`, `chordNotInKey`, `badBpm`, `unknownQuality`, `badBeats`, `badLength`, `badKey`, `badBar`. Text in der Sprache der App: `t('err.' + code, params)`.
+`validateTrack(track)` wirft nie und liefert `{ code, params }[]` (leer heißt gültig). Die öffentliche Funktion wendet vorher die Standardwerte an (`length`, `meter`, `tags`, `layers`, `seed`), akzeptiert also auch Teil-Tracks wie das alte Format von Interactive Scales und meldet genau die Codes, die `buildEvents` und `chordTimeline` als `err.errors` werfen würden. Codes (`VALIDATION_CODES` aus `src/index.js`): `emptyBars`, `chordNotInKey`, `badBpm`, `unknownQuality`, `badBeats`, `badLength`, `badKey`, `badBar`. Text in der Sprache der App: `t('err.' + code, params)`.
 
 ```js
 const errors = validateTrack(track);

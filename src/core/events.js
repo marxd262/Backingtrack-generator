@@ -2,7 +2,7 @@
 // Reine Logik ohne Audio: gleicher Track mit gleichem Seed ergibt denselben Strom.
 import { createRng } from './rng.js';
 import { CHORD_QUALITIES, chordMidi, noteToPc } from './music.js';
-import { checkedTrack, barTimeline } from './timeline.js';
+import { checkedTrack, barTimeline, r6 } from './timeline.js';
 import { resolveTags } from './tags.js';
 import { buildArrangement } from './arrange.js';
 
@@ -16,7 +16,6 @@ const END_GAP = 0.001; // Abstand zum Taktende, damit auch gerundete Zeiten im T
 const BASS_MIN = 28;
 const BASS_MAX = 52;
 
-const r6 = (x) => Math.round(x * 1e6) / 1e6;
 const r3 = (x) => Math.round(x * 1e3) / 1e3;
 const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
 // Stufe eines Parameters: 0 wenig, 1 mittel, 2 viel

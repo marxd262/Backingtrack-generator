@@ -36,3 +36,18 @@ test('chordTimeline: Dauer je Takt und Akkorde im Kreis', () => {
 test('chordTimeline wirft bei ungültigem Track mit errors', () => {
   assert.throws(() => chordTimeline({ key, bpm: 5, bars: [bar(Am)] }), (err) => err.errors.some((e) => e.code === 'badBpm'));
 });
+
+// unabhängig nachgerechnet: kumulierte Schläge * 60 / bpm, erst das Ergebnis wird gerundet
+test('chordTimeline: time entspricht der kumulierten Summe aus beats * 60 / bpm', () => {
+  for (const bpm of [40, 100, 240]) {
+    const track = { key, bpm, length: 10, bars: [bar(Am, 3), bar(Dm, 4), bar(Am, 5)] };
+    let beatsBefore = 0;
+    const expected = Array.from({ length: 10 }, (_, i) => {
+      const beats = track.bars[i % 3].beats;
+      const row = { time: Math.round(((beatsBefore * 60) / bpm) * 1e6) / 1e6, durationSec: Math.round(((beats * 60) / bpm) * 1e6) / 1e6 };
+      beatsBefore += beats;
+      return row;
+    });
+    assert.deepEqual(chordTimeline(track).map(({ time, durationSec }) => ({ time, durationSec })), expected, `bpm ${bpm}`);
+  }
+});

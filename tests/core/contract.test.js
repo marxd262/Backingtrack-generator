@@ -73,3 +73,28 @@ test('jedes Stil-Preset und jedes Schlagwort passt in einen gültigen Track', ()
   assert.ok(buildEvents({ ...legacy(), tags: all }).length > 0);
   for (const c of TAG_CATEGORIES) for (const tag of c.tags) assert.ok(buildEvents({ ...legacy(), tags: { [c.id]: [tag] } }).length > 0, tag);
 });
+
+test('öffentliches validateTrack wendet Standardwerte an: altes Format ist gültig', () => {
+  assert.deepEqual(validateTrack(legacy()), []);
+});
+
+test('öffentliches validateTrack wirft nie und meldet Codes für Müll', () => {
+  for (const bad of [{}, null, undefined]) {
+    const codes = validateTrack(bad).map((e) => e.code);
+    assert.ok(codes.includes('badKey') && codes.includes('emptyBars'), String(bad));
+  }
+  const codes = validateTrack({ ...legacy(), bars: [bar('F#', 'maj')] }).map((e) => e.code);
+  assert.deepEqual(codes, ['chordNotInKey']);
+});
+
+test('öffentliches validateTrack ist genau dann leer, wenn buildEvents nicht wirft', () => {
+  const tracks = [
+    legacy(), { ...legacy(), length: 2 }, { ...legacy(), bpm: 5 }, { ...legacy(), length: 0 },
+    { ...legacy(), bars: [] }, { ...legacy(), bars: [bar('F#', 'maj')] }, { ...legacy(), bars: [bar('A', 'min', 0)] }, {},
+  ];
+  for (const track of tracks) {
+    let threw = false;
+    try { buildEvents(track); } catch { threw = true; }
+    assert.equal(validateTrack(track).length > 0, threw, JSON.stringify(track));
+  }
+});

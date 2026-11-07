@@ -1,7 +1,7 @@
 // Taktzeiten: eine Quelle für Ereignisstrom und chordTimeline, damit beide nie auseinanderlaufen.
 import { normalizeTrack, validateTrack } from './track.js';
 
-const r6 = (x) => Math.round(x * 1e6) / 1e6;
+export const r6 = (x) => Math.round(x * 1e6) / 1e6;
 
 /** Normalisiert und prüft einen Track; wirft einen Error mit `.errors`, wenn er ungültig ist. */
 export function checkedTrack(input) {
