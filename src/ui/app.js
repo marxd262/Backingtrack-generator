@@ -102,12 +102,20 @@ for (const id of ['go', 'tuning-go']) {
   });
 }
 
-$('new-variant').addEventListener('click', () => {
-  state.track.seed = rollVariant();
+function setVariant(seed) {
+  state.track.seed = seed;
   deriveBars();
   restartIfPlaying();
   render();
+}
+$('new-variant').addEventListener('click', () => setVariant(rollVariant()));
+
+// Eingabe übernehmen (Enter oder Verlassen); Ungültiges ignorieren, beim Verlassen zeigt das Feld wieder die Variante
+$('variant').addEventListener('change', (e) => {
+  const n = Number(e.target.value);
+  if (e.target.value !== '' && Number.isInteger(n) && n >= 1 && n <= 9999) setVariant(n);
 });
+$('variant').addEventListener('blur', (e) => { e.target.value = String(state.track.seed); });
 
 function setTuning(open) {
   state.tuningOpen = open;
@@ -168,7 +176,8 @@ function render() {
     pressed(card, id === style);
   }
 
-  $('variant').textContent = t('ui.variant', { n: track.seed });
+  // während der Eingabe nicht überschreiben (render läuft je Takt)
+  if (document.activeElement !== $('variant') && $('variant').value !== String(track.seed)) $('variant').value = String(track.seed);
   $('chords').textContent = track.bars.map((b) => chordName(b.chord)).join(' – ');
   for (const id of ['go', 'tuning-go']) {
     $(id).textContent = t(playing ? 'ui.stop' : 'ui.go');

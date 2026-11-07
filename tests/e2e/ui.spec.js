@@ -1,6 +1,7 @@
 // Oberfläche: Startsatz, Auswahl-Popover, Los/Stopp, Variante, Sprachumschalter (echte Seite /ui/index.html).
 import { test, expect } from '@playwright/test';
 import { allowedChords } from '../../src/core/music.js';
+import { progressionFor } from '../../src/core/progressions.js';
 
 const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category)\.[A-Za-z.]+$/;
 const SYMBOLS = { maj: '', min: 'm', dim: 'dim' };
@@ -75,7 +76,7 @@ test('Startsatz auf Deutsch, Feintuning-Bereich versteckt, kein AudioContext bei
   for (const part of ['A-Moll-Pentatonik', 'Funk-Rock', '100']) expect(text).toContain(part);
   expect(text).toBe('A-Moll-Pentatonik im Stil Funk-Rock bei 100 bpm');
   await expect(go(page)).toHaveText('Los');
-  await expect(page.locator('#variant')).toHaveText(/^Variante \d{1,4}$/);
+  await expect(page.getByRole('spinbutton', { name: 'Variante', exact: true })).toHaveValue(/^\d{1,4}$/);
   expect(await shownChords(page)).toHaveLength(4);
   await expect(page.locator('#tuning')).toBeAttached();
   await expect(page.locator('#tuning')).toBeHidden();
@@ -202,11 +203,11 @@ test('Dorisch: Satz, Akkorde der dorischen Tonart (mit Dur-IV), Feintuning und E
 
 test('andere Variante ändert die Nummer und zeigt vier gültige Akkorde', async ({ page }) => {
   const variant = page.locator('#variant');
-  const before = await variant.textContent();
+  const before = await variant.inputValue();
   let after = before;
   for (let i = 0; i < 5 && after === before; i++) {
     await page.locator('#new-variant').click();
-    after = await variant.textContent();
+    after = await variant.inputValue();
   }
   expect(after).not.toBe(before);
   const n = Number(after.match(/\d+/)[0]);
@@ -215,6 +216,77 @@ test('andere Variante ändert die Nummer und zeigt vier gültige Akkorde', async
   const chords = await shownChords(page);
   expect(chords).toHaveLength(4);
   for (const c of chords) expect(namesIn('A', 'minor')).toContain(c);
+});
+
+const expectedChords = (key, seed) => progressionFor(key, seed).map((c) => c.root + SYMBOLS[c.quality]);
+
+test('Variantennummer eingeben: gleiche Nummer, gleiche Folge; Feld mit Name, Grenzen und Fokusrahmen', async ({ page }) => {
+  const field = page.getByRole('spinbutton', { name: 'Variante', exact: true });
+  await expect(field).toHaveAttribute('min', '1');
+  await expect(field).toHaveAttribute('max', '9999');
+  await field.fill('4711');
+  await field.press('Enter');
+  await expect.poll(() => shownChords(page)).toEqual(expectedChords({ root: 'A', mode: 'minor' }, 4711));
+  await field.focus();
+  expect(await field.evaluate((el) => getComputedStyle(el).outlineStyle)).not.toBe('none');
+  // andere Variante würfelt und schreibt die Nummer ins Feld, dieselbe Nummer bringt die Folge zurück
+  await page.locator('#new-variant').click();
+  const rolled = Number(await field.inputValue());
+  expect(await shownChords(page)).toEqual(expectedChords({ root: 'A', mode: 'minor' }, rolled));
+  await field.fill('4711');
+  await field.blur();
+  await expect.poll(() => shownChords(page)).toEqual(expectedChords({ root: 'A', mode: 'minor' }, 4711));
+  // andere Tonart: Nummer bleibt, Folge der neuen Tonart
+  await page.locator('#key-btn').click();
+  await page.locator('#key-pop').getByRole('button', { name: 'D', exact: true }).click();
+  await page.keyboard.press('Escape');
+  await expect(field).toHaveValue('4711');
+  expect(await shownChords(page)).toEqual(expectedChords({ root: 'D', mode: 'minor' }, 4711));
+  await field.fill('12');
+  await field.press('Enter');
+  await expect.poll(() => shownChords(page)).toEqual(expectedChords({ root: 'D', mode: 'minor' }, 12));
+});
+
+test('ungültige Variantennummer (0, 10000, Buchstaben, leer) wird ignoriert, Feld springt zurück', async ({ page }) => {
+  const field = page.locator('#variant');
+  await field.fill('4711');
+  await field.press('Enter');
+  await expect.poll(() => shownChords(page)).toEqual(expectedChords({ root: 'A', mode: 'minor' }, 4711));
+  const chords = await shownChords(page);
+  for (const bad of ['0', '10000', '-3', '2.5', '']) {
+    await field.fill(bad);
+    await field.press('Enter');
+    await field.blur();
+    await expect(field).toHaveValue('4711');
+    expect(await shownChords(page), bad).toEqual(chords);
+  }
+  await field.fill('');
+  await field.pressSequentially('abc');
+  await field.blur();
+  await expect(field).toHaveValue('4711');
+  expect(await shownChords(page)).toEqual(chords);
+});
+
+test('Variantennummer während der Wiedergabe startet neu; auf Englisch ohne rohe Schlüssel', async ({ page }) => {
+  await go(page).click();
+  const position = page.locator('#position');
+  await expect(position).toHaveText('Takt 2 von 96', { timeout: BAR_TIMEOUT });
+  const field = page.locator('#variant');
+  await field.fill('321');
+  await field.press('Enter');
+  await expect(position).toHaveText('Takt 1 von 96', { timeout: BAR_TIMEOUT });
+  await expect(go(page)).toHaveText('Stopp');
+  expect(await shownChords(page)).toEqual(expectedChords({ root: 'A', mode: 'minor' }, 321));
+  await go(page).click();
+
+  await page.getByRole('button', { name: /^EN/i }).click();
+  const en = page.getByRole('spinbutton', { name: 'Variant', exact: true });
+  await expect(en).toHaveValue('321');
+  await en.fill('9999');
+  await en.press('Enter');
+  await expect.poll(() => shownChords(page)).toEqual(expectedChords({ root: 'A', mode: 'minor' }, 9999));
+  expect(await rawKeysIn(page)).toEqual([]);
+  expect(await contexts(page)).toBe(1);
 });
 
 test('Tempo-Regler während der Wiedergabe: kein Neustart, kein Fehler', async ({ page }) => {
@@ -247,7 +319,7 @@ test('Sprachumschalter: Englisch ohne Neuladen, bleibt nach Neuladen, keine rohe
   expect(await normalized(sentence(page))).toMatch(/^A minor pentatonic in Funk rock at 100 bpm$/i);
   await expect(go(page)).toHaveText('Go');
   await expect(page.locator('#new-variant')).toHaveText('another variant');
-  await expect(page.locator('#variant')).toHaveText(/^Variant \d+$/);
+  await expect(page.getByRole('spinbutton', { name: 'Variant', exact: true })).toHaveValue(/^\d+$/);
   await checkNoRawKeys(page);
   await go(page).click();
   await expect(page.locator('#position')).toHaveText(/^Bar \d+ of 96$/, { timeout: BAR_TIMEOUT });

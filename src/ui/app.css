@@ -89,6 +89,17 @@ main {
   margin: 0.8em 0 1.2em;
   color: var(--ink-soft);
 }
+.variant input {
+  width: 5.5em;
+  min-height: var(--target);
+  padding: 0 4px 0 8px;
+  border: 1px solid var(--ink-soft);
+  border-radius: 4px;
+  background: var(--paper);
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
 
 .go {
   min-width: 10rem;

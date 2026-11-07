@@ -1,7 +1,8 @@
 # Backingtrack-Generator
 
 Erzeugt im Browser Begleit-Tracks zum Üben (Schlagzeug, Bass, Akkorde, Pad) aus Tonart, Stil, Tempo und Schlagworten.
-Reines JavaScript (ES-Module), kein Build-Schritt.
+Reines JavaScript (ES-Module), kein Build-Schritt. Die Variantennummer auf der Startseite ist eingebbar (1 bis 9999):
+dieselbe Nummer ergibt in derselben Tonart wieder dieselbe Akkordfolge.
 
 ## Starten
 

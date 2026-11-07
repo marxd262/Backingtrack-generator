@@ -75,7 +75,7 @@ export default {
   'ui.newVariant': 'andere Variante',
   'ui.fineTune': 'Feintuning',
   'ui.back': 'zurück',
-  'ui.variant': 'Variante {n}',
+  'ui.variant': 'Variante',
   'ui.language': 'Sprache',
   'ui.tempo': 'Tempo',
   'ui.length': 'Länge',
