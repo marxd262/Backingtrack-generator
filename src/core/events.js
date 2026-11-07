@@ -79,12 +79,16 @@ function playDrums(b, v, rng, params, fill) {
   const kicks = new Set(v.kicks[b.index % 2]);
   if (rng.next() < 0.6 * params.syncopation) kicks.add(rng.pick(OFFBEAT_KICKS));
   const hits = [];
-  for (let s = 0; s < fillStart; s++) {
+  for (let s = 0; s < b.steps; s++) {
     const p = s % STEPS;
+    const hat = v.tier.hat[s % 4];
+    if (s >= fillStart) { // unter dem Fill hält die geschlossene Hi-Hat das Tempo
+      if (hat > 0) hits.push([s, 'hat', hat]);
+      continue;
+    }
     if (kicks.has(p)) hits.push([s, 'kick', 1]);
     if (v.tier.snare.includes(p)) hits.push([s, 'snare', 0.9]);
     else if (v.tier.ghosts.includes(p) && rng.next() < 0.6 * params.syncopation) hits.push([s, 'snare', 0.2]);
-    const hat = v.tier.hat[s % 4];
     if (hat > 0) hits.push(v.openHat && p === 14 ? [s, 'openHat', 0.5] : [s, 'hat', hat]);
   }
   if (fill) {
@@ -120,12 +124,10 @@ function playBass(b, pattern, rng, params) {
     else for (let s = p; s < apStep; s += STEPS) steps.push([s, d, len]); // kürzere Takte abschneiden, längere wiederholen
   }
   steps.sort((x, y) => x[0] - y[0]);
-  // einstimmig: jede Note endet spätestens mit der nächsten
-  return steps.map(([s, d, len], k) => {
-    const t = at(b, s, rng, params.swing);
-    const room = (steps[k + 1]?.[0] ?? b.steps) - s;
-    return note(b, 'bass', s, t, fold(degree[d]), humanVel(0.95, rng), Math.min(len, room) * b.stepSec);
-  });
+  // einstimmig: jede Note endet spätestens beim tatsächlichen Start der nächsten (nach Swing und Jitter)
+  const times = steps.map(([s]) => at(b, s, rng, params.swing));
+  return steps.map(([s, d, len], k) =>
+    note(b, 'bass', s, times[k], fold(degree[d]), humanVel(0.95, rng), Math.min(len * b.stepSec, (times[k + 1] ?? b.end) - times[k])));
 }
 
 const chordsSection = (params, rng) => (params.arp ? { arp: rng.pick(ARPS) } : { stabs: rng.pick(STABS) });

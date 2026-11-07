@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildEvents, DRUM_NAMES } from '../../src/core/events.js';
 import { chordMidi, noteToPc } from '../../src/core/music.js';
-import { STYLE_PRESETS } from '../../src/core/tags.js';
+import { STYLE_PRESETS, resolveTags } from '../../src/core/tags.js';
+import { createRng } from '../../src/core/rng.js';
 
 const chordBar = (root, quality, beats = 4) => ({ chord: { root, quality }, beats });
 const BASE = {
@@ -122,6 +123,54 @@ test('Humanisierung ohne Swing: höchstens 0,02 s vom Raster aus bar und beat', 
     for (const e of sounding(events)) {
       const grid = chordT[e.bar] + (e.beat * 60) / bpm;
       assert.ok(Math.abs(e.t - grid) <= 0.02, JSON.stringify(e));
+    }
+  }
+});
+
+test('Humanisierung mit Swing: höchstens 0,02 s vom geswingten Raster', () => {
+  for (const tags of [presetTags('funk'), { rhythm: ['swing'] }]) {
+    const { swing } = resolveTags(tags, createRng(1));
+    assert.ok(swing > 0);
+    for (const bpm of [40, 100, 240]) {
+      const events = make({ tags, bpm });
+      const chordT = ofType(events, 'chord').map((c) => c.t);
+      const stepSec = 60 / bpm / 4;
+      for (const e of sounding(events)) {
+        const step = e.beat * 4;
+        const grid = chordT[e.bar] + step * stepSec + (step % 2 === 1 ? (swing * stepSec) / 3 : 0);
+        assert.ok(Math.abs(e.t - grid) <= 0.02, `${bpm} ${JSON.stringify(e)}`);
+      }
+    }
+  }
+});
+
+test('Fill-Bereich hat mehr Schläge als derselbe Bereich im Takt davor, für jede drive-Stufe', () => {
+  const tagSets = { low: presetTags('dreamy'), mid: {}, high: { drums: ['driving'] } };
+  for (const id of PRESET_IDS) tagSets[id] = presetTags(id);
+  for (const [name, tags] of Object.entries(tagSets)) {
+    let checked = 0;
+    for (const seed of [1, 2, 3, 4, 5]) {
+      const events = make({ tags, seed });
+      const hitsFrom2 = (bar) => ofType(events, 'hit').filter((e) => e.bar === bar && e.beat >= 2).length;
+      for (const m of ofType(events, 'marker')) {
+        const [fill, before] = [hitsFrom2(m.bar), hitsFrom2(m.bar - 1)];
+        if (fill === 0 && before === 0) continue; // Schlagzeug in diesem Abschnitt aus
+        assert.ok(fill > before, `${name} Seed ${seed} Takt ${m.bar}: ${fill} <= ${before}`);
+        checked++;
+      }
+    }
+    assert.ok(checked > 0, name);
+  }
+});
+
+test('Bass ist einstimmig: keine Note klingt in die nächste hinein, auch mit Swing', () => {
+  for (const id of PRESET_IDS) {
+    for (const bpm of [60, 240]) {
+      const bass = ofLayer(make({ tags: presetTags(id), bpm }), 'bass');
+      for (let i = 1; i < bass.length; i++) {
+        const [a, b] = [bass[i - 1], bass[i]];
+        assert.ok(a.dur > 0 && a.t + a.dur <= b.t + 1e-9, `${id} ${bpm}: ${JSON.stringify(a)} -> ${b.t}`);
+      }
     }
   }
 });
