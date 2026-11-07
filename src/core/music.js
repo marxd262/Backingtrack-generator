@@ -14,9 +14,10 @@ const SCALES = {
   dorian: [0, 2, 3, 5, 7, 9, 10],
 };
 
+// parentMajor: Abstand zum Grundton der Dur-Tonart mit derselben Vorzeichnung (für die Schreibweise)
 const MODES = {
-  minor: { steps: [0, 2, 3, 5, 7, 8, 10], qualities: ['min', 'dim', 'maj', 'min', 'min', 'maj', 'maj'] },
-  major: { steps: [0, 2, 4, 5, 7, 9, 11], qualities: ['maj', 'min', 'min', 'maj', 'maj', 'min', 'dim'] },
+  minor: { steps: [0, 2, 3, 5, 7, 8, 10], qualities: ['min', 'dim', 'maj', 'min', 'min', 'maj', 'maj'], parentMajor: 3 },
+  major: { steps: [0, 2, 4, 5, 7, 9, 11], qualities: ['maj', 'min', 'min', 'maj', 'maj', 'min', 'dim'], parentMajor: 0 },
 };
 
 // Namen für Beschriftungen (i18n) und deren Tests
@@ -52,11 +53,20 @@ export function scalePcs(key, scale) {
   return SCALES[scale].map((i) => (root + i) % 12);
 }
 
+// Dur-Tonarten mit b-Vorzeichnung: F, Bb, Eb, Ab, Db, Gb
+const FLAT_MAJOR_PCS = [5, 10, 3, 8, 1, 6];
+
+// Kreuze oder Bs: ein Vorzeichen am Grundton gilt, sonst die Vorzeichnung der zugehörigen Dur-Tonart
+function spelling(key, root) {
+  if (key.root.endsWith('#')) return SHARP_NAMES;
+  if (key.root.endsWith('b')) return FLAT_NAMES;
+  return FLAT_MAJOR_PCS.includes((root + MODES[key.mode].parentMajor + 12) % 12) ? FLAT_NAMES : SHARP_NAMES;
+}
+
 export function diatonicChords(key) {
   const root = noteToPc(key.root);
   const { steps, qualities } = MODES[key.mode];
-  // Schreibweise der Tonart folgt: Bs-Tonarten und F bekommen Bs, sonst Kreuze
-  const names = key.root.includes('b') || key.root === 'F' ? FLAT_NAMES : SHARP_NAMES;
+  const names = spelling(key, root);
   return steps.map((s, i) => ({ root: names[(root + s) % 12], quality: qualities[i] }));
 }
 

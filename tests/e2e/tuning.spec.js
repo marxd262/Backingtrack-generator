@@ -360,7 +360,7 @@ test('eigene Folge übersteht Stilwahl, Variante und Tonart leiten neu ab', asyn
   await page.keyboard.press('Escape');
   await expect.poll(async () => (await shownChords(page)).length).toBe(4);
   // Akkord-Knöpfe folgen der Tonart
-  expect(await page.locator('#add-chords button').allTextContents()).toEqual(['Dm', 'Edim', 'F', 'Gm', 'Am', 'A#', 'C', 'A']);
+  expect(await page.locator('#add-chords button').allTextContents()).toEqual(['Dm', 'Edim', 'F', 'Gm', 'Am', 'Bb', 'C', 'A']);
 });
 
 test('keine rohen Schlüssel in beiden Sprachen mit offenem Feintuning', async ({ page }) => {

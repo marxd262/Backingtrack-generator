@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CHORD_QUALITIES, noteToPc, chordMidi, scalePcs, diatonicChords, allowedChords } from '../../src/core/music.js';
+import { CHORD_QUALITIES, MODE_NAMES, isNoteName, noteToPc, chordMidi, scalePcs, diatonicChords, allowedChords } from '../../src/core/music.js';
 
 const aMinor = { root: 'A', mode: 'minor' };
 const name = (c) => `${c.root}:${c.quality}`;
@@ -53,4 +53,37 @@ test('allowedChords: Moll bekommt zusätzlich die Dur-Dominante', () => {
 
 test('allowedChords: Dur bleibt diatonisch', () => {
   assert.equal(allowedChords({ root: 'C', mode: 'major' }).length, 7);
+});
+
+const SYMBOLS = { maj: '', min: 'm', dim: 'dim' };
+const names = (key) => allowedChords(key).map((c) => c.root + SYMBOLS[c.quality]);
+
+test('Schreibweise folgt der Vorzeichnung: Moll über die parallele Dur-Tonart', () => {
+  assert.deepEqual(names({ root: 'C', mode: 'minor' }), ['Cm', 'Ddim', 'Eb', 'Fm', 'Gm', 'Ab', 'Bb', 'G']);
+  assert.deepEqual(names({ root: 'D', mode: 'minor' }), ['Dm', 'Edim', 'F', 'Gm', 'Am', 'Bb', 'C', 'A']);
+  assert.deepEqual(names({ root: 'G', mode: 'minor' }), ['Gm', 'Adim', 'Bb', 'Cm', 'Dm', 'Eb', 'F', 'D']);
+  assert.deepEqual(names({ root: 'A', mode: 'minor' }), ['Am', 'Bdim', 'C', 'Dm', 'Em', 'F', 'G', 'E']);
+  assert.deepEqual(names({ root: 'E', mode: 'minor' }), ['Em', 'F#dim', 'G', 'Am', 'Bm', 'C', 'D', 'B']);
+  assert.deepEqual(names({ root: 'F', mode: 'major' }), ['F', 'Gm', 'Am', 'Bb', 'C', 'Dm', 'Edim']);
+  assert.deepEqual(names({ root: 'D', mode: 'major' }), ['D', 'Em', 'F#m', 'G', 'A', 'Bm', 'C#dim']);
+});
+
+test('Grundton mit Vorzeichen behält seine Schreibweise', () => {
+  assert.equal(diatonicChords({ root: 'Eb', mode: 'minor' })[0].root, 'Eb');
+  assert.equal(diatonicChords({ root: 'Bb', mode: 'major' })[3].root, 'Eb');
+  assert.equal(diatonicChords({ root: 'F#', mode: 'minor' })[0].root, 'F#');
+  assert.equal(diatonicChords({ root: 'C#', mode: 'major' })[0].root, 'C#');
+  assert.equal(diatonicChords({ root: 'Db', mode: 'major' })[0].root, 'Db');
+});
+
+test('alle Grundtöne und Modi: gültige Tonnamen, kein Akkordname doppelt', () => {
+  const ROOTS = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B', 'C#', 'D#', 'G#', 'A#', 'Gb'];
+  for (const root of ROOTS) {
+    for (const mode of MODE_NAMES) {
+      const chords = allowedChords({ root, mode });
+      for (const c of chords) assert.ok(isNoteName(c.root), `${root} ${mode}: ${c.root}`);
+      const list = names({ root, mode });
+      assert.equal(new Set(list).size, list.length, `${root} ${mode}: ${list}`);
+    }
+  }
 });
