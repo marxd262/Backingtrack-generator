@@ -102,4 +102,5 @@ export default {
   'ui.progressionFull': 'Die Akkordfolge hat schon {max} Akkorde, mehr passen nicht hinein.',
   'ui.quickPick': 'Schnellauswahl',
   'ui.barsCount': '{n} Takte',
+  'ui.inertTag': 'noch ohne Wirkung',
 };

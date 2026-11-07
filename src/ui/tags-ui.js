@@ -1,5 +1,6 @@
 // Schlagworte nach Kategorien: je Kategorie eine Gruppe mit Umschalt-Knöpfen, mehrere pro Kategorie wählbar.
 import { TAG_CATEGORIES } from '../index.js';
+import { INERT_TAGS } from '../core/tags.js';
 import { pressed } from './state.js';
 
 // Auswahl als { kategorie: [tags] } in der Reihenfolge von TAG_CATEGORIES, leere Kategorien entfallen
@@ -29,6 +30,11 @@ export function buildTags(container, onToggle) {
     for (const tag of tags) {
       const b = Object.assign(document.createElement('button'), { type: 'button', className: 'chip' });
       Object.assign(b.dataset, { category: id, tag, i18n: `tag.${id}.${tag}` });
+      // ohne Wirkung: gedämpft, Hinweis als title und aria-description (setzt render über data-i18n-hint)
+      if (INERT_TAGS.includes(tag)) {
+        b.classList.add('inert');
+        b.dataset.i18nHint = 'ui.inertTag';
+      }
       b.addEventListener('click', () => onToggle(id, tag));
       chips.append(b);
     }

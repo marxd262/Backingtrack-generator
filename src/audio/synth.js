@@ -2,7 +2,7 @@
 // Rauschen aus dem Seed statt Math.random, damit Renders reproduzierbar sind. AudioContext nur von außen.
 import { createRng } from '../core/rng.js';
 
-// Schichtpegel und Summe, aus Messungen mit tests/e2e/levels.spec.js angeglichen (siehe task-6-report.md)
+// Schichtpegel und Summe, aus Messungen mit tests/e2e/levels.spec.js angeglichen (Messwerte dort im Kommentar)
 const TRIM = { drums: 0.65, bass: 0.24, chords: 1, pad: 0.8 };
 const MASTER = 0.6;
 const REVERB_WET = 0.15;

@@ -153,6 +153,9 @@ main {
   background: var(--ink);
   color: var(--paper);
 }
+/* Schlagwort ohne Wirkung: gestrichelt und leiser, gewählt bleibt es gut lesbar */
+.chip.inert { border-style: dashed; }
+.chip.inert:not([aria-pressed="true"]) { color: var(--ink-soft); }
 
 /* Popover unter dem Wort, innerhalb des Fensters */
 #key-btn { anchor-name: --key; }

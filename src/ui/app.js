@@ -155,6 +155,10 @@ function render() {
   document.title = t('ui.title');
   for (const el of document.querySelectorAll('[data-i18n]')) setText(el, t(el.dataset.i18n));
   for (const el of document.querySelectorAll('[data-i18n-label]')) setAttr(el, 'aria-label', t(el.dataset.i18nLabel));
+  for (const el of document.querySelectorAll('[data-i18n-hint]')) {
+    setAttr(el, 'title', t(el.dataset.i18nHint));
+    setAttr(el, 'aria-description', t(el.dataset.i18nHint));
+  }
   for (const b of document.querySelectorAll('[data-lang]')) pressed(b, b.dataset.lang === lang);
 
   $('key-btn').textContent = t('ui.keyScale', { root: track.key.root, scale: t(`scale.${scale}`) });

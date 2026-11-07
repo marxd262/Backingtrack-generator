@@ -102,4 +102,5 @@ export default {
   'ui.progressionFull': 'The progression already has {max} chords, no more fit.',
   'ui.quickPick': 'Quick pick',
   'ui.barsCount': '{n} bars',
+  'ui.inertTag': 'no effect yet',
 };

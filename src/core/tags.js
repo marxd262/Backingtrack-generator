@@ -32,7 +32,7 @@ const DEFAULTS = {
 
 // Wirkung je Schlagwort. Zahlen sind Verschiebungen zum Standardwert; arp/buildUp werden gesetzt.
 // Mehrere Schlagworte addieren sich, das Ergebnis wird auf [0,1] begrenzt.
-// Schlagworte ohne Eintrag (z. B. gritty, warm, dark) ändern noch nichts.
+// Schlagworte ohne Eintrag (z. B. gritty, warm, dark) ändern noch nichts, siehe INERT_TAGS.
 const EFFECTS = {
   driving: { drive: 0.3 },
   loose: { drive: -0.3 },
@@ -54,6 +54,9 @@ const EFFECTS = {
   buildsSlowly: { buildUp: 'slow' },
   fullFromStart: { buildUp: 'instant' },
 };
+
+/** Schlagwort-IDs ohne Eintrag in der Wirkungstabelle: wählbar, ändern aber (noch) nichts am Strom. */
+export const INERT_TAGS = Object.freeze(TAG_CATEGORIES.flatMap((c) => c.tags).filter((tag) => !Object.hasOwn(EFFECTS, tag)));
 
 // Gegensätze: sind beide gewählt, entscheidet rng je Aufruf, welches zählt.
 const OPPOSITES = [
