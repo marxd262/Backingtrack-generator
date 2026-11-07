@@ -138,7 +138,7 @@ test('Schnellauswahl Träumerisch belegt Schlagworte und 80 bpm vor', async ({ p
 test('Schlagworte nach Kategorien, mehrere pro Kategorie wählbar', async ({ page }) => {
   await openPlayPage(page);
   const groups = page.locator('#tags [role="group"]');
-  await expect(groups).toHaveCount(6);
+  await expect(groups).toHaveCount(10);
   await expect(page.getByRole('group', { name: 'Entwicklung' })).toBeVisible();
   await expect(page.getByRole('group', { name: 'Schlagzeug', exact: true })).toBeVisible();
   const drums = page.getByRole('group', { name: 'Schlagzeug', exact: true });
@@ -152,23 +152,23 @@ test('Schlagworte nach Kategorien, mehrere pro Kategorie wählbar', async ({ pag
 
 test('Schlagworte ohne Wirkung: gedämpft, mit Hinweis in beiden Sprachen, weiter wählbar', async ({ page }) => {
   await openPlayPage(page);
-  const gritty = page.locator('#tags [data-tag="gritty"]');
-  await expect(gritty).toHaveClass(/\binert\b/);
-  await expect(gritty).toHaveAttribute('title', 'noch ohne Wirkung');
-  await expect(gritty).toHaveAttribute('aria-description', 'noch ohne Wirkung');
-  await expect(gritty).toHaveAccessibleName('angezerrt');
-  await expect(page.locator('#tags .inert')).toHaveCount(6);
+  const withBreakouts = page.locator('#tags [data-tag="withBreakouts"]');
+  await expect(withBreakouts).toHaveClass(/\binert\b/);
+  await expect(withBreakouts).toHaveAttribute('title', 'noch ohne Wirkung');
+  await expect(withBreakouts).toHaveAttribute('aria-description', 'noch ohne Wirkung');
+  await expect(withBreakouts).toHaveAccessibleName('mit Ausbrüchen');
+  await expect(page.locator('#tags .inert')).toHaveCount(1);
   // Schlagworte mit Wirkung tragen keinen Hinweis
   const driving = page.locator('#tags [data-tag="driving"]');
   await expect(driving).not.toHaveClass(/\binert\b/);
   await expect(driving).not.toHaveAttribute('title', /./);
-  await gritty.click();
-  await expect(gritty).toHaveAttribute('aria-pressed', 'true');
-  await gritty.click();
-  await expect(gritty).toHaveAttribute('aria-pressed', 'false');
+  await withBreakouts.click();
+  await expect(withBreakouts).toHaveAttribute('aria-pressed', 'true');
+  await withBreakouts.click();
+  await expect(withBreakouts).toHaveAttribute('aria-pressed', 'false');
   await page.locator('[data-lang="en"]').click();
-  await expect(gritty).toHaveAttribute('title', 'no effect yet');
-  await expect(gritty).toHaveAttribute('aria-description', 'no effect yet');
+  await expect(withBreakouts).toHaveAttribute('title', 'no effect yet');
+  await expect(withBreakouts).toHaveAttribute('aria-description', 'no effect yet');
   expect(await rawKeysIn(page)).toEqual([]);
 });
 

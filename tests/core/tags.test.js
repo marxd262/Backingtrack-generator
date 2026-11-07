@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRng } from '../../src/core/rng.js';
 import { TAG_CATEGORIES, STYLE_PRESETS, INERT_TAGS, resolveTags } from '../../src/core/tags.js';
+import { resolveTimbre } from '../../src/core/timbre.js';
 
 const NUMBERS = ['drive', 'swing', 'syncopation', 'bassLow', 'bassMovement', 'padWidth'];
 const seeds = Array.from({ length: 40 }, (_, i) => i + 1);
@@ -9,7 +10,7 @@ const seeds = Array.from({ length: 40 }, (_, i) => i + 1);
 test('Kategorien in fester Reihenfolge', () => {
   assert.deepEqual(
     TAG_CATEGORIES.map((c) => c.id),
-    ['drums', 'bass', 'synths', 'rhythm', 'mood', 'development'],
+    ['drums', 'bass', 'synths', 'rhythm', 'mood', 'development', 'drumSound', 'bassSound', 'chordSound', 'padSound'],
   );
 });
 
@@ -87,12 +88,12 @@ test('verändert die Eingabe nicht', () => {
 test('INERT_TAGS: genau die Schlagworte ohne Wirkung, alle gültig', () => {
   const ids = TAG_CATEGORIES.flatMap((c) => c.tags);
   for (const tag of INERT_TAGS) assert.ok(ids.includes(tag), tag);
-  assert.deepEqual([...INERT_TAGS].sort(), ['bright', 'dark', 'gritty', 'psychedelic', 'warm', 'withBreakouts']);
-  // unabhängig von der Liste: ohne Wirkung heißt, allein gewählt ergibt es die Standardwerte
-  const defaults = resolveTags({}, createRng(1));
+  assert.deepEqual([...INERT_TAGS].sort(), ['withBreakouts']);
+  // unabhängig von der Liste: ohne Wirkung heißt, allein gewählt ergibt es die Standardwerte (Muster und Klang)
+  const defaults = JSON.stringify([resolveTags({}, createRng(1)), resolveTimbre({})]);
   for (const c of TAG_CATEGORIES) {
     for (const tag of c.tags) {
-      const inert = JSON.stringify(resolveTags({ [c.id]: [tag] }, createRng(1))) === JSON.stringify(defaults);
+      const inert = JSON.stringify([resolveTags({ [c.id]: [tag] }, createRng(1)), resolveTimbre({ [c.id]: [tag] })]) === defaults;
       assert.equal(INERT_TAGS.includes(tag), inert, tag);
     }
   }

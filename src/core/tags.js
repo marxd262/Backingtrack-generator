@@ -1,5 +1,6 @@
 // Schlagworte, Stil-Presets und Auflösung zu Parametern. Reine Logik, kein Audio/DOM.
 // Beschriftungen stehen nur in src/i18n.
+import { TIMBRE_EFFECTS } from './timbre-effects.js';
 
 export const TAG_CATEGORIES = [
   { id: 'drums', tags: ['driving', 'loose', 'halftime', 'dry', 'heavy'] },
@@ -8,6 +9,10 @@ export const TAG_CATEGORIES = [
   { id: 'rhythm', tags: ['funky', 'straight', 'swing', 'syncopated'] },
   { id: 'mood', tags: ['dreamy', 'dark', 'bright', 'psychedelic'] },
   { id: 'development', tags: ['buildsSlowly', 'fullFromStart', 'withBreakouts'] },
+  { id: 'drumSound', tags: ['punchy', 'boomy', 'snappy', 'crisp', 'roomy'] },
+  { id: 'bassSound', tags: ['sub', 'fuzz', 'plucky', 'round', 'resonant'] },
+  { id: 'chordSound', tags: ['mellow', 'biting', 'chorused', 'tremolo', 'ringing'] },
+  { id: 'padSound', tags: ['swelling', 'airy', 'glassy', 'thick', 'moving'] },
 ];
 
 export const STYLE_PRESETS = [
@@ -32,7 +37,7 @@ const DEFAULTS = {
 
 // Wirkung je Schlagwort. Zahlen sind Verschiebungen zum Standardwert; arp/buildUp werden gesetzt.
 // Mehrere Schlagworte addieren sich, das Ergebnis wird auf [0,1] begrenzt.
-// Schlagworte ohne Eintrag (z. B. gritty, warm, dark) ändern noch nichts, siehe INERT_TAGS.
+// Klangwirkung steht in timbre-effects.js; Schlagworte ohne Eintrag dort wie hier sind inert, siehe INERT_TAGS.
 const EFFECTS = {
   driving: { drive: 0.3 },
   loose: { drive: -0.3 },
@@ -55,8 +60,9 @@ const EFFECTS = {
   fullFromStart: { buildUp: 'instant' },
 };
 
-/** Schlagwort-IDs ohne Eintrag in der Wirkungstabelle: wählbar, ändern aber (noch) nichts am Strom. */
-export const INERT_TAGS = Object.freeze(TAG_CATEGORIES.flatMap((c) => c.tags).filter((tag) => !Object.hasOwn(EFFECTS, tag)));
+/** Schlagwort-IDs ohne Eintrag in Muster- und Klangtabelle: wählbar, ändern aber nichts. */
+export const INERT_TAGS = Object.freeze(TAG_CATEGORIES.flatMap((c) => c.tags)
+  .filter((tag) => !Object.hasOwn(EFFECTS, tag) && !Object.hasOwn(TIMBRE_EFFECTS, tag)));
 
 // Gegensätze: sind beide gewählt, entscheidet rng je Aufruf, welches zählt.
 const OPPOSITES = [
@@ -69,7 +75,7 @@ const OPPOSITES = [
 
 const clamp01 = (x) => Math.min(1, Math.max(0, x));
 
-function collectTags(tags) {
+export function collectTags(tags) {
   const selected = new Set();
   for (const [cat, list] of Object.entries(tags ?? {})) {
     const category = TAG_CATEGORIES.find((c) => c.id === cat);
