@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Render-Harness</title>
+<link rel="icon" href="data:,">
+</head>
+<body>
+<!-- Entwicklerseite (nicht Teil der Oberfläche): window.__render für Pegeltests und Hörprobe der drei Stile -->
+<h1>Hörprobe</h1>
+<p>
+  <button data-style="funk">Funk</button>
+  <button data-style="psych">Psych</button>
+  <button data-style="dreamy">Dreamy</button>
+  <button id="stop">Stopp</button>
+</p>
+<script type="module">
+import { renderOffline } from '../audio/render.js';
+import { createInstruments } from '../audio/synth.js';
+import { buildEvents } from '../core/events.js';
+import { STYLE_PRESETS } from '../core/tags.js';
+
+window.__render = renderOffline;
+
+const LISTEN_SECONDS = 60;
+let ctx = null;
+
+function stop() {
+  ctx?.close();
+  ctx = null;
+}
+
+function play(id) {
+  stop();
+  const preset = STYLE_PRESETS.find((p) => p.id === id);
+  const events = buildEvents({
+    key: { root: 'A', mode: 'minor' },
+    bpm: preset.bpm,
+    bars: [['A', 'min'], ['A', 'min'], ['D', 'min'], ['E', 'maj']].map(([root, quality]) => ({ chord: { root, quality }, beats: 4 })),
+    tags: preset.tags,
+    seed: 1,
+  });
+  ctx = new AudioContext();
+  const { output, layers } = createInstruments(ctx, { bpm: preset.bpm });
+  output.connect(ctx.destination);
+  const start = ctx.currentTime + 0.15;
+  // shortcut: alles auf einmal einplanen statt Vorausplanung, play() mit Scheduler kommt in Task 7
+  for (const e of events) if (e.t < LISTEN_SECONDS && e.layer) layers[e.layer].trigger(e, start + e.t);
+}
+
+for (const b of document.querySelectorAll('[data-style]')) b.addEventListener('click', () => play(b.dataset.style));
+document.getElementById('stop').addEventListener('click', stop);
+</script>
+</body>
+</html>
