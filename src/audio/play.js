@@ -16,7 +16,9 @@ const FADE = 0.05;
  */
 export function play(ctx, trackInput, { loops = 1, onEvent, onBar, onEnd, createInstruments = synthInstruments } = {}) {
   const events = buildEvents(trackInput); // wirft bei ungültigem Track, bevor ein Knoten entsteht
-  if (!(loops >= 1)) throw new RangeError(`loops must be >= 1, got ${loops}`);
+  if (!(loops === Infinity || (Number.isInteger(loops) && loops >= 1))) {
+    throw new RangeError(`loops must be an integer >= 1 or Infinity, got ${loops}`);
+  }
   const track = normalizeTrack(trackInput);
   const bpm = track.bpm;
   const loopBars = track.length;
@@ -24,6 +26,9 @@ export function play(ctx, trackInput, { loops = 1, onEvent, onBar, onEnd, create
   for (let i = 0; i < loopBars; i++) loopSec += (track.bars[i % track.bars.length].beats * 60) / bpm;
 
   const instruments = createInstruments(ctx, { bpm });
+  for (const e of events) {
+    if (e.layer && !Object.hasOwn(instruments.layers, e.layer)) throw new Error(`Instruments lack layer: ${e.layer}`);
+  }
   const out = ctx.createGain();
   instruments.output.connect(out).connect(ctx.destination);
 
@@ -43,6 +48,8 @@ export function play(ctx, trackInput, { loops = 1, onEvent, onBar, onEnd, create
   let next = 0;
   let stopped = false;
   const timers = new Set();
+  // Rückrufe laufen auf der ctx.currentTime-Uhr: gegenüber startPerf (enthält die Ausgabelatenz) kommen sie etwa
+  // ctx.outputLatency zu früh; Interactive Scales muss das beim Ausrichten einer Aufnahme berücksichtigen.
   const at = (when, fn) => {
     if (!fn) return;
     const id = setTimeout(() => {
@@ -52,7 +59,7 @@ export function play(ctx, trackInput, { loops = 1, onEvent, onBar, onEnd, create
     timers.add(id);
   };
 
-  function tick() {
+  function schedule() {
     const horizon = ctx.currentTime + LOOKAHEAD;
     while (loop < loops) {
       if (next === events.length) {
@@ -82,23 +89,33 @@ export function play(ctx, trackInput, { loops = 1, onEvent, onBar, onEnd, create
       if (e.type === 'chord') at(when, onBar && (() => onBar({ bar: ev.bar, chord: ev.chord })));
     }
   }
+  function stop() {
+    if (stopped) return;
+    stopped = true;
+    clearInterval(scheduler);
+    for (const id of timers) clearTimeout(id);
+    timers.clear();
+    const now = ctx.currentTime;
+    out.gain.cancelScheduledValues(now);
+    out.gain.setValueAtTime(out.gain.value, now);
+    out.gain.linearRampToValueAtTime(0, now + FADE);
+    setTimeout(() => out.disconnect(), FADE * 2000);
+  }
+  // Fehler beim Planen (z. B. werfendes trigger) stoppt alles, sonst bliebe ein Planer übrig, den niemand anhalten kann
+  function tick() {
+    try {
+      schedule();
+    } catch (err) {
+      stop();
+      throw err;
+    }
+  }
   const scheduler = setInterval(tick, TICK_MS);
   tick();
 
   return {
     startPerf,
-    stop() {
-      if (stopped) return;
-      stopped = true;
-      clearInterval(scheduler);
-      for (const id of timers) clearTimeout(id);
-      timers.clear();
-      const now = ctx.currentTime;
-      out.gain.cancelScheduledValues(now);
-      out.gain.setValueAtTime(out.gain.value, now);
-      out.gain.linearRampToValueAtTime(0, now + FADE);
-      setTimeout(() => out.disconnect(), FADE * 2000);
-    },
+    stop,
     // setMuted(true) heißt stumm. Neue und schon geplante Töne verstummen, Echo- und Hallfahnen klingen 1-2 s nach.
     setLayer(name, on) {
       if (!Object.hasOwn(instruments.layers, name)) throw new Error(`Unknown layer: ${name}`);

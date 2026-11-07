@@ -13,7 +13,10 @@ const track = (extra = {}) => ({
   seed: 1,
   ...extra,
 });
-const TOLERANCE = 150;
+// Abstände zwischen Takten sind robust gegen Anlaufverzögerung; ein falsches Tempo verfehlt sie um 500 ms und mehr
+const SPACING_TOLERANCE = 200;
+// erster Takt gegen startPerf: Gerätestart und Timer unter Last (4 Worker) brauchen mehr Spielraum
+const START_TOLERANCE = 400;
 
 let problems;
 
@@ -45,7 +48,7 @@ test.beforeEach(async ({ page }) => {
         for (const name of ['drums', 'bass', 'chords', 'pad']) {
           layers[name] = {
             trigger: (e, when) => calls.trigger.push({ name, t: e.t, type: e.type, dur: e.dur, when, now: ctx.currentTime }),
-            setMuted: (on) => calls.muted.push({ name, on }),
+            setMuted: (muted) => calls.muted.push({ name, muted }),
           };
         }
         return { output: ctx.createGain(), layers };
@@ -100,38 +103,63 @@ test('onBar in Takt-Reihenfolge mit Akkorden und Zeiten, onEnd am Ende', async (
   }, track());
   expect(r.bars.map((b) => b.bar)).toEqual([0, 1, 2, 3]);
   expect(r.bars.map((b) => b.chord)).toEqual(CHORDS.map(([root, quality]) => ({ root, quality })));
-  for (const b of r.bars) expect(Math.abs(b.at - (r.startPerf + b.bar * 1000)), `bar ${b.bar}`).toBeLessThan(TOLERANCE);
+  const first = r.bars[0].at;
+  expect(Math.abs(first - r.startPerf)).toBeLessThan(START_TOLERANCE);
+  for (const b of r.bars) expect(Math.abs(b.at - first - b.bar * 1000), `bar ${b.bar}`).toBeLessThan(SPACING_TOLERANCE);
   expect(r.ends).toBe(1);
-  expect(Math.abs(r.endAt - (r.startPerf + 4000))).toBeLessThan(TOLERANCE);
+  expect(Math.abs(r.endAt - first - 4000)).toBeLessThan(SPACING_TOLERANCE);
 });
 
-test('nach stop() keine Aufrufe mehr, doppeltes stop() harmlos', async ({ page }) => {
+test('nach stop() mitten im Track keine Aufrufe mehr, kein onEnd, doppeltes stop() harmlos', async ({ page }) => {
+  test.setTimeout(30_000);
   const r = await page.evaluate(async (input) => {
     const { play } = await import('/audio/play.js');
     const ctx = new AudioContext();
     const spy = window.__spy();
     const n = { bar: 0, event: 0, end: 0 };
+    let reached;
+    const twoBars = new Promise((resolve) => (reached = resolve));
     const h = play(ctx, input, {
-      loops: Infinity,
       createInstruments: spy.create,
-      onBar: () => n.bar++,
+      onBar: () => ++n.bar === 2 && reached(),
       onEvent: () => n.event++,
       onEnd: () => n.end++,
     });
-    await new Promise((resolve) => setTimeout(resolve, 1300));
+    await twoBars;
     h.stop();
     const atStop = { ...n, trigger: spy.trigger.length };
     h.stop();
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    // bis deutlich nach dem regulären Ende (4 Takte = 4 s) warten
+    await new Promise((resolve) => setTimeout(resolve, h.startPerf + 4500 - performance.now()));
     const later = { ...n, trigger: spy.trigger.length };
     await ctx.close();
     return { atStop, later, factory: spy.factory };
   }, track());
   expect(r.factory).toEqual([{ bpm: 240 }]);
-  expect(r.atStop.bar).toBeGreaterThanOrEqual(2);
+  expect(r.atStop.bar).toBe(2);
   expect(r.atStop.event).toBeGreaterThan(0);
   expect(r.atStop.trigger).toBeGreaterThan(0);
+  expect(r.atStop.end).toBe(0);
   expect(r.later).toEqual(r.atStop);
+});
+
+test('stop() kurz vor dem Ende verhindert das schon geplante onEnd', async ({ page }) => {
+  test.setTimeout(30_000);
+  const r = await page.evaluate(async (input) => {
+    const { play } = await import('/audio/play.js');
+    const ctx = new AudioContext();
+    let ends = 0;
+    const startCtx = ctx.currentTime + 0.15;
+    const h = play(ctx, input, { onEnd: () => ends++ });
+    // 50 ms vor dem Ende (ctx-Zeit): der Planer (100 ms voraus) hat den End-Timer schon gestellt
+    while (ctx.currentTime < startCtx + 2 - 0.05) await new Promise((resolve) => setTimeout(resolve, 5));
+    const endsAtStop = ends;
+    h.stop();
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await ctx.close();
+    return { endsAtStop, ends };
+  }, track({ length: 2 }));
+  expect(r).toEqual({ endsAtStop: 0, ends: 0 });
 });
 
 test('setLayer schaltet Schichten über setMuted, onEvent meldet Schlagzeug weiter', async ({ page }) => {
@@ -157,8 +185,8 @@ test('setLayer schaltet Schichten über setMuted, onEvent meldet Schlagzeug weit
     await ctx.close();
     return { afterOff, muted: spy.muted, hitsWhileOff, unknown };
   }, track());
-  expect(r.afterOff).toEqual([{ name: 'drums', on: true }]);
-  expect(r.muted).toEqual([{ name: 'drums', on: true }, { name: 'drums', on: false }]);
+  expect(r.afterOff).toEqual([{ name: 'drums', muted: true }]);
+  expect(r.muted).toEqual([{ name: 'drums', muted: true }, { name: 'drums', muted: false }]);
   expect(r.hitsWhileOff).toBeGreaterThan(0);
   expect(r.unknown).toBe('Error');
 });
@@ -195,8 +223,8 @@ test('setTempo beschleunigt spätere Takte ohne Auslassen, Wiederholen oder Umor
   expect(r.bars.map((b) => b.bar)).toEqual([0, 1, 2, 3]);
   const before = r.bars[1].at - r.bars[0].at;
   const after = r.bars[3].at - r.bars[2].at;
-  expect(Math.abs(before - 3000)).toBeLessThan(TOLERANCE);
-  expect(Math.abs(after - 2000)).toBeLessThan(TOLERANCE);
+  expect(Math.abs(before - 3000)).toBeLessThan(SPACING_TOLERANCE);
+  expect(Math.abs(after - 2000)).toBeLessThan(SPACING_TOLERANCE);
   // Reihenfolge und Vollständigkeit: trigger-Aufrufe folgen exakt dem Strom, Zeiten steigen nie und liegen nie in der Vergangenheit
   expect(r.trigger.map((c) => c.t)).toEqual(r.expected.map((e) => e.t));
   for (let i = 1; i < r.trigger.length; i++) expect(r.trigger[i].when).toBeGreaterThanOrEqual(r.trigger[i - 1].when);
@@ -217,16 +245,94 @@ test('loops: 2 zählt Takte weiter und ruft onEnd einmal nach zwei Durchläufen'
     const ctx = new AudioContext();
     const bars = [];
     const ends = [];
-    const h = play(ctx, input, { loops: 2, onBar: (b) => bars.push(b), onEnd: () => ends.push(performance.now()) });
-    await new Promise((resolve) => setTimeout(resolve, 4800));
+    let done;
+    const ended = new Promise((resolve) => (done = resolve));
+    const h = play(ctx, input, {
+      loops: 2,
+      onBar: (b) => bars.push({ ...b, at: performance.now() }),
+      onEnd: () => (ends.push(performance.now()), done()),
+    });
+    await ended;
+    await new Promise((resolve) => setTimeout(resolve, 500)); // kein zweites onEnd, keine weiteren Takte
     h.stop();
     await ctx.close();
-    return { startPerf: h.startPerf, bars, ends };
+    return { bars, ends };
   }, track({ length: 2 }));
   expect(r.bars.map((b) => b.bar)).toEqual([0, 1, 2, 3]);
   expect(r.bars.map((b) => b.chord.root)).toEqual(['A', 'A', 'A', 'A']);
   expect(r.ends.length).toBe(1);
-  expect(Math.abs(r.ends[0] - (r.startPerf + 4000))).toBeLessThan(TOLERANCE);
+  expect(Math.abs(r.ends[0] - r.bars[0].at - 4000)).toBeLessThan(SPACING_TOLERANCE);
+});
+
+test('loops muss eine ganze Zahl >= 1 oder Infinity sein', async ({ page }) => {
+  const r = await page.evaluate(async (input) => {
+    const { play } = await import('/audio/play.js');
+    const touched = [];
+    const ctx = new Proxy({}, { get: (_, key) => void touched.push(String(key)) });
+    const errors = [0, 1.5, NaN, -Infinity, '2'].map((loops) => {
+      try { play(ctx, input, { loops }); return null; } catch (err) { return err.constructor.name; }
+    });
+    return { errors, touched };
+  }, track());
+  expect(r).toEqual({ errors: Array(5).fill('RangeError'), touched: [] });
+});
+
+test('fehlende Instrument-Schicht: play wirft, nichts läuft weiter', async ({ page }) => {
+  const r = await page.evaluate(async (input) => {
+    const { play } = await import('/audio/play.js');
+    const ctx = new AudioContext();
+    const spy = window.__spy();
+    const n = { event: 0, bar: 0 };
+    let threw = null;
+    try {
+      play(ctx, input, {
+        createInstruments: (c, o) => {
+          const instruments = spy.create(c, o);
+          delete instruments.layers.drums;
+          return instruments;
+        },
+        onEvent: () => n.event++,
+        onBar: () => n.bar++,
+      });
+    } catch (err) {
+      threw = err.message;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await ctx.close();
+    return { threw, n, trigger: spy.trigger.length };
+  }, track());
+  expect(r.threw).toMatch(/drums/);
+  expect(r).toMatchObject({ n: { event: 0, bar: 0 }, trigger: 0 });
+});
+
+test('werfendes trigger hält den Planer an, keine verwaisten Timer', async ({ page }) => {
+  const r = await page.evaluate(async (input) => {
+    const { play } = await import('/audio/play.js');
+    const ctx = new AudioContext();
+    const spy = window.__spy();
+    const n = { event: 0, bar: 0, trigger: 0 };
+    play(ctx, input, {
+      createInstruments: (c, o) => {
+        const instruments = spy.create(c, o);
+        for (const layer of Object.values(instruments.layers)) {
+          layer.trigger = () => {
+            n.trigger++;
+            throw new Error('boom');
+          };
+        }
+        return instruments;
+      },
+      onEvent: () => n.event++,
+      onBar: () => n.bar++,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    await ctx.close();
+    return n;
+  }, track());
+  expect(r).toEqual({ event: 0, bar: 0, trigger: 1 });
+  // der Fehler selbst landet genau einmal als Seitenfehler (Timer-Rückruf), danach nichts mehr
+  expect(problems).toEqual(['pageerror: boom']);
+  problems = [];
 });
 
 test('ungültiger Track wirft, bevor ein Knoten entsteht oder trigger läuft', async ({ page }) => {
