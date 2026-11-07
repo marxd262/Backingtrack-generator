@@ -92,7 +92,8 @@ function showPage(page, { sidebars } = {}) {
   }
   state.page = page;
   render();
-  if (page === 'play') $('play-title').focus();
+  // offene schmale Schublade ist modal (Titel inert): dann ihre Überschrift
+  if (page === 'play') ($('play-title').closest('[inert]') ? document.querySelector('.side:not([hidden]) [tabindex="-1"]') : $('play-title')).focus();
   // "Zur Spielseite" ist im Stand versteckt: dann auf Los
   else ($(opener).checkVisibility() ? $(opener) : $('go')).focus();
 }
@@ -217,10 +218,10 @@ function render() {
     setText($(id), text);
   }
 
-  for (const s of sidebars) s.render();
   show($('start'), page === 'start');
   show($('play'), page === 'play');
   show($('to-play'), playing);
+  for (const s of sidebars) s.render(); // nach dem Seitenwechsel: modal nur, wenn die Schublade sichtbar ist
   renderTuning();
 }
 

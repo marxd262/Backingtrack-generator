@@ -247,6 +247,7 @@ test('leere Meldung in der Kopfzeile: gerendert, aber ohne Platz (360 px, dort b
   await page.setViewportSize({ width: 360, height: 740 });
   await page.reload();
   await page.locator('#tune-btn').click();
+  await page.keyboard.press('Escape'); // schmal öffnet Feintuning die Klang-Schublade (modal); erst schließen
   const message = page.locator('#play-message');
   // Live-Region bleibt im Barrierefreiheitsbaum: nicht display:none, sichtbar im Sinne von checkVisibility
   expect(await message.evaluate((el) => ({
@@ -420,7 +421,7 @@ test.describe('Seitenleisten', () => {
     await expectSides(page, true, true);
   });
 
-  test('800 px: Schublade, nur eine offen, Klick daneben schließt nicht, Escape und Schließen-Knopf', async ({ page }) => {
+  test('800 px: Schublade, nur eine offen (Auslöser darunter inert), Klick daneben schließt nicht, Escape und Schließen-Knopf', async ({ page }) => {
     await page.setViewportSize({ width: 800, height: 740 });
     await openWithGo(page);
     await toggle(page, 'left').click();
@@ -433,6 +434,9 @@ test.describe('Seitenleisten', () => {
     expect(left.height).toBe(740);
     expect(left.width).toBeLessThan(800);
 
+    // modal: die zweite Leiste lässt sich erst nach dem Schließen der ersten öffnen
+    expect(await toggle(page, 'right').evaluate((el) => el.closest('[inert]') !== null)).toBe(true);
+    await page.keyboard.press('Escape');
     await toggle(page, 'right').click();
     await expectSides(page, false, true);
     await expect(page.locator('[aria-expanded="true"]')).toHaveCount(1);
@@ -523,8 +527,7 @@ test.describe('Seitenleisten', () => {
     await expect(toggle(page, 'right')).toBeFocused();
     await page.keyboard.press(' ');
     await expectSides(page, false, true);
-    // vom Auslöser aus: die Blöcke unter der Schublade werden übersprungen
-    await toggle(page, 'right').focus();
+    await expect(page.locator('#side-right-title')).toBeFocused();
     await page.keyboard.press('Tab');
     expect(await page.evaluate(() => document.getElementById('side-right').contains(document.activeElement))).toBe(true);
     await page.keyboard.press('Escape');
@@ -546,26 +549,30 @@ test.describe('Seitenleisten', () => {
     await openWithGo(page);
     await toggle(page, 'left').click();
     expect(await rawKeys()).toEqual([]);
+    await page.keyboard.press('Escape'); // Sprachleiste ist unter der Schublade inert
     await page.locator('[data-lang="en"]').click();
+    await toggle(page, 'left').click();
     await expect(toggle(page, 'left')).toHaveAccessibleName('Sound');
     await expect(toggle(page, 'right')).toHaveAccessibleName('Chords');
     await expect(page.locator('#side-left .side-close')).toHaveText('Close');
     expect(await rawKeys()).toEqual([]);
   });
 
-  test('beim Spielen keine DOM-Schreibvorgänge je Takt an Auslösern und Leisten (1280 und 800 px)', async ({ page }) => {
+  test('beim Spielen keine DOM-Schreibvorgänge je Takt an Auslösern, Leisten und inert-Zielen (1280 und 800 px)', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.locator('#tune-btn').click();
+    await page.locator('#tuning-tempo').fill('200');
+    await playGo(page).click();
     for (const width of [1280, 800]) {
       await page.setViewportSize({ width, height: 900 });
-      await page.locator('#tune-btn').click();
-      await page.locator('#tuning-tempo').fill('200');
-      await playGo(page).press('Enter'); // schmal kann die Schublade den Knopf verdecken
+      await expectSides(page, true, width === 1280); // 800 px: nur die linke Schublade
       await expect(page.locator('#play-position')).toHaveText(/^Takt \d+ von 96$/, { timeout: BAR_TIMEOUT });
       await page.evaluate(() => {
         window.__sideMutations = [];
-        const record = new MutationObserver((list) => window.__sideMutations.push(...list.map((m) => `${m.target.id || m.target.nodeName} ${m.attributeName ?? m.type}`)));
+        const record = new MutationObserver((list) => window.__sideMutations.push(...list.map((m) => `${m.target.id || m.target.className || m.target.nodeName} ${m.attributeName ?? m.type}`)));
         for (const id of ['toggle-left', 'toggle-right']) record.observe(document.getElementById(id), { attributes: true, childList: true, characterData: true, subtree: true });
-        // Leisten und Blöcke selbst (hidden, inert); ihr Inhalt (z. B. aria-current der Folge) darf sich je Takt ändern
-        for (const id of ['side-left', 'side-right', 'blocks']) record.observe(document.getElementById(id), { attributes: true });
+        // Leisten und alles, was inert werden kann, selbst; ihr Inhalt (z. B. aria-current der Folge) darf sich je Takt ändern
+        for (const sel of ['#side-left', '#side-right', '#blocks', '.play-head', '.top', '#start', 'main > h1']) record.observe(document.querySelector(sel), { attributes: true });
         for (const sel of ['#side-left-title', '#side-right-title', '.side-close']) {
           for (const el of document.querySelectorAll(sel)) record.observe(el, { attributes: true, childList: true, characterData: true, subtree: true });
         }
@@ -573,8 +580,110 @@ test.describe('Seitenleisten', () => {
       const bar = Number((await page.locator('#play-position').textContent()).match(/\d+/)[0]);
       await expect(page.locator('#play-position')).toHaveText(`Takt ${bar + 2} von 96`, { timeout: BAR_TIMEOUT });
       expect(await page.evaluate(() => window.__sideMutations), `${width} px`).toEqual([]);
-      await playGo(page).press('Enter');
-      await page.locator('#play-back').press('Enter');
+    }
+    await page.keyboard.press('Escape');
+    await playGo(page).click();
+  });
+
+  // Fokus bleibt in der offenen Schublade: Ziel liegt in der Schublade oder ist body (Browseroberfläche)
+  const focusInside = (page, side) => page.evaluate((id) => {
+    const el = document.activeElement;
+    return el === document.body || el.closest(`#${id}`) !== null ? 'ok' : `${el.id || el.className || el.nodeName} außerhalb`;
+  }, `side-${side}`);
+  const usable = (id) => [...document.getElementById(id).querySelectorAll('button, input, select')].filter((el) => !el.disabled && el.checkVisibility());
+
+  for (const width of [360, 800]) {
+    test(`${width} px: offene Schublade ist modal, Shift+Tab und Tab verlassen sie nicht, nach dem Schließen nichts inert`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 740 });
+      await openWithGo(page);
+      for (const side of ['left', 'right']) {
+        await toggle(page, side).click();
+        await expect(page.locator(`#side-${side}-title`)).toBeFocused();
+        // erstes Bedienelement (Schließen) rückwärts verlassen
+        await page.locator(`#side-${side} .side-close`).focus();
+        await page.keyboard.press('Shift+Tab');
+        expect(await focusInside(page, side), `${side} Shift+Tab`).toBe('ok');
+        // letztes Bedienelement vorwärts verlassen
+        expect(await page.evaluate(`(${usable})('side-${side}').length`)).toBeGreaterThan(3);
+        await page.evaluate(`(${usable})('side-${side}').at(-1).focus()`);
+        await page.keyboard.press('Tab');
+        expect(await focusInside(page, side), `${side} Tab nach dem letzten`).toBe('ok');
+        // viele Tabs ab der Überschrift: nie außerhalb
+        await page.locator(`#side-${side}-title`).focus();
+        for (let i = 0; i < 12; i++) {
+          await page.keyboard.press('Tab');
+          expect(await focusInside(page, side), `${side} Tab ${i + 1}`).toBe('ok');
+        }
+        await page.locator(`#side-${side}-title`).focus();
+        await page.keyboard.press('Escape');
+        await expectSides(page, false, false);
+        await expect(toggle(page, side)).toBeFocused();
+        // nichts bleibt inert, Kopfzeile und Blöcke wieder bedienbar
+        await expect(page.locator('[inert]')).toHaveCount(0);
+        await page.locator('#play-back').focus();
+        await expect(page.locator('#play-back')).toBeFocused();
+        await page.locator('#lane-buttons button').first().focus();
+        await expect(page.locator('#lane-buttons button').first()).toBeFocused();
+      }
+    });
+  }
+
+  test('offene Schublade, dann breit: nichts bleibt inert; zurück auf schmal wieder modal', async ({ page }) => {
+    await page.setViewportSize({ width: 800, height: 740 });
+    await openWithGo(page);
+    await toggle(page, 'left').click();
+    await expect(page.locator('.play-head')).toHaveAttribute('inert', '');
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await expect(page.locator('[inert]')).toHaveCount(0);
+    await expectSides(page, true, false);
+    await page.setViewportSize({ width: 800, height: 740 });
+    await expect(page.locator('.play-head')).toHaveAttribute('inert', '');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('[inert]')).toHaveCount(0);
+  });
+
+  test('Startseite mit gemerkter offener Leiste (schmal): nichts inert, Escape ändert nichts; Los zeigt die Schublade', async ({ page }) => {
+    await page.setViewportSize({ width: 800, height: 740 });
+    await page.evaluate(() => localStorage.setItem('backingtrack.layout', JSON.stringify({ sidebars: { left: true, right: false } })));
+    await page.reload();
+    await expect(start(page)).toBeVisible();
+    await expect(page.locator('[inert]')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    expect((await savedLayout(page)).sidebars).toEqual({ left: true, right: false });
+    await page.locator('#go').click();
+    await expectSides(page, true, false);
+    // Navigation bei offener modaler Schublade: Fokus in die Schublade (der Seitentitel ist inert)
+    await expect(page.locator('#side-left-title')).toBeFocused();
+    await expect(page.locator('.play-head')).toHaveAttribute('inert', '');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('[inert]')).toHaveCount(0);
+    await playGo(page).click();
+  });
+
+  test('Escape, das ein anderer schon behandelt hat (defaultPrevented, z. B. offene Auswahlliste), schließt die Schublade nicht', async ({ page }) => {
+    await page.setViewportSize({ width: 800, height: 740 });
+    await openWithGo(page);
+    await toggle(page, 'left').click();
+    await page.locator('#length').focus();
+    await page.evaluate(() => window.addEventListener('keydown', (e) => { if (e.key === 'Escape') e.preventDefault(); }, { capture: true, once: true }));
+    await page.keyboard.press('Escape');
+    await expectSides(page, true, false);
+    await page.keyboard.press('Escape');
+    await expectSides(page, false, false);
+  });
+
+  test('breit mit beiden Leisten: Blöcke mindestens 480 px (1100 px) bzw. 640 px (1280 px), keine Überlappung', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.locator('#tune-btn').click();
+    for (const [width, min] of [[1100, 480], [1280, 640]]) {
+      await page.setViewportSize({ width, height: 900 });
+      await expectSides(page, true, true);
+      const [left, blocks, right] = [await box(page, '#side-left'), await box(page, '#blocks'), await box(page, '#side-right')];
+      expect(blocks.width, `${width} px`).toBeGreaterThanOrEqual(min);
+      expect(overlaps(left, blocks), `${width} px links`).toBe(false);
+      expect(overlaps(right, blocks), `${width} px rechts`).toBe(false);
+      expect(left.x + left.width).toBeLessThanOrEqual(blocks.x);
+      expect(blocks.x + blocks.width).toBeLessThanOrEqual(right.x);
     }
   });
 });

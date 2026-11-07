@@ -308,7 +308,7 @@ main {
   .side {
     position: static;
     z-index: auto;
-    width: 20rem;
+    width: clamp(14rem, 20vw, 20rem); /* schrumpft vor den Blöcken: bei 1100 px 14rem */
     padding: 0;
     overflow: visible;
     background: none;
