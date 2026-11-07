@@ -1,7 +1,7 @@
 // Feintuning-Ansicht: Schnellauswahl, Schlagworte, Tempo, Länge, Schichten mit Verlauf, Akkordfolge und Rad.
 // Teilt den Zustand mit der Startseite; app.js ruft die zurückgegebene Funktion in jedem render() auf.
 import { STYLE_PRESETS, buildEvents, t } from '../index.js';
-import { $, LAYERS, ALL_LAYERS, LENGTHS, state, pressed, preset, applyStyle } from './state.js';
+import { $, LAYERS, ALL_LAYERS, LENGTHS, state, pressed, setText, preset, applyStyle } from './state.js';
 import { buildTags, renderTags, toggleTag, sameTags } from './tags-ui.js';
 import { initProgressionEditor, addChord } from './progression-editor.js';
 import { drawLanes } from './lanes.js';
@@ -36,13 +36,13 @@ export function initTuning({ render, restartIfPlaying, player }) {
     changed();
   });
 
-  const renderProgression = initProgressionEditor(changed);
+  const renderProgression = initProgressionEditor(changed, render);
   const wheelState = () => ({
     key: state.track.key,
     progression: state.track.bars.map((b) => b.chord),
     current: state.playing && state.current ? state.current.chord : null,
   });
-  const wheel = createWheel($('wheel'), wheelState(), (chord) => { addChord(chord); changed(); });
+  const wheel = createWheel($('wheel'), wheelState(), (chord) => (addChord(chord) ? changed() : render()));
 
   // Ereignisse nur neu bauen, wenn sich Folge, Schlagworte, Variante oder Länge ändern. Tempo und Schichten
   // fehlen im Schlüssel: die x-Achse sind Takte, stumme Spuren werden nur gedimmt gezeichnet.
@@ -76,10 +76,11 @@ export function initTuning({ render, restartIfPlaying, player }) {
       pressed(b, p.bpm === track.bpm && sameTags(p.tags, track.tags));
     }
     renderTags($('tags'), track.tags);
-    $('tuning-tempo').value = track.bpm;
-    $('tuning-tempo-out').value = track.bpm;
-    $('length').value = String(track.length);
-    for (const o of $('length').options) o.textContent = t('ui.barsCount', { n: o.value });
+    // nur bei Änderung: <output>.value ersetzt den Textknoten, die offene Längen-Auswahl bleibt unberührt
+    for (const [id, v] of [['tuning-tempo', track.bpm], ['tuning-tempo-out', track.bpm], ['length', track.length]]) {
+      if ($(id).value !== String(v)) $(id).value = String(v);
+    }
+    for (const o of $('length').options) setText(o, t('ui.barsCount', { n: o.value }));
     for (const b of $('lane-buttons').children) pressed(b, track.layers[b.dataset.layer]);
     renderProgression();
     drawCanvases();

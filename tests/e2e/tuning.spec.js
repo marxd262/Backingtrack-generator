@@ -44,6 +44,17 @@ async function playFast(page) {
   await expect(position(page)).toHaveText(/^Takt 1 von \d+$/, { timeout: BAR_TIMEOUT });
 }
 
+// Fokus bleibt in der Ansicht auf einem bedienbaren Element
+const focusState = (page) => page.evaluate(() => {
+  const el = document.activeElement;
+  return {
+    inTuning: document.querySelector('#tuning').contains(el),
+    body: el === document.body,
+    disabled: el.disabled === true || el.getAttribute('aria-disabled') === 'true',
+  };
+});
+const usableFocus = { inTuning: true, body: false, disabled: false };
+
 async function rawKeysIn(page) {
   return page.evaluate((source) => {
     const re = new RegExp(source);
@@ -261,12 +272,15 @@ test('Tastatur: Akkord-Knöpfe fügen an und entfernen, nie leer, höchstens 8',
   }
   await expect(progression(page).first()).toBeDisabled();
   expect(await shownChords(page)).toHaveLength(1);
+  // der letzte Akkord ist gesperrt: Fokus darf nicht auf ihm oder auf body landen
+  expect(await focusState(page)).toEqual(usableFocus);
 
   // per Tastatur anfügen bis 8
   await add.filter({ hasText: /^Dm$/ }).focus();
   for (let n = 2; n <= 8; n++) {
     await page.keyboard.press('Enter');
     await expect(progression(page)).toHaveCount(n);
+    await expect(add.filter({ hasText: /^Dm$/ })).toBeFocused();
   }
   await expect(progression(page).first()).toBeEnabled();
   const message = page.locator('#tuning-message');
@@ -275,14 +289,55 @@ test('Tastatur: Akkord-Knöpfe fügen an und entfernen, nie leer, höchstens 8',
   await page.keyboard.press('Enter');
   await expect(message).toHaveText(/8/);
   await expect(progression(page)).toHaveCount(8);
+  await expect(add.filter({ hasText: /^Dm$/ })).toBeFocused();
   // Rad ebenfalls gesperrt
   await page.locator('#wheel').click({ position: await wheelPoint(page, 'C', 'maj') });
   await expect(progression(page)).toHaveCount(8);
-  // Entfernen räumt die Meldung
-  await progression(page).last().click();
+  // Entfernen in der Mitte räumt die Meldung, Fokus bleibt an derselben Stelle (nächster Akkord)
+  await progression(page).nth(3).focus();
+  await page.keyboard.press('Enter');
   await expect(progression(page)).toHaveCount(7);
   await expect(message).toHaveText('');
+  await expect(progression(page).nth(3)).toBeFocused();
+  // Entfernen am Ende: Fokus auf den neuen letzten Akkord
+  await progression(page).last().focus();
+  await page.keyboard.press('Enter');
+  await expect(progression(page)).toHaveCount(6);
+  await expect(progression(page).last()).toBeFocused();
+  expect(await focusState(page)).toEqual(usableFocus);
   await expect(progression(page).first()).toHaveAccessibleName(/entfernen/);
+});
+
+test('Live-Region: Hinweis bleibt bei Taktwechseln still, zweite Ablehnung meldet sich neu', async ({ page }) => {
+  await openTuning(page);
+  const add = page.locator('#add-chords button');
+  while ((await progression(page).count()) < 8) await add.first().click();
+  await playFast(page);
+  const message = page.locator('#tuning-message');
+  await add.first().click();
+  await expect(message).toHaveText(/8/);
+  await page.evaluate(() => {
+    window.__region = 0;
+    window.__controls = 0;
+    new MutationObserver((list) => { window.__region += list.length; })
+      .observe(document.querySelector('#tuning-message'), { childList: true, characterData: true, subtree: true });
+    // Bedienelemente, die sich beim Taktwechsel nicht ändern: nichts neu schreiben
+    const quiet = new MutationObserver((list) => { window.__controls += list.length; });
+    for (const id of ['#tags', '#quick-pick', '#lane-buttons', '#length', '#add-chords', '#tuning-title', '#back']) {
+      quiet.observe(document.querySelector(id), { childList: true, characterData: true, subtree: true, attributes: true });
+    }
+  });
+  await expect(position(page)).toHaveText(/^Takt \d+ von 96$/, { timeout: BAR_TIMEOUT });
+  const bar = Number((await position(page).textContent()).match(/\d+/)[0]);
+  await expect(position(page)).toHaveText(`Takt ${bar + 2} von 96`, { timeout: BAR_TIMEOUT });
+  expect(await page.evaluate(() => [window.__region, window.__controls])).toEqual([0, 0]);
+  // zweite Ablehnung: Region ändert sich (leeren und neu setzen), Text bleibt die Meldung
+  await add.first().click();
+  await expect.poll(() => page.evaluate(() => window.__region)).toBeGreaterThan(0);
+  await expect(message).toHaveText(/8/);
+  // Ablehnung startet die Wiedergabe nicht neu
+  expect(await position(page).textContent()).toMatch(/^Takt \d+ von 96$/);
+  await tuningGo(page).click();
 });
 
 test('eigene Folge übersteht Stilwahl, Variante und Tonart leiten neu ab', async ({ page }) => {

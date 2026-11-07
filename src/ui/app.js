@@ -2,7 +2,7 @@
 import { play, STYLE_PRESETS, validateTrack, t, setLanguage } from '../index.js';
 import { SCALE_NAMES } from '../core/music.js';
 import { positionLabel } from './position.js';
-import { $, ROOTS, SCALE_MODE, LAYERS, ALL_LAYERS, state, chordName, rollVariant, preset, pressed, saveLang, deriveBars, applyStyle } from './state.js';
+import { $, ROOTS, SCALE_MODE, LAYERS, ALL_LAYERS, state, chordName, rollVariant, preset, pressed, setText, setAttr, saveLang, deriveBars, applyStyle } from './state.js';
 import { initTuning } from './tuning.js';
 
 // Dekoratives 16tel-Bild je Stil, 1 = Schlag
@@ -145,8 +145,8 @@ function render() {
   setLanguage(lang);
   document.documentElement.lang = lang;
   document.title = t('ui.title');
-  for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = t(el.dataset.i18n);
-  for (const el of document.querySelectorAll('[data-i18n-label]')) el.setAttribute('aria-label', t(el.dataset.i18nLabel));
+  for (const el of document.querySelectorAll('[data-i18n]')) setText(el, t(el.dataset.i18n));
+  for (const el of document.querySelectorAll('[data-i18n-label]')) setAttr(el, 'aria-label', t(el.dataset.i18nLabel));
   for (const b of document.querySelectorAll('[data-lang]')) pressed(b, b.dataset.lang === lang);
 
   $('key-btn').textContent = t('ui.keyScale', { root: track.key.root, scale: t(`scale.${scale}`) });

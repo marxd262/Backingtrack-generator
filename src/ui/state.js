@@ -17,7 +17,10 @@ export const $ = (id) => document.getElementById(id);
 export const chordName = (c) => c.root + SYMBOLS[c.quality];
 export const rollVariant = () => (crypto.getRandomValues(new Uint32Array(1))[0] % 9999) + 1;
 export const preset = (id) => STYLE_PRESETS.find((p) => p.id === id);
-export const pressed = (el, on) => el.setAttribute('aria-pressed', String(on));
+// Nur bei Änderung schreiben: render() läuft je Takt, gleiche Werte sollen keine DOM-Mutation (und keine Ansage) auslösen
+export const setText = (el, text) => { if (el.textContent !== text) el.textContent = text; };
+export const setAttr = (el, name, value) => { if (el.getAttribute(name) !== value) el.setAttribute(name, value); };
+export const pressed = (el, on) => setAttr(el, 'aria-pressed', String(on));
 
 export function readLang() {
   try {
