@@ -38,6 +38,29 @@ const contexts = (page) => page.evaluate(() => window.__audioContexts);
 const shownChords = async (page) => (await page.locator('#chords').textContent()).split(' – ').map((s) => s.trim());
 const progression = (page) => page.locator('#progression button');
 const savedLayout = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('backingtrack.layout')));
+const toggle = (page, side) => page.locator(`#toggle-${side}`);
+const aside = (page, side) => page.locator(`#side-${side}`);
+const box = (page, selector) => page.locator(selector).boundingBox();
+const noScrollX = (page) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
+
+// Auslöser und Leiste stimmen überein: aria-expanded am Knopf, hidden an der Leiste
+async function expectSides(page, left, right) {
+  for (const [side, open] of [['left', left], ['right', right]]) {
+    await expect(toggle(page, side), side).toHaveAttribute('aria-expanded', String(open));
+    if (open) await expect(aside(page, side), side).not.toHaveAttribute('hidden');
+    else await expect(aside(page, side), side).toHaveAttribute('hidden', '');
+  }
+}
+
+// Spielseite über Los öffnen (gemerkter Zustand) und die Wiedergabe gleich stoppen
+async function openWithGo(page) {
+  await page.locator('#go').click();
+  await expect(play(page)).toBeVisible();
+  await playGo(page).click();
+  await expect(playGo(page)).toHaveText('Los');
+}
+
+const overlaps = (a, b) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 
 async function wheelPoint(page, root, quality, ring = 'outer') {
   const canvas = page.locator('#wheel');
@@ -130,12 +153,13 @@ test('Los während der Wiedergabe auf der Startseite stoppt und bleibt dort', as
   await expect(page.locator('#now-chord')).toHaveText('');
 });
 
-test('gemerkte Leisten: Feintuning merkt beide offen, Los übernimmt sie nach Neuladen', async ({ page }) => {
+test('gemerkte Leisten: Feintuning merkt beide offen, Los zeigt nach Neuladen beide offen', async ({ page }) => {
   await page.locator('#tune-btn').click();
   await page.locator('#play-back').click();
   await page.reload();
   await page.locator('#go').click();
   await expect(play(page)).toBeVisible();
+  await expectSides(page, true, true);
   expect((await savedLayout(page)).sidebars).toEqual({ left: true, right: true });
   await playGo(page).click();
 });
@@ -245,7 +269,7 @@ test('leere Meldung in der Kopfzeile: gerendert, aber ohne Platz (360 px, dort b
   expect(await page.locator('.play-head').evaluate((el) => el.getBoundingClientRect().height)).toBeGreaterThan(heights.empty);
 });
 
-test('Reihenfolge: DOM wie Bildschirm (360, 800 px), breit Leisten links und rechts, Tab erreicht zuerst die Blöcke', async ({ page }) => {
+test('Reihenfolge: Blöcke zuerst, schmal (360, 800 px) Leisten als Schublade außerhalb des Flusses, breit links und rechts, Tab erreicht zuerst die Blöcke', async ({ page }) => {
   await page.locator('#tune-btn').click();
   const order = () => page.evaluate(() => {
     const els = ['#blocks', '#side-left', '#side-right'].map((s) => document.querySelector(s));
@@ -253,12 +277,19 @@ test('Reihenfolge: DOM wie Bildschirm (360, 800 px), breit Leisten links und rec
     const visual = [...els].sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top).map((e) => e.id);
     return { dom, visual };
   });
+  // schmal stehen die Leisten nicht im Fluss: die offene ist Schublade (fixed), die andere hidden (nur eine offen)
   for (const width of [360, 800]) {
     await page.setViewportSize({ width, height: 740 });
-    const { dom, visual } = await order();
-    expect(visual, `${width} px`).toEqual(dom);
+    await expectSides(page, true, false); // matchMedia meldet die neue Breite erst im nächsten Bild
+    expect((await order()).dom).toEqual(['blocks', 'side-left', 'side-right']);
+    const flow = await page.evaluate(() => ['side-left', 'side-right'].map((id) => {
+      const el = document.getElementById(id);
+      return el.hidden ? 'hidden' : getComputedStyle(el).position;
+    }));
+    expect(flow, `${width} px`).toEqual(['fixed', 'hidden']);
   }
   await page.setViewportSize({ width: 1280, height: 900 });
+  await toggle(page, 'right').click(); // beim Schmalwerden geschlossen
   expect((await order()).dom).toEqual(['blocks', 'side-left', 'side-right']);
   const [left, blocks, right] = await Promise.all(['#side-left', '#blocks', '#side-right'].map((id) => page.locator(id).boundingBox()));
   expect(left.x + left.width).toBeLessThanOrEqual(blocks.x);
@@ -291,11 +322,11 @@ test('Spielseite auf Englisch: Kopfzeile und Überschriften übersetzt', async (
   await page.locator('#go').click();
 });
 
-test('1280 px: Leisten neben den Blöcken; 360 px: Blöcke zuerst, darunter die Leisten', async ({ page }) => {
+test('1280 px: Leisten neben den Blöcken; 360 px: eine Leiste als Schublade im Fenster', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.locator('#tune-btn').click();
   const box = async (id) => page.locator(id).boundingBox();
-  let [left, blocks, right] = [await box('#side-left'), await box('#blocks'), await box('#side-right')];
+  const [left, blocks, right] = [await box('#side-left'), await box('#blocks'), await box('#side-right')];
   expect(left.x + left.width).toBeLessThanOrEqual(blocks.x);
   expect(blocks.x + blocks.width).toBeLessThanOrEqual(right.x);
   // Rad bleibt in seiner bisherigen Größe (CSS min(100%, 24rem) = 384 px), mittig im Block
@@ -305,8 +336,245 @@ test('1280 px: Leisten neben den Blöcken; 360 px: Blöcke zuerst, darunter die 
   expect(Math.abs(wheel.x + wheel.width / 2 - (block.x + block.width / 2))).toBeLessThanOrEqual(2);
 
   await page.setViewportSize({ width: 360, height: 740 });
-  [left, blocks, right] = [await box('#side-left'), await box('#blocks'), await box('#side-right')];
-  expect(blocks.y + blocks.height).toBeLessThanOrEqual(left.y);
-  expect(left.y + left.height).toBeLessThanOrEqual(right.y);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  await expectSides(page, true, false);
+  const drawer = await box('#side-left');
+  expect(drawer.x).toBe(0);
+  expect(drawer.width).toBeLessThanOrEqual(360);
+  expect(await noScrollX(page)).toBe(true);
+});
+
+// --- Einklappbare Seitenleisten (Task 4); ohne Bewegung, damit Maße nicht in eine Einblendung fallen ---
+test.describe('Seitenleisten', () => {
+  test.use({ reducedMotion: 'reduce' });
+  const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view)\.[A-Za-z.]+$/;
+
+  test('erster Besuch: Los öffnet die Spielseite mit beiden Leisten zu; Auslöser in der Kopfzeile', async ({ page }) => {
+    await openWithGo(page);
+    await expectSides(page, false, false);
+    expect(await savedLayout(page)).toBeNull();
+    for (const [side, name] of [['left', 'Klang'], ['right', 'Akkorde']]) {
+      await expect(page.locator(`.play-head #toggle-${side}`)).toBeVisible();
+      await expect(toggle(page, side)).toHaveAccessibleName(name); // Zustandszeichen ist dekorativ
+      await expect(toggle(page, side)).toHaveText(name);
+      await expect(toggle(page, side)).toHaveAttribute('aria-controls', `side-${side}`);
+    }
+    // am Ende der Kopfzeile, nach der Variantennummer
+    expect(await page.evaluate(() => {
+      const v = document.getElementById('play-variant');
+      return ['toggle-left', 'toggle-right'].every((id) => v.compareDocumentPosition(document.getElementById(id)) & Node.DOCUMENT_POSITION_FOLLOWING);
+    })).toBe(true);
+  });
+
+  test('1280 px: Klick öffnet und schließt, Fokus auf die Überschrift und zurück zum Auslöser, beide unabhängig', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await openWithGo(page);
+    for (const side of ['left', 'right']) {
+      await toggle(page, side).click();
+      await expect(aside(page, side)).toBeVisible();
+      await expect(page.locator(`#side-${side}-title`)).toBeFocused();
+      await expect(page.locator(`#side-${side}-title`)).toHaveAttribute('tabindex', '-1');
+    }
+    await expectSides(page, true, true);
+    expect((await savedLayout(page)).sidebars).toEqual({ left: true, right: true });
+    await toggle(page, 'left').click();
+    await expectSides(page, false, true);
+    await expect(toggle(page, 'left')).toBeFocused();
+    expect((await savedLayout(page)).sidebars).toEqual({ left: false, right: true });
+    // breit: kein Schließen-Knopf in der Leiste, Escape lässt die Leisten stehen
+    await expect(page.locator('#side-right .side-close')).toBeHidden();
+    await page.keyboard.press('Escape');
+    await expectSides(page, false, true);
+  });
+
+  test('1280 px: offene Leisten verdecken das Griffbrett nicht, geschlossene geben den Platz den Blöcken', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.locator('#tune-btn').click();
+    await expectSides(page, true, true);
+    const fretboard = await box(page, 'section[data-view="fretboard"]');
+    for (const side of ['left', 'right']) expect(overlaps(await box(page, `#side-${side}`), fretboard), side).toBe(false);
+    const both = { blocks: await box(page, '#blocks'), lanes: await box(page, 'section[data-view="lanes"]') };
+    await toggle(page, 'left').click();
+    const one = (await box(page, '#blocks')).width;
+    await toggle(page, 'right').click();
+    await expectSides(page, false, false);
+    const none = { blocks: await box(page, '#blocks'), lanes: await box(page, 'section[data-view="lanes"]') };
+    expect(one).toBeGreaterThan(both.blocks.width);
+    expect(none.blocks.width).toBeGreaterThan(one);
+    expect(none.lanes.width).toBeGreaterThan(both.lanes.width);
+    expect(none.blocks.width).toBeGreaterThan(1280 - 2 * 16 - 2); // volle Breite der Mitte (Seitenrand 16 px)
+  });
+
+  test('gemerkter Zustand überlebt Neuladen, Los zeigt ihn; Feintuning öffnet beide und merkt es', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await openWithGo(page);
+    await toggle(page, 'right').click();
+    await page.reload();
+    await openWithGo(page);
+    await expectSides(page, false, true);
+    expect((await savedLayout(page)).sidebars).toEqual({ left: false, right: true });
+    await page.locator('#play-back').click();
+    await page.locator('#tune-btn').click();
+    await expectSides(page, true, true);
+    await page.reload();
+    await openWithGo(page);
+    await expectSides(page, true, true);
+  });
+
+  test('800 px: Schublade, nur eine offen, Klick daneben schließt nicht, Escape und Schließen-Knopf', async ({ page }) => {
+    await page.setViewportSize({ width: 800, height: 740 });
+    await openWithGo(page);
+    await toggle(page, 'left').click();
+    await expectSides(page, true, false);
+    await expect(page.locator('#side-left-title')).toBeFocused();
+    const left = await box(page, '#side-left');
+    expect(await aside(page, 'left').evaluate((el) => getComputedStyle(el).position)).toBe('fixed');
+    expect(left.x).toBe(0);
+    expect(left.y).toBe(0);
+    expect(left.height).toBe(740);
+    expect(left.width).toBeLessThan(800);
+
+    await toggle(page, 'right').click();
+    await expectSides(page, false, true);
+    await expect(page.locator('[aria-expanded="true"]')).toHaveCount(1);
+    expect((await savedLayout(page)).sidebars).toEqual({ left: false, right: true });
+    const right = await box(page, '#side-right');
+    expect(right.x + right.width).toBe(800);
+
+    // Klick daneben (auf die Blöcke links der Schublade): bleibt offen
+    await page.mouse.click(right.x / 2, 500);
+    await expectSides(page, false, true);
+    await page.keyboard.press('Escape');
+    await expectSides(page, false, false);
+    await expect(toggle(page, 'right')).toBeFocused();
+    expect((await savedLayout(page)).sidebars).toEqual({ left: false, right: false });
+
+    await toggle(page, 'left').click();
+    const close = page.locator('#side-left .side-close');
+    await expect(close).toHaveText('Schließen');
+    await close.click();
+    await expectSides(page, false, false);
+    await expect(toggle(page, 'left')).toBeFocused();
+  });
+
+  test('Wechsel von 1280 auf 800 px mit beiden offen: eine Schublade bleibt, das Layout merkt es', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.locator('#tune-btn').click();
+    await expectSides(page, true, true);
+    await page.setViewportSize({ width: 800, height: 740 });
+    await expectSides(page, true, false);
+    expect((await savedLayout(page)).sidebars).toEqual({ left: true, right: false });
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await expectSides(page, true, false);
+  });
+
+  test('360 px: Schublade passt ins Fenster, kein waagerechtes Scrollen, Schließen stellt die Seite wieder her', async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 740 });
+    await openWithGo(page);
+    const before = await box(page, '#blocks');
+    for (const side of ['left', 'right']) {
+      await toggle(page, side).click();
+      await expect(aside(page, side)).toBeVisible();
+      const drawer = await box(page, `#side-${side}`);
+      expect(drawer.x, side).toBeGreaterThanOrEqual(0);
+      expect(drawer.x + drawer.width, side).toBeLessThanOrEqual(360);
+      expect(await noScrollX(page), side).toBe(true);
+      await page.keyboard.press('Escape');
+      await expectSides(page, false, false);
+      expect(await box(page, '#blocks'), side).toEqual(before);
+    }
+  });
+
+  test('Speicher wirft oder JSON kaputt: Standard (beide zu), Leisten bedienbar, kein Fehler', async ({ page }) => {
+    await page.evaluate(() => localStorage.setItem('backingtrack.layout', '{'));
+    await page.reload();
+    await openWithGo(page);
+    await expectSides(page, false, false);
+    await toggle(page, 'left').click();
+    await expectSides(page, true, false);
+    expect((await savedLayout(page)).sidebars).toEqual({ left: true, right: false });
+
+    await page.addInitScript(() => {
+      Object.defineProperty(window, 'localStorage', { get() { throw new DOMException('blocked', 'SecurityError'); } });
+    });
+    await page.reload();
+    await openWithGo(page);
+    await expectSides(page, false, false);
+    await toggle(page, 'right').click();
+    await expectSides(page, false, true);
+    await toggle(page, 'right').click();
+    await expectSides(page, false, false);
+  });
+
+  test('Tastatur: Tab zum Auslöser, Enter und Leertaste, Inhalt der Schublade erreichbar (800 px)', async ({ page }) => {
+    await page.setViewportSize({ width: 800, height: 740 });
+    await openWithGo(page);
+    await playGo(page).focus();
+    await page.keyboard.press('Tab');
+    await expect(toggle(page, 'left')).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expectSides(page, true, false);
+    await expect(page.locator('#side-left-title')).toBeFocused();
+    // Tab aus der Überschrift bleibt in der Schublade
+    await page.keyboard.press('Tab');
+    expect(await page.evaluate(() => document.getElementById('side-left').contains(document.activeElement))).toBe(true);
+    await page.keyboard.press('Escape');
+    await expect(toggle(page, 'left')).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(toggle(page, 'right')).toBeFocused();
+    await page.keyboard.press(' ');
+    await expectSides(page, false, true);
+    // vom Auslöser aus: die Blöcke unter der Schublade werden übersprungen
+    await toggle(page, 'right').focus();
+    await page.keyboard.press('Tab');
+    expect(await page.evaluate(() => document.getElementById('side-right').contains(document.activeElement))).toBe(true);
+    await page.keyboard.press('Escape');
+    await expect(toggle(page, 'right')).toBeFocused();
+  });
+
+  test('keine rohen Schlüssel an Auslösern und Leisten in beiden Sprachen, auch in aria-Attributen', async ({ page }) => {
+    await page.setViewportSize({ width: 800, height: 740 });
+    const rawKeys = () => page.evaluate((source) => {
+      const re = new RegExp(source);
+      const found = [];
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      while (walker.nextNode()) if (re.test(walker.currentNode.textContent.trim())) found.push(walker.currentNode.textContent);
+      for (const el of document.querySelectorAll('*')) {
+        for (const { name, value } of el.attributes) if ((name.startsWith('aria-') || name === 'title') && re.test(value)) found.push(`${name}=${value}`);
+      }
+      return found;
+    }, RAW_KEY.source);
+    await openWithGo(page);
+    await toggle(page, 'left').click();
+    expect(await rawKeys()).toEqual([]);
+    await page.locator('[data-lang="en"]').click();
+    await expect(toggle(page, 'left')).toHaveAccessibleName('Sound');
+    await expect(toggle(page, 'right')).toHaveAccessibleName('Chords');
+    await expect(page.locator('#side-left .side-close')).toHaveText('Close');
+    expect(await rawKeys()).toEqual([]);
+  });
+
+  test('beim Spielen keine DOM-Schreibvorgänge je Takt an Auslösern und Leisten (1280 und 800 px)', async ({ page }) => {
+    for (const width of [1280, 800]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.locator('#tune-btn').click();
+      await page.locator('#tuning-tempo').fill('200');
+      await playGo(page).press('Enter'); // schmal kann die Schublade den Knopf verdecken
+      await expect(page.locator('#play-position')).toHaveText(/^Takt \d+ von 96$/, { timeout: BAR_TIMEOUT });
+      await page.evaluate(() => {
+        window.__sideMutations = [];
+        const record = new MutationObserver((list) => window.__sideMutations.push(...list.map((m) => `${m.target.id || m.target.nodeName} ${m.attributeName ?? m.type}`)));
+        for (const id of ['toggle-left', 'toggle-right']) record.observe(document.getElementById(id), { attributes: true, childList: true, characterData: true, subtree: true });
+        // Leisten und Blöcke selbst (hidden, inert); ihr Inhalt (z. B. aria-current der Folge) darf sich je Takt ändern
+        for (const id of ['side-left', 'side-right', 'blocks']) record.observe(document.getElementById(id), { attributes: true });
+        for (const sel of ['#side-left-title', '#side-right-title', '.side-close']) {
+          for (const el of document.querySelectorAll(sel)) record.observe(el, { attributes: true, childList: true, characterData: true, subtree: true });
+        }
+      });
+      const bar = Number((await page.locator('#play-position').textContent()).match(/\d+/)[0]);
+      await expect(page.locator('#play-position')).toHaveText(`Takt ${bar + 2} von 96`, { timeout: BAR_TIMEOUT });
+      expect(await page.evaluate(() => window.__sideMutations), `${width} px`).toEqual([]);
+      await playGo(page).press('Enter');
+      await page.locator('#play-back').press('Enter');
+    }
+  });
 });

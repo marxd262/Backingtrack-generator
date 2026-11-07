@@ -106,6 +106,7 @@ export default {
   'ui.toPlayPage': 'Zur Spielseite',
   'ui.sidebarSound': 'Klang',
   'ui.sidebarChords': 'Akkorde',
+  'ui.close': 'Schließen',
   'ui.nextChord': 'Als Nächstes',
   'ui.variantShown': 'Variante {n}',
   'view.fretboard': 'Griffbrett',

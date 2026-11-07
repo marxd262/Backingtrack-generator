@@ -25,6 +25,7 @@ test.afterEach(() => {
 
 const tuneBtn = (page) => page.locator('#tune-btn');
 const playPage = (page) => page.locator('#play');
+const start = (page) => page.locator('#start');
 const playGo = (page) => page.locator('#play-go');
 const position = (page) => page.locator('#play-position');
 const progression = (page) => page.locator('#progression button');
@@ -78,14 +79,15 @@ async function wheelPoint(page, root, quality, ring = 'outer') {
   return { x: node.x, y: node.y };
 }
 
-test('Feintuning öffnet die Spielseite, zurück zur Startseite: aria-expanded, hidden, Fokus', async ({ page }) => {
+test('Feintuning öffnet die Spielseite, zurück zur Startseite: Navigation ohne aria-expanded, hidden, Fokus', async ({ page }) => {
   await expect(tuneBtn(page)).toHaveText('Feintuning');
-  await expect(tuneBtn(page)).toHaveAttribute('aria-expanded', 'false');
-  await expect(tuneBtn(page)).toHaveAttribute('aria-controls', 'play');
+  // Feintuning navigiert und klappt nichts auf: kein aria-expanded, kein aria-controls
+  await expect(tuneBtn(page)).not.toHaveAttribute('aria-expanded');
+  await expect(tuneBtn(page)).not.toHaveAttribute('aria-controls');
   await expect(playPage(page)).toBeHidden();
   await tuneBtn(page).click();
   await expect(playPage(page)).toBeVisible();
-  await expect(tuneBtn(page)).toHaveAttribute('aria-expanded', 'true');
+  await expect(start(page)).toBeHidden();
   await expect(page.locator('#play-title')).toBeFocused();
   await expect(page.locator('#play-title')).toHaveAttribute('tabindex', '-1');
   // Startsatz und Variantenwahl gehören nur zur Startseite; die Variante steht als Anzeige in der Kopfzeile
@@ -94,7 +96,8 @@ test('Feintuning öffnet die Spielseite, zurück zur Startseite: aria-expanded, 
   await expect(page.locator('#play-variant')).toHaveText(`Variante ${await page.locator('#variant').inputValue()}`);
   await page.locator('#play-back').click();
   await expect(playPage(page)).toBeHidden();
-  await expect(tuneBtn(page)).toHaveAttribute('aria-expanded', 'false');
+  await expect(start(page)).toBeVisible();
+  await expect(tuneBtn(page)).not.toHaveAttribute('aria-expanded');
   await expect(tuneBtn(page)).toBeFocused();
   // Startsatz und Variante wieder erreichbar
   await expect(page.locator('#style-btn')).toBeVisible();

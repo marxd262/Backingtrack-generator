@@ -5,6 +5,7 @@ import { $, LAYERS, ALL_LAYERS, state, layoutStorage, chordName, rollVariant, pr
 import { saveLayout } from './layout-state.js';
 import { initTuning } from './tuning.js';
 import { buildKeyScale } from './key-scale.js';
+import { initSidebar } from './sidebar.js';
 
 // Dekoratives 16tel-Bild je Stil, 1 = Schlag
 const RHYTHMS = { funk: '1001001010100110', psych: '1010101010101010', dreamy: '1000000010000000' };
@@ -158,6 +159,18 @@ for (const button of document.querySelectorAll('[popovertarget]')) {
 
 const renderTuning = initTuning({ render: () => render(), restartIfPlaying, player: () => player });
 
+// Leisten "Klang" (links) und "Akkorde" (rechts): offen/zu steht im gemerkten Layout
+const sidebars = ['left', 'right'].map((side) => initSidebar({
+  side,
+  panel: $(`side-${side}`),
+  toggle: $(`toggle-${side}`),
+  isOpen: () => state.layout.sidebars[side],
+  setOpen: (open) => {
+    state.layout = { ...state.layout, sidebars: { ...state.layout.sidebars, [side]: open } };
+    saveLayout(layoutStorage, state.layout);
+  },
+}));
+
 // --- Darstellung ---
 const show = (el, on) => { if (el.hidden === on) el.hidden = !on; };
 
@@ -204,7 +217,7 @@ function render() {
     setText($(id), text);
   }
 
-  setAttr($('tune-btn'), 'aria-expanded', String(page === 'play'));
+  for (const s of sidebars) s.render();
   show($('start'), page === 'start');
   show($('play'), page === 'play');
   show($('to-play'), playing);

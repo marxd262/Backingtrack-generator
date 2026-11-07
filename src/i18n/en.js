@@ -106,6 +106,7 @@ export default {
   'ui.toPlayPage': 'To play page',
   'ui.sidebarSound': 'Sound',
   'ui.sidebarChords': 'Chords',
+  'ui.close': 'Close',
   'ui.nextChord': 'Next',
   'ui.variantShown': 'Variant {n}',
   'view.fretboard': 'Fretboard',

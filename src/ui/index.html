@@ -61,7 +61,7 @@
     <p class="actions">
       <button type="button" class="chip" id="to-play" data-i18n="ui.toPlayPage" hidden></button>
       <button type="button" class="chip" id="new-variant" data-i18n="ui.newVariant"></button>
-      <button type="button" class="chip" id="tune-btn" aria-expanded="false" aria-controls="play" data-i18n="ui.fineTune"></button>
+      <button type="button" class="chip" id="tune-btn" data-i18n="ui.fineTune"></button>
     </p>
   </section>
 
@@ -76,6 +76,10 @@
       <p class="position" id="play-position"></p>
       <button type="button" class="go" id="play-go"></button>
       <p class="play-variant" id="play-variant"></p>
+      <div class="play-toggles">
+        <button type="button" class="chip side-toggle" id="toggle-left" aria-expanded="false" aria-controls="side-left" data-i18n="ui.sidebarSound"></button>
+        <button type="button" class="chip side-toggle" id="toggle-right" aria-expanded="false" aria-controls="side-right" data-i18n="ui.sidebarChords"></button>
+      </div>
       <p class="message" id="play-message" aria-live="polite"></p>
     </div>
 
@@ -97,8 +101,12 @@
         </section>
       </div>
 
-      <aside class="side" id="side-left" aria-labelledby="side-left-title">
-        <h3 class="side-title" id="side-left-title" data-i18n="ui.sidebarSound"></h3>
+      <!-- Leisten: breit neben den Blöcken, schmal als Schublade darüber; offen/zu, Fokus und Escape macht sidebar.js -->
+      <aside class="side" id="side-left" aria-labelledby="side-left-title" hidden>
+        <div class="side-head">
+          <h3 class="side-title" id="side-left-title" tabindex="-1" data-i18n="ui.sidebarSound"></h3>
+          <button type="button" class="chip side-close" data-i18n="ui.close"></button>
+        </div>
         <h4 class="label" id="quick-title" data-i18n="ui.quickPick"></h4>
         <div class="chips" id="quick-pick" role="group" aria-labelledby="quick-title"></div>
         <div class="settings">
@@ -114,8 +122,11 @@
         <div id="tags"></div>
       </aside>
 
-      <aside class="side" id="side-right" aria-labelledby="side-right-title">
-        <h3 class="side-title" id="side-right-title" data-i18n="ui.sidebarChords"></h3>
+      <aside class="side" id="side-right" aria-labelledby="side-right-title" hidden>
+        <div class="side-head">
+          <h3 class="side-title" id="side-right-title" tabindex="-1" data-i18n="ui.sidebarChords"></h3>
+          <button type="button" class="chip side-close" data-i18n="ui.close"></button>
+        </div>
         <h4 class="label" id="side-key-label" data-i18n="ui.key"></h4>
         <div class="chips" role="group" aria-labelledby="side-key-label" id="side-key-chips"></div>
         <h4 class="label" id="side-scale-label" data-i18n="ui.scale"></h4>
