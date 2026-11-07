@@ -299,19 +299,26 @@ main {
 .fretboard .fret-wire { stroke-width: 1.5; }
 .fretboard .nut { stroke: var(--ink); stroke-width: 5; }
 .fretboard .inlay { fill: rgba(42, 38, 34, 0.2); }
-/* Rollen: Leiterton Ring, jetziger Akkord gefüllter Kreis, folgender gefülltes Quadrat, beide Kreis mit
-   Ring in der Zweitfarbe, Grundton Außenring, außerhalb der Leiter gestrichelt und blass */
+/* Rollen, auch ohne Farbe unterscheidbar: Leiterton Ring, jetziger Akkord gefüllter Kreis, folgender gefülltes
+   Quadrat, beide gefüllte Raute (gedrehtes Quadrat), Grundton Außenring, außerhalb der Leiter gestrichelt und blass */
 .fret-note[hidden] { display: none; }
 .fret-note .dot { x: -11px; y: -11px; width: 22px; height: 22px; rx: 11px; fill: var(--paper); stroke: var(--ink); stroke-width: 1.5; }
 .fret-note .ring { display: none; r: 14.5px; fill: none; stroke: var(--accent); stroke-width: 2; }
 .fret-note text { fill: var(--ink); font-size: 12px; text-anchor: middle; dominant-baseline: central; }
 .fret-note[data-role~="current"] .dot { fill: var(--accent); stroke: var(--accent); }
 .fret-note[data-role~="next"] .dot { rx: 3px; fill: var(--accent2); stroke: var(--accent2); }
-.fret-note[data-role~="both"] .dot { fill: var(--accent); stroke: var(--accent2); stroke-width: 3.5; }
+/* Raute mit 18er-Seite: Spitzen bleiben im Grundton-Ring (r 14.5) und neben den Nachbarn in Bund 15 */
+.fret-note[data-role~="both"] .dot {
+  x: -9px; y: -9px; width: 18px; height: 18px; rx: 2px;
+  transform: rotate(45deg); transform-box: fill-box; transform-origin: center;
+  fill: var(--accent); stroke: var(--accent2); stroke-width: 2;
+}
 .fret-note[data-role~="root"] .ring { display: inline; }
 .fret-note:is([data-role~="current"], [data-role~="next"], [data-role~="both"]) text { fill: var(--on-accent); }
 .fret-note[data-role~="outside"] .dot { fill-opacity: 0.2; stroke-dasharray: 3 2; }
 .fret-note[data-role~="outside"] text { fill: var(--ink); }
+/* Legende: "außerhalb" allein, ohne Rollenfarbe, steht für jetzigen und folgenden Akkord */
+.fret-note[data-role="outside"] .dot { fill: var(--ink-soft); stroke: var(--ink-soft); }
 .legend { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 8px 0 0; padding: 0; list-style: none; font-size: 0.9rem; }
 .legend li { display: flex; align-items: center; gap: 6px; }
 .legend svg { flex: none; width: 24px; height: 24px; }

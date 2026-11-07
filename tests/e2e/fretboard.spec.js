@@ -240,6 +240,85 @@ test('keine DOM-Schreibvorgänge im Griffbrett-Block über Takte ohne Akkordwech
   await playGo(page).click();
 });
 
+// Zeichen einer Rolle ohne Farbe: Form (Rundung, Drehung), gefüllt, blass, gestrichelt, Außenring
+const signatures = (page, selector) => page.evaluate((sel) => {
+  const paper = getComputedStyle(document.body).backgroundColor;
+  return [...document.querySelectorAll(sel)].map((g) => {
+    const dot = getComputedStyle(g.querySelector('.dot'));
+    const ring = g.querySelector('.ring');
+    return {
+      role: g.getAttribute('data-role'),
+      fill: dot.fill,
+      stroke: dot.stroke,
+      sig: JSON.stringify({
+        rx: dot.rx, transform: dot.transform, filled: dot.fill !== paper, pale: Number(dot.fillOpacity) < 1,
+        dashed: dot.strokeDasharray !== 'none', ring: ring !== null && getComputedStyle(ring).display !== 'none',
+      }),
+    };
+  });
+}, selector);
+const ACCENTS = ['rgb(200, 69, 45)', 'rgb(47, 111, 143)'];
+
+test('Legende: jede Rolle hat ohne Farbe ein eigenes Zeichen, "außerhalb" ist neutral und passt zu beiden Akkorden', async ({ page }) => {
+  await openPlayPage(page);
+  const legend = await signatures(page, '#fretboard-legend .fret-note');
+  expect(legend.map((l) => l.role)).toEqual(['scale', 'current', 'current root', 'next', 'both', 'outside']);
+  const bySig = Object.groupBy(legend, (l) => l.sig);
+  expect(Object.values(bySig).filter((group) => group.length > 1).map((group) => group.map((l) => l.role))).toEqual([]);
+  // neutral: keine Rollenfarbe, gestrichelt und blass
+  const outside = legend.find((l) => l.role === 'outside');
+  expect(ACCENTS).not.toContain(outside.fill);
+  expect(ACCENTS).not.toContain(outside.stroke);
+  expect(JSON.parse(outside.sig)).toMatchObject({ dashed: true, pale: true });
+  // auf dem Brett: Akkordton außerhalb beim jetzigen (F in Dm) und beim folgenden (G# in E) gestrichelt und blass
+  await setProgression(page, ['Dm', 'E']);
+  await expect(note(page, 5, 1)).toHaveAttribute('data-role', roleHas('current', 'outside'));
+  await expect(note(page, 5, 4)).toHaveAttribute('data-role', roleHas('next', 'outside'));
+  const board = await signatures(page, '#fretboard .fret-note[data-string="5"]:is([data-fret="1"], [data-fret="4"])');
+  for (const n of board) expect(JSON.parse(n.sig), n.role).toMatchObject({ dashed: true, pale: true });
+  // Formen wie in der Legende: jetzig rund, folgend eckig
+  const shape = (sig) => { const { rx, transform } = JSON.parse(sig); return { rx, transform }; };
+  expect(shape(board[0].sig)).toEqual(shape(legend.find((l) => l.role === 'current').sig));
+  expect(shape(board[1].sig)).toEqual(shape(legend.find((l) => l.role === 'next').sig));
+});
+
+test('Graustufen: ein Ton in beiden Akkorden sieht anders aus als ein Ton nur im jetzigen (C, dann Am)', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await openPlayPage(page);
+  await setProgression(page, ['C', 'Am']);
+  // E (tiefe E-Saite leer) in C und Am, G (Bund 3) nur in C; beide ohne Grundton-Ring
+  await expect(note(page, 5, 0)).toHaveAttribute('data-role', 'scale both');
+  await expect(note(page, 5, 3)).toHaveAttribute('data-role', 'scale current');
+  const board = await signatures(page, '#fretboard .fret-note[data-string="5"][data-fret="0"]');
+  expect(board[0].sig).toBe((await signatures(page, '#fretboard-legend .fret-note[data-role="both"]'))[0].sig);
+  // Graustufen, ohne Beschriftung und ohne Saiten/Bünde (Buchstaben und Linien unterscheiden sich ohnehin): nur das Zeichen zählt
+  await page.addStyleTag({ content: '#fretboard { filter: grayscale(1); } #fretboard :is(.fret-note text, .string, .fret-wire, .nut, .board, .inlay) { visibility: hidden; }' });
+  const shot = async (fret) => {
+    const b = await note(page, 5, fret).locator('.dot').boundingBox();
+    const [cx, cy] = [b.x + b.width / 2, b.y + b.height / 2];
+    return (await page.screenshot({ clip: { x: Math.round(cx) - 18, y: Math.round(cy) - 18, width: 36, height: 36 } })).toString('base64');
+  };
+  // Formmaß der dunklen Fläche: Breite / Wurzel(Fläche); Kreis 2/Wurzel(Pi) = 1,13, Quadrat 1,0, Raute Wurzel(2) = 1,41.
+  // Größe und Strichstärke fallen heraus: ein dicker Kreis bleibt ein Kreis (so sah "beide" vorher aus).
+  const form = (data) => page.evaluate(async (png) => {
+    const bitmap = await createImageBitmap(await (await fetch(`data:image/png;base64,${png}`)).blob());
+    const ctx = new OffscreenCanvas(bitmap.width, bitmap.height).getContext('2d');
+    ctx.drawImage(bitmap, 0, 0);
+    const px = ctx.getImageData(0, 0, bitmap.width, bitmap.height).data;
+    let [count, left, right] = [0, Infinity, -Infinity];
+    for (let i = 0; i < px.length / 4; i++) {
+      if (px[4 * i] >= 200) continue; // Papier ist hell (um 246), die gefüllten Zeichen dunkel (um 95)
+      count++;
+      left = Math.min(left, i % bitmap.width);
+      right = Math.max(right, i % bitmap.width);
+    }
+    return (right - left + 1) / Math.sqrt(count);
+  }, data);
+  const [both, current] = [await form(await shot(0)), await form(await shot(3))];
+  expect(current).toBeCloseTo(1.13, 1);
+  expect(Math.abs(both - current), `Formmaß beide ${both.toFixed(2)}, jetzig ${current.toFixed(2)}`).toBeGreaterThan(0.15);
+});
+
 test('360 px: Seite ohne waagerechtes Scrollen, das Griffbrett scrollt in sich und ist per Tastatur erreichbar', async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 740 });
   await openPlayPage(page);
