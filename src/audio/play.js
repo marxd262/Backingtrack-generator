@@ -126,8 +126,8 @@ export function play(ctx, trackInput, { loops = 1, onEvent, onBar, onEnd, create
       // Anker nicht vor das zuletzt geplante Ereignis: geplante Ereignisse behalten ihre Zeit, nichts wird umgeordnet
       const pivot = Math.max(ctx.currentTime, anchor.ctx, lastCtx);
       anchor = { song: anchor.song + (pivot - anchor.ctx) * rate, ctx: pivot };
-      // shortcut: Echo-Verzögerung der Synth-Instrumente bleibt beim Originaltempo, Instrument-Schnittstelle hat kein setTempo
       rate = newBpm / bpm;
+      instruments.setTempo?.(newBpm); // optional: eigene Instrumente ohne setTempo bleiben gültig
     },
   };
 }

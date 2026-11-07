@@ -124,8 +124,9 @@ export function createInstruments(ctx, { bpm = 100 } = {}) {
   master.connect(limiter);
   master.connect(reverb).connect(reverbWet).connect(limiter);
 
-  // Echo (punktierte Achtel) nur für Akkorde und Pad, nach der Stummschaltung abgegriffen
-  const delay = ctx.createDelay(2); delay.delayTime.value = (60 / bpm) * 0.75;
+  // Echo (punktierte Achtel) nur für Akkorde und Pad, nach der Stummschaltung abgegriffen; 3 s reichen bis 20 bpm
+  const echoTime = (b) => (60 / b) * 0.75;
+  const delay = ctx.createDelay(3); delay.delayTime.value = echoTime(bpm);
   const fb = ctx.createGain(); fb.gain.value = ECHO.feedback;
   const tone = ctx.createBiquadFilter(); tone.type = 'lowpass'; tone.frequency.value = ECHO.tone;
   const echoWet = ctx.createGain(); echoWet.gain.value = ECHO.wet;
@@ -159,5 +160,12 @@ export function createInstruments(ctx, { bpm = 100 } = {}) {
       },
     };
   }
-  return { output: limiter, layers };
+  return {
+    output: limiter,
+    layers,
+    // Echo folgt einem Live-Tempowechsel; weich nachgeführt (Zeitkonstante 50 ms) statt springend
+    setTempo(newBpm) {
+      delay.delayTime.setTargetAtTime(echoTime(newBpm), ctx.currentTime, 0.05);
+    },
+  };
 }

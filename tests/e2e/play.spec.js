@@ -238,6 +238,36 @@ test('setTempo beschleunigt spätere Takte ohne Auslassen, Wiederholen oder Umor
   for (const c of late) expect(c.dur).toBeCloseTo(c.original / 1.5, 9);
 });
 
+test('setTempo erreicht setTempo der Instrumente (Echo), fehlende Methode ist harmlos', async ({ page }) => {
+  const r = await page.evaluate(async (input) => {
+    const { play } = await import('/audio/play.js');
+    const { createInstruments } = await import('/audio/synth.js');
+    const ctx = new AudioContext();
+    const spy = window.__spy();
+    const tempos = [];
+    const h = play(ctx, input, {
+      createInstruments: (c, o) => ({ ...spy.create(c, o), setTempo: (bpm) => tempos.push(bpm) }),
+    });
+    h.setTempo(120);
+    h.setTempo(60);
+    let rangeError = null;
+    try { h.setTempo(500); } catch (err) { rangeError = err.constructor.name; }
+    h.stop();
+    // Spion ohne setTempo: kein Fehler
+    const plain = play(ctx, input, { createInstruments: spy.create });
+    let plainError = null;
+    try { plain.setTempo(90); } catch (err) { plainError = err.message; }
+    plain.stop();
+    // echte Instrumente haben setTempo und vertragen es
+    const real = createInstruments(new OfflineAudioContext(2, 4410, 44100), { bpm: 100 });
+    const realType = typeof real.setTempo;
+    real.setTempo(150);
+    await ctx.close();
+    return { tempos, rangeError, plainError, realType };
+  }, track());
+  expect(r).toEqual({ tempos: [120, 60], rangeError: 'RangeError', plainError: null, realType: 'function' });
+});
+
 test('loops: 2 zählt Takte weiter und ruft onEnd einmal nach zwei Durchläufen', async ({ page }) => {
   test.setTimeout(30_000);
   const r = await page.evaluate(async (input) => {
