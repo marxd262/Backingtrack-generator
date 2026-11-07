@@ -248,9 +248,10 @@ main {
   padding-bottom: 12px;
   border-bottom: 1px solid var(--ink);
 }
-/* feste Mindestbreite, damit die Kopfzeile beim Akkordwechsel nicht springt */
+/* feste Mindestbreiten, damit die Kopfzeile beim Akkordwechsel nicht springt: gemessen breitestes Etikett aller
+   Grundtöne x Dur/Moll/vermindert ("Abdim" 6,23ch, "Als Nächstes: Dbdim" 18,73ch), plus etwa 8 % Reserve */
 .play-now {
-  min-width: 4ch;
+  min-width: 6.8ch;
   min-height: 1.1em;
   margin: 0;
   color: var(--accent);
@@ -259,7 +260,7 @@ main {
 }
 .play-next:empty { display: none; }
 .play-next, .play-variant { margin: 0; color: var(--ink-soft); }
-.play-next { color: var(--accent2); }
+.play-next { min-width: 20ch; color: var(--accent2); }
 .play-head .position { min-width: 9em; }
 .play-head .go { min-width: 8rem; font-size: 1.25rem; }
 .play-head .message { flex-basis: 100%; margin: 0; }
