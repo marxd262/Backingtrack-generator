@@ -1,4 +1,5 @@
 // Arrangement: Abschnitte à 8 Takte, welche Schichten wann spielen, Fills.
+import { MAX_LENGTH } from './track.js';
 
 const SECTION_BARS = 8;
 const DEFAULT_LENGTH = 24;
@@ -22,7 +23,7 @@ function layersBefore(buildUp, index, slowOrder) {
 }
 
 export function buildArrangement(track, params, rng) {
-  const length = Number.isInteger(track?.length) && track.length > 0 ? track.length : DEFAULT_LENGTH;
+  const length = Number.isInteger(track?.length) && track.length > 0 && track.length <= MAX_LENGTH ? track.length : DEFAULT_LENGTH;
   const buildUp = params?.buildUp;
   const count = Math.ceil(length / SECTION_BARS);
   const slowOrder = buildUp === 'slow' ? ['bass', ...shuffled(OTHER_LAYERS, rng)] : null;

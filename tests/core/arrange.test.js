@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRng } from '../../src/core/rng.js';
+import { MAX_LENGTH } from '../../src/core/track.js';
 import { buildArrangement } from '../../src/core/arrange.js';
 
 const LAYERS = ['drums', 'bass', 'chords', 'pad'];
@@ -71,8 +72,20 @@ test('gleicher Seed ergibt gleiches Ergebnis, verschiedene Seeds variieren bei s
   assert.ok(variants.size >= 2);
 });
 
+test('length über MAX_LENGTH fällt auf 24 Takte zurück (kein Speicher-Absturz)', () => {
+  for (const length of [MAX_LENGTH + 1, 1e9, Number.MAX_SAFE_INTEGER]) {
+    const { sections } = buildArrangement({ length }, { buildUp: 'normal' }, createRng(1));
+    assert.equal(sections.reduce((n, s) => n + s.bars, 0), 24, String(length));
+  }
+  const max = buildArrangement({ length: MAX_LENGTH }, { buildUp: 'normal' }, createRng(1));
+  assert.equal(max.sections.reduce((n, s) => n + s.bars, 0), MAX_LENGTH);
+});
+
 test('mutiert die Eingaben nicht', () => {
-  const track = Object.freeze({ length: 24 });
-  const params = Object.freeze({ buildUp: 'slow' });
-  buildArrangement(track, params, createRng(1));
+  const track = { length: 24, layers: { drums: true } };
+  const params = { buildUp: 'slow' };
+  const rng = createRng(1);
+  const before = structuredClone({ track, params });
+  buildArrangement(track, params, rng);
+  assert.deepEqual({ track, params }, before);
 });

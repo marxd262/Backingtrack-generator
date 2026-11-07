@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeTrack, validateTrack, VALIDATION_CODES } from '../../src/core/track.js';
+import { normalizeTrack, validateTrack, VALIDATION_CODES, MAX_LENGTH } from '../../src/core/track.js';
 
 const bar = (root, quality = 'maj', beats = 4) => ({ chord: { root, quality }, beats });
 const am = (root, quality) => bar(root, quality);
@@ -65,6 +65,13 @@ test('validateTrack: badBpm', () => {
   assert.deepEqual(codes({ ...good(), bpm: NaN }), ['badBpm']);
 });
 
+test('validateTrack: bpm nur im Bereich 20 bis 400', () => {
+  for (const bpm of [19, 401, Infinity, -Infinity]) {
+    assert.deepEqual(codes({ ...good(), bpm }), ['badBpm'], String(bpm));
+  }
+  for (const bpm of [20, 400]) assert.deepEqual(codes({ ...good(), bpm }), [], String(bpm));
+});
+
 test('validateTrack: unknownQuality (ohne zusätzliches chordNotInKey)', () => {
   const errs = validateTrack({ ...good(), bars: [am('A', 'xyz')] });
   assert.deepEqual(errs.map((e) => e.code), ['unknownQuality']);
@@ -79,6 +86,14 @@ test('validateTrack: badBeats', () => {
 
 test('validateTrack: badLength', () => {
   for (const length of [0, -4, 1.5, '24', undefined]) {
+    assert.deepEqual(codes({ ...good(), length }), ['badLength'], String(length));
+  }
+});
+
+test('validateTrack: length über MAX_LENGTH ist badLength', () => {
+  assert.equal(MAX_LENGTH, 512);
+  assert.deepEqual(codes({ ...good(), length: MAX_LENGTH }), []);
+  for (const length of [MAX_LENGTH + 1, 1e9, Number.MAX_SAFE_INTEGER]) {
     assert.deepEqual(codes({ ...good(), length }), ['badLength'], String(length));
   }
 });

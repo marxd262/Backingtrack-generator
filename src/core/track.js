@@ -11,6 +11,11 @@ export const VALIDATION_CODES = Object.freeze([
   'emptyBars', 'chordNotInKey', 'badBpm', 'unknownQuality', 'badBeats', 'badLength', 'badKey', 'badBar',
 ]);
 
+/** Obergrenze für `length` (Takte); schützt Arrangement und Audio vor riesigen Eingaben. */
+export const MAX_LENGTH = 512;
+const MIN_BPM = 20;
+const MAX_BPM = 400;
+
 const isObject = (v) => v !== null && typeof v === 'object';
 const isPosInt = (n) => Number.isInteger(n) && n > 0;
 // Parameterwert ohne String(): wirft auch bei Object.create(null) nicht
@@ -29,7 +34,7 @@ export function normalizeTrack(track) {
 }
 
 /**
- * Sammelt Meldungen, wirft nie (leer = gültig).
+ * Sammelt Meldungen, wirft nie (leer = gültig). bpm muss in [20, 400] liegen, length in [1, MAX_LENGTH].
  * @returns {{ code: 'emptyBars'|'chordNotInKey'|'badBpm'|'unknownQuality'|'badBeats'|'badLength'|'badKey'|'badBar',
  *             params: Record<string, string|number> }[]}
  */
@@ -38,8 +43,8 @@ export function validateTrack(track) {
   const errors = [];
   const add = (code, params = {}) => errors.push({ code, params });
 
-  if (!(Number.isFinite(t.bpm) && t.bpm > 0)) add('badBpm', { bpm: show(t.bpm) });
-  if (!isPosInt(t.length)) add('badLength', { length: show(t.length) });
+  if (!(Number.isFinite(t.bpm) && t.bpm >= MIN_BPM && t.bpm <= MAX_BPM)) add('badBpm', { bpm: show(t.bpm) });
+  if (!isPosInt(t.length) || t.length > MAX_LENGTH) add('badLength', { length: show(t.length) });
   const keyOk = isValidKey(t.key);
   if (!keyOk) add('badKey');
   if (!Array.isArray(t.bars) || t.bars.length === 0) {
