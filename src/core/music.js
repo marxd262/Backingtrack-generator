@@ -77,3 +77,8 @@ export function allowedChords(key) {
   if (key.mode === 'minor') chords.push({ root: chords[4].root, quality: 'maj' });
   return chords;
 }
+
+// Notenname einer Tonhöhenklasse in der Schreibweise der Tonart (wie bei den Akkorden)
+export function noteName(key, pc) {
+  return spelling(key, noteToPc(key.root))[((pc % 12) + 12) % 12];
+}
