@@ -1,0 +1,201 @@
+/* Notenheft-Optik, vorläufig: Farben und Schrift nur hier über Variablen. Genau ein farbiges Objekt zur Zeit. */
+:root {
+  --paper: #faf6ec;
+  --ink: #2a2622;
+  --ink-soft: #5a524a;
+  --accent: #c8452d;
+  --on-accent: #fff;
+  --staff: rgba(42, 38, 34, 0.07);
+  --serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
+  --target: 44px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: 1.0625rem;
+  line-height: 1.4;
+  background-color: var(--paper);
+  /* Notensysteme: fünf Linien im Abstand 10 px, dann Lücke */
+  background-image: repeating-linear-gradient(to bottom,
+    transparent 0 9px, var(--staff) 9px 10px, transparent 10px 19px, var(--staff) 19px 20px,
+    transparent 20px 29px, var(--staff) 29px 30px, transparent 30px 39px, var(--staff) 39px 40px,
+    transparent 40px 49px, var(--staff) 49px 50px, transparent 50px 110px);
+}
+
+button, input, output { font: inherit; color: inherit; }
+button { cursor: pointer; }
+
+:focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: 3px;
+}
+
+.top {
+  display: flex;
+  justify-content: flex-end;
+  padding: 12px 16px;
+}
+
+.lang { display: flex; gap: 4px; }
+
+main {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: 0 16px 48px;
+  text-align: center;
+}
+
+.tonight {
+  margin: 6vh 0 0.2em;
+  font-size: clamp(1.4rem, 4.5vw, 2rem);
+  font-style: italic;
+}
+
+.sentence {
+  margin: 0;
+  font-size: clamp(1.6rem, 6.5vw, 2.6rem);
+  line-height: 1.5;
+}
+
+.word {
+  min-height: var(--target);
+  padding: 0 0.08em;
+  border: 0;
+  background: none;
+  text-decoration: underline;
+  text-decoration-thickness: 0.06em;
+  text-underline-offset: 0.18em;
+}
+.word[aria-expanded="true"] { text-decoration-style: double; }
+
+.variant {
+  margin: 0.8em 0 1.2em;
+  color: var(--ink-soft);
+}
+
+.go {
+  min-width: 10rem;
+  min-height: 56px;
+  padding: 0.4em 2em;
+  border: 2px solid var(--accent);
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 1.5rem;
+}
+/* beim Spielen ist der aktuelle Akkord das farbige Objekt, der Knopf wird schlicht */
+.go.playing {
+  border-color: var(--ink);
+  background: transparent;
+  color: var(--ink);
+}
+
+.now { min-height: 9rem; }
+.now-chord {
+  margin: 0.2em 0 0;
+  min-height: 1.15em;
+  color: var(--accent);
+  font-size: clamp(3.5rem, 16vw, 6rem);
+  line-height: 1.15;
+}
+.position {
+  margin: 0;
+  min-height: 1.4em;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.message:empty { display: none; }
+.message {
+  margin: 0.5em auto;
+  max-width: 30rem;
+  font-style: italic;
+}
+
+.chip {
+  min-width: var(--target);
+  min-height: var(--target);
+  padding: 0 14px;
+  border: 1px solid var(--ink);
+  border-radius: 4px;
+  background: transparent;
+}
+.chip[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+/* Popover unter dem Wort, innerhalb des Fensters */
+#key-btn { anchor-name: --key; }
+#style-btn { anchor-name: --style; }
+#tempo-btn { anchor-name: --tempo; }
+#key-pop { position-anchor: --key; }
+#style-pop { position-anchor: --style; }
+#tempo-pop { position-anchor: --tempo; }
+
+.pop {
+  position-area: block-end span-all;
+  width: min(34rem, calc(100vw - 32px));
+  max-height: calc(100% - 16px);
+  margin: 8px 16px auto; /* Seitenrand 16 px, auch wenn das Popover zur Fensterkante geschoben wird */
+  padding: 16px;
+  overflow: auto;
+  border: 1px solid var(--ink);
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: 0 6px 24px rgba(42, 38, 34, 0.18);
+  text-align: left;
+}
+.pop-label {
+  display: block;
+  margin: 0 0 6px;
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+}
+.pop-label:not(:first-child) { margin-top: 14px; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  gap: 10px;
+}
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--ink);
+  border-radius: 4px;
+  background: transparent;
+  text-align: left;
+}
+.card[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--ink); }
+.card-name { font-size: 1.15rem; }
+.card-bpm { color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.card-hint { font-size: 0.875rem; }
+.rhythm {
+  display: grid;
+  grid-template-columns: repeat(16, 1fr);
+  gap: 2px;
+  margin-top: 6px;
+}
+.rhythm i { height: 8px; background: var(--staff); border-radius: 1px; }
+.rhythm i.on { background: var(--ink); }
+
+.tempo-row { display: flex; align-items: center; gap: 12px; }
+.tempo-row input { flex: 1; min-width: 0; height: var(--target); accent-color: var(--ink); }
+.tempo-row output { display: inline-block; min-width: 3ch; text-align: right; font-variant-numeric: tabular-nums; }
+
+.actions { margin-top: 1.5em; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .go, .chip, .card { transition: background-color 0.15s, color 0.15s, border-color 0.15s; }
+}

@@ -61,6 +61,7 @@ export default {
   'err.chordNotInKey': 'Der Akkord {chord} in Takt {bar} gehört nicht zur Tonart.',
   'err.unknownQuality': 'Der Akkord {chord} in Takt {bar} hat eine unbekannte Akkordart.',
   'err.badBeats': 'Takt {bar} hat eine ungültige Schlagzahl: {beats}.',
+  'err.playFailed': 'Die Wiedergabe konnte nicht starten.',
 
   'ui.tonight': 'Heute Abend:',
   'ui.keyScale': '{root}-{scale}',
@@ -81,4 +82,13 @@ export default {
   'ui.progression': 'Akkordfolge',
   'ui.build': 'Aufbau',
   'ui.tags': 'Schlagworte',
+  'ui.title': 'Backingtrack-Generator',
+  'ui.bar': 'Takt {n} von {total}',
+  'ui.key': 'Tonart',
+  'ui.scale': 'Skala',
+  'ui.style': 'Stil',
+  'ui.langDe': 'DE',
+  'ui.langDeName': 'Deutsch',
+  'ui.langEn': 'EN',
+  'ui.langEnName': 'English',
 };

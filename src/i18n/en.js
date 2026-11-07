@@ -61,6 +61,7 @@ export default {
   'err.chordNotInKey': 'The chord {chord} in bar {bar} does not belong to the key.',
   'err.unknownQuality': 'The chord {chord} in bar {bar} has an unknown chord type.',
   'err.badBeats': 'Bar {bar} has an invalid number of beats: {beats}.',
+  'err.playFailed': 'Playback could not start.',
 
   'ui.tonight': 'Tonight:',
   'ui.keyScale': '{root} {scale}',
@@ -81,4 +82,13 @@ export default {
   'ui.progression': 'Progression',
   'ui.build': 'Build-up',
   'ui.tags': 'Tags',
+  'ui.title': 'Backing track generator',
+  'ui.bar': 'Bar {n} of {total}',
+  'ui.key': 'Key',
+  'ui.scale': 'Scale',
+  'ui.style': 'Style',
+  'ui.langDe': 'DE',
+  'ui.langDeName': 'Deutsch',
+  'ui.langEn': 'EN',
+  'ui.langEnName': 'English',
 };

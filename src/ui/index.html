@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title></title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="app.css">
+<script type="module" src="app.js"></script>
+</head>
+<body>
+<!-- Alle sichtbaren Texte setzt app.js über t(): data-i18n = Text, data-i18n-label = aria-label -->
+<header class="top">
+  <div class="lang" role="group" data-i18n-label="ui.language">
+    <button type="button" class="chip" data-lang="de" lang="de" data-i18n="ui.langDe" data-i18n-label="ui.langDeName"></button>
+    <button type="button" class="chip" data-lang="en" lang="en" data-i18n="ui.langEn" data-i18n-label="ui.langEnName"></button>
+  </div>
+</header>
+<main>
+  <section class="start">
+    <p class="tonight" id="tonight" data-i18n="ui.tonight"></p>
+    <p class="sentence" id="sentence">
+      <button type="button" class="word" id="key-btn" popovertarget="key-pop" aria-haspopup="dialog" aria-expanded="false" aria-controls="key-pop"></button>
+      <span data-i18n="ui.styleIn"></span>
+      <button type="button" class="word" id="style-btn" popovertarget="style-pop" aria-haspopup="dialog" aria-expanded="false" aria-controls="style-pop"></button>
+      <br>
+      <span data-i18n="ui.atTempo"></span>
+      <button type="button" class="word" id="tempo-btn" popovertarget="tempo-pop" aria-haspopup="dialog" aria-expanded="false" aria-controls="tempo-pop"></button>
+    </p>
+
+    <div class="pop" id="key-pop" popover role="dialog" aria-labelledby="key-btn">
+      <p class="pop-label" id="key-label" data-i18n="ui.key"></p>
+      <div class="chips" role="group" aria-labelledby="key-label" id="key-chips"></div>
+      <p class="pop-label" id="scale-label" data-i18n="ui.scale"></p>
+      <div class="chips" role="group" aria-labelledby="scale-label" id="scale-chips"></div>
+    </div>
+    <div class="pop" id="style-pop" popover role="dialog" aria-labelledby="style-btn">
+      <p class="pop-label" id="style-label" data-i18n="ui.style"></p>
+      <div class="cards" role="group" aria-labelledby="style-label" id="style-cards"></div>
+    </div>
+    <div class="pop" id="tempo-pop" popover role="dialog" aria-labelledby="tempo-btn">
+      <label class="pop-label" for="tempo" data-i18n="ui.tempo"></label>
+      <div class="tempo-row">
+        <input type="range" id="tempo" min="40" max="200" step="1">
+        <span><output id="tempo-out" for="tempo"></output> <span data-i18n="ui.bpm"></span></span>
+      </div>
+    </div>
+
+    <p class="variant"><span id="variant"></span> · <span data-i18n="ui.chords"></span>: <span id="chords"></span></p>
+    <button type="button" class="go" id="go"></button>
+    <div class="now">
+      <p class="now-chord" id="now-chord"></p>
+      <p class="position" id="position"></p>
+    </div>
+    <p class="message" id="message" aria-live="polite"></p>
+    <p class="actions"><button type="button" class="chip" id="new-variant" data-i18n="ui.newVariant"></button></p>
+  </section>
+  <!-- Platz für die Feintuning-Ansicht (Task 9b) -->
+  <section id="tuning" hidden></section>
+</main>
+</body>
+</html>
