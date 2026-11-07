@@ -57,6 +57,7 @@ Weitere Felder (`id`, `title`, `style` ...) stören nicht und werden ignoriert. 
 
 - Ein Track ohne `seed` ist gültig und bedeutet Seed 1: wiederholte Aufrufe liefern identische Ausgabe.
 - Ein Track mit `seed` ist wiederholbar: gleiche Eingabe plus gleicher Seed ergibt denselben Strom (der Seed wird mit `>>> 0` zu einer 32-Bit-Zahl).
+- Die Ausgabe für feste Seeds ist durch einen Golden-Test festgehalten (`tests/core/golden.test.js`: SHA-256 des Stroms für die drei Stile und einen Track im alten Format). Ändert sich der Strom gewollt, ändert sich der Klang bestehender Übungen; das wird beim Aktualisieren der Werte bewusst entschieden.
 - Will Interactive Scales Abwechslung, würfelt es selbst einen Seed (zum Beispiel eine Zufallszahl 1 bis 9999) und gibt ihn mit. Soll eine Übung immer gleich klingen, gibt es einen festen Seed mit.
 
 ## `buildEvents(track)` und der Ereignisstrom
