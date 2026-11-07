@@ -23,9 +23,17 @@ const LETTER_PC = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
 const SHARP_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const FLAT_NAMES = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
 
+const NOTE_RE = /^([A-G])([#b]?)$/;
+
+export const isNoteName = (name) => typeof name === 'string' && NOTE_RE.test(name);
+
+// Gültige Tonart: Objekt mit bekanntem Grundton und bekanntem Modus (nur eigene Einträge von MODES)
+export const isValidKey = (key) =>
+  key !== null && typeof key === 'object' && isNoteName(key.root) && typeof key.mode === 'string' && Object.hasOwn(MODES, key.mode);
+
 export function noteToPc(name) {
-  const m = /^([A-G])([#b]?)$/.exec(name);
-  if (!m) throw new Error(`Unknown note name: ${name}`);
+  const m = typeof name === 'string' ? NOTE_RE.exec(name) : null;
+  if (!m) throw new Error(`Unknown note name: ${String(name)}`);
   return (LETTER_PC[m[1]] + (m[2] === '#' ? 1 : m[2] === 'b' ? -1 : 0) + 12) % 12;
 }
 

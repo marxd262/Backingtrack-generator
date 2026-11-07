@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeTrack, validateTrack } from '../../src/core/track.js';
+import { normalizeTrack, validateTrack, VALIDATION_CODES } from '../../src/core/track.js';
 
 const bar = (root, quality = 'maj', beats = 4) => ({ chord: { root, quality }, beats });
 const am = (root, quality) => bar(root, quality);
@@ -85,5 +85,60 @@ test('validateTrack: badLength', () => {
 
 test('validateTrack: sammelt mehrere Meldungen und wirft nicht', () => {
   assert.deepEqual(codes({ ...good(), bpm: 0, length: 0, bars: [] }), ['badBpm', 'badLength', 'emptyBars']);
-  assert.doesNotThrow(() => validateTrack({ ...good(), bars: [am('H', 'maj')] }));
+});
+
+test('validateTrack: unbekannter Akkord-Grundton ergibt chordNotInKey, ohne zu werfen', () => {
+  const errs = validateTrack({ ...good(), bars: [am('H', 'min')] });
+  assert.deepEqual(errs, [{ code: 'chordNotInKey', params: { bar: 1, chord: 'Hm' } }]);
+});
+
+test('VALIDATION_CODES listet alle acht Codes', () => {
+  assert.deepEqual([...VALIDATION_CODES].sort(),
+    ['badBar', 'badBeats', 'badBpm', 'badKey', 'badLength', 'chordNotInKey', 'emptyBars', 'unknownQuality'].sort());
+  assert.equal(VALIDATION_CODES.length, 8);
+});
+
+test('validateTrack: kaputte Takte ergeben badBar statt Wurf', () => {
+  const broken = [null, 'x', 5, [], {}, { beats: 4 }, { chord: null, beats: 4 }, { chord: 'Am', beats: 4 },
+    { chord: { quality: 'min' }, beats: 4 }, { chord: { root: 9, quality: 'min' }, beats: 4 }];
+  for (const b of broken) {
+    assert.deepEqual(validateTrack({ ...good(), bars: [b] }), [{ code: 'badBar', params: { bar: 1 } }], JSON.stringify(b));
+  }
+  const errs = validateTrack({ ...good(), bars: [am('A', 'min'), null, am('D', 'min')] });
+  assert.deepEqual(errs, [{ code: 'badBar', params: { bar: 2 } }]);
+});
+
+test('validateTrack: fehlende oder kaputte Tonart ergibt badKey und keine Akkordprüfung', () => {
+  const noKey = good();
+  delete noKey.key;
+  const keys = [undefined, null, 'A', 5, [], {}, { root: 'A' }, { mode: 'minor' }, { root: 'H', mode: 'minor' },
+    { root: ['A'], mode: 'minor' }, { root: 'A', mode: 'dorian' }, { root: 'A', mode: 'toString' }];
+  for (const key of keys) {
+    assert.deepEqual(codes({ ...good(), key, bars: [am('C#', 'maj')] }), ['badKey'], JSON.stringify(key));
+  }
+  assert.deepEqual(codes(noKey), ['badKey']);
+});
+
+test('validateTrack: geerbte Eigenschaften zählen nicht als Akkordart', () => {
+  const errs = validateTrack({ ...good(), bars: [am('A', 'toString'), { chord: { root: 'A' }, beats: 4 }] });
+  assert.deepEqual(errs.map((e) => e.code), ['unknownQuality', 'unknownQuality']);
+});
+
+test('validateTrack: wirft nie, auch bei null, undefined und Unsinn', () => {
+  for (const t of [null, undefined, 'x', 5, [], {}]) {
+    assert.deepEqual(codes(t).sort(), ['badBpm', 'badKey', 'badLength', 'emptyBars'], String(t));
+  }
+  for (const bars of [undefined, null, 'Am', {}, { length: 1 }]) {
+    assert.deepEqual(codes({ ...good(), bars }), ['emptyBars'], String(bars));
+  }
+  assert.doesNotThrow(() => validateTrack({ ...good(), bpm: Object.create(null), bars: [{ chord: { root: 'A', quality: Object.create(null) }, beats: Object.create(null) }] }));
+});
+
+test('normalizeTrack: null und undefined ergeben Standardwerte', () => {
+  for (const input of [null, undefined]) {
+    const t = normalizeTrack(input);
+    assert.deepEqual(t.meter, [4, 4]);
+    assert.equal(t.length, 24);
+    assert.equal(t.seed, 1);
+  }
 });
