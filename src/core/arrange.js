@@ -3,7 +3,9 @@ import { MAX_LENGTH } from './track.js';
 
 const SECTION_BARS = 8;
 const DEFAULT_LENGTH = 24;
-const OTHER_LAYERS = ['drums', 'chords', 'pad'];
+// langsamer Aufbau: Bass und Schlagzeug von Anfang an (der Groove fällt nie weg), dann Akkorde und Pad gemischt
+const SLOW_FIRST = ['bass', 'drums'];
+const SLOW_SHUFFLED = ['chords', 'pad'];
 
 // Fisher-Yates mit dem seedbaren rng (Eingabe wird nicht verändert)
 function shuffled(items, rng) {
@@ -26,7 +28,7 @@ export function buildArrangement(track, params, rng) {
   const length = Number.isInteger(track?.length) && track.length > 0 && track.length <= MAX_LENGTH ? track.length : DEFAULT_LENGTH;
   const buildUp = params?.buildUp;
   const count = Math.ceil(length / SECTION_BARS);
-  const slowOrder = buildUp === 'slow' ? ['bass', ...shuffled(OTHER_LAYERS, rng)] : null;
+  const slowOrder = buildUp === 'slow' ? [...SLOW_FIRST, ...shuffled(SLOW_SHUFFLED, rng)] : null;
 
   const sections = Array.from({ length: count }, (_, i) => {
     const start = i * SECTION_BARS;

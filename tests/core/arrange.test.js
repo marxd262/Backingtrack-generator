@@ -66,10 +66,25 @@ test('fillAtEnd ist außer im letzten Abschnitt true', () => {
   assert.deepEqual(sections.map((s) => s.fillAtEnd), [true, true, false]);
 });
 
-test('gleicher Seed ergibt gleiches Ergebnis, verschiedene Seeds variieren bei slow', () => {
+test('gleicher Seed ergibt gleiches Ergebnis, verschiedene Seeds variieren bei slow (Akkorde oder Pad zuerst)', () => {
   assert.deepEqual(build(24, 'slow', 9), build(24, 'slow', 9));
   const variants = new Set(Array.from({ length: 30 }, (_, i) => JSON.stringify(build(24, 'slow', i + 1))));
   assert.ok(variants.size >= 2);
+  // nur die zwei gemischten Schichten wechseln: zweiter Abschnitt bringt je Seed Akkorde oder Pad
+  const second = new Set(Array.from({ length: 30 }, (_, i) => {
+    const { sections } = build(24, 'slow', i + 1);
+    return LAYERS.filter((l) => sections[1].layers[l] && !sections[0].layers[l]).join();
+  }));
+  assert.deepEqual([...second].sort(), ['chords', 'pad']);
+});
+
+test('slow: Bass und Schlagzeug ab Abschnitt 0, dann eines von Akkorden/Pad, ab Abschnitt 2 alles (Seeds 1..50)', () => {
+  for (let seed = 1; seed <= 50; seed++) {
+    const { sections } = build(40, 'slow', seed);
+    assert.deepEqual(sections[0].layers, { drums: true, bass: true, chords: false, pad: false }, `seed ${seed}`);
+    assert.equal(active(sections[1]), 3, `seed ${seed}`);
+    for (const s of sections.slice(2)) assert.equal(active(s), 4, `seed ${seed}`);
+  }
 });
 
 test('length über MAX_LENGTH fällt auf 24 Takte zurück (kein Speicher-Absturz)', () => {
