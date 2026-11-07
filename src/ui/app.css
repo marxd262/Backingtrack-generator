@@ -291,8 +291,8 @@ main {
 /* --- Griffbrett-Block --- */
 .block-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-bottom: 8px; }
 .block-head .block-title { margin: 0; }
-/* schmal scrollt nur das Griffbrett (Mindestbreite), breit füllt es die Mitte */
-.fretboard-scroll { overflow-x: auto; }
+/* schmal scrollt nur das Griffbrett (Mindestbreite), breit füllt es die Mitte; schmale sichtbare Leiste als Hinweis */
+.fretboard-scroll { overflow-x: auto; scrollbar-width: thin; scrollbar-color: var(--ink-soft) transparent; }
 .fretboard { display: block; width: 100%; min-width: 40rem; height: auto; }
 .fretboard .board { fill: rgba(42, 38, 34, 0.04); }
 .fretboard .string, .fretboard .fret-wire { stroke: var(--ink-soft); }
@@ -340,8 +340,10 @@ main {
 #side-right { right: 0; border-left: 1px solid var(--ink); }
 .drawer-backdrop { display: none; }
 
-/* breit (ab etwa 1100 px, passend zu overlayQuery in sidebar.js): Klang | Blöcke | Akkorde; zu = hidden, die Blöcke nehmen den Platz */
-@media (min-width: 68.75rem) {
+/* breit ab 1200 px = 75rem; schmal bis 74.9375rem. GLEICHE Grenze in sidebar.js (OVERLAY_QUERY) und den zwei
+   max-width-Abfragen unten: erst ab hier zeigt die Mitte neben beiden Leisten das ganze Griffbrett (40rem).
+   Klang | Blöcke | Akkorde; zu = hidden, die Blöcke nehmen den Platz */
+@media (min-width: 75rem) {
   .stage {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
@@ -352,7 +354,8 @@ main {
   .side {
     position: static;
     z-index: auto;
-    width: clamp(14rem, 20vw, 20rem); /* schrumpft vor den Blöcken: bei 1100 px 14rem */
+    /* schrumpft vor den Blöcken: bei 1200 px 14rem, Mitte 42rem, auch mit klassischer Bildlaufleiste (17 px) über 40rem */
+    width: clamp(14rem, 20vw - 1rem, 20rem);
     padding: 0;
     overflow: visible;
     background: none;
@@ -365,7 +368,7 @@ main {
 }
 /* schmal: offene Schublade dunkelt die Seite dahinter ab (dort ist alles inert, sidebar.js); nur Optik, ein Klick
    darauf bewirkt nichts. Unter der Schublade (z-index 10), über der Seite; Popover liegen in der obersten Ebene darüber */
-@media (max-width: 68.6875rem) {
+@media (max-width: 74.9375rem) {
   .stage:has(> .side:not([hidden])) > .drawer-backdrop {
     display: block;
     position: fixed;
@@ -423,7 +426,7 @@ select {
   .side { transition: opacity 0.15s, transform 0.2s ease-out; }
   @starting-style { .side { opacity: 0; } }
 }
-@media (prefers-reduced-motion: no-preference) and (max-width: 68.6875rem) {
+@media (prefers-reduced-motion: no-preference) and (max-width: 74.9375rem) {
   .drawer-backdrop { transition: opacity 0.15s; }
   @starting-style {
     #side-left { transform: translateX(-100%); }

@@ -328,6 +328,9 @@ test('360 px: Seite ohne waagerechtes Scrollen, das Griffbrett scrollt in sich u
   await expect(region).toHaveAttribute('role', 'region');
   const sizes = await region.evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
   expect(sizes.scroll).toBeGreaterThan(sizes.client);
+  // sichtbare (schmale) Bildlaufleiste als Hinweis, dass das Griffbrett weitergeht
+  expect(await region.evaluate((el) => { const s = getComputedStyle(el); return { x: s.overflowX, bar: s.scrollbarWidth }; }))
+    .toEqual({ x: expect.stringMatching(/^(auto|scroll)$/), bar: 'thin' });
   expect(await noScrollX(page)).toBe(true);
   const box = await region.boundingBox();
   expect(box.x).toBeGreaterThanOrEqual(0);

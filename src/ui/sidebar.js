@@ -17,7 +17,10 @@ function applyModal() {
   inerted = next;
 }
 
-export function initSidebar({ side, panel, toggle, isOpen, setOpen, overlayQuery = '(max-width: 1099px)' }) {
+// Schubladen bis 1199 px; GLEICHE Grenze in app.css (min-width: 75rem bzw. max-width: 74.9375rem)
+const OVERLAY_QUERY = '(max-width: 74.9375rem)';
+
+export function initSidebar({ side, panel, toggle, isOpen, setOpen, overlayQuery = OVERLAY_QUERY }) {
   const query = typeof matchMedia === 'function' ? matchMedia(overlayQuery) : null;
   const overlay = () => query?.matches === true;
   const heading = panel.querySelector('[tabindex="-1"]');

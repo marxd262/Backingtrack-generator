@@ -717,10 +717,12 @@ test.describe('Seitenleisten', () => {
     await expectSides(page, false, false);
   });
 
-  test('breit mit beiden Leisten: Blöcke mindestens 480 px (1100 px) bzw. 640 px (1280 px), keine Überlappung', async ({ page }) => {
+  // Andocken erst ab 1200 px: dort zeigt die Mitte das ganze Griffbrett (40rem), auch neben einer klassischen
+  // Bildlaufleiste von 17 px (headless hat keine, daher 640 + 17)
+  test('breit mit beiden Leisten: Blöcke mindestens 657 px (1200 px) bzw. 640 px (1280 px), Griffbrett ohne inneres Scrollen, keine Überlappung; 1199 px Schubladen', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.locator('#tune-btn').click();
-    for (const [width, min] of [[1100, 480], [1280, 640]]) {
+    for (const [width, min] of [[1200, 657], [1280, 640]]) {
       await page.setViewportSize({ width, height: 900 });
       await expectSides(page, true, true);
       const [left, blocks, right] = [await box(page, '#side-left'), await box(page, '#blocks'), await box(page, '#side-right')];
@@ -729,6 +731,13 @@ test.describe('Seitenleisten', () => {
       expect(overlaps(right, blocks), `${width} px rechts`).toBe(false);
       expect(left.x + left.width).toBeLessThanOrEqual(blocks.x);
       expect(blocks.x + blocks.width).toBeLessThanOrEqual(right.x);
+      const fret = await page.locator('#fretboard').evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
+      expect(fret.scroll, `${width} px Griffbrett`).toBeLessThanOrEqual(fret.client + 1);
     }
+    // eine Spalte schmaler: Schubladen, nur die linke bleibt offen
+    await page.setViewportSize({ width: 1199, height: 900 });
+    await expectSides(page, true, false);
+    expect(await aside(page, 'left').evaluate((el) => getComputedStyle(el).position)).toBe('fixed');
+    await expect(page.locator('.play-head')).toHaveAttribute('inert', '');
   });
 });
