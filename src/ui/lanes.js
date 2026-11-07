@@ -1,0 +1,75 @@
+// Verlauf: vier Spuren über alle Takte, ohne Text (Beschriftung sind die Schicht-Knöpfe daneben).
+import { fitCanvas, cssColors } from './canvas.js';
+
+const LANES = ['drums', 'bass', 'chords', 'pad'];
+const SECTION = 8; // Abschnittsgrenze alle 8 Takte
+const summaries = new WeakMap();
+
+// Je Takt: Startzeit, Anzahl Ereignisse je Schicht, Fill-Marker. Einmal je Ereignisliste.
+function summarize(events) {
+  const starts = [];
+  const fills = [];
+  const counts = Object.fromEntries(LANES.map((l) => [l, []]));
+  for (const e of events) {
+    if (e.type === 'chord') starts[e.bar] = e.t;
+    else if (e.type === 'marker') fills.push(e.bar);
+    else if (counts[e.layer]) counts[e.layer][e.bar] = (counts[e.layer][e.bar] ?? 0) + 1;
+  }
+  const max = Object.fromEntries(LANES.map((l) => [l, Math.max(1, ...counts[l].filter(Boolean))]));
+  return { starts, fills, counts, max };
+}
+
+/**
+ * Zeichnet die Spuren; der Zeiger steht am Anfang des Takts, in dem positionSec liegt (Liedzeit wie in events).
+ * layers (optional): { drums: false, ... } dimmt stumme Spuren.
+ */
+export function drawLanes(canvas, events, positionSec, layers = {}) {
+  const fit = fitCanvas(canvas);
+  if (!fit) return;
+  const { ctx, width, height } = fit;
+  let s = summaries.get(events);
+  if (!s) summaries.set(events, (s = summarize(events)));
+  const bars = s.starts.length;
+  if (!bars) return;
+  const c = cssColors(canvas);
+  const bw = width / bars;
+  const gap = bw > 3 ? 1 : 0;
+  const lh = height / LANES.length;
+
+  LANES.forEach((lane, i) => {
+    const y = i * lh;
+    const dim = layers[lane] === false ? 0.3 : 1;
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = c.staff;
+    ctx.fillRect(0, y + 4, width, lh - 8);
+    ctx.fillStyle = c.ink;
+    for (let b = 0; b < bars; b++) {
+      const n = s.counts[lane][b];
+      if (!n) continue;
+      // Block: Schicht spielt in diesem Takt; dunkler Sockel: Dichte relativ zum vollsten Takt der Schicht
+      ctx.globalAlpha = 0.25 * dim;
+      ctx.fillRect(b * bw, y + 8, bw - gap, lh - 16);
+      const dh = ((lh - 16) * n) / s.max[lane];
+      ctx.globalAlpha = 0.8 * dim;
+      ctx.fillRect(b * bw, y + lh - 8 - dh, bw - gap, dh);
+    }
+  });
+
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = c.inkSoft;
+  for (let b = SECTION; b < bars; b += SECTION) ctx.fillRect(Math.round(b * bw) - 0.5, 0, 1, height);
+  // Fill: kleines Dreieck über dem Ende des Takts
+  ctx.fillStyle = c.ink;
+  for (const b of s.fills) {
+    const x = (b + 1) * bw;
+    ctx.beginPath();
+    ctx.moveTo(x - 6, 0);
+    ctx.lineTo(x, 0);
+    ctx.lineTo(x, 6);
+    ctx.fill();
+  }
+
+  let bar = 0;
+  while (bar + 1 < bars && s.starts[bar + 1] <= positionSec) bar++;
+  ctx.fillRect(bar * bw, 0, 2, height);
+}

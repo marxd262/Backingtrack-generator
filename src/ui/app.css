@@ -27,7 +27,7 @@ body {
     transparent 40px 49px, var(--staff) 49px 50px, transparent 50px 110px);
 }
 
-button, input, output { font: inherit; color: inherit; }
+button, input, output, select { font: inherit; color: inherit; }
 button { cursor: pointer; }
 
 :focus-visible {
@@ -208,6 +208,86 @@ main {
 .tempo-row output { display: inline-block; min-width: 3ch; text-align: right; font-variant-numeric: tabular-nums; }
 
 .actions { margin-top: 1.5em; }
+
+.actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+
+/* --- Feintuning --- */
+.tuning[hidden] { display: none; }
+.tuning {
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--ink);
+  text-align: left;
+}
+.tuning-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.tuning-head h2 { margin: 0; font-size: 1.5rem; font-weight: normal; font-style: italic; }
+.tuning .go { margin-top: 12px; font-size: 1.25rem; }
+.label {
+  margin: 1.4em 0 6px;
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+  font-weight: normal;
+}
+.tuning .message { margin: 6px 0 0; }
+
+/* Im Feintuning ist der Akkord im Rad das farbige Objekt; Los der Startseite tritt zurück, solange beide sichtbar sind */
+.tuning-open .now-chord { display: none; }
+.tuning-open .now { min-height: 0; }
+.tuning-open .start .go:not(.playing) { border-color: var(--ink); background: transparent; color: var(--ink); }
+
+.lanes { display: flex; gap: 8px; }
+.lane-buttons { display: grid; grid-template-rows: repeat(4, 48px); align-items: center; }
+.lane-buttons .chip { min-height: var(--target); }
+#lanes { display: block; flex: 1; min-width: 0; height: 192px; }
+
+.settings {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: 12px;
+}
+.settings .label { margin: 0.6em 0; }
+select {
+  justify-self: start;
+  min-height: var(--target);
+  padding: 0 10px;
+  border: 1px solid var(--ink);
+  border-radius: 4px;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.wheel {
+  display: block;
+  width: min(100%, 24rem);
+  height: auto;
+  aspect-ratio: 1;
+  margin: 0 auto 10px;
+}
+#progression [aria-current="true"] { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 0.2em; }
+
+.tag-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  padding: 7px 0;
+  border-top: 1px solid rgba(42, 38, 34, 0.2);
+}
+.tag-label { flex: 0 0 7rem; margin: 0; font-style: italic; }
+.tag-group .chips { flex: 1 1 14rem; }
+
+/* breit: Startseite links, Feintuning rechts */
+@media (min-width: 64rem) {
+  .tuning-open main {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr);
+    gap: 40px;
+    align-items: start;
+    max-width: 80rem;
+  }
+  .tuning-open .tuning { margin-top: 6vh; padding: 0 0 0 40px; border-top: 0; border-left: 1px solid var(--ink); }
+}
 
 @media (prefers-reduced-motion: no-preference) {
   .go, .chip, .card { transition: background-color 0.15s, color 0.15s, border-color 0.15s; }

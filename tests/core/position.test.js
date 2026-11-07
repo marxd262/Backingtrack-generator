@@ -15,3 +15,8 @@ test('positionLabel zählt 1-basiert und beginnt nach jedem Durchlauf neu', () =
   setLanguage('en');
   assert.equal(positionLabel(4, 4), 'Bar 1 of 4');
 });
+
+test('positionLabel ohne gültige Länge zeigt nichts statt NaN', () => {
+  setLanguage('de');
+  for (const length of [0, undefined, -4, NaN]) assert.equal(positionLabel(3, length), '', String(length));
+});

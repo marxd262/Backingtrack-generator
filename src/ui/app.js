@@ -1,60 +1,12 @@
-// Startseite: ein Zustandsobjekt, render() schreibt daraus alle Texte und Attribute neu.
+// Startseite: ein Zustandsobjekt (state.js), render() schreibt daraus alle Texte und Attribute neu.
 import { play, STYLE_PRESETS, validateTrack, t, setLanguage } from '../index.js';
-import { detectLanguage } from '../i18n/index.js';
-import { progressionFor } from '../core/progressions.js';
 import { SCALE_NAMES } from '../core/music.js';
 import { positionLabel } from './position.js';
+import { $, ROOTS, SCALE_MODE, LAYERS, ALL_LAYERS, state, chordName, rollVariant, preset, pressed, saveLang, deriveBars, applyStyle } from './state.js';
+import { initTuning } from './tuning.js';
 
-const ROOTS = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
-// Skala ist nur Oberflächen-Zustand; der Generator kennt nur den Modus
-const SCALE_MODE = { minorPentatonic: 'minor', majorPentatonic: 'major', blues: 'minor', dorian: 'minor' };
-const SYMBOLS = { maj: '', min: 'm', dim: 'dim' };
 // Dekoratives 16tel-Bild je Stil, 1 = Schlag
 const RHYTHMS = { funk: '1001001010100110', psych: '1010101010101010', dreamy: '1000000010000000' };
-const STORAGE_KEY = 'backingtrack.lang';
-
-const $ = (id) => document.getElementById(id);
-const chordName = (c) => c.root + SYMBOLS[c.quality];
-const rollVariant = () => (crypto.getRandomValues(new Uint32Array(1))[0] % 9999) + 1;
-const preset = (id) => STYLE_PRESETS.find((p) => p.id === id);
-
-function readLang() {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved === 'de' || saved === 'en') return saved;
-  } catch { /* Speicher gesperrt: Browsersprache */ }
-  return detectLanguage(navigator.language);
-}
-
-function saveLang(lang) {
-  try {
-    localStorage.setItem(STORAGE_KEY, lang);
-  } catch { /* ohne Speicher gilt die Wahl nur bis zum Neuladen */ }
-}
-
-const funk = preset('funk');
-const state = {
-  track: {
-    key: { root: 'A', mode: 'minor' },
-    bpm: funk.bpm,
-    bars: [],
-    tags: structuredClone(funk.tags),
-    layers: { drums: true, bass: true, chords: true, pad: true },
-    seed: rollVariant(), // Variantennummer
-    length: 96,
-  },
-  scale: 'minorPentatonic',
-  style: 'funk',
-  playing: false,
-  lang: readLang(),
-  tuningOpen: false, // Feintuning-Ansicht (Task 9b)
-  current: null, // { bar, chord } aus onBar
-  errors: [], // [{ code, params }], übersetzt erst in render()
-};
-
-const deriveBars = () => {
-  state.track.bars = progressionFor(state.track.key, state.track.seed).map((chord) => ({ chord, beats: 4 }));
-};
 
 // --- Wiedergabe: ein AudioContext für alle Starts, nie zwei Player gleichzeitig ---
 let ctx = null;
@@ -65,13 +17,17 @@ function start() {
   try {
     ctx ??= new AudioContext(); // nur aus einem Klick heraus aufgerufen
     if (ctx.state === 'suspended') ctx.resume().catch(() => {});
-    player = play(ctx, state.track, {
+    // alle Schichten erzeugen und stumme per setLayer leise schalten, damit Einschalten live ohne Neustart klingt
+    player = play(ctx, { ...state.track, layers: ALL_LAYERS }, {
       loops: Infinity, // läuft bis Stopp
       onBar: (b) => { state.current = b; render(); },
       onEnd: () => { stop(); render(); },
     });
+    for (const name of LAYERS) if (!state.track.layers[name]) player.setLayer(name, false);
     state.playing = true;
   } catch {
+    player?.stop();
+    player = null;
     const found = validateTrack(state.track);
     state.errors = found.length ? found : [{ code: 'playFailed', params: {} }];
   }
@@ -120,10 +76,7 @@ for (const scale of SCALE_NAMES) {
 
 for (const { id } of STYLE_PRESETS) {
   const card = chip($('style-cards'), { style: id }, () => {
-    const p = preset(id);
-    state.style = id;
-    state.track.bpm = p.bpm;
-    state.track.tags = structuredClone(p.tags);
+    applyStyle(id);
     restartIfPlaying();
     $('style-pop').hidePopover();
   });
@@ -132,17 +85,22 @@ for (const { id } of STYLE_PRESETS) {
   for (const step of RHYTHMS[id]) card.lastChild.append(Object.assign(document.createElement('i'), { className: step === '1' ? 'on' : '' }));
 }
 
-$('tempo').addEventListener('input', (e) => {
-  state.track.bpm = Number(e.target.value);
-  player?.setTempo(state.track.bpm); // live, ohne Neustart
-  render();
-});
+// Tempo-Regler im Popover und im Feintuning teilen sich den Zustand
+for (const id of ['tempo', 'tuning-tempo']) {
+  $(id).addEventListener('input', (e) => {
+    state.track.bpm = Number(e.target.value);
+    player?.setTempo(state.track.bpm); // live, ohne Neustart
+    render();
+  });
+}
 
-$('go').addEventListener('click', () => {
-  if (state.playing) stop();
-  else start();
-  render();
-});
+for (const id of ['go', 'tuning-go']) {
+  $(id).addEventListener('click', () => {
+    if (state.playing) stop();
+    else start();
+    render();
+  });
+}
 
 $('new-variant').addEventListener('click', () => {
   state.track.seed = rollVariant();
@@ -150,6 +108,14 @@ $('new-variant').addEventListener('click', () => {
   restartIfPlaying();
   render();
 });
+
+function setTuning(open) {
+  state.tuningOpen = open;
+  render();
+  (open ? $('tuning-title') : $('tune-btn')).focus();
+}
+$('tune-btn').addEventListener('click', () => setTuning(!state.tuningOpen));
+$('back').addEventListener('click', () => setTuning(false));
 
 for (const b of document.querySelectorAll('[data-lang]')) {
   b.addEventListener('click', () => {
@@ -171,11 +137,11 @@ for (const button of document.querySelectorAll('[popovertarget]')) {
   });
 }
 
-// --- Darstellung ---
-const pressed = (el, on) => el.setAttribute('aria-pressed', String(on));
+const renderTuning = initTuning({ render: () => render(), restartIfPlaying, player: () => player });
 
+// --- Darstellung ---
 function render() {
-  const { track, scale, style, playing, lang, current, errors } = state;
+  const { track, scale, style, playing, lang, current, errors, tuningOpen } = state;
   setLanguage(lang);
   document.documentElement.lang = lang;
   document.title = t('ui.title');
@@ -204,12 +170,17 @@ function render() {
 
   $('variant').textContent = t('ui.variant', { n: track.seed });
   $('chords').textContent = track.bars.map((b) => chordName(b.chord)).join(' – ');
-  $('go').textContent = t(playing ? 'ui.stop' : 'ui.go');
-  $('go').classList.toggle('playing', playing);
+  for (const id of ['go', 'tuning-go']) {
+    $(id).textContent = t(playing ? 'ui.stop' : 'ui.go');
+    $(id).classList.toggle('playing', playing);
+  }
   $('now-chord').textContent = current ? chordName(current.chord) : '';
   $('position').textContent = current ? positionLabel(current.bar, track.length) : '';
   $('message').textContent = errors.map((e) => t(`err.${e.code}`, e.params)).join(' ');
-  $('tuning').hidden = !state.tuningOpen;
+  $('tune-btn').setAttribute('aria-expanded', String(tuningOpen));
+  document.body.classList.toggle('tuning-open', tuningOpen);
+  $('tuning').hidden = !tuningOpen;
+  renderTuning();
 }
 
 deriveBars();
