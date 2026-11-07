@@ -17,6 +17,23 @@ export const DEFAULT_TIMBRE = deepFreeze({
 
 const clamp01 = (x) => Math.min(1, Math.max(0, x));
 
+/**
+ * Füllt ein unvollständiges oder ungültiges Klangmodell Feld für Feld aus DEFAULT_TIMBRE auf (neue Kopie).
+ * Nur endliche Zahlen zählen, begrenzt auf [0,1]; unbekannte Gruppen und Felder fallen weg.
+ */
+export function completeTimbre(timbre) {
+  const result = structuredClone(DEFAULT_TIMBRE);
+  // Arrays zählen nicht als Objekt, sonst würde ihr `length` zu chords.length
+  const isRecord = (x) => typeof x === 'object' && x !== null && !Array.isArray(x);
+  if (!isRecord(timbre)) return result;
+  for (const [group, fields] of Object.entries(result)) {
+    const given = timbre[group];
+    if (!isRecord(given)) continue;
+    for (const key of Object.keys(fields)) if (Number.isFinite(given[key])) fields[key] = clamp01(given[key]);
+  }
+  return result;
+}
+
 /** Gleiche Eingaben wie resolveTags; Schlagworte addieren sich, Ergebnis ist eine neue, begrenzte Kopie. */
 export function resolveTimbre(tags) {
   const timbre = structuredClone(DEFAULT_TIMBRE);

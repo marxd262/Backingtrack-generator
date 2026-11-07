@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createRng } from '../../src/core/rng.js';
 import { TAG_CATEGORIES, resolveTags } from '../../src/core/tags.js';
 import { TIMBRE_EFFECTS } from '../../src/core/timbre-effects.js';
-import { DEFAULT_TIMBRE, resolveTimbre } from '../../src/core/timbre.js';
+import { DEFAULT_TIMBRE, completeTimbre, resolveTimbre } from '../../src/core/timbre.js';
 
 const EPS = 1e-9;
 const near = (a, b, msg) => assert.ok(Math.abs(a - b) < EPS, `${msg ?? ''} ${a} != ${b}`);
@@ -95,4 +95,41 @@ test('Klang-Schlagworte der neuen Kategorien ändern die Muster-Parameter nicht'
     assert.equal(c.tags.length, 5);
     assert.deepEqual(resolveTags({ [id]: c.tags }, createRng(1)), base);
   }
+});
+
+test('completeTimbre: ungültige Eingaben ergeben die Standardwerte als neue Kopie', () => {
+  for (const input of [null, undefined, 0, 0.5, 'bass', [], [1, 2], true]) {
+    const t = completeTimbre(input);
+    assert.deepEqual(t, DEFAULT_TIMBRE, String(input));
+    assert.notEqual(t, DEFAULT_TIMBRE);
+    assert.ok(!Object.isFrozen(t) && !Object.isFrozen(t.bass));
+  }
+});
+
+test('completeTimbre: füllt Feld für Feld auf, begrenzt, ignoriert Unbekanntes und Nicht-Zahlen', () => {
+  const input = {
+    bass: { fuzz: 0.6, cutoff: 2, pluck: -1, sub: NaN, resonance: Infinity, roundness: '0.9', extra: 0.3 },
+    drums: null,
+    chords: [0.1],
+    pad: { attack: 0.2, lfoSpeed: -Infinity },
+    nope: { x: 1 },
+  };
+  const copy = structuredClone(input);
+  const t = completeTimbre(input);
+  assert.deepEqual(input, copy);
+  const expected = structuredClone(DEFAULT_TIMBRE);
+  expected.bass.fuzz = 0.6;
+  expected.bass.cutoff = 1;
+  expected.bass.pluck = 0;
+  expected.pad.attack = 0.2;
+  assert.deepEqual(t, expected);
+});
+
+test('completeTimbre: vollständiges Klangmodell bleibt gleich, Ergebnis ist eine eigene Kopie', () => {
+  const full = resolveTimbre({ bassSound: ['fuzz'], mood: ['dark'] });
+  const t = completeTimbre(full);
+  assert.deepEqual(t, full);
+  assert.notEqual(t, full);
+  assert.notEqual(t.bass, full.bass);
+  assert.deepEqual(completeTimbre(DEFAULT_TIMBRE), DEFAULT_TIMBRE);
 });

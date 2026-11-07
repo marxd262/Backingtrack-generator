@@ -1,6 +1,7 @@
 // Instrumente (Synthese) hinter der Instrument-Schnittstelle. Klangerzeuger aus backing-demo.html übernommen,
 // Rauschen aus dem Seed statt Math.random, damit Renders reproduzierbar sind. AudioContext nur von außen.
 import { createRng } from '../core/rng.js';
+import { DEFAULT_TIMBRE, completeTimbre } from '../core/timbre.js';
 
 // Schichtpegel und Summe, aus Messungen mit tests/e2e/levels.spec.js angeglichen (Messwerte dort im Kommentar)
 const TRIM = { drums: 0.65, bass: 0.24, chords: 1, pad: 0.8 };
@@ -39,7 +40,8 @@ function osc(ctx, type, freq, detune, dest, t, end) {
   return o;
 }
 
-function drumVoices(ctx, noise) {
+// Die Stimmen bekommen ihre Gruppe des Klangmodells (timbre); noch unbenutzt, der Klang ist der bisherige.
+function drumVoices(ctx, noise, timbre) {
   const kick = (out, t, v) => {
     const o = ctx.createOscillator(), a = ctx.createGain();
     o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(46, t + 0.12);
@@ -72,7 +74,7 @@ function drumVoices(ctx, noise) {
 }
 
 // Bass: zwei leicht verstimmte Sägezähne mit Tiefpass-Zupfhüllkurve, Sinus als Fundament
-function bassNote(ctx, out, t, e) {
+function bassNote(ctx, out, t, e, timbre) {
   const f = hz(e.midi), end = t + e.dur + 0.1;
   const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.Q.value = 4;
   lp.frequency.setValueAtTime(2200, t); lp.frequency.exponentialRampToValueAtTime(320, t + 0.15);
@@ -84,7 +86,7 @@ function bassNote(ctx, out, t, e) {
 }
 
 // Akkorde: kurzer Zupf/Stab je Ton (der Strom enthält Stabs oder Arpeggio-Töne)
-function chordNote(ctx, out, t, e) {
+function chordNote(ctx, out, t, e, timbre) {
   const f = hz(e.midi), end = t + e.dur + 0.3;
   const lp = ctx.createBiquadFilter(); lp.type = 'lowpass';
   lp.frequency.setValueAtTime(3600, t); lp.frequency.exponentialRampToValueAtTime(900, t + 0.25);
@@ -95,7 +97,7 @@ function chordNote(ctx, out, t, e) {
 }
 
 // Pad: langsamer Einsatz, drei verstimmte Sägezähne durch Tiefpass mit langsamem LFO
-function padNote(ctx, out, t, e) {
+function padNote(ctx, out, t, e, timbre) {
   const end = t + e.dur + 1;
   const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.Q.value = 0.8; lp.frequency.value = 1100;
   const depth = ctx.createGain(); depth.gain.value = 450;
@@ -108,8 +110,10 @@ function padNote(ctx, out, t, e) {
 /**
  * Baut die Instrumente und die Summenkette (Trims, Master, Echo auf Akkorde/Pad, Hall, Begrenzer).
  * `output` verbindet der Aufrufer mit ctx.destination. `trigger(event, when)` mit when in ctx-Zeit.
+ * `timbre` (Klangmodell, siehe core/timbre.js) wird mit DEFAULT_TIMBRE aufgefüllt; ungültig zählt wie fehlend.
  */
-export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true } = {}) {
+export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, timbre = DEFAULT_TIMBRE } = {}) {
+  const sound = completeTimbre(timbre);
   const rng = createRng(1);
   const noise = noiseBuffer(ctx, rng.fork('noise'), 1);
 
@@ -136,12 +140,12 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true }
   delay.connect(tone).connect(fb).connect(delay);
   tone.connect(echoWet).connect(master);
 
-  const drums = drumVoices(ctx, noise);
+  const drums = drumVoices(ctx, noise, sound.drums);
   const play = {
     drums: (out, t, e) => e.type === 'hit' && drums[e.name]?.(out, t, e.vel),
-    bass: (out, t, e) => e.type === 'note' && bassNote(ctx, out, t, e),
-    chords: (out, t, e) => e.type === 'note' && chordNote(ctx, out, t, e),
-    pad: (out, t, e) => e.type === 'note' && padNote(ctx, out, t, e),
+    bass: (out, t, e) => e.type === 'note' && bassNote(ctx, out, t, e, sound.bass),
+    chords: (out, t, e) => e.type === 'note' && chordNote(ctx, out, t, e, sound.chords),
+    pad: (out, t, e) => e.type === 'note' && padNote(ctx, out, t, e, sound.pad),
   };
 
   const layers = {};

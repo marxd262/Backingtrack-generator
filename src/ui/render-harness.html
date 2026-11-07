@@ -6,7 +6,7 @@
 <link rel="icon" href="data:,">
 </head>
 <body>
-<!-- Entwicklerseite (nicht Teil der Oberfläche): window.__render für Pegeltests und Hörprobe der drei Stile -->
+<!-- Entwicklerseite (nicht Teil der Oberfläche): window.__render/__compare für Pegel- und Klangtests und Hörprobe der drei Stile -->
 <h1>Hörprobe</h1>
 <p>
   <button data-style="funk">Funk</button>
@@ -15,11 +15,12 @@
   <button id="stop">Stopp</button>
 </p>
 <script type="module">
-import { renderOffline } from '../audio/render.js';
+import { compareRenders, renderOffline } from '../audio/render.js';
 import { play } from '../audio/play.js';
 import { STYLE_PRESETS } from '../core/tags.js';
 
 window.__render = renderOffline;
+window.__compare = compareRenders;
 
 let ctx = null;
 let playback = null;

@@ -1,6 +1,7 @@
 // Wiedergabe-Schnittstelle: play() in echter Zeit auf der Harness-Seite (schnelle Tempi, Toleranzen).
 import { test, expect } from '@playwright/test';
 import { STYLE_PRESETS } from '../../src/core/tags.js';
+import { resolveTimbre } from '../../src/core/timbre.js';
 
 const CHORDS = [['A', 'min'], ['A', 'min'], ['D', 'min'], ['E', 'maj']];
 // Standardtrack Am Am Dm E, 4 Schläge je Takt; bei bpm 240 dauert ein Takt 1 s
@@ -135,7 +136,7 @@ test('nach stop() mitten im Track keine Aufrufe mehr, kein onEnd, doppeltes stop
     await ctx.close();
     return { atStop, later, factory: spy.factory };
   }, track());
-  expect(r.factory).toEqual([{ bpm: 240 }]);
+  expect(r.factory).toEqual([{ bpm: 240, timbre: resolveTimbre(track().tags) }]);
   expect(r.atStop.bar).toBe(2);
   expect(r.atStop.event).toBeGreaterThan(0);
   expect(r.atStop.trigger).toBeGreaterThan(0);
@@ -266,6 +267,78 @@ test('setTempo erreicht setTempo der Instrumente (Echo), fehlende Methode ist ha
     return { tempos, rangeError, plainError, realType };
   }, track());
   expect(r).toEqual({ tempos: [120, 60], rangeError: 'RangeError', plainError: null, realType: 'function' });
+});
+
+// Standard-Klangmodell als Literal (nicht aus src/core gelesen), damit der Test DEFAULT_TIMBRE mitprüft
+const DEFAULT_SOUND = {
+  drums: { kickPunch: 0.5, kickLength: 0.5, snareTone: 0.5, snareSnap: 0.5, hatBright: 0.5, hatLength: 0.5, room: 0 },
+  bass: { sub: 0, fuzz: 0, pluck: 0.5, cutoff: 0.5, resonance: 0.5, roundness: 0 },
+  chords: { brightness: 0.5, length: 0.5, chorus: 0, tremolo: 0 },
+  pad: { attack: 0.5, cutoff: 0.5, lfoSpeed: 0.5, lfoDepth: 0.5, shimmer: 0, thickness: 0.5 },
+  master: { brightness: 0.5, echo: 0.5, reverb: 0.5 },
+};
+
+test('createInstruments erhält { bpm, timbre } aus den Schlagworten; Fabriken ohne timbre laufen weiter', async ({ page }) => {
+  const r = await page.evaluate(async (inputs) => {
+    const { play } = await import('/audio/play.js');
+    const ctx = new AudioContext();
+    const spy = window.__spy();
+    const handles = inputs.map((input) => play(ctx, input, { createInstruments: spy.create }));
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    for (const h of handles) h.stop();
+    await ctx.close();
+    return { factory: spy.factory, trigger: spy.trigger.length };
+  }, [track({ tags: { bassSound: ['fuzz'] } }), track({ tags: {} })]);
+  expect(r.factory).toEqual([
+    { bpm: 240, timbre: { ...DEFAULT_SOUND, bass: { ...DEFAULT_SOUND.bass, fuzz: 0.6 } } },
+    { bpm: 240, timbre: DEFAULT_SOUND },
+  ]);
+  // der Spion wertet timbre nicht aus und wird trotzdem bespielt
+  expect(r.trigger).toBeGreaterThan(0);
+});
+
+test('setLayer und setTempo mit Klang-Schlagworten: Spion und echte Instrumente', async ({ page }) => {
+  const r = await page.evaluate(async (input) => {
+    const { play } = await import('/audio/play.js');
+    const ctx = new AudioContext();
+    const spy = window.__spy();
+    const tempos = [];
+    const h = play(ctx, input, {
+      loops: Infinity,
+      createInstruments: (c, o) => ({ ...spy.create(c, o), setTempo: (bpm) => tempos.push(bpm) }),
+    });
+    h.setLayer('bass', false);
+    h.setTempo(120);
+    h.setLayer('bass', true);
+    h.stop();
+    // echte Instrumente (Standardfabrik) mit Klangmodell aus den Schlagworten; Echo-Verzögerung abgegriffen
+    const delays = [];
+    const createDelay = ctx.createDelay.bind(ctx);
+    ctx.createDelay = (...args) => {
+      const d = createDelay(...args);
+      delays.push(d);
+      return d;
+    };
+    const real = play(ctx, input, { loops: Infinity });
+    const echoStart = delays[0].delayTime.value;
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    real.setLayer('pad', false);
+    real.setTempo(90);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    const echoAfter = delays[0].delayTime.value;
+    real.setLayer('pad', true);
+    real.stop();
+    await ctx.close();
+    return { muted: spy.muted, tempos, timbre: spy.factory[0].timbre, delays: delays.length, echoStart, echoAfter };
+  }, track({ tags: { mood: ['psychedelic'], bassSound: ['fuzz'] } }));
+  expect(r.muted).toEqual([{ name: 'bass', muted: true }, { name: 'bass', muted: false }]);
+  expect(r.tempos).toEqual([120]);
+  expect(r.timbre.master.echo).toBeCloseTo(0.8, 9);
+  expect(r.timbre.bass.fuzz).toBeCloseTo(0.6, 9);
+  // punktierte Achtel: 240 bpm -> 0.1875 s, nach setTempo(90) -> 0.5 s (Zeitkonstante 50 ms, 400 ms gewartet)
+  expect(r.delays).toBe(1);
+  expect(r.echoStart).toBeCloseTo(0.1875, 6);
+  expect(Math.abs(r.echoAfter - 0.5)).toBeLessThan(0.01);
 });
 
 test('loops: 2 zählt Takte weiter und ruft onEnd einmal nach zwei Durchläufen', async ({ page }) => {

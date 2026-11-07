@@ -74,7 +74,7 @@ test('Funk: Summe clippt nicht, jede Schicht hörbar, Verhältnisse im Rahmen', 
 test('Funk ohne Bass: Bass exakt still, Rest hörbar', async ({ page }) => {
   test.setTimeout(120_000);
   const r = await render(page, track('funk', { layers: { drums: true, bass: false, chords: true, pad: true } }));
-  expect(r.perLayer.bass).toEqual({ peak: 0, rms: 0 });
+  expect(r.perLayer.bass).toEqual({ peak: 0, rms: 0, centroid: 0 });
   for (const layer of ['drums', 'chords', 'pad']) expect(r.perLayer[layer].rms, layer).toBeGreaterThan(0.005);
   expect(r.peak).toBeLessThan(0.9);
 });
@@ -133,3 +133,48 @@ test('gleiche Eingabe ergibt identischen Render', async ({ page }) => {
     same(b.perLayer[layer].rms, a.perLayer[layer].rms);
   }
 });
+
+// Basistrack ohne klangformende Schlagworte: Am Am Dm E, 100 bpm, Seed 1, 24 Takte, 16 s.
+// Basiswerte aufgenommen vor Einführung des Klangmodells (Commit b5467aa) über window.__render:
+// je Begrenzer-Einstellung Summe und jede Schicht allein { peak, rms }.
+const BASE_TRACK = {
+  key: { root: 'A', mode: 'minor' },
+  bpm: 100,
+  bars: [['A', 'min'], ['A', 'min'], ['D', 'min'], ['E', 'maj']].map(([root, quality]) => ({ chord: { root, quality }, beats: 4 })),
+  layers: { drums: true, bass: true, chords: true, pad: true },
+  seed: 1,
+  length: 24,
+  tags: { development: ['fullFromStart'] },
+};
+const BASELINE = {
+  limiter: {
+    sum: { peak: 0.6924842596054077, rms: 0.21844540437901838 },
+    drums: { peak: 0.6449302434921265, rms: 0.09300502722750302 },
+    bass: { peak: 0.40817004442214966, rms: 0.17921658262486775 },
+    chords: { peak: 0.6502371430397034, rms: 0.12017539105571275 },
+    pad: { peak: 0.34489092230796814, rms: 0.07873770485969132 },
+  },
+  pre: {
+    sum: { peak: 0.688706636428833, rms: 0.1318748606970193 },
+    drums: { peak: 0.40511777997016907, rms: 0.05009726748802992 },
+    bass: { peak: 0.21176163852214813, rms: 0.09297909625210916 },
+    chords: { peak: 0.43066513538360596, rms: 0.0683636709576798 },
+    pad: { peak: 0.17893196642398834, rms: 0.04085044316844499 },
+  },
+};
+
+for (const limiter of [true, false]) {
+  test(`Standardklang unverändert: Basiswerte (limiter ${limiter})`, async ({ page }) => {
+    test.setTimeout(120_000);
+    const r = await render(page, BASE_TRACK, 16, { limiter });
+    const base = BASELINE[limiter ? 'limiter' : 'pre'];
+    // relative Toleranz 1e-6: Chrome summiert Eingänge in wechselnder Reihenfolge (Abweichung ~1e-7 relativ gemessen)
+    const same = (actual, expected, msg) => expect(Math.abs(actual - expected), `${msg}: ${actual} vs ${expected}`).toBeLessThanOrEqual(1e-6 * expected);
+    same(r.peak, base.sum.peak, 'sum peak');
+    same(r.rms, base.sum.rms, 'sum rms');
+    for (const layer of LAYERS) {
+      same(r.perLayer[layer].peak, base[layer].peak, `${layer} peak`);
+      same(r.perLayer[layer].rms, base[layer].rms, `${layer} rms`);
+    }
+  });
+}
