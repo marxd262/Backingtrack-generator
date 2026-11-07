@@ -65,7 +65,8 @@
     </p>
   </section>
 
-  <!-- Spielseite: Kopfzeile, darunter Leiste "Klang", Blöcke (Visualisierungen) und Leiste "Akkorde"; Knöpfe baut tuning.js -->
+  <!-- Spielseite: Kopfzeile, darunter Blöcke (Visualisierungen), Leiste "Klang" und Leiste "Akkorde"; Knöpfe baut tuning.js.
+       DOM-Reihenfolge = Tab-Reihenfolge = schmale Ansicht; breit stellt das Raster die Leisten links und rechts daneben. -->
   <section class="play" id="play" aria-labelledby="play-title" hidden>
     <div class="play-head">
       <button type="button" class="chip" id="play-back" data-i18n="ui.toStart"></button>
@@ -79,23 +80,6 @@
     </div>
 
     <div class="stage">
-      <aside class="side" id="side-left" aria-labelledby="side-left-title">
-        <h3 class="side-title" id="side-left-title" data-i18n="ui.sidebarSound"></h3>
-        <h4 class="label" id="quick-title" data-i18n="ui.quickPick"></h4>
-        <div class="chips" id="quick-pick" role="group" aria-labelledby="quick-title"></div>
-        <div class="settings">
-          <label class="label" for="tuning-tempo" data-i18n="ui.tempo"></label>
-          <div class="tempo-row">
-            <input type="range" id="tuning-tempo" min="40" max="200" step="1">
-            <span><output id="tuning-tempo-out" for="tuning-tempo"></output> <span data-i18n="ui.bpm"></span></span>
-          </div>
-          <label class="label" for="length" data-i18n="ui.length"></label>
-          <select id="length"></select>
-        </div>
-        <h4 class="label" data-i18n="ui.tags"></h4>
-        <div id="tags"></div>
-      </aside>
-
       <div class="blocks" id="blocks">
         <section class="block" data-view="fretboard" aria-labelledby="view-fretboard-title">
           <h3 class="block-title" id="view-fretboard-title" data-i18n="view.fretboard"></h3>
@@ -112,6 +96,23 @@
           <canvas class="wheel" id="wheel" role="img" width="380" height="380" data-i18n-label="ui.wheelLabel"></canvas>
         </section>
       </div>
+
+      <aside class="side" id="side-left" aria-labelledby="side-left-title">
+        <h3 class="side-title" id="side-left-title" data-i18n="ui.sidebarSound"></h3>
+        <h4 class="label" id="quick-title" data-i18n="ui.quickPick"></h4>
+        <div class="chips" id="quick-pick" role="group" aria-labelledby="quick-title"></div>
+        <div class="settings">
+          <label class="label" for="tuning-tempo" data-i18n="ui.tempo"></label>
+          <div class="tempo-row">
+            <input type="range" id="tuning-tempo" min="40" max="200" step="1">
+            <span><output id="tuning-tempo-out" for="tuning-tempo"></output> <span data-i18n="ui.bpm"></span></span>
+          </div>
+          <label class="label" for="length" data-i18n="ui.length"></label>
+          <select id="length"></select>
+        </div>
+        <h4 class="label" data-i18n="ui.tags"></h4>
+        <div id="tags"></div>
+      </aside>
 
       <aside class="side" id="side-right" aria-labelledby="side-right-title">
         <h3 class="side-title" id="side-right-title" data-i18n="ui.sidebarChords"></h3>

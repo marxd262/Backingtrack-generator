@@ -212,6 +212,72 @@ test('Startfehler auf der Spielseite: Meldung dort sichtbar', async ({ page }) =
   await expect(page.locator('#message')).toHaveText('Die Wiedergabe konnte nicht starten.');
 });
 
+test('leere Meldung in der Kopfzeile: gerendert, aber ohne Platz (360 px, dort bricht sie in eine eigene Zeile)', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.AudioContext = class {
+      constructor() {
+        throw new Error('no audio');
+      }
+    };
+  });
+  await page.setViewportSize({ width: 360, height: 740 });
+  await page.reload();
+  await page.locator('#tune-btn').click();
+  const message = page.locator('#play-message');
+  // Live-Region bleibt im Barrierefreiheitsbaum: nicht display:none, sichtbar im Sinne von checkVisibility
+  expect(await message.evaluate((el) => ({
+    display: getComputedStyle(el).display !== 'none',
+    shown: el.checkVisibility({ visibilityProperty: true }),
+  }))).toEqual({ display: true, shown: true });
+  // Kopfzeile genauso hoch wie ganz ohne Meldung
+  const heights = await page.evaluate(() => {
+    const head = document.querySelector('.play-head');
+    const msg = document.querySelector('#play-message');
+    const empty = head.getBoundingClientRect().height;
+    msg.style.display = 'none';
+    const without = head.getBoundingClientRect().height;
+    msg.style.display = '';
+    return { empty, without };
+  });
+  expect(heights.empty).toBe(heights.without);
+  await playGo(page).click();
+  await expect(message).toHaveText(/\S/);
+  expect(await page.locator('.play-head').evaluate((el) => el.getBoundingClientRect().height)).toBeGreaterThan(heights.empty);
+});
+
+test('Reihenfolge: DOM wie Bildschirm (360, 800 px), breit Leisten links und rechts, Tab erreicht zuerst die Blöcke', async ({ page }) => {
+  await page.locator('#tune-btn').click();
+  const order = () => page.evaluate(() => {
+    const els = ['#blocks', '#side-left', '#side-right'].map((s) => document.querySelector(s));
+    const dom = [...els].sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1)).map((e) => e.id);
+    const visual = [...els].sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top).map((e) => e.id);
+    return { dom, visual };
+  });
+  for (const width of [360, 800]) {
+    await page.setViewportSize({ width, height: 740 });
+    const { dom, visual } = await order();
+    expect(visual, `${width} px`).toEqual(dom);
+  }
+  await page.setViewportSize({ width: 1280, height: 900 });
+  expect((await order()).dom).toEqual(['blocks', 'side-left', 'side-right']);
+  const [left, blocks, right] = await Promise.all(['#side-left', '#blocks', '#side-right'].map((id) => page.locator(id).boundingBox()));
+  expect(left.x + left.width).toBeLessThanOrEqual(blocks.x);
+  expect(blocks.x + blocks.width).toBeLessThanOrEqual(right.x);
+
+  // Tab vom Seitentitel: das erste Element in den Bereichen liegt in den Blöcken (Schicht-Knopf), nicht in "Klang"
+  await page.locator('#play-title').focus();
+  let region = null;
+  for (let i = 0; i < 10 && !region; i++) {
+    await page.keyboard.press('Tab');
+    region = await page.evaluate(() => {
+      const el = document.activeElement;
+      const r = ['blocks', 'side-left', 'side-right'].find((id) => document.getElementById(id).contains(el));
+      return r ? { id: r, layer: el.closest('#lane-buttons') !== null } : null;
+    });
+  }
+  expect(region).toEqual({ id: 'blocks', layer: true });
+});
+
 test('Spielseite auf Englisch: Kopfzeile und Überschriften übersetzt', async ({ page }) => {
   await page.locator('[data-lang="en"]').click();
   await page.locator('#tune-btn').click();

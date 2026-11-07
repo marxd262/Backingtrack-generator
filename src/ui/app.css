@@ -256,6 +256,8 @@ main {
 .play-head .position { min-width: 9em; }
 .play-head .go { min-width: 8rem; font-size: 1.25rem; }
 .play-head .message { flex-basis: 100%; margin: 0; }
+/* leer: aus dem Flex-Fluss (keine Zeile, kein Abstand), bleibt aber gerendert, damit die Live-Region angesagt wird */
+.play-head .message:empty { position: absolute; }
 .label {
   margin: 1.4em 0 6px;
   color: var(--ink-soft);
