@@ -19,6 +19,10 @@ const MODES = {
   major: { steps: [0, 2, 4, 5, 7, 9, 11], qualities: ['maj', 'min', 'min', 'maj', 'maj', 'min', 'dim'] },
 };
 
+// Namen für Beschriftungen (i18n) und deren Tests
+export const SCALE_NAMES = Object.keys(SCALES);
+export const MODE_NAMES = Object.keys(MODES);
+
 const LETTER_PC = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
 const SHARP_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const FLAT_NAMES = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
