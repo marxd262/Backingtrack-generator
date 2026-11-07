@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildEvents, chordTimeline, validateTrack, TAG_CATEGORIES, STYLE_PRESETS } from '../../src/index.js';
+import { createRng } from '../../src/core/rng.js';
 
 const bar = (root, quality, beats = 4) => ({ chord: { root, quality }, beats });
 // Format von Interactive Scales heute: keine tags, seed, layers, length
@@ -91,10 +92,56 @@ test('öffentliches validateTrack ist genau dann leer, wenn buildEvents nicht wi
   const tracks = [
     legacy(), { ...legacy(), length: 2 }, { ...legacy(), bpm: 5 }, { ...legacy(), length: 0 },
     { ...legacy(), bars: [] }, { ...legacy(), bars: [bar('F#', 'maj')] }, { ...legacy(), bars: [bar('A', 'min', 0)] }, {},
+    // Schlagworte: kein Objekt, unbekannte Kategorie oder Schlagwort, Liste statt String, Prototyp-Schlüssel
+    { ...legacy(), tags: 'driving' }, { ...legacy(), tags: [] }, { ...legacy(), tags: { nope: ['driving'] } },
+    { ...legacy(), tags: { drums: ['nope'] } }, { ...legacy(), tags: { drums: 'driving' } }, { ...legacy(), tags: { bass: ['driving'] } },
+    { ...legacy(), tags: JSON.parse('{"__proto__": ["driving"]}') }, { ...legacy(), tags: { constructor: ['driving'] } },
+    { ...legacy(), tags: null }, { ...legacy(), tags: { drums: ['driving'] } },
+    // Schläge: Obergrenze 16
+    { ...legacy(), bars: [bar('A', 'min', 17)] }, { ...legacy(), bars: [bar('A', 'min', 1e5)] },
+    { ...legacy(), bars: [bar('A', 'min', 3)] }, { ...legacy(), bars: [bar('A', 'min', 16)] },
   ];
   for (const track of tracks) {
-    let threw = false;
-    try { buildEvents(track); } catch { threw = true; }
-    assert.equal(validateTrack(track).length > 0, threw, JSON.stringify(track));
+    let threw = null;
+    try { buildEvents(track); } catch (err) { threw = err; }
+    assert.equal(validateTrack(track).length > 0, threw !== null, JSON.stringify(track));
+    // wer wirft, wirft mit den Codes
+    if (threw) assert.deepEqual(threw.errors, validateTrack(track), JSON.stringify(track));
   }
+});
+
+test('Stichprobe aus 200 seltsamen Tracks: buildEvents wirft genau dann, wenn validateTrack meldet, und dann mit errors', () => {
+  const rng = createRng(2026);
+  const pick = (list) => list[rng.int(0, list.length - 1)];
+  // meist gültige, aber ungewöhnliche Werte, selten ungültige: so wird beides oft geprüft
+  const odd = (valid, invalid) => (rng.next() < 0.1 ? pick(invalid) : pick(valid));
+  const all = Object.fromEntries(TAG_CATEGORIES.map((c) => [c.id, c.tags]));
+  const validTags = [undefined, null, {}, { drums: ['driving', 'loose'] }, { synths: ['arpeggio', 'warm'], development: ['buildsSlowly', 'fullFromStart'] },
+    { development: ['buildsSlowly'], rhythm: ['swing', 'straight'] }, { mood: [] }, all];
+  const badTags = ['x', [], { drums: 'driving' }, { nope: [] }, { mood: [7] }, JSON.parse('{"__proto__": []}')];
+  const chords = [['A', 'min'], ['D', 'min'], ['E', 'maj'], ['E', 'min'], ['F', 'maj'], ['G', 'maj'], ['B', 'dim'], ['C', 'maj']];
+  let accepted = 0;
+  for (let i = 0; i < 200; i++) {
+    const track = {
+      ...legacy(),
+      bars: Array.from({ length: rng.int(1, 5) }, () => {
+        const [root, quality] = odd(chords, [['F#', 'maj'], ['A', 'xyz']]);
+        return bar(root, quality, odd([1, 2, 3, 4, 5, 7, 12, 16], [0, 17, 2.5, 1e5]));
+      }),
+      tags: odd(validTags, badTags),
+      length: odd([undefined, 1, 3, 4, 24, 100, 512], [0, 513]),
+      bpm: odd([20, 40, 90, 237.5, 400], [401, NaN]),
+      seed: pick([undefined, 0, 1, 7, -1, 2 ** 32 + 5, 1.5]),
+    };
+    const errors = validateTrack(track);
+    let threw = null;
+    try { buildEvents(track); } catch (err) { threw = err; }
+    if (errors.length === 0) {
+      accepted++;
+      assert.equal(threw, null, `${JSON.stringify(track)}: ${threw?.message}`);
+    } else {
+      assert.deepEqual(threw?.errors, errors, JSON.stringify(track));
+    }
+  }
+  assert.ok(accepted >= 10 && accepted <= 190, `angenommen: ${accepted}`);
 });

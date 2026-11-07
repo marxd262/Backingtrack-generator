@@ -61,7 +61,8 @@ export default {
   'err.badBar': 'Bar {bar} does not contain a valid chord.',
   'err.chordNotInKey': 'The chord {chord} in bar {bar} does not belong to the key.',
   'err.unknownQuality': 'The chord {chord} in bar {bar} has an unknown chord type.',
-  'err.badBeats': 'Bar {bar} has an invalid number of beats: {beats}.',
+  'err.badBeats': 'Bar {bar} has an invalid number of beats: {beats}. Allowed are 1 to 16 beats.',
+  'err.badTags': 'The tags are invalid.',
   'err.playFailed': 'Playback could not start.',
 
   'ui.tonight': 'Tonight:',

@@ -1,18 +1,21 @@
 // Track-Format: Standardwerte und sprachfreie Validierung (nur Codes + Parameter).
 import { CHORD_QUALITIES, noteToPc, isNoteName, isValidKey, allowedChords } from './music.js';
+import { TAG_CATEGORIES } from './tags.js';
 
 const SYMBOLS = { maj: '', min: 'm', dim: 'dim' };
 
 /**
  * Alle Codes, die validateTrack melden kann; die Oberfläche übersetzt sie über `err.<code>`.
- * @type {readonly ('emptyBars'|'chordNotInKey'|'badBpm'|'unknownQuality'|'badBeats'|'badLength'|'badKey'|'badBar')[]}
+ * @type {readonly ('emptyBars'|'chordNotInKey'|'badBpm'|'unknownQuality'|'badBeats'|'badLength'|'badKey'|'badBar'|'badTags')[]}
  */
 export const VALIDATION_CODES = Object.freeze([
-  'emptyBars', 'chordNotInKey', 'badBpm', 'unknownQuality', 'badBeats', 'badLength', 'badKey', 'badBar',
+  'emptyBars', 'chordNotInKey', 'badBpm', 'unknownQuality', 'badBeats', 'badLength', 'badKey', 'badBar', 'badTags',
 ]);
 
 /** Obergrenze für `length` (Takte); schützt Arrangement und Audio vor riesigen Eingaben. */
 export const MAX_LENGTH = 512;
+/** Obergrenze für `beats` je Takt; mehr Schläge erzeugen unhandlich viele Ereignisse je Takt. */
+export const MAX_BEATS = 16;
 const MIN_BPM = 20;
 const MAX_BPM = 400;
 
@@ -33,9 +36,24 @@ export function normalizeTrack(track) {
   };
 }
 
+// tags: fehlend/null oder {Kategorie: [Schlagwort-IDs]}; meldet Kategorie und Schlagwort, soweit bekannt
+function checkTags(tags, add) {
+  if (tags == null) return;
+  if (!isObject(tags) || Array.isArray(tags)) {
+    add('badTags');
+    return;
+  }
+  for (const [category, list] of Object.entries(tags)) {
+    const known = TAG_CATEGORIES.find((c) => c.id === category);
+    if (!known || !Array.isArray(list)) add('badTags', { category });
+    else for (const tag of list) if (!known.tags.includes(tag)) add('badTags', { category, tag: show(tag) });
+  }
+}
+
 /**
- * Sammelt Meldungen, wirft nie (leer = gültig). bpm muss in [20, 400] liegen, length in [1, MAX_LENGTH].
- * @returns {{ code: 'emptyBars'|'chordNotInKey'|'badBpm'|'unknownQuality'|'badBeats'|'badLength'|'badKey'|'badBar',
+ * Sammelt Meldungen, wirft nie (leer = gültig). bpm muss in [20, 400] liegen, length in [1, MAX_LENGTH],
+ * beats in [1, MAX_BEATS].
+ * @returns {{ code: 'emptyBars'|'chordNotInKey'|'badBpm'|'unknownQuality'|'badBeats'|'badLength'|'badKey'|'badBar'|'badTags',
  *             params: Record<string, string|number> }[]}
  */
 export function validateTrack(track) {
@@ -47,6 +65,7 @@ export function validateTrack(track) {
   if (!isPosInt(t.length) || t.length > MAX_LENGTH) add('badLength', { length: show(t.length) });
   const keyOk = isValidKey(t.key);
   if (!keyOk) add('badKey');
+  checkTags(t.tags, add);
   if (!Array.isArray(t.bars) || t.bars.length === 0) {
     add('emptyBars');
     return errors;
@@ -65,7 +84,7 @@ export function validateTrack(track) {
     const { root, quality } = b.chord;
     const known = typeof quality === 'string' && Object.hasOwn(CHORD_QUALITIES, quality);
     const chord = root + (known ? (SYMBOLS[quality] ?? quality) : show(quality));
-    if (!isPosInt(b.beats)) add('badBeats', { bar, beats: show(b.beats) });
+    if (!isPosInt(b.beats) || b.beats > MAX_BEATS) add('badBeats', { bar, beats: show(b.beats) });
     if (!known) add('unknownQuality', { bar, chord });
     else if (allowed && !(isNoteName(root) && allowed.includes(`${noteToPc(root)}:${quality}`))) {
       add('chordNotInKey', { bar, chord });

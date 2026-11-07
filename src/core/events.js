@@ -190,7 +190,7 @@ export function buildEvents(input) {
       if (!sec.layers[layer]) continue;
       const v = section(params, rng);
       const last = sec.start + sec.bars - 1;
-      for (let i = sec.start; i <= last; i++) events.push(...play(bars[i], v, rng, params, sec.fillAtEnd && i === last));
+      for (let i = sec.start; i <= last; i++) for (const e of play(bars[i], v, rng, params, sec.fillAtEnd && i === last)) events.push(e);
     }
   }
   return events.sort((x, y) => x.t - y.t || (RANK[x.type] ?? 2) - (RANK[y.type] ?? 2));

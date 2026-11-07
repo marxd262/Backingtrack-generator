@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeTrack, validateTrack, VALIDATION_CODES, MAX_LENGTH } from '../../src/core/track.js';
+import { normalizeTrack, validateTrack, VALIDATION_CODES, MAX_LENGTH, MAX_BEATS } from '../../src/core/track.js';
 
 const bar = (root, quality = 'maj', beats = 4) => ({ chord: { root, quality }, beats });
 const am = (root, quality) => bar(root, quality);
@@ -107,10 +107,39 @@ test('validateTrack: unbekannter Akkord-Grundton ergibt chordNotInKey, ohne zu w
   assert.deepEqual(errs, [{ code: 'chordNotInKey', params: { bar: 1, chord: 'Hm' } }]);
 });
 
-test('VALIDATION_CODES listet alle acht Codes', () => {
+test('VALIDATION_CODES listet alle neun Codes', () => {
   assert.deepEqual([...VALIDATION_CODES].sort(),
-    ['badBar', 'badBeats', 'badBpm', 'badKey', 'badLength', 'chordNotInKey', 'emptyBars', 'unknownQuality'].sort());
-  assert.equal(VALIDATION_CODES.length, 8);
+    ['badBar', 'badBeats', 'badBpm', 'badKey', 'badLength', 'badTags', 'chordNotInKey', 'emptyBars', 'unknownQuality'].sort());
+  assert.equal(VALIDATION_CODES.length, 9);
+});
+
+test('validateTrack: beats höchstens MAX_BEATS (16)', () => {
+  assert.equal(MAX_BEATS, 16);
+  for (const beats of [1, 3, 16]) assert.deepEqual(codes({ ...good(), bars: [bar('A', 'min', beats)] }), [], String(beats));
+  for (const beats of [17, 1e4, 1e5]) {
+    assert.deepEqual(validateTrack({ ...good(), bars: [bar('A', 'min', beats)] }), [{ code: 'badBeats', params: { bar: 1, beats } }]);
+  }
+});
+
+test('validateTrack: badTags mit Kategorie und Schlagwort, soweit bekannt', () => {
+  const tagErrors = (tags) => validateTrack({ ...good(), tags });
+  for (const tags of ['driving', 5, true, [], [['driving']]]) assert.deepEqual(tagErrors(tags), [{ code: 'badTags', params: {} }], JSON.stringify(tags));
+  assert.deepEqual(tagErrors({ nope: ['driving'] }), [{ code: 'badTags', params: { category: 'nope' } }]);
+  assert.deepEqual(tagErrors({ drums: 'driving' }), [{ code: 'badTags', params: { category: 'drums' } }]);
+  assert.deepEqual(tagErrors({ drums: null }), [{ code: 'badTags', params: { category: 'drums' } }]);
+  assert.deepEqual(tagErrors({ drums: ['driving', 'nope'] }), [{ code: 'badTags', params: { category: 'drums', tag: 'nope' } }]);
+  assert.deepEqual(tagErrors({ bass: ['driving'] }), [{ code: 'badTags', params: { category: 'bass', tag: 'driving' } }]);
+  assert.deepEqual(tagErrors({ drums: [5, null] }).map((e) => e.params.tag), [5, 'null']);
+  // Prototyp-Schlüssel als eigene Eigenschaften (so liefert sie JSON.parse)
+  const proto = JSON.parse('{"__proto__": ["driving"], "constructor": ["driving"], "toString": []}');
+  assert.deepEqual(tagErrors(proto).map((e) => e.params.category), ['__proto__', 'constructor', 'toString']);
+  assert.deepEqual(tagErrors({ drums: ['toString'] }), [{ code: 'badTags', params: { category: 'drums', tag: 'toString' } }]);
+});
+
+test('validateTrack: gültige oder fehlende Schlagworte melden nichts', () => {
+  for (const tags of [undefined, null, {}, { drums: [] }, { drums: ['driving', 'dry'], mood: [] }]) {
+    assert.deepEqual(validateTrack({ ...good(), tags }), [], JSON.stringify(tags));
+  }
 });
 
 test('validateTrack: kaputte Takte ergeben badBar statt Wurf', () => {

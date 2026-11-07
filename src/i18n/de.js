@@ -61,7 +61,8 @@ export default {
   'err.badBar': 'Takt {bar} enthält keinen gültigen Akkord.',
   'err.chordNotInKey': 'Der Akkord {chord} in Takt {bar} gehört nicht zur Tonart.',
   'err.unknownQuality': 'Der Akkord {chord} in Takt {bar} hat eine unbekannte Akkordart.',
-  'err.badBeats': 'Takt {bar} hat eine ungültige Schlagzahl: {beats}.',
+  'err.badBeats': 'Takt {bar} hat eine ungültige Schlagzahl: {beats}. Erlaubt sind 1 bis 16 Schläge.',
+  'err.badTags': 'Die Schlagworte sind ungültig.',
   'err.playFailed': 'Die Wiedergabe konnte nicht starten.',
 
   'ui.tonight': 'Heute Abend:',
