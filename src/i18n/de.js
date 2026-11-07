@@ -65,7 +65,7 @@ export default {
 
   'ui.tonight': 'Heute Abend:',
   'ui.keyScale': '{root}-{scale}',
-  'ui.styleIn': 'im',
+  'ui.styleIn': 'im Stil',
   'ui.atTempo': 'bei',
   'ui.bpm': 'bpm',
   'ui.go': 'Los',

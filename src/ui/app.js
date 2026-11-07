@@ -3,6 +3,7 @@ import { play, STYLE_PRESETS, validateTrack, t, setLanguage } from '../index.js'
 import { detectLanguage } from '../i18n/index.js';
 import { progressionFor } from '../core/progressions.js';
 import { SCALE_NAMES } from '../core/music.js';
+import { positionLabel } from './position.js';
 
 const ROOTS = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
 // Skala ist nur Oberflächen-Zustand; der Generator kennt nur den Modus
@@ -40,7 +41,7 @@ const state = {
     tags: structuredClone(funk.tags),
     layers: { drums: true, bass: true, chords: true, pad: true },
     seed: rollVariant(), // Variantennummer
-    length: 24,
+    length: 96,
   },
   scale: 'minorPentatonic',
   style: 'funk',
@@ -65,6 +66,7 @@ function start() {
     ctx ??= new AudioContext(); // nur aus einem Klick heraus aufgerufen
     if (ctx.state === 'suspended') ctx.resume().catch(() => {});
     player = play(ctx, state.track, {
+      loops: Infinity, // läuft bis Stopp
       onBar: (b) => { state.current = b; render(); },
       onEnd: () => { stop(); render(); },
     });
@@ -205,7 +207,7 @@ function render() {
   $('go').textContent = t(playing ? 'ui.stop' : 'ui.go');
   $('go').classList.toggle('playing', playing);
   $('now-chord').textContent = current ? chordName(current.chord) : '';
-  $('position').textContent = current ? t('ui.bar', { n: (current.bar % track.length) + 1, total: track.length }) : '';
+  $('position').textContent = current ? positionLabel(current.bar, track.length) : '';
   $('message').textContent = errors.map((e) => t(`err.${e.code}`, e.params)).join(' ');
   $('tuning').hidden = !state.tuningOpen;
 }

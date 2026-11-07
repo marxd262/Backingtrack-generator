@@ -73,7 +73,7 @@ test('Startsatz auf Deutsch, Feintuning-Bereich versteckt, kein AudioContext bei
   await expect(page.locator('#tonight')).toHaveText('Heute Abend:');
   const text = await normalized(sentence(page));
   for (const part of ['A-Moll-Pentatonik', 'Funk-Rock', '100']) expect(text).toContain(part);
-  expect(text).toBe('A-Moll-Pentatonik im Funk-Rock bei 100 bpm');
+  expect(text).toBe('A-Moll-Pentatonik im Stil Funk-Rock bei 100 bpm');
   await expect(go(page)).toHaveText('Los');
   await expect(page.locator('#variant')).toHaveText(/^Variante \d{1,4}$/);
   expect(await shownChords(page)).toHaveLength(4);
@@ -91,8 +91,8 @@ test('Los startet mit aktuellem Akkord und Taktzeile, Stopp hält an; ein AudioC
   await expect(now).toHaveText(/\S/, { timeout: BAR_TIMEOUT });
   expect(chords).toContain(await now.textContent());
   const position = page.locator('#position');
-  await expect(position).toHaveText(/^Takt 1 von 24$/, { timeout: BAR_TIMEOUT });
-  await expect(position).toHaveText(/^Takt 2 von 24$/, { timeout: BAR_TIMEOUT });
+  await expect(position).toHaveText(/^Takt 1 von 96$/, { timeout: BAR_TIMEOUT });
+  await expect(position).toHaveText(/^Takt 2 von 96$/, { timeout: BAR_TIMEOUT });
   await go(page).click();
   await expect(go(page)).toHaveText('Los');
   await expect(now).toHaveText('');
@@ -200,14 +200,14 @@ test('andere Variante ändert die Nummer und zeigt vier gültige Akkorde', async
 test('Tempo-Regler während der Wiedergabe: kein Neustart, kein Fehler', async ({ page }) => {
   await go(page).click();
   const position = page.locator('#position');
-  await expect(position).toHaveText('Takt 2 von 24', { timeout: BAR_TIMEOUT });
+  await expect(position).toHaveText('Takt 2 von 96', { timeout: BAR_TIMEOUT });
   await page.locator('#tempo-btn').click();
   await page.locator('#tempo').fill('160');
   await expect(page.locator('#tempo-out')).toHaveText('160');
   await expect(page.locator('#tempo-btn')).toHaveText('160 bpm');
   // ein Neustart würde die Taktzeile leeren und bei Takt 1 beginnen
-  expect(await position.textContent()).toMatch(/^Takt [2-9] von 24$/);
-  await expect(position).toHaveText(/^Takt [3-9] von 24$/, { timeout: BAR_TIMEOUT });
+  expect(await position.textContent()).toMatch(/^Takt [2-9] von 96$/);
+  await expect(position).toHaveText(/^Takt [3-9] von 96$/, { timeout: BAR_TIMEOUT });
   await expect(go(page)).toHaveText('Stopp');
   await page.locator('#tempo').fill('40');
   await expect(page.locator('#tempo-btn')).toHaveText('40 bpm');
@@ -230,7 +230,7 @@ test('Sprachumschalter: Englisch ohne Neuladen, bleibt nach Neuladen, keine rohe
   await expect(page.locator('#variant')).toHaveText(/^Variant \d+$/);
   await checkNoRawKeys(page);
   await go(page).click();
-  await expect(page.locator('#position')).toHaveText(/^Bar \d+ of 24$/, { timeout: BAR_TIMEOUT });
+  await expect(page.locator('#position')).toHaveText(/^Bar \d+ of 96$/, { timeout: BAR_TIMEOUT });
   await go(page).click();
 
   await open(page);
@@ -240,6 +240,16 @@ test('Sprachumschalter: Englisch ohne Neuladen, bleibt nach Neuladen, keine rohe
   await expect(page.locator('#tonight')).toHaveText('Heute Abend:');
   await open(page);
   await expect(page.locator('html')).toHaveAttribute('lang', 'de');
+});
+
+test('genau eine h1 mit übersetztem Titel, nur für Screenreader sichtbar', async ({ page }) => {
+  for (const [lang, title] of [['de', 'Backingtrack-Generator'], ['en', 'Backing track generator']]) {
+    await page.getByRole('button', { name: new RegExp(`^${lang}`, 'i') }).click();
+    await expect(page.locator('h1')).toHaveCount(1);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(title);
+    // versteckt per Clip, nicht per display:none (sonst fehlt sie im Barrierefreiheitsbaum)
+    expect(await page.locator('h1').evaluate((el) => getComputedStyle(el).display)).not.toBe('none');
+  }
 });
 
 test.describe('englischer Browser', () => {
@@ -276,8 +286,15 @@ test('Startfehler stürzt nicht ab: Meldung in der gewählten Sprache', async ({
   await open(page);
   const message = page.locator('#message');
   await expect(message).toHaveAttribute('aria-live', 'polite');
+  // Live-Region muss schon leer gerendert sein, sonst kündigen Screenreader den ersten Text oft nicht an
+  await expect(message).toHaveText('');
+  expect(await message.evaluate((el) => {
+    const s = getComputedStyle(el);
+    return { display: s.display !== 'none', visibility: s.visibility, ancestorsShown: el.checkVisibility({ visibilityProperty: true }) };
+  })).toEqual({ display: true, visibility: 'visible', ancestorsShown: true });
   await go(page).click();
-  await expect(message).toHaveText(/\S/);
+  await expect(message).toHaveText('Die Wiedergabe konnte nicht starten.');
+  await expect(message).toBeVisible();
   await expect(go(page)).toHaveText('Los');
   const german = await message.textContent();
   await page.getByRole('button', { name: /^EN/i }).click();
