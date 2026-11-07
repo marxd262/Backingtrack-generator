@@ -109,7 +109,7 @@ function padNote(ctx, out, t, e) {
  * Baut die Instrumente und die Summenkette (Trims, Master, Echo auf Akkorde/Pad, Hall, Begrenzer).
  * `output` verbindet der Aufrufer mit ctx.destination. `trigger(event, when)` mit when in ctx-Zeit.
  */
-export function createInstruments(ctx, { bpm = 100 } = {}) {
+export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true } = {}) {
   const rng = createRng(1);
   const noise = noiseBuffer(ctx, rng.fork('noise'), 1);
 
@@ -117,10 +117,13 @@ export function createInstruments(ctx, { bpm = 100 } = {}) {
   // Hall: Rauschen aus dem Seed, exponentiell abklingend (2 s), als Impulsantwort
   const reverb = ctx.createConvolver(); reverb.buffer = noiseBuffer(ctx, rng.fork('reverb'), 2, 2, 3);
   const reverbWet = ctx.createGain(); reverbWet.gain.value = REVERB_WET;
-  // Begrenzer: harte Kennlinie, kurze Ansprache; Chrome hebt automatisch nach, -10 dB ergeben gemessene Spitzen um 0,70
-  const limiter = ctx.createDynamicsCompressor();
-  limiter.threshold.value = -10; limiter.knee.value = 0; limiter.ratio.value = 20;
-  limiter.attack.value = 0.001; limiter.release.value = 0.1;
+  // Begrenzer: harte Kennlinie, kurze Ansprache; Chrome hebt automatisch nach, -10 dB ergeben gemessene Spitzen um 0,70.
+  // limiter: false (nur für Pegeltests) ersetzt ihn durch eine neutrale Summe, gemessen wird dann die Mischung davor.
+  const limiter = useLimiter ? ctx.createDynamicsCompressor() : ctx.createGain();
+  if (useLimiter) {
+    limiter.threshold.value = -10; limiter.knee.value = 0; limiter.ratio.value = 20;
+    limiter.attack.value = 0.001; limiter.release.value = 0.1;
+  }
   master.connect(limiter);
   master.connect(reverb).connect(reverbWet).connect(limiter);
 

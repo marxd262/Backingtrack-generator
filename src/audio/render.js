@@ -7,9 +7,9 @@ const OFFSET = 0.1; // erste Ereignisse bei 0,1 s
 const TAIL = 1; // Ausklang nach dem letzten Ereignis
 const LAYERS = ['drums', 'bass', 'chords', 'pad'];
 
-async function measure(events, bpm, seconds, solo) {
+async function measure(events, bpm, seconds, solo, limiter) {
   const ctx = new OfflineAudioContext(2, Math.ceil(SAMPLE_RATE * (OFFSET + seconds + TAIL)), SAMPLE_RATE);
-  const { output, layers } = createInstruments(ctx, { bpm });
+  const { output, layers } = createInstruments(ctx, { bpm, limiter });
   output.connect(ctx.destination);
   if (solo) for (const name of LAYERS) layers[name].setMuted(name !== solo);
   for (const e of events) if (e.t < seconds && e.layer) layers[e.layer].trigger(e, OFFSET + e.t);
@@ -22,11 +22,14 @@ async function measure(events, bpm, seconds, solo) {
   return { peak, rms: Math.sqrt(sum / d.length) };
 }
 
-/** Rendert die ersten `seconds` Sekunden: Summe und jede Schicht allein (andere stumm geschaltet). */
-export async function renderOffline(trackInput, seconds) {
+/**
+ * Rendert die ersten `seconds` Sekunden: Summe und jede Schicht allein (andere stumm geschaltet).
+ * `limiter: false` misst die Mischung vor dem Begrenzer.
+ */
+export async function renderOffline(trackInput, seconds, { limiter = true } = {}) {
   const events = buildEvents(trackInput);
   const { bpm } = trackInput;
   const perLayer = {};
-  for (const name of LAYERS) perLayer[name] = await measure(events, bpm, seconds, name);
-  return { ...(await measure(events, bpm, seconds)), perLayer };
+  for (const name of LAYERS) perLayer[name] = await measure(events, bpm, seconds, name, limiter);
+  return { ...(await measure(events, bpm, seconds, undefined, limiter)), perLayer };
 }

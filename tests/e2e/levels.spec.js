@@ -43,7 +43,7 @@ test.afterEach(() => {
   expect(problems).toEqual([]);
 });
 
-const render = (page, input, seconds = SECONDS) => page.evaluate(([i, s]) => window.__render(i, s), [input, seconds]);
+const render = (page, input, seconds = SECONDS, options) => page.evaluate(([i, s, o]) => window.__render(i, s, o), [input, seconds, options]);
 
 test('Seite erzeugt beim Laden keinen AudioContext', async ({ page }) => {
   expect(await page.evaluate(() => window.__audioContexts)).toBe(0);
@@ -87,6 +87,37 @@ for (const id of ['psych', 'dreamy']) {
     for (const layer of LAYERS) expect(r.perLayer[layer].rms, layer).toBeGreaterThan(0.005);
   });
 }
+
+// Vor dem Begrenzer (limiter: false), 18 s, Seed 1, fullFromStart, gemessen 2026-11-07:
+//   Summe Spitze: funk 0.736, psych 0.695, dreamy 0.691 (nach dem Begrenzer jeweils ~0.70)
+//   rms je Schicht / lauteste: funk 0.670 / 0.793 / 1 / 0.498, psych 0.614 / 1 / 0.682 / 0.532,
+//   dreamy 0.406 / 0.728 / 1 / 0.554 (drums / bass / chords / pad)
+//   Anteil Samples über der Begrenzer-Schwelle (-10 dB): funk 3.1 %, psych 2.3 %, dreamy 1.9 %; über 0.5: höchstens 0.18 %
+// Die Mischung selbst hat also Luft (Spitze unter -2.6 dBFS); der Begrenzer fängt nur Transienten.
+const PRE_PEAK_MAX = 0.85; // Abstand ~0.11 zur höchsten Messung, deutlich unter 1.0
+const PRE_RATIO_MIN = 0.35; // Abstand ~0.06 zum Minimum (dreamy drums 0.406)
+
+for (const id of ['funk', 'psych', 'dreamy']) {
+  test(`${id} vor dem Begrenzer: Summe mit Luft, Schichten im Verhältnis`, async ({ page }) => {
+    test.setTimeout(120_000);
+    const r = await render(page, track(id), SECONDS, { limiter: false });
+    expect(r.peak).toBeLessThan(PRE_PEAK_MAX);
+    const loudest = Math.max(...LAYERS.map((l) => r.perLayer[l].rms));
+    for (const layer of LAYERS) {
+      expect(r.perLayer[layer].rms / loudest, layer).toBeGreaterThanOrEqual(PRE_RATIO_MIN);
+      expect(r.perLayer[layer].peak, layer).toBeLessThan(PRE_PEAK_MAX);
+    }
+  });
+}
+
+test('limiter: false misst wirklich vor dem Begrenzer (ohne dessen Nachverstärkung)', async ({ page }) => {
+  test.setTimeout(120_000);
+  // gemessen funk 6 s: rms davor/danach ~0.63; mit Begrenzer wäre das Verhältnis 1
+  const pre = await render(page, track('funk'), 6, { limiter: false });
+  const post = await render(page, track('funk'), 6);
+  expect(pre.rms / post.rms).toBeLessThan(0.8);
+  for (const layer of LAYERS) expect(pre.perLayer[layer].rms / post.perLayer[layer].rms, layer).toBeLessThan(0.8);
+});
 
 test('gleiche Eingabe ergibt identischen Render', async ({ page }) => {
   test.setTimeout(120_000);
