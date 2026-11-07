@@ -95,6 +95,31 @@ const rawKeys = (page) => page.evaluate((source) => {
   return found;
 }, RAW_KEY.source);
 
+// Gegenprobe zur Suche nach rohen Schlüsseln: eingeschleuste Schlüssel in aria-label, Textknoten und SVG-Text werden gemeldet
+test.describe('Suche nach rohen Schlüsseln', () => {
+  test.use({ locale: 'de-DE' });
+
+  test('findet eingeschleuste Schlüssel in aria-label, Text und SVG-Text, danach wieder nichts', async ({ page }) => {
+    await openPlayPage(page);
+    expect(await rawKeys(page)).toEqual([]);
+    await page.evaluate(() => {
+      document.getElementById('play-back').setAttribute('aria-label', 'view.fretboard');
+      document.getElementById('blocks').append(Object.assign(document.createElement('p'), { id: 'raw-probe', textContent: 'view.lanes' }));
+      const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      text.id = 'raw-probe-svg';
+      text.textContent = 'ui.legendBoth';
+      document.querySelector('#fretboard svg').append(text);
+    });
+    expect((await rawKeys(page)).sort()).toEqual(['aria-label=view.fretboard', 'ui.legendBoth', 'view.lanes']);
+    await page.evaluate(() => {
+      document.getElementById('play-back').removeAttribute('aria-label');
+      document.getElementById('raw-probe').remove();
+      document.getElementById('raw-probe-svg').remove();
+    });
+    expect(await rawKeys(page)).toEqual([]);
+  });
+});
+
 for (const [locale, L] of Object.entries(TEXT)) {
   test.describe(locale, () => {
     test.use({ locale, reducedMotion: 'reduce' });

@@ -229,7 +229,9 @@ test('keine DOM-Schreibvorgänge im Griffbrett-Block über Takte ohne Akkordwech
     count('next').observe(document.getElementById('play-next'), all);
   });
   await playGo(page).click();
-  await expect(position(page)).toHaveText(/^Takt 3 von \d+$/, { timeout: 2 * BAR_TIMEOUT });
+  // irgendein Takt ab 3: die Markierung je Mutation macht das Auslesen unabhängig davon, welcher Takt gerade läuft
+  await expect.poll(async () => Number((await position(page).textContent()).match(/^Takt (\d+) von/)?.[1] ?? 0), { timeout: 2 * BAR_TIMEOUT })
+    .toBeGreaterThanOrEqual(3);
   const log = await page.evaluate(() => window.__fretMutations);
   const at = (bar) => log.filter((m) => m.bar === bar).map((m) => m.target);
   expect(at(''), 'Stand').toEqual([]);

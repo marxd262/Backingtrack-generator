@@ -123,6 +123,6 @@ export default {
   'ui.legendBoth': 'In both chords',
   'ui.legendOutside': 'Chord note outside the scale',
   'view.fretboard': 'Fretboard',
-  'view.lanes': 'Course',
+  'view.lanes': 'Timeline',
   'view.wheel': 'Chord wheel',
 };

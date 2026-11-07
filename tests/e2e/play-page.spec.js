@@ -317,7 +317,7 @@ test('Spielseite auf Englisch: Kopfzeile und Überschriften übersetzt', async (
   await expect(page.locator('#play-back')).toHaveText('To start page');
   await expect(page.locator('#play-title')).toHaveText('Play page');
   await expect(page.locator('#play-variant')).toHaveText(/^Variant \d+$/);
-  for (const name of ['Sound', 'Chords', 'Fretboard', 'Course', 'Chord wheel']) await expect(page.getByRole('heading', { name, exact: true })).toBeVisible();
+  for (const name of ['Sound', 'Chords', 'Fretboard', 'Timeline', 'Chord wheel']) await expect(page.getByRole('heading', { name, exact: true })).toBeVisible();
   await playGo(page).click();
   await page.locator('#play-back').click();
   await expect(page.locator('#to-play')).toHaveText('To play page');
