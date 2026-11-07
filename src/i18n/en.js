@@ -52,6 +52,7 @@ export default {
 
   'mode.minor': 'minor',
   'mode.major': 'major',
+  'mode.dorian': 'Dorian',
 
   'err.badBpm': 'The tempo {bpm} is invalid. Allowed range is 20 to 400 bpm.',
   'err.badLength': 'The length {length} is invalid. It must be a whole number of bars.',

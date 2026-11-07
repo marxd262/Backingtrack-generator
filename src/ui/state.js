@@ -5,7 +5,7 @@ import { progressionFor } from '../core/progressions.js';
 
 export const ROOTS = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
 // Skala ist nur Oberflächen-Zustand; der Generator kennt nur den Modus
-export const SCALE_MODE = { minorPentatonic: 'minor', majorPentatonic: 'major', blues: 'minor', dorian: 'minor' };
+export const SCALE_MODE = { minorPentatonic: 'minor', majorPentatonic: 'major', blues: 'minor', dorian: 'dorian' };
 export const LAYERS = ['drums', 'bass', 'chords', 'pad'];
 export const ALL_LAYERS = Object.fromEntries(LAYERS.map((l) => [l, true]));
 export const LENGTHS = [24, 48, 96, 192];

@@ -31,7 +31,7 @@ import {
 
 | Feld | Pflicht | Standard | Regel |
 | --- | --- | --- | --- |
-| `key` | ja | - | `root` ist ein Notenname (`C`, `F#`, `Bb`), `mode` ist `minor` oder `major` |
+| `key` | ja | - | `root` ist ein Notenname (`C`, `F#`, `Bb`), `mode` ist `minor`, `major` oder `dorian` |
 | `bpm` | ja | - | 20 bis 400 |
 | `bars` | ja | - | nicht leer; je Eintrag `chord: {root, quality}` und `beats` (ganze Zahl > 0) |
 | `length` | nein | `24` | Anzahl Takte, 1 bis 512; `bars` läuft im Kreis darüber |
@@ -43,7 +43,8 @@ import {
 Weitere Felder (`id`, `title`, `style` ...) stören nicht und werden ignoriert. Ein Track im alten Format von Interactive Scales (`{ id, title, key, bpm, bars }`) ist gültig.
 
 - Akkordarten: `maj`, `min`, `dim`. Akkordsymbole bleiben international (`B` bleibt `B`, nie das deutsche `H`).
-- Jeder Akkord muss zur Tonart gehören: diatonisch, in Moll zusätzlich die Dur-Dominante (`allowedChords(key)` aus `src/index.js`). Sonst meldet `validateTrack` `chordNotInKey`.
+- Jeder Akkord muss zur Tonart gehören: diatonisch, in Moll zusätzlich die Dur-Dominante (`allowedChords(key)` aus `src/index.js`). Sonst meldet `validateTrack` `chordNotInKey`. Dorisch hat keine Zusatzakkorde (A-Dorisch: `Am Bm C D Em F#dim G`).
+- `allowedChords` schreibt die Akkorde in der Vorzeichnung der Tonart (D-Moll: `Bb`, E-Moll: `F#dim`); ein Grundton mit `#` oder `b` behält sein Vorzeichen. Geprüft wird nach Tonhöhe, `A#` und `Bb` sind im Track gleichwertig.
 
 ## Schlagworte und Stile
 

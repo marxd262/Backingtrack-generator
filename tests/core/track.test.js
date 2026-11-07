@@ -127,11 +127,18 @@ test('validateTrack: fehlende oder kaputte Tonart ergibt badKey und keine Akkord
   const noKey = good();
   delete noKey.key;
   const keys = [undefined, null, 'A', 5, [], {}, { root: 'A' }, { mode: 'minor' }, { root: 'H', mode: 'minor' },
-    { root: ['A'], mode: 'minor' }, { root: 'A', mode: 'dorian' }, { root: 'A', mode: 'toString' }];
+    { root: ['A'], mode: 'minor' }, { root: 'A', mode: 'lydian' }, { root: 'A', mode: 'toString' }];
   for (const key of keys) {
     assert.deepEqual(codes({ ...good(), key, bars: [am('C#', 'maj')] }), ['badKey'], JSON.stringify(key));
   }
   assert.deepEqual(codes(noKey), ['badKey']);
+});
+
+test('validateTrack: dorische Tonart mit dorischen Akkorden ist gültig, Moll-Dominante nicht', () => {
+  const dorian = { ...good(), key: { root: 'A', mode: 'dorian' }, bars: [am('A', 'min'), am('D', 'maj'), am('G', 'maj'), am('B', 'min')] };
+  assert.deepEqual(validateTrack(dorian), []);
+  assert.deepEqual(codes({ ...dorian, bars: [am('E', 'maj')] }), ['chordNotInKey']);
+  assert.deepEqual(codes({ ...dorian, bars: [am('F', 'maj')] }), ['chordNotInKey']);
 });
 
 test('validateTrack: geerbte Eigenschaften zählen nicht als Akkordart', () => {

@@ -16,6 +16,13 @@ export const PROGRESSION_TEMPLATES = {
     { name: 'I-vi-IV-V', degrees: [0, 5, 3, 4] },
     { name: 'I-I-IV-V', degrees: [0, 0, 3, 4] },
   ],
+  // dorisch lebt von der Dur-Subdominante (IV, z. B. D in A-Dorisch)
+  dorian: [
+    { name: 'i-IV-i-VII', degrees: [0, 3, 0, 6] },
+    { name: 'i-IV-VII-IV', degrees: [0, 3, 6, 3] },
+    { name: 'i-VII-IV-i', degrees: [0, 6, 3, 0] },
+    { name: 'i-i-IV-i', degrees: [0, 0, 3, 0] },
+  ],
 };
 
 /** Vier Akkorde der Tonart, Vorlage per Seed gewählt (gleicher Seed, gleiche Folge). */

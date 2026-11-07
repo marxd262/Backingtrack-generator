@@ -52,6 +52,7 @@ export default {
 
   'mode.minor': 'Moll',
   'mode.major': 'Dur',
+  'mode.dorian': 'Dorisch',
 
   'err.badBpm': 'Das Tempo {bpm} ist ungültig. Erlaubt sind 20 bis 400 bpm.',
   'err.badLength': 'Die Länge {length} ist ungültig. Sie muss eine ganze Zahl von Takten sein.',

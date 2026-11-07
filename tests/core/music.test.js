@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CHORD_QUALITIES, MODE_NAMES, isNoteName, noteToPc, chordMidi, scalePcs, diatonicChords, allowedChords } from '../../src/core/music.js';
+import { CHORD_QUALITIES, MODE_NAMES, isNoteName, isValidKey, noteToPc, chordMidi, scalePcs, diatonicChords, allowedChords } from '../../src/core/music.js';
 
 const aMinor = { root: 'A', mode: 'minor' };
 const name = (c) => `${c.root}:${c.quality}`;
@@ -66,6 +66,20 @@ test('Schreibweise folgt der Vorzeichnung: Moll über die parallele Dur-Tonart',
   assert.deepEqual(names({ root: 'E', mode: 'minor' }), ['Em', 'F#dim', 'G', 'Am', 'Bm', 'C', 'D', 'B']);
   assert.deepEqual(names({ root: 'F', mode: 'major' }), ['F', 'Gm', 'Am', 'Bb', 'C', 'Dm', 'Edim']);
   assert.deepEqual(names({ root: 'D', mode: 'major' }), ['D', 'Em', 'F#m', 'G', 'A', 'Bm', 'C#dim']);
+});
+
+test('Dorisch: eigener Modus mit eigenen Akkorden, Schreibweise über die Dur-Tonart zwei Halbtöne tiefer', () => {
+  assert.ok(MODE_NAMES.includes('dorian'));
+  assert.ok(isValidKey({ root: 'A', mode: 'dorian' }));
+  assert.deepEqual(names({ root: 'A', mode: 'dorian' }), ['Am', 'Bm', 'C', 'D', 'Em', 'F#dim', 'G']);
+  assert.deepEqual(names({ root: 'D', mode: 'dorian' }), ['Dm', 'Em', 'F', 'G', 'Am', 'Bdim', 'C']);
+  assert.deepEqual(names({ root: 'G', mode: 'dorian' }), ['Gm', 'Am', 'Bb', 'C', 'Dm', 'Edim', 'F']);
+  assert.deepEqual(names({ root: 'C', mode: 'dorian' }), ['Cm', 'Dm', 'Eb', 'F', 'Gm', 'Adim', 'Bb']);
+  // Akkordtöne liegen in der dorischen Skala
+  const pcs = scalePcs({ root: 'A', mode: 'dorian' }, 'dorian');
+  for (const c of allowedChords({ root: 'A', mode: 'dorian' })) {
+    for (const m of chordMidi(c, 3)) assert.ok(pcs.includes(m % 12), `${c.root}${c.quality}`);
+  }
 });
 
 test('Grundton mit Vorzeichen behält seine Schreibweise', () => {

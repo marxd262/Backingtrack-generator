@@ -180,6 +180,26 @@ test('andere Tonart und Skala: Satz und Akkorde folgen, auch während der Wieder
   expect(await contexts(page)).toBe(1);
 });
 
+test('Dorisch: Satz, Akkorde der dorischen Tonart (mit Dur-IV), Feintuning und Englisch folgen', async ({ page }) => {
+  await page.locator('#key-btn').click();
+  const pop = page.locator('#key-pop');
+  await pop.getByRole('button', { name: 'Dorisch' }).click();
+  await expect(sentence(page)).toContainText('A-Dorisch');
+  const chords = await shownChords(page);
+  expect(chords).toHaveLength(4);
+  for (const c of chords) expect(namesIn('A', 'dorian')).toContain(c);
+  expect(chords).toContain('D'); // jede dorische Vorlage hat die Dur-IV, die es in A-Moll nicht gibt
+  await pop.getByRole('button', { name: 'G', exact: true }).click();
+  await expect(sentence(page)).toContainText('G-Dorisch');
+  for (const c of await shownChords(page)) expect(namesIn('G', 'dorian')).toContain(c);
+  await page.keyboard.press('Escape');
+  await page.locator('#tune-btn').click();
+  expect(await page.locator('#add-chords button').allTextContents()).toEqual(namesIn('G', 'dorian'));
+  await page.getByRole('button', { name: /^EN/i }).click();
+  await expect(sentence(page)).toContainText('G dorian');
+  expect(await rawKeysIn(page)).toEqual([]);
+});
+
 test('andere Variante ändert die Nummer und zeigt vier gültige Akkorde', async ({ page }) => {
   const variant = page.locator('#variant');
   const before = await variant.textContent();

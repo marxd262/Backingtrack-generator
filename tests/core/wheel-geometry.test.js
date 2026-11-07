@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { layoutWheel, hitTest, FIFTHS } from '../../src/ui/wheel-geometry.js';
-import { allowedChords, noteToPc } from '../../src/core/music.js';
+import { allowedChords, noteToPc, MODE_NAMES } from '../../src/core/music.js';
 
 const ROOTS = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
 const deg = (rad) => (((rad * 180) / Math.PI) % 360 + 360) % 360;
@@ -88,7 +88,7 @@ test('mit Tonart: verminderter Akkord der Tonart ersetzt außen den Dur-Akkord',
 
 test('jeder erlaubte Akkord jeder Tonart hat genau einen Knoten', () => {
   for (const root of ROOTS) {
-    for (const mode of ['minor', 'major']) {
+    for (const mode of MODE_NAMES) {
       const key = { root, mode };
       const l = layoutWheel(400, key);
       for (const c of allowedChords(key)) {

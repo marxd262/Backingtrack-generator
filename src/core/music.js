@@ -18,6 +18,7 @@ const SCALES = {
 const MODES = {
   minor: { steps: [0, 2, 3, 5, 7, 8, 10], qualities: ['min', 'dim', 'maj', 'min', 'min', 'maj', 'maj'], parentMajor: 3 },
   major: { steps: [0, 2, 4, 5, 7, 9, 11], qualities: ['maj', 'min', 'min', 'maj', 'maj', 'min', 'dim'], parentMajor: 0 },
+  dorian: { steps: [0, 2, 3, 5, 7, 9, 10], qualities: ['min', 'min', 'maj', 'maj', 'min', 'dim', 'maj'], parentMajor: -2 },
 };
 
 // Namen für Beschriftungen (i18n) und deren Tests
