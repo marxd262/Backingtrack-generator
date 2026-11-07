@@ -1,0 +1,94 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { LAYOUT_KEY, DEFAULT_LAYOUT, loadLayout, saveLayout } from '../../src/ui/layout-state.js';
+
+// Minimaler Speicher mit fester Rückgabe für getItem
+const storageWith = (raw) => ({ getItem: () => raw });
+const throwing = {
+  getItem() { throw new Error('gesperrt'); },
+  setItem() { throw new Error('gesperrt'); },
+};
+
+test('Schlüssel und Standardwerte', () => {
+  assert.equal(LAYOUT_KEY, 'backingtrack.layout');
+  assert.deepEqual(DEFAULT_LAYOUT, {
+    sidebars: { left: false, right: false },
+    views: { fretboard: true, wheel: true },
+    labels: 'names',
+  });
+  assert.ok(Object.isFrozen(DEFAULT_LAYOUT));
+  assert.ok(Object.isFrozen(DEFAULT_LAYOUT.sidebars));
+  assert.ok(Object.isFrozen(DEFAULT_LAYOUT.views));
+});
+
+test('leerer Speicher liefert tief gleiche, aber neue Standardwerte', () => {
+  const a = loadLayout(storageWith(null));
+  assert.deepEqual(a, DEFAULT_LAYOUT);
+  assert.notEqual(a, DEFAULT_LAYOUT);
+  assert.notEqual(a.sidebars, DEFAULT_LAYOUT.sidebars);
+  a.sidebars.left = true;
+  a.views.wheel = false;
+  assert.deepEqual(loadLayout(storageWith(null)), DEFAULT_LAYOUT);
+});
+
+test('Rundreise saveLayout -> loadLayout', () => {
+  const map = new Map();
+  const storage = { getItem: (k) => map.get(k) ?? null, setItem: (k, v) => map.set(k, v) };
+  const layout = {
+    sidebars: { left: true, right: false },
+    views: { fretboard: false, wheel: true },
+    labels: 'degrees',
+  };
+  saveLayout(storage, layout);
+  assert.ok(map.has(LAYOUT_KEY));
+  assert.deepEqual(loadLayout(storage), layout);
+});
+
+test('saveLayout schreibt nur bekannte, gültige Felder', () => {
+  const map = new Map();
+  const storage = { setItem: (k, v) => map.set(k, v) };
+  saveLayout(storage, {
+    sidebars: { left: true, x: 1 },
+    views: { lanes: false, wheel: 'no' },
+    labels: 'x',
+    extra: 1,
+  });
+  assert.deepEqual(JSON.parse(map.get(LAYOUT_KEY)), {
+    sidebars: { left: true, right: false },
+    views: { fretboard: true, wheel: true },
+    labels: 'names',
+  });
+});
+
+test('ungültiges JSON und Nicht-Objekte liefern Standardwerte', () => {
+  for (const raw of ['{', 'null', '5', '[]', '"x"', 'true', '', 42, undefined]) {
+    assert.deepEqual(loadLayout(storageWith(raw)), DEFAULT_LAYOUT, String(raw));
+  }
+});
+
+test('Felder werden einzeln geprüft', () => {
+  assert.equal(loadLayout(storageWith('{"labels":"x"}')).labels, 'names');
+  assert.equal(loadLayout(storageWith('{"labels":"degrees"}')).labels, 'degrees');
+  assert.equal(loadLayout(storageWith('{"sidebars":{"left":"yes"}}')).sidebars.left, false);
+  const mixed = loadLayout(storageWith('{"labels":"x","sidebars":{"left":true}}'));
+  assert.equal(mixed.sidebars.left, true);
+  assert.equal(mixed.labels, 'names');
+});
+
+test('Teilangaben werden aufgefüllt, unbekannte Schlüssel verworfen', () => {
+  const l = loadLayout(storageWith('{"views":{"lanes":false,"fretboard":false,"foo":1},"bar":2,"sidebars":5}'));
+  assert.deepEqual(l, {
+    sidebars: { left: false, right: false },
+    views: { fretboard: false, wheel: true },
+    labels: 'names',
+  });
+  assert.ok(!('lanes' in l.views));
+});
+
+test('fehlender oder werfender Speicher wirft nie', () => {
+  assert.deepEqual(loadLayout(), DEFAULT_LAYOUT);
+  assert.deepEqual(loadLayout(throwing), DEFAULT_LAYOUT);
+  assert.doesNotThrow(() => saveLayout(undefined, DEFAULT_LAYOUT));
+  assert.doesNotThrow(() => saveLayout(throwing, DEFAULT_LAYOUT));
+  assert.doesNotThrow(() => saveLayout({ setItem() {} }, null));
+});
