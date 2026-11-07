@@ -30,6 +30,13 @@ test('int und pick bleiben im Bereich', () => {
   assert.ok(['x', 'y', 'z'].includes(rng.pick(['x', 'y', 'z'])));
 });
 
+test('2**32+5 wie 5 und undefined wie 0: gleiche Folge und gleiche Forks', () => {
+  for (const [a, b] of [[2 ** 32 + 5, 5], [undefined, 0]]) {
+    assert.deepEqual(take(createRng(a), 5), take(createRng(b), 5));
+    assert.deepEqual(take(createRng(a).fork('x'), 5), take(createRng(b).fork('x'), 5));
+  }
+});
+
 test('fork: a ungleich b, a reproduzierbar', () => {
   const a1 = take(createRng(5).fork('a'), 10);
   const a2 = take(createRng(5).fork('a'), 10);

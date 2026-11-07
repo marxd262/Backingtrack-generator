@@ -11,7 +11,8 @@ function hash(text) {
 }
 
 export function createRng(seed) {
-  let state = seed >>> 0; // Seeds jenseits 32 Bit werden modulo 2**32 gekürzt
+  const base = seed >>> 0; // Seeds jenseits 32 Bit werden modulo 2**32 gekürzt, undefined wird 0
+  let state = base;
   const rng = {
     next() {
       state = (state + 0x6d2b79f5) >>> 0;
@@ -27,7 +28,7 @@ export function createRng(seed) {
       return arr[Math.floor(rng.next() * arr.length)];
     },
     fork(label) {
-      return createRng(hash(`${seed}:${label}`));
+      return createRng(hash(`${base}:${label}`));
     },
   };
   return rng;
