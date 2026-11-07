@@ -8,3 +8,7 @@ test('src/index.js lädt in Node und exportiert die Schnittstelle', async () => 
   assert.ok(Array.isArray(api.TAG_CATEGORIES) && api.TAG_CATEGORIES.length > 0);
   assert.ok(Array.isArray(api.STYLE_PRESETS) && api.STYLE_PRESETS.length > 0);
 });
+
+test('src/index.js exportiert chordTimeline', async () => {
+  assert.equal(typeof (await import('../../src/index.js')).chordTimeline, 'function');
+});

@@ -2,7 +2,7 @@
 // Reine Logik ohne Audio: gleicher Track mit gleichem Seed ergibt denselben Strom.
 import { createRng } from './rng.js';
 import { CHORD_QUALITIES, chordMidi, noteToPc } from './music.js';
-import { normalizeTrack, validateTrack } from './track.js';
+import { checkedTrack, barTimeline } from './timeline.js';
 import { resolveTags } from './tags.js';
 import { buildArrangement } from './arrange.js';
 
@@ -168,37 +168,15 @@ const PLAYERS = {
   pad: { section: () => null, play: playPad },
 };
 
-// Takte: bars läuft im Kreis über length; Startzeit = Schläge davor * 60 / bpm
-function timeline(track) {
-  let startBeat = 0;
-  return Array.from({ length: track.length }, (_, index) => {
-    const { chord, beats } = track.bars[index % track.bars.length];
-    const b = {
-      index, chord, beats,
-      next: track.bars[(index + 1) % track.bars.length].chord,
-      steps: beats * 4,
-      stepSec: 60 / track.bpm / 4,
-      start: (startBeat * 60) / track.bpm,
-      end: ((startBeat + beats) * 60) / track.bpm,
-    };
-    startBeat += beats;
-    return b;
-  });
-}
-
 const RANK = { chord: 0, marker: 1 };
 
 /** Track -> Ereignisse sortiert nach t (bei Gleichstand chord, marker, Rest). Wirft bei ungültigem Track. */
 export function buildEvents(input) {
-  const track = normalizeTrack(input);
-  const errors = validateTrack(track);
-  if (errors.length > 0) {
-    throw Object.assign(new Error(`Invalid track: ${errors.map((e) => e.code).join(', ')}`), { errors });
-  }
+  const track = checkedTrack(input);
   const master = createRng(track.seed);
   const params = resolveTags(track.tags, master.fork('tags'));
   const { sections } = buildArrangement(track, params, master.fork('arrangement'));
-  const bars = timeline(track);
+  const bars = barTimeline(track);
 
   const events = bars.map((b) => ({ t: r6(b.start), bar: b.index, beat: 0, type: 'chord', chord: { ...b.chord } }));
   for (const sec of sections) {
