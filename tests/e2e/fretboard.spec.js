@@ -68,7 +68,7 @@ test('im Stand: Rollen an der tiefen E-Saite für Am Am Dm E in A-Moll-Pentatoni
   await expect(page.locator('#play-next')).toHaveText('Als Nächstes: Dm');
   await expect(page.locator('#fretboard-text')).toHaveText('Jetzt: Am (A, C, E). Als Nächstes: Dm (D, F, A)');
   await expect(page.getByRole('img', { name: /^Griffbrett/ })).toBeVisible();
-  await expect(page.getByRole('region', { name: /^Griffbrett: / })).toBeVisible();
+  await expect(page.locator('#fretboard')).toHaveAccessibleName('Griffbrett'); // kurzer Name, die Beschreibung trägt das SVG
   for (const text of ['Leiterton', 'Jetziger Akkord', 'Grundton des jetzigen Akkords', 'Folgender Akkord', 'In beiden Akkorden', 'Akkordton außerhalb der Leiter']) {
     await expect(page.locator('#fretboard-legend')).toContainText(text);
   }
@@ -100,25 +100,50 @@ test('Namen/Stufen: Schalter im Blockkopf, aria-pressed, Wahl überlebt Neuladen
   await expect(page.locator('#labels-names')).toHaveAttribute('aria-pressed', 'true');
 });
 
+// Ein Schnappschuss in einem einzigen evaluate: Takt, Akkorde, Kopfzeile, Textfassung und Rollen gehören zum selben render()
+const snapshot = (page) => page.evaluate(() => {
+  const role = (s, f) => document.querySelector(`#fretboard .fret-note[data-string="${s}"][data-fret="${f}"]`).getAttribute('data-role').split(' ');
+  const text = (id) => document.getElementById(id).textContent;
+  const bar = Number(text('play-position').match(/^Takt (\d+) von/)?.[1] ?? 0);
+  return {
+    bar, now: text('play-now'), next: text('play-next'), text: text('fretboard-text'),
+    roles: { d: role(3, 0), e: role(5, 0), f: role(5, 1), gSharp: role(5, 4), a: role(5, 5) },
+  };
+});
+
 test('beim Abspielen folgen die Rollen dem Akkord, die Kopfzeile zeigt den folgenden', async ({ page }) => {
   await openPlayPage(page);
   await setProgression(page, ['Am', 'Am', 'Dm', 'E']);
   await playFast(page);
-  await expect(page.locator('#play-next')).toHaveText('Als Nächstes: Dm');
-  // Takt 3 (Index 2): Dm klingt, E folgt
-  await expect(page.locator('#play-now')).toHaveText('Dm', { timeout: BAR_TIMEOUT });
-  await expect(note(page, 3, 0)).toHaveAttribute('data-role', roleHas('current', 'root')); // D
-  await expect(note(page, 5, 1)).toHaveAttribute('data-role', roleHas('current', 'outside')); // F
-  await expect(note(page, 5, 5)).toHaveAttribute('data-role', roleHas('current')); // A
-  await expect(note(page, 5, 5)).not.toHaveAttribute('data-role', roleHas('root'));
-  await expect(note(page, 5, 0)).toHaveAttribute('data-role', roleHas('next')); // E
-  await expect(page.locator('#play-next')).toHaveText('Als Nächstes: E');
-  await expect(page.locator('#fretboard-text')).toHaveText('Jetzt: Dm (D, F, A). Als Nächstes: E (E, G#, B)');
-  // Takt 4: E klingt, über die Naht folgt Am
-  await expect(page.locator('#play-now')).toHaveText('E', { timeout: BAR_TIMEOUT });
-  await expect(page.locator('#play-next')).toHaveText('Als Nächstes: Am');
-  await expect(note(page, 5, 0)).toHaveAttribute('data-role', roleHas('both', 'root'));
-  await expect(note(page, 5, 4)).toHaveAttribute('data-role', roleHas('current', 'outside')); // G#
+  // Schnappschüsse sammeln, bis Takt 3 (Dm) und Takt 4 (E) gesehen sind; jeder muss zu seinem eigenen Takt passen
+  const seen = {};
+  const wrong = [];
+  await expect.poll(async () => {
+    const snap = await snapshot(page);
+    const expected = ['Am', 'Am', 'Dm', 'E'][(snap.bar - 1) % 4];
+    if (snap.now !== expected) wrong.push(`Takt ${snap.bar}: ${snap.now} statt ${expected}`);
+    seen[snap.now] ??= snap;
+    return Boolean(seen.Dm && seen.E);
+  }, { timeout: 3 * BAR_TIMEOUT, intervals: [100] }).toBe(true);
+  expect(wrong).toEqual([]);
+
+  // Dm klingt, E folgt
+  const dm = seen.Dm;
+  expect(dm.next).toBe('Als Nächstes: E');
+  expect(dm.text).toBe('Jetzt: Dm (D, F, A). Als Nächstes: E (E, G#, B)');
+  expect(dm.roles.d).toEqual(expect.arrayContaining(['current', 'root']));
+  expect(dm.roles.f).toEqual(expect.arrayContaining(['current', 'outside']));
+  expect(dm.roles.a).toContain('current');
+  expect(dm.roles.a).not.toContain('root');
+  expect(dm.roles.e).toContain('next');
+  // E klingt, über die Naht folgt Am
+  const e = seen.E;
+  expect(e.next).toBe('Als Nächstes: Am');
+  expect(e.text).toBe('Jetzt: E (E, G#, B). Als Nächstes: Am (A, C, E)');
+  expect(e.roles.e).toEqual(expect.arrayContaining(['both', 'root']));
+  expect(e.roles.gSharp).toEqual(expect.arrayContaining(['current', 'outside']));
+  expect(e.roles.d).toEqual(['scale']);
+
   await playGo(page).click();
   await expect(playGo(page)).toHaveText('Los');
   await expect(page.locator('#play-next')).toHaveText('Als Nächstes: Dm');
@@ -174,7 +199,7 @@ test('Sprachwechsel: Legende, Schalter, Textfassung und Kopfzeile auf Englisch, 
   await expect(page.getByRole('group', { name: 'Labels' }).locator('#labels-names')).toHaveText('Names');
   await expect(page.locator('#labels-degrees')).toHaveText('Degrees');
   await expect(page.getByRole('img', { name: /^Fretboard/ })).toBeVisible();
-  await expect(page.getByRole('region', { name: /^Fretboard: / })).toBeVisible();
+  await expect(page.locator('#fretboard')).toHaveAccessibleName('Fretboard');
   for (const text of ['Scale note', 'Current chord', 'Root of the current chord', 'Next chord', 'In both chords', 'Chord note outside the scale']) {
     await expect(page.locator('#fretboard-legend')).toContainText(text);
   }
@@ -189,23 +214,29 @@ test('keine DOM-Schreibvorgänge im Griffbrett-Block über Takte ohne Akkordwech
   await setProgression(page, ['Am', 'Am', 'Dm', 'E']);
   await page.locator('#quick-pick [data-style="funk"]').click();
   await page.locator('#tuning-tempo').fill('200');
-  // Stand, Takt 1 und Takt 2 zeigen alle Am mit folgendem Dm: von hier bis Takt 2 darf sich nichts ändern
+  // Stand, Takt 1 und Takt 2 zeigen alle Am mit folgendem Dm. Jede Mutation wird mit dem Takt markiert, der beim
+  // Schreiben in der Kopfzeile steht (Beobachter laufen direkt nach dem render() dieses Takts): so ist das Fenster durch
+  // die Takte selbst bestimmt, nicht durch den Zeitpunkt des Auslesens.
   await page.evaluate(() => {
-    window.__fretMutations = { text: 0, block: 0, next: 0 };
-    const count = (key) => new MutationObserver((list) => { window.__fretMutations[key] += list.length; });
+    window.__fretMutations = [];
+    const count = (target) => new MutationObserver((list) => {
+      const bar = document.getElementById('play-position').textContent;
+      for (const m of list) window.__fretMutations.push({ target, bar });
+    });
     const all = { attributes: true, childList: true, characterData: true, subtree: true };
     count('text').observe(document.getElementById('fretboard-text'), all);
     count('block').observe(document.querySelector('section[data-view="fretboard"]'), all);
     count('next').observe(document.getElementById('play-next'), all);
   });
   await playGo(page).click();
-  await expect(position(page)).toHaveText(/^Takt 2 von \d+$/, { timeout: BAR_TIMEOUT });
-  expect(await page.evaluate(() => window.__fretMutations)).toEqual({ text: 0, block: 0, next: 0 });
-  // Gegenprobe: beim Wechsel auf Dm wird neu geschrieben
-  await expect(page.locator('#play-now')).toHaveText('Dm', { timeout: BAR_TIMEOUT });
-  const after = await page.evaluate(() => window.__fretMutations);
-  expect(after.text).toBeGreaterThan(0);
-  expect(after.next).toBeGreaterThan(0);
+  await expect(position(page)).toHaveText(/^Takt 3 von \d+$/, { timeout: 2 * BAR_TIMEOUT });
+  const log = await page.evaluate(() => window.__fretMutations);
+  const at = (bar) => log.filter((m) => m.bar === bar).map((m) => m.target);
+  expect(at(''), 'Stand').toEqual([]);
+  expect(at('Takt 1 von 96'), 'Takt 1').toEqual([]);
+  expect(at('Takt 2 von 96'), 'Takt 2').toEqual([]);
+  // Gegenprobe: beim Wechsel auf Dm (Takt 3) wird neu geschrieben
+  expect(at('Takt 3 von 96')).toEqual(expect.arrayContaining(['text', 'next', 'block']));
   await playGo(page).click();
 });
 
