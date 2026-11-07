@@ -1,8 +1,11 @@
 // Bedienelemente der Spielseite: Schnellauswahl, Schlagworte, Tempo, Länge (Leiste "Klang"), Schichten mit Verlauf,
-// Akkordrad (Blöcke), Akkordfolge (Leiste "Akkorde"). Teilt den Zustand mit der Startseite; app.js ruft die
+// Griffbrett und Akkordrad (Blöcke), Akkordfolge (Leiste "Akkorde"). Teilt den Zustand mit der Startseite; app.js ruft die
 // zurückgegebene Funktion in jedem render() auf.
 import { STYLE_PRESETS, buildEvents, t } from '../index.js';
-import { $, LAYERS, ALL_LAYERS, LENGTHS, state, pressed, setText, preset, applyStyle } from './state.js';
+import { $, LAYERS, ALL_LAYERS, LENGTHS, state, layoutStorage, chordName, pressed, setText, preset, applyStyle } from './state.js';
+import { saveLayout } from './layout-state.js';
+import { nextDistinctChord } from '../core/fretboard.js';
+import { createFretboard, chordSentence } from './fretboard.js';
 import { buildTags, renderTags, toggleTag, sameTags } from './tags-ui.js';
 import { initProgressionEditor, addChord } from './progression-editor.js';
 import { drawLanes } from './lanes.js';
@@ -43,6 +46,26 @@ export function initTuning({ render, restartIfPlaying, player }) {
     progression: state.track.bars.map((b) => b.chord),
     current: state.playing && state.current ? state.current.chord : null,
   });
+  const fretboard = createFretboard($('fretboard'));
+  for (const b of document.querySelectorAll('[data-labels]')) {
+    b.addEventListener('click', () => {
+      state.layout = { ...state.layout, labels: b.dataset.labels };
+      saveLayout(layoutStorage, state.layout);
+      render();
+    });
+  }
+
+  // Griffbrett, folgender Akkord in der Kopfzeile und Textfassung; im Stand der erste Akkord der Folge
+  function renderFretboard() {
+    const { track } = state;
+    const current = state.current?.chord ?? track.bars[0]?.chord ?? null;
+    const next = nextDistinctChord(track.bars, track.length, state.current?.bar ?? 0);
+    fretboard.update({ key: track.key, scale: state.scale, current, next, labels: state.layout.labels });
+    for (const b of document.querySelectorAll('[data-labels]')) pressed(b, b.dataset.labels === state.layout.labels);
+    setText($('play-next'), next ? `${t('ui.nextChord')}: ${chordName(next)}` : '');
+    setText($('fretboard-text'), chordSentence(track.key, current, next));
+  }
+
   const wheel = createWheel($('wheel'), wheelState(), (chord) => (addChord(chord) ? changed() : render()));
 
   // Ereignisse nur neu bauen, wenn sich Folge, Schlagworte, Variante oder Länge ändern. Tempo und Schichten
@@ -84,6 +107,7 @@ export function initTuning({ render, restartIfPlaying, player }) {
     for (const o of $('length').options) setText(o, t('ui.barsCount', { n: o.value }));
     for (const b of $('lane-buttons').children) pressed(b, track.layers[b.dataset.layer]);
     renderProgression();
+    renderFretboard();
     drawCanvases();
   };
 }

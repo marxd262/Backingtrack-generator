@@ -296,7 +296,8 @@ test('Reihenfolge: Blöcke zuerst, schmal (360, 800 px) Leisten als Schublade au
   expect(left.x + left.width).toBeLessThanOrEqual(blocks.x);
   expect(blocks.x + blocks.width).toBeLessThanOrEqual(right.x);
 
-  // Tab vom Seitentitel: das erste Element in den Bereichen liegt in den Blöcken (Schicht-Knopf), nicht in "Klang"
+  // Tab vom Seitentitel: das erste Element in den Bereichen liegt in den Blöcken (Namen/Stufen-Schalter des
+  // Griffbretts, des ersten Blocks), nicht in "Klang"
   await page.locator('#play-title').focus();
   let region = null;
   for (let i = 0; i < 10 && !region; i++) {
@@ -304,10 +305,10 @@ test('Reihenfolge: Blöcke zuerst, schmal (360, 800 px) Leisten als Schublade au
     region = await page.evaluate(() => {
       const el = document.activeElement;
       const r = ['blocks', 'side-left', 'side-right'].find((id) => document.getElementById(id).contains(el));
-      return r ? { id: r, layer: el.closest('#lane-buttons') !== null } : null;
+      return r ? { id: r, first: el.id } : null;
     });
   }
-  expect(region).toEqual({ id: 'blocks', layer: true });
+  expect(region).toEqual({ id: 'blocks', first: 'labels-names' });
 });
 
 test('Spielseite auf Englisch: Kopfzeile und Überschriften übersetzt', async ({ page }) => {

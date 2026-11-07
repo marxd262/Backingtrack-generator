@@ -1,9 +1,11 @@
-/* Notenheft-Optik, vorläufig: Farben und Schrift nur hier über Variablen. Genau ein farbiges Objekt zur Zeit. */
+/* Notenheft-Optik, vorläufig: Farben und Schrift nur hier über Variablen. Genau ein farbiges Objekt zur Zeit,
+   außer auf dem Griffbrett (jetziger und folgender Akkord, dort zusätzlich durch Form unterschieden). */
 :root {
   --paper: #faf6ec;
   --ink: #2a2622;
   --ink-soft: #5a524a;
   --accent: #c8452d;
+  --accent2: #2f6f8f; /* folgender Akkord (Griffbrett, Kopfzeile) */
   --on-accent: #fff;
   --staff: rgba(42, 38, 34, 0.07);
   --serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
@@ -253,6 +255,7 @@ main {
 }
 .play-next:empty { display: none; }
 .play-next, .play-variant { margin: 0; color: var(--ink-soft); }
+.play-next { color: var(--accent2); }
 .play-head .position { min-width: 9em; }
 .play-head .go { min-width: 8rem; font-size: 1.25rem; }
 .play-head .message { flex-basis: 100%; margin: 0; }
@@ -279,6 +282,34 @@ main {
 .side-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .side-title, .block-title { margin: 0 0 4px; font-size: 1.25rem; font-weight: normal; font-style: italic; }
 .blocks { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+
+/* --- Griffbrett-Block --- */
+.block-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-bottom: 8px; }
+.block-head .block-title { margin: 0; }
+/* schmal scrollt nur das Griffbrett (Mindestbreite), breit füllt es die Mitte */
+.fretboard-scroll { overflow-x: auto; }
+.fretboard { display: block; width: 100%; min-width: 40rem; height: auto; }
+.fretboard .board { fill: rgba(42, 38, 34, 0.04); }
+.fretboard .string, .fretboard .fret-wire { stroke: var(--ink-soft); }
+.fretboard .fret-wire { stroke-width: 1.5; }
+.fretboard .nut { stroke: var(--ink); stroke-width: 5; }
+.fretboard .inlay { fill: rgba(42, 38, 34, 0.2); }
+/* Rollen: Leiterton Ring, jetziger Akkord gefüllter Kreis, folgender gefülltes Quadrat, beide Kreis mit
+   Ring in der Zweitfarbe, Grundton Außenring, außerhalb der Leiter gestrichelt und blass */
+.fret-note[hidden] { display: none; }
+.fret-note .dot { x: -11px; y: -11px; width: 22px; height: 22px; rx: 11px; fill: var(--paper); stroke: var(--ink); stroke-width: 1.5; }
+.fret-note .ring { display: none; r: 14.5px; fill: none; stroke: var(--accent); stroke-width: 2; }
+.fret-note text { fill: var(--ink); font-size: 12px; text-anchor: middle; dominant-baseline: central; }
+.fret-note[data-role~="current"] .dot { fill: var(--accent); stroke: var(--accent); }
+.fret-note[data-role~="next"] .dot { rx: 3px; fill: var(--accent2); stroke: var(--accent2); }
+.fret-note[data-role~="both"] .dot { fill: var(--accent); stroke: var(--accent2); stroke-width: 3.5; }
+.fret-note[data-role~="root"] .ring { display: inline; }
+.fret-note:is([data-role~="current"], [data-role~="next"], [data-role~="both"]) text { fill: var(--on-accent); }
+.fret-note[data-role~="outside"] .dot { fill-opacity: 0.2; stroke-dasharray: 3 2; }
+.fret-note[data-role~="outside"] text { fill: var(--ink); }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 8px 0 0; padding: 0; list-style: none; font-size: 0.9rem; }
+.legend li { display: flex; align-items: center; gap: 6px; }
+.legend svg { flex: none; width: 24px; height: 24px; }
 
 /* schmal: offene Leiste als Schublade über den Blöcken, an ihrer Seite angedockt; geschlossen ist sie hidden */
 .side {

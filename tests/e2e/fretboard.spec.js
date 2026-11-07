@@ -1,0 +1,244 @@
+// Griffbrett-Block der Spielseite: Rollen je Bund, Namen/Stufen, folgender Akkord, Textfassung, Breiten.
+import { test, expect } from '@playwright/test';
+
+const BAR_TIMEOUT = 10_000; // ein Takt bei 200 bpm dauert 1,2 s; unter Last großzügig
+const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view)\.[A-Za-z.]+$/;
+
+let problems;
+
+test.use({ locale: 'de-DE' });
+
+test.beforeEach(async ({ page }) => {
+  problems = [];
+  page.on('console', (msg) => msg.type() === 'error' && problems.push(`console: ${msg.text()}`));
+  page.on('pageerror', (err) => problems.push(`pageerror: ${err.message}`));
+  await page.goto('/ui/index.html');
+  await expect(page.locator('#go')).toHaveText(/\S/);
+});
+
+test.afterEach(() => {
+  expect(problems).toEqual([]);
+});
+
+const note = (page, string, fret) => page.locator(`#fretboard .fret-note[data-string="${string}"][data-fret="${fret}"]`);
+const playGo = (page) => page.locator('#play-go');
+const position = (page) => page.locator('#play-position');
+const shownChords = async (page) => (await page.locator('#chords').textContent()).split(' – ').map((s) => s.trim());
+const progression = (page) => page.locator('#progression button');
+const noScrollX = (page) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
+
+// Feintuning: Spielseite mit beiden Leisten (bei 1280 px neben den Blöcken)
+async function openPlayPage(page) {
+  await page.locator('#tune-btn').click();
+  await expect(page.locator('#play')).toBeVisible();
+}
+
+// Folge über die rechte Leiste setzen: bis auf einen Akkord entfernen, anfügen, den übrigen ersten entfernen
+async function setProgression(page, names) {
+  while (await progression(page).count() > 1) await progression(page).first().click();
+  for (const name of names) await page.locator('#add-chords button', { hasText: new RegExp(`^${name}$`) }).click();
+  await progression(page).first().click();
+  await expect.poll(() => shownChords(page)).toEqual(names);
+}
+
+async function playFast(page) {
+  await page.locator('#quick-pick [data-style="funk"]').click();
+  await page.locator('#tuning-tempo').fill('200');
+  await playGo(page).click();
+  await expect(position(page)).toHaveText(/^Takt 1 von \d+$/, { timeout: BAR_TIMEOUT });
+}
+
+const roleHas = (...tokens) => new RegExp(tokens.map((tok) => `(?=.*\\b${tok}\\b)`).join(''));
+
+test('im Stand: Rollen an der tiefen E-Saite für Am Am Dm E in A-Moll-Pentatonik', async ({ page }) => {
+  await openPlayPage(page);
+  await setProgression(page, ['Am', 'Am', 'Dm', 'E']);
+  await expect(note(page, 5, 5)).toHaveAttribute('data-role', roleHas('both', 'root'));
+  await expect(note(page, 5, 5)).toHaveText('A');
+  await expect(note(page, 5, 0)).toHaveAttribute('data-role', roleHas('current'));
+  await expect(note(page, 5, 0)).not.toHaveAttribute('data-role', roleHas('next'));
+  await expect(note(page, 5, 0)).toHaveText('E');
+  await expect(note(page, 5, 1)).toHaveAttribute('data-role', roleHas('next', 'outside'));
+  await expect(note(page, 5, 1)).toBeVisible();
+  await expect(note(page, 5, 1)).toHaveText('F');
+  await expect(note(page, 5, 2)).toBeHidden();
+  await expect(note(page, 5, 3)).toHaveAttribute('data-role', 'scale'); // G: nur Leiterton
+  // je Saite 16 Positionen (Bund 0 bis 15), sechs Saiten
+  await expect(page.locator('#fretboard .fret-note[data-string]')).toHaveCount(96);
+  await expect(page.locator('#play-next')).toHaveText('Als Nächstes: Dm');
+  await expect(page.locator('#fretboard-text')).toHaveText('Jetzt: Am (A, C, E). Als Nächstes: Dm (D, F, A)');
+  await expect(page.getByRole('img', { name: /^Griffbrett/ })).toBeVisible();
+  await expect(page.getByRole('region', { name: /^Griffbrett: / })).toBeVisible();
+  for (const text of ['Leiterton', 'Jetziger Akkord', 'Grundton des jetzigen Akkords', 'Folgender Akkord', 'In beiden Akkorden', 'Akkordton außerhalb der Leiter']) {
+    await expect(page.locator('#fretboard-legend')).toContainText(text);
+  }
+  // Farbe des folgenden Akkords in der Kopfzeile: Sekundärfarbe
+  expect(await page.locator('#play-next').evaluate((el) => getComputedStyle(el).color)).toBe('rgb(47, 111, 143)');
+});
+
+test('Namen/Stufen: Schalter im Blockkopf, aria-pressed, Wahl überlebt Neuladen', async ({ page }) => {
+  await openPlayPage(page);
+  const group = page.getByRole('group', { name: 'Beschriftung' });
+  await expect(group.locator('#labels-names')).toHaveText('Namen');
+  await expect(group.locator('#labels-degrees')).toHaveText('Stufen');
+  await expect(page.locator('section[data-view="fretboard"] #labels-names')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#labels-degrees')).toHaveAttribute('aria-pressed', 'false');
+  await expect(note(page, 5, 0)).toHaveText('E');
+  await page.locator('#labels-degrees').click();
+  await expect(note(page, 5, 0)).toHaveText('5');
+  await expect(note(page, 5, 3)).toHaveText('b7');
+  await expect(page.locator('#labels-degrees')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#labels-names')).toHaveAttribute('aria-pressed', 'false');
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('backingtrack.layout')).labels)).toBe('degrees');
+
+  await page.reload();
+  await openPlayPage(page);
+  await expect(note(page, 5, 0)).toHaveText('5');
+  await expect(page.locator('#labels-degrees')).toHaveAttribute('aria-pressed', 'true');
+  await page.locator('#labels-names').click();
+  await expect(note(page, 5, 0)).toHaveText('E');
+  await expect(page.locator('#labels-names')).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('beim Abspielen folgen die Rollen dem Akkord, die Kopfzeile zeigt den folgenden', async ({ page }) => {
+  await openPlayPage(page);
+  await setProgression(page, ['Am', 'Am', 'Dm', 'E']);
+  await playFast(page);
+  await expect(page.locator('#play-next')).toHaveText('Als Nächstes: Dm');
+  // Takt 3 (Index 2): Dm klingt, E folgt
+  await expect(page.locator('#play-now')).toHaveText('Dm', { timeout: BAR_TIMEOUT });
+  await expect(note(page, 3, 0)).toHaveAttribute('data-role', roleHas('current', 'root')); // D
+  await expect(note(page, 5, 1)).toHaveAttribute('data-role', roleHas('current', 'outside')); // F
+  await expect(note(page, 5, 5)).toHaveAttribute('data-role', roleHas('current')); // A
+  await expect(note(page, 5, 5)).not.toHaveAttribute('data-role', roleHas('root'));
+  await expect(note(page, 5, 0)).toHaveAttribute('data-role', roleHas('next')); // E
+  await expect(page.locator('#play-next')).toHaveText('Als Nächstes: E');
+  await expect(page.locator('#fretboard-text')).toHaveText('Jetzt: Dm (D, F, A). Als Nächstes: E (E, G#, B)');
+  // Takt 4: E klingt, über die Naht folgt Am
+  await expect(page.locator('#play-now')).toHaveText('E', { timeout: BAR_TIMEOUT });
+  await expect(page.locator('#play-next')).toHaveText('Als Nächstes: Am');
+  await expect(note(page, 5, 0)).toHaveAttribute('data-role', roleHas('both', 'root'));
+  await expect(note(page, 5, 4)).toHaveAttribute('data-role', roleHas('current', 'outside')); // G#
+  await playGo(page).click();
+  await expect(playGo(page)).toHaveText('Los');
+  await expect(page.locator('#play-next')).toHaveText('Als Nächstes: Dm');
+});
+
+test('Folge aus einem einzigen Akkord: kein folgender, nur "Jetzt", auch beim Abspielen', async ({ page }) => {
+  await openPlayPage(page);
+  while (await progression(page).count() > 1) await progression(page).first().click();
+  await expect(page.locator('#play-next')).toHaveText('');
+  await expect(page.locator('#fretboard-text')).toHaveText(/^Jetzt: \S+ \([^)]+\)$/);
+  await expect(page.locator('#fretboard .fret-note[data-role~="next"]')).toHaveCount(0);
+  await expect(page.locator('#fretboard .fret-note[data-role~="current"]').first()).toBeVisible();
+  await playFast(page);
+  await expect(position(page)).toHaveText(/^Takt 2 von \d+$/, { timeout: BAR_TIMEOUT });
+  await expect(page.locator('#play-next')).toHaveText('');
+  await expect(page.locator('#fretboard-text')).not.toContainText('Als Nächstes');
+  await playGo(page).click();
+});
+
+test('c-Moll: Notennamen mit Bs, nie mit Kreuzen', async ({ page }) => {
+  await openPlayPage(page);
+  await page.locator('#side-key-chips').getByRole('button', { name: 'C', exact: true }).click();
+  await page.locator('#side-scale-chips').getByRole('button', { name: 'Moll-Pentatonik' }).click();
+  await expect(note(page, 4, 1)).toHaveText('Bb'); // A-Saite, Bund 1
+  await expect(note(page, 4, 1)).toBeVisible();
+  await expect(note(page, 4, 6)).toHaveText('Eb');
+  const names = await page.locator('#fretboard .fret-note:visible').allTextContents();
+  expect(names).toContain('Bb');
+  expect(names.filter((n) => n.includes('#'))).toEqual([]);
+  await expect(page.locator('#fretboard-text')).not.toContainText('#');
+  await page.locator('#labels-degrees').click();
+  await expect(note(page, 4, 1)).toHaveText('b7');
+  await expect(note(page, 4, 6)).toHaveText('b3');
+});
+
+test('Sprachwechsel: Legende, Schalter, Textfassung und Kopfzeile auf Englisch, keine rohen Schlüssel', async ({ page }) => {
+  const rawKeys = () => page.evaluate((source) => {
+    const re = new RegExp(source);
+    const found = [];
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) if (re.test(walker.currentNode.textContent.trim())) found.push(walker.currentNode.textContent);
+    for (const el of document.querySelectorAll('*')) {
+      for (const { name, value } of el.attributes) if ((name.startsWith('aria-') || name === 'title') && re.test(value)) found.push(`${name}=${value}`);
+    }
+    return found;
+  }, RAW_KEY.source);
+  await openPlayPage(page);
+  await setProgression(page, ['Am', 'Am', 'Dm', 'E']);
+  expect(await rawKeys()).toEqual([]);
+  await page.locator('[data-lang="en"]').click();
+  await expect(page.locator('#play-next')).toHaveText('Next: Dm');
+  await expect(page.locator('#fretboard-text')).toHaveText('Now: Am (A, C, E). Next: Dm (D, F, A)');
+  await expect(page.getByRole('group', { name: 'Labels' }).locator('#labels-names')).toHaveText('Names');
+  await expect(page.locator('#labels-degrees')).toHaveText('Degrees');
+  await expect(page.getByRole('img', { name: /^Fretboard/ })).toBeVisible();
+  await expect(page.getByRole('region', { name: /^Fretboard: / })).toBeVisible();
+  for (const text of ['Scale note', 'Current chord', 'Root of the current chord', 'Next chord', 'In both chords', 'Chord note outside the scale']) {
+    await expect(page.locator('#fretboard-legend')).toContainText(text);
+  }
+  await expect(page.locator('#fretboard-legend')).not.toContainText('Leiterton');
+  expect(await rawKeys()).toEqual([]);
+  await page.locator('#labels-degrees').click();
+  expect(await rawKeys()).toEqual([]);
+});
+
+test('keine DOM-Schreibvorgänge im Griffbrett-Block über Takte ohne Akkordwechsel (Am Am Dm E, Takt 1 auf 2)', async ({ page }) => {
+  await openPlayPage(page);
+  await setProgression(page, ['Am', 'Am', 'Dm', 'E']);
+  await page.locator('#quick-pick [data-style="funk"]').click();
+  await page.locator('#tuning-tempo').fill('200');
+  // Stand, Takt 1 und Takt 2 zeigen alle Am mit folgendem Dm: von hier bis Takt 2 darf sich nichts ändern
+  await page.evaluate(() => {
+    window.__fretMutations = { text: 0, block: 0, next: 0 };
+    const count = (key) => new MutationObserver((list) => { window.__fretMutations[key] += list.length; });
+    const all = { attributes: true, childList: true, characterData: true, subtree: true };
+    count('text').observe(document.getElementById('fretboard-text'), all);
+    count('block').observe(document.querySelector('section[data-view="fretboard"]'), all);
+    count('next').observe(document.getElementById('play-next'), all);
+  });
+  await playGo(page).click();
+  await expect(position(page)).toHaveText(/^Takt 2 von \d+$/, { timeout: BAR_TIMEOUT });
+  expect(await page.evaluate(() => window.__fretMutations)).toEqual({ text: 0, block: 0, next: 0 });
+  // Gegenprobe: beim Wechsel auf Dm wird neu geschrieben
+  await expect(page.locator('#play-now')).toHaveText('Dm', { timeout: BAR_TIMEOUT });
+  const after = await page.evaluate(() => window.__fretMutations);
+  expect(after.text).toBeGreaterThan(0);
+  expect(after.next).toBeGreaterThan(0);
+  await playGo(page).click();
+});
+
+test('360 px: Seite ohne waagerechtes Scrollen, das Griffbrett scrollt in sich und ist per Tastatur erreichbar', async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 740 });
+  await openPlayPage(page);
+  await page.keyboard.press('Escape'); // schmal öffnet Feintuning die Klang-Schublade (modal)
+  const region = page.locator('#fretboard');
+  await expect(region).toHaveAttribute('tabindex', '0');
+  await expect(region).toHaveAttribute('role', 'region');
+  const sizes = await region.evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
+  expect(sizes.scroll).toBeGreaterThan(sizes.client);
+  expect(await noScrollX(page)).toBe(true);
+  const box = await region.boundingBox();
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(360);
+  // Tab aus dem Blockkopf erreicht den Bereich; Pfeil rechts scrollt ihn
+  await page.locator('#labels-degrees').focus();
+  await page.keyboard.press('Tab');
+  await expect(region).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(() => region.evaluate((el) => el.scrollLeft)).toBeGreaterThan(0);
+  expect(await noScrollX(page)).toBe(true);
+});
+
+test('1280 px mit beiden Leisten: alle 16 Bünde ohne inneres Scrollen, Griffbrett füllt die Breite', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await openPlayPage(page);
+  const region = page.locator('#fretboard');
+  const sizes = await region.evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
+  expect(sizes.scroll).toBeLessThanOrEqual(sizes.client);
+  const [svg, area, last] = [await page.locator('#fretboard svg').boundingBox(), await region.boundingBox(), await note(page, 0, 15).boundingBox()];
+  expect(Math.abs(svg.width - area.width)).toBeLessThanOrEqual(1);
+  expect(last.x + last.width).toBeLessThanOrEqual(area.x + area.width);
+  expect(await noScrollX(page)).toBe(true);
+});

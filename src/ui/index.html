@@ -86,7 +86,25 @@
     <div class="stage">
       <div class="blocks" id="blocks">
         <section class="block" data-view="fretboard" aria-labelledby="view-fretboard-title">
-          <h3 class="block-title" id="view-fretboard-title" data-i18n="view.fretboard"></h3>
+          <div class="block-head">
+            <h3 class="block-title" id="view-fretboard-title" data-i18n="view.fretboard"></h3>
+            <div class="chips" role="group" data-i18n-label="ui.labelsGroup">
+              <button type="button" class="chip" id="labels-names" data-labels="names" data-i18n="ui.labelNames"></button>
+              <button type="button" class="chip" id="labels-degrees" data-labels="degrees" data-i18n="ui.labelDegrees"></button>
+            </div>
+          </div>
+          <!-- SVG baut fretboard.js; schmal scrollt nur dieser Bereich waagerecht, nie die Seite -->
+          <div class="fretboard-scroll" id="fretboard" tabindex="0" role="region" data-i18n-label="ui.fretboardLabel"></div>
+          <!-- Legende: Zeichen wie auf dem Griffbrett (dekorativ), Bedeutung steht als Text daneben -->
+          <ul class="legend" id="fretboard-legend">
+            <li><svg viewBox="-16 -16 32 32" aria-hidden="true"><g class="fret-note" data-role="scale"><rect class="dot"/></g></svg><span data-i18n="ui.legendScale"></span></li>
+            <li><svg viewBox="-16 -16 32 32" aria-hidden="true"><g class="fret-note" data-role="current"><rect class="dot"/></g></svg><span data-i18n="ui.legendCurrent"></span></li>
+            <li><svg viewBox="-16 -16 32 32" aria-hidden="true"><g class="fret-note" data-role="current root"><circle class="ring"/><rect class="dot"/></g></svg><span data-i18n="ui.legendRoot"></span></li>
+            <li><svg viewBox="-16 -16 32 32" aria-hidden="true"><g class="fret-note" data-role="next"><rect class="dot"/></g></svg><span data-i18n="ui.legendNext"></span></li>
+            <li><svg viewBox="-16 -16 32 32" aria-hidden="true"><g class="fret-note" data-role="both"><rect class="dot"/></g></svg><span data-i18n="ui.legendBoth"></span></li>
+            <li><svg viewBox="-16 -16 32 32" aria-hidden="true"><g class="fret-note" data-role="current outside"><rect class="dot"/></g></svg><span data-i18n="ui.legendOutside"></span></li>
+          </ul>
+          <p class="visually-hidden" id="fretboard-text"></p>
         </section>
         <section class="block" data-view="lanes" aria-labelledby="view-lanes-title">
           <h3 class="block-title" id="view-lanes-title" data-i18n="view.lanes"></h3>
