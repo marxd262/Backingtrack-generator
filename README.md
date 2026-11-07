@@ -15,6 +15,14 @@ Dann im Browser öffnen: <http://localhost:4173/ui/index.html> (der Server lausc
 
 Entwicklerseite zum Anhören der drei Stile: <http://localhost:4173/ui/render-harness.html>
 
+## Die Oberfläche
+
+- **Startseite:** der Startsatz (Tonart und Leiter, Stil, Tempo), Variantennummer, **Los** und **Feintuning**. Läuft die Wiedergabe, zeigt Los „Stopp“ und „Zur Spielseite“ führt zurück.
+- **Spielseite:** in der Mitte untereinander **Griffbrett**, **Verlauf** (mit den Stummschaltern je Schicht) und **Akkordrad**. Links die Seitenleiste **Klang** (Stil, Schlagworte, Tempo, Länge), rechts **Akkorde** (Tonart, Leiter, Akkordfolge bearbeiten, Ansichten).
+- Beide Seitenleisten lassen sich ein- und ausklappen; der Zustand wird im Browser gemerkt (`localStorage`). Auf schmalen Fenstern liegt eine offene Leiste als Schublade über der Mitte (Escape schließt sie).
+- **Griffbrett:** zeigt alle Töne der Leiter, hebt den jetzigen Akkord hervor und markiert den folgenden; der Schalter **Namen/Stufen** wechselt die Beschriftung (Stufen zählen vom Grundton der Tonart).
+- Unter **Ansichten** (rechte Leiste) lassen sich Griffbrett und Akkordrad ausblenden; der Verlauf bleibt immer sichtbar.
+
 ## Tests
 
 ```sh
