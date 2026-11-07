@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { VIEWS } from '../../src/ui/blocks.js';
+import { VIEWS as REGISTRY } from '../../src/ui/views.js';
 
 const html = readFileSync(new URL('../../src/ui/index.html', import.meta.url), 'utf8');
 const sections = [...html.matchAll(/<section\b[^>]*\bdata-view="([^"]+)"/g)].map((m) => m[1]);
@@ -18,4 +19,8 @@ test('ids sind eindeutig', () => {
 test('jede id hat genau einen section[data-view] im HTML und umgekehrt', () => {
   for (const { id } of VIEWS) assert.equal(sections.filter((s) => s === id).length, 1, id);
   for (const id of sections) assert.ok(VIEWS.some((v) => v.id === id), `${id} fehlt in VIEWS`);
+});
+
+test('blocks.js stellt dieselbe Registry bereit wie views.js', () => {
+  assert.equal(VIEWS, REGISTRY);
 });

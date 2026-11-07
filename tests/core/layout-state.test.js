@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { VIEWS } from '../../src/ui/views.js';
 import { LAYOUT_KEY, DEFAULT_LAYOUT, loadLayout, saveLayout } from '../../src/ui/layout-state.js';
 
 // Minimaler Speicher mit fester Rückgabe für getItem
@@ -91,4 +92,27 @@ test('fehlender oder werfender Speicher wirft nie', () => {
   assert.doesNotThrow(() => saveLayout(undefined, DEFAULT_LAYOUT));
   assert.doesNotThrow(() => saveLayout(throwing, DEFAULT_LAYOUT));
   assert.doesNotThrow(() => saveLayout({ setItem() {} }, null));
+});
+
+const hideableIds = VIEWS.filter((v) => v.hideable).map((v) => v.id);
+
+test('Standard-Ansichten sind genau die ausblendbaren Ansichten der Registry', () => {
+  assert.deepEqual(Object.keys(DEFAULT_LAYOUT.views).sort(), [...hideableIds].sort());
+  assert.ok(Object.values(DEFAULT_LAYOUT.views).every((v) => v === true));
+});
+
+test('jede ausblendbare Ansicht der Registry überlebt saveLayout -> loadLayout', () => {
+  for (const id of hideableIds) {
+    const map = new Map();
+    const storage = { getItem: (k) => map.get(k) ?? null, setItem: (k, v) => map.set(k, v) };
+    saveLayout(storage, { ...DEFAULT_LAYOUT, views: { ...DEFAULT_LAYOUT.views, [id]: false } });
+    const loaded = loadLayout(storage);
+    assert.equal(loaded.views[id], false, id);
+    for (const other of hideableIds.filter((o) => o !== id)) assert.equal(loaded.views[other], true, other);
+  }
+});
+
+test('nicht ausblendbare und unbekannte Ansichten werden verworfen', () => {
+  const raw = JSON.stringify({ views: { lanes: false, unknown: false } });
+  assert.deepEqual(loadLayout({ getItem: () => raw }).views, DEFAULT_LAYOUT.views);
 });

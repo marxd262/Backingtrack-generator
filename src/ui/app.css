@@ -226,6 +226,7 @@ main {
 .rhythm i { height: 8px; background: var(--staff); border-radius: 1px; }
 .rhythm i.on { background: var(--ink); }
 
+#views { display: grid; gap: 6px; }
 .view-switch { display: flex; align-items: center; gap: 10px; min-height: var(--target); cursor: pointer; }
 .view-switch input { width: 1.5rem; height: 1.5rem; margin: 0; accent-color: var(--ink); }
 

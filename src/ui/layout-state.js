@@ -1,9 +1,12 @@
 // Merkt sich Seitenleisten, Ansichten und Beschriftung; der Speicher wird übergeben (keine Browser-Globals).
+// Die ausblendbaren Ansichten kommen aus der Registry (views.js); nicht ausblendbare und unbekannte werden verworfen.
+import { VIEWS } from './views.js';
+
 export const LAYOUT_KEY = 'backingtrack.layout';
 
 export const DEFAULT_LAYOUT = Object.freeze({
   sidebars: Object.freeze({ left: false, right: false }),
-  views: Object.freeze({ fretboard: true, wheel: true }),
+  views: Object.freeze(Object.fromEntries(VIEWS.filter((v) => v.hideable).map((v) => [v.id, true]))),
   labels: 'names',
 });
 

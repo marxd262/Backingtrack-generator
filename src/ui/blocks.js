@@ -1,12 +1,10 @@
-// Registry der Ansichten (Blöcke der Spielseite) und ihre Schalter. Ein neuer Eintrag mit hideable: true bekommt
-// Schalter und Ausblenden ohne weiteren Code. Kein Browser-Objekt beim Import: das DOM wird erst in initViews angefasst.
+// Schalter der Ansichten. Die Registry VIEWS steht in views.js (rein, auch für layout-state.js); ein neuer
+// hideable-Eintrag dort bekommt Schalter und Ausblenden hier ohne weiteren Code. Kein Browser-Objekt beim Import:
+// das DOM wird erst in initViews angefasst.
 import { t } from '../index.js';
+import { VIEWS } from './views.js';
 
-export const VIEWS = [
-  { id: 'fretboard', hideable: true },
-  { id: 'lanes', hideable: false }, // enthält die Stummschalter je Schicht
-  { id: 'wheel', hideable: true },
-];
+export { VIEWS };
 
 // initViews(container, { isVisible(id), setVisible(id, on) }) -> { render() }; render() schreibt nur bei Änderung
 export function initViews(container, { isVisible, setVisible }) {
