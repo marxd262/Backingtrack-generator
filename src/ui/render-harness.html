@@ -16,39 +16,34 @@
 </p>
 <script type="module">
 import { renderOffline } from '../audio/render.js';
-import { createInstruments } from '../audio/synth.js';
-import { buildEvents } from '../core/events.js';
+import { play } from '../audio/play.js';
 import { STYLE_PRESETS } from '../core/tags.js';
 
 window.__render = renderOffline;
 
-const LISTEN_SECONDS = 60;
 let ctx = null;
+let playback = null;
 
 function stop() {
+  playback?.stop();
   ctx?.close();
-  ctx = null;
+  playback = ctx = null;
 }
 
-function play(id) {
+function start(id) {
   stop();
   const preset = STYLE_PRESETS.find((p) => p.id === id);
-  const events = buildEvents({
+  ctx = new AudioContext();
+  playback = play(ctx, {
     key: { root: 'A', mode: 'minor' },
     bpm: preset.bpm,
     bars: [['A', 'min'], ['A', 'min'], ['D', 'min'], ['E', 'maj']].map(([root, quality]) => ({ chord: { root, quality }, beats: 4 })),
     tags: preset.tags,
     seed: 1,
-  });
-  ctx = new AudioContext();
-  const { output, layers } = createInstruments(ctx, { bpm: preset.bpm });
-  output.connect(ctx.destination);
-  const start = ctx.currentTime + 0.15;
-  // shortcut: alles auf einmal einplanen statt Vorausplanung, play() mit Scheduler kommt in Task 7
-  for (const e of events) if (e.t < LISTEN_SECONDS && e.layer) layers[e.layer].trigger(e, start + e.t);
+  }, { loops: Infinity });
 }
 
-for (const b of document.querySelectorAll('[data-style]')) b.addEventListener('click', () => play(b.dataset.style));
+for (const b of document.querySelectorAll('[data-style]')) b.addEventListener('click', () => start(b.dataset.style));
 document.getElementById('stop').addEventListener('click', stop);
 </script>
 </body>
