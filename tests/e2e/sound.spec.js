@@ -100,3 +100,74 @@ test('createInstruments verträgt unvollständiges oder ungültiges timbre', asy
   });
   expect(r).toEqual(Array(8).fill(LAYERS.join()));
 });
+
+// Bassklang: Basistrack (16 s) mit genau einem Schlagwort gegen den Standard, nur Bass-Schicht.
+const withTags = (tags) => track({ tags: { development: ['fullFromStart'], ...tags } });
+const BASS_SECONDS = 16;
+// Bass-rms vor dem Begrenzer im Standardklang (levels.spec.js, BASELINE.pre.bass, gleicher Track und gleiche Länge)
+const DEFAULT_BASS_PRE_RMS = 0.09297909625210916;
+// [Name, Schlagworte, Mindest-diff, Richtung des Schwerpunkts: -1 tiefer, +1 höher, 0 egal]
+// Gemessen 2026-11-08 (Bass allein, mit Begrenzer, Schwerpunkt Standard 525 Hz):
+//   sub diff 0.473 / 216 Hz, fuzz 0.360 / 1505 Hz, plucky 0.494 / 757 Hz, round 0.341 / 229 Hz,
+//   resonant 0.378 / 1064 Hz, gritty 0.259 / 1003 Hz (warm, nur Bass: 0.089 / 470 Hz)
+const BASS_TAGS = [
+  ['sub', { bassSound: ['sub'] }, 0.25, -1],
+  ['fuzz', { bassSound: ['fuzz'] }, 0.25, 1],
+  ['plucky', { bassSound: ['plucky'] }, 0.25, 0],
+  ['round', { bassSound: ['round'] }, 0.25, -1],
+  ['resonant', { bassSound: ['resonant'] }, 0.25, 1],
+  ['gritty', { bass: ['gritty'] }, 0.15, 1],
+];
+
+for (const [name, tags, minDiff, direction] of BASS_TAGS) {
+  test(`Bassklang ${name}: Bass-Schicht deutlich anders, Schwerpunkt in Richtung`, async ({ page }) => {
+    test.setTimeout(120_000);
+    const r = await compare(page, track(), withTags(tags), BASS_SECONDS, { layer: 'bass' });
+    const label = `${name}: ${JSON.stringify(r)}`;
+    expect(r.diff, label).toBeGreaterThanOrEqual(minDiff);
+    if (direction < 0) expect(r.centroidB, label).toBeLessThan(r.centroidA);
+    if (direction > 0) expect(r.centroidB, label).toBeGreaterThan(r.centroidA);
+  });
+}
+
+// Pegelsicherheit: auch warm (runderer Bass) gehört dazu. Gemessen 2026-11-08, 16 s
+// (Bass-rms vor dem Begrenzer / Standard, Summe Spitze vor / nach dem Begrenzer, Bass-rms nach dem Begrenzer):
+//   sub 1.338, 0.751 / 0.700, 0.240; fuzz 1.114, 0.734 / 0.704, 0.200; plucky 0.618, 0.669 / 0.692, 0.111;
+//   round 1.159, 0.732 / 0.700, 0.208; resonant 0.772, 0.692 / 0.702, 0.138; gritty 1.079, 0.703 / 0.698, 0.193;
+//   warm 1.026, 0.698 / 0.695, 0.184. Ohne Ausgleich lag fuzz bei 2.45 (vor dem Begrenzer Spitze 0.875), gritty bei 2.31.
+for (const [name, tags] of [...BASS_TAGS, ['warm', { synths: ['warm'] }]]) {
+  test(`Bassklang ${name}: Pegel sicher (Bass hörbar und im Rahmen, Summe ohne Übersteuern)`, async ({ page }) => {
+    test.setTimeout(120_000);
+    const input = withTags(tags);
+    const pre = await page.evaluate(([i, s]) => window.__render(i, s, { limiter: false }), [input, BASS_SECONDS]);
+    const post = await page.evaluate(([i, s]) => window.__render(i, s), [input, BASS_SECONDS]);
+    const ratio = pre.perLayer.bass.rms / DEFAULT_BASS_PRE_RMS;
+    const label = `${name}: ratio ${ratio}, pre peak ${pre.peak}, post peak ${post.peak}, bass rms ${post.perLayer.bass.rms}`;
+    expect(post.perLayer.bass.rms, label).toBeGreaterThan(0.005);
+    expect(ratio, label).toBeGreaterThanOrEqual(0.25);
+    expect(ratio, label).toBeLessThanOrEqual(3);
+    expect(post.peak, label).toBeLessThan(0.9);
+    expect(pre.peak, label).toBeLessThan(0.95);
+  });
+}
+
+// gemessen 2026-11-08: Spitze nach dem Begrenzer 0.706 (davor 0.733), Bass-rms 0.122
+test('Bassklang: alle fünf Bass-Schlagworte und gritty zugleich bleiben endlich und sicher', async ({ page }) => {
+  test.setTimeout(120_000);
+  const input = withTags({ bassSound: ['sub', 'fuzz', 'plucky', 'round', 'resonant'], bass: ['gritty'] });
+  const r = await page.evaluate(([i, s]) => window.__render(i, s), [input, BASS_SECONDS]);
+  const values = [r.peak, r.rms, r.centroid, ...LAYERS.flatMap((l) => Object.values(r.perLayer[l]))];
+  expect(values.every(Number.isFinite), JSON.stringify(r)).toBe(true);
+  expect(r.peak).toBeLessThan(0.9);
+  expect(r.perLayer.bass.rms).toBeGreaterThan(0.005);
+});
+
+test('Bassklang: stummer Bass bleibt mit fuzz exakt still (abgeschaltet und über setMuted)', async ({ page }) => {
+  test.setTimeout(120_000);
+  const fuzz = { bassSound: ['fuzz'] };
+  const off = await page.evaluate(([i, s]) => window.__render(i, s), [track({ layers: { drums: true, bass: false, chords: true, pad: true }, tags: { development: ['fullFromStart'], ...fuzz } }), 6]);
+  expect(off.perLayer.bass).toEqual({ peak: 0, rms: 0, centroid: 0 });
+  // Schlagzeug allein: der Bass spielt mit fuzz, ist aber über setMuted stumm geschaltet; nur Float-Rundung erlaubt
+  const drums = await compare(page, track(), withTags(fuzz), 6, { layer: 'drums' });
+  expect(drums.diff).toBeLessThan(1e-6);
+});

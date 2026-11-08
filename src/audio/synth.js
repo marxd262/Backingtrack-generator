@@ -2,6 +2,7 @@
 // Rauschen aus dem Seed statt Math.random, damit Renders reproduzierbar sind. AudioContext nur von außen.
 import { createRng } from '../core/rng.js';
 import { DEFAULT_TIMBRE, completeTimbre } from '../core/timbre.js';
+import { bassParams } from './voice-params.js';
 
 // Schichtpegel und Summe, aus Messungen mit tests/e2e/levels.spec.js angeglichen (Messwerte dort im Kommentar)
 const TRIM = { drums: 0.65, bass: 0.24, chords: 1, pad: 0.8 };
@@ -40,7 +41,7 @@ function osc(ctx, type, freq, detune, dest, t, end) {
   return o;
 }
 
-// Die Stimmen bekommen ihre Gruppe des Klangmodells (timbre); noch unbenutzt, der Klang ist der bisherige.
+// Die Stimmen bekommen ihre Gruppe des Klangmodells (timbre); außer dem Bass noch unbenutzt, der Klang ist der bisherige.
 function drumVoices(ctx, noise, timbre) {
   const kick = (out, t, v) => {
     const o = ctx.createOscillator(), a = ctx.createGain();
@@ -73,16 +74,49 @@ function drumVoices(ctx, noise, timbre) {
   return voices;
 }
 
-// Bass: zwei leicht verstimmte Sägezähne mit Tiefpass-Zupfhüllkurve, Sinus als Fundament
-function bassNote(ctx, out, t, e, timbre) {
+function gain(ctx, value, dest) {
+  const g = ctx.createGain();
+  g.gain.value = value;
+  g.connect(dest);
+  return g;
+}
+
+// Tanh-Kennlinie für den Bass-Verzerrer, Eingang -FUZZ_HEAD..FUZZ_HEAD. k = drive - 1: bei k -> 0 die Identität,
+// der Klang geht also stetig aus dem unverzerrten hervor. Ungerade Länge: 0 trifft genau einen Stützpunkt (Stille bleibt 0).
+const FUZZ_HEAD = 4;
+function fuzzCurve(drive) {
+  const k = drive - 1, n = 4097;
+  return Float32Array.from({ length: n }, (_, i) => (FUZZ_HEAD * Math.tanh(k * ((2 * i) / (n - 1) - 1))) / Math.tanh(k));
+}
+
+// Bass: zwei leicht verstimmte Sägezähne (oder Dreiecke) mit Tiefpass-Zupfhüllkurve, Sinus als Fundament,
+// optional Verzerrer nach dem Filter. p aus bassParams, curve aus fuzzCurve (null ohne Verzerrer).
+function bassNote(ctx, out, t, e, p, curve) {
   const f = hz(e.midi), end = t + e.dur + 0.1;
-  const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.Q.value = 4;
-  lp.frequency.setValueAtTime(2200, t); lp.frequency.exponentialRampToValueAtTime(320, t + 0.15);
-  const a = ctx.createGain(); adsr(a, t, 0.004, e.vel * 0.5, Math.max(0.03, e.dur - 0.06), 0.05);
-  osc(ctx, 'sawtooth', f, -6, lp, t, end);
-  osc(ctx, 'sawtooth', f, 6, lp, t, end);
-  osc(ctx, 'sine', f, 0, a, t, end);
-  lp.connect(a).connect(out);
+  const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.Q.value = p.q;
+  lp.frequency.setValueAtTime(p.lpStart, t); lp.frequency.exponentialRampToValueAtTime(p.lpEnd, t + p.lpTime);
+  const hold = Math.max(p.holdMin, e.dur - p.holdCut);
+  const a = ctx.createGain(); adsr(a, t, p.attack, e.vel * p.peak, hold, p.release);
+  // zupfend: Abklingen während der Haltezeit; sustain 1 = flach wie bisher, dann ohne zusätzlichen Knoten
+  if (p.sustain < 1) {
+    const decay = gain(ctx, 1, out);
+    decay.gain.setValueAtTime(1, t + p.attack);
+    decay.gain.exponentialRampToValueAtTime(p.sustain, t + p.attack + hold);
+    a.connect(decay);
+  } else a.connect(out);
+  for (const [type, mix] of [['sawtooth', p.sawMix], ['triangle', p.triMix]]) {
+    if (mix === 0) continue;
+    const bus = gain(ctx, mix, lp);
+    for (const det of [-p.sawDetune, p.sawDetune]) osc(ctx, type, f, det, bus, t, end);
+  }
+  let body = a;
+  if (curve) {
+    const shaper = ctx.createWaveShaper(); shaper.curve = curve;
+    body = gain(ctx, 1 / FUZZ_HEAD, shaper);
+    shaper.connect(a);
+  }
+  osc(ctx, 'sine', f, 0, gain(ctx, p.sineGain, body), t, end);
+  lp.connect(body);
 }
 
 // Akkorde: kurzer Zupf/Stab je Ton (der Strom enthält Stabs oder Arpeggio-Töne)
@@ -141,9 +175,11 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
   tone.connect(echoWet).connect(master);
 
   const drums = drumVoices(ctx, noise, sound.drums);
+  const bass = bassParams(sound.bass);
+  const curve = bass.drive > 1 ? fuzzCurve(bass.drive) : null; // einmal je Instrumentensatz
   const play = {
     drums: (out, t, e) => e.type === 'hit' && drums[e.name]?.(out, t, e.vel),
-    bass: (out, t, e) => e.type === 'note' && bassNote(ctx, out, t, e, sound.bass),
+    bass: (out, t, e) => e.type === 'note' && bassNote(ctx, out, t, e, bass, curve),
     chords: (out, t, e) => e.type === 'note' && chordNote(ctx, out, t, e, sound.chords),
     pad: (out, t, e) => e.type === 'note' && padNote(ctx, out, t, e, sound.pad),
   };
