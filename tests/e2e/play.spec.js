@@ -380,6 +380,88 @@ test('loops muss eine ganze Zahl >= 1 oder Infinity sein', async ({ page }) => {
   expect(r).toEqual({ errors: Array(5).fill('RangeError'), touched: [] });
 });
 
+// Abspielen ab einem Takt: misst onBar, onEvent, trigger (Spion) und onEnd
+const playFrom = (page, input, options) => page.evaluate(async ([input, options]) => {
+  const { play } = await import('/audio/play.js');
+  const ctx = new AudioContext();
+  const spy = window.__spy();
+  const bars = [], events = [], ends = [];
+  let done;
+  const ended = new Promise((resolve) => (done = resolve));
+  const h = play(ctx, input, {
+    ...options,
+    createInstruments: spy.create,
+    onBar: (b) => bars.push({ ...b, at: performance.now() }),
+    onEvent: (e) => events.push({ type: e.type, bar: e.bar, t: e.t }),
+    onEnd: () => (ends.push(performance.now()), done()),
+  });
+  await ended;
+  await new Promise((resolve) => setTimeout(resolve, 400)); // kein zweites onEnd, keine weiteren Takte
+  h.stop();
+  await ctx.close();
+  return { startPerf: h.startPerf, bars, events, ends, trigger: spy.trigger.map((c) => c.t), factory: spy.factory.length };
+}, [input, options]);
+
+test('startBar: 2 spielt ab Takt 2 mit dessen Akkord, frühere Ereignisse entfallen, loops: 1 endet nach den restlichen Takten', async ({ page }) => {
+  test.setTimeout(30_000);
+  const input = track();
+  const r = await playFrom(page, input, { startBar: 2 });
+  const expected = await page.evaluate(async (i) => {
+    const { buildEvents } = await import('/core/events.js');
+    return buildEvents(i).filter((e) => e.layer && e.bar >= 2).map((e) => e.t);
+  }, input);
+  expect(r.bars.map((b) => b.bar)).toEqual([2, 3]);
+  expect(r.bars.map((b) => b.chord)).toEqual([{ root: 'D', quality: 'min' }, { root: 'E', quality: 'maj' }]);
+  // erstes Ereignis ist der Akkord von Takt 2 zur Liedzeit 2 s (Takt 2 beginnt nach zwei Takten zu 1 s)
+  expect(r.events[0]).toEqual({ type: 'chord', bar: 2, t: 2 });
+  expect(r.events.every((e) => e.bar >= 2)).toBe(true);
+  expect(r.trigger).toEqual(expected);
+  expect(r.factory).toBe(1);
+  // startPerf ist der Beginn des ersten gespielten Takts
+  const first = r.bars[0].at;
+  expect(Math.abs(first - r.startPerf)).toBeLessThan(START_TOLERANCE);
+  expect(Math.abs(r.bars[1].at - first - 1000)).toBeLessThan(SPACING_TOLERANCE);
+  expect(r.ends.length).toBe(1);
+  expect(Math.abs(r.ends[0] - first - 2000)).toBeLessThan(SPACING_TOLERANCE);
+});
+
+test('startBar mit loops: 2: der angefangene Durchlauf zählt als erster, Takte zählen weiter', async ({ page }) => {
+  test.setTimeout(30_000);
+  const r = await playFrom(page, track(), { startBar: 3, loops: 2 });
+  expect(r.bars.map((b) => b.bar)).toEqual([3, 4, 5, 6, 7]);
+  expect(r.bars.map((b) => b.chord.root)).toEqual(['E', 'A', 'A', 'D', 'E']);
+  expect(r.ends.length).toBe(1);
+  expect(Math.abs(r.ends[0] - r.bars[0].at - 5000)).toBeLessThan(SPACING_TOLERANCE);
+});
+
+test('startBar gleich length - 1 spielt genau einen Takt', async ({ page }) => {
+  test.setTimeout(30_000);
+  const r = await playFrom(page, track(), { startBar: 3 });
+  expect(r.bars.map((b) => b.bar)).toEqual([3]);
+  expect(r.events[0]).toEqual({ type: 'chord', bar: 3, t: 3 });
+  expect(r.ends.length).toBe(1);
+  expect(Math.abs(r.ends[0] - r.bars[0].at - 1000)).toBeLessThan(SPACING_TOLERANCE);
+});
+
+test('startBar muss eine ganze Zahl in 0..length-1 sein, sonst RangeError, bevor ein Knoten entsteht', async ({ page }) => {
+  const r = await page.evaluate(async (input) => {
+    const { play } = await import('/audio/play.js');
+    const touched = [];
+    const ctx = new Proxy({}, { get: (_, key) => void touched.push(String(key)) });
+    const spy = window.__spy();
+    const errors = [-1, 1.5, 4, NaN, '2', Infinity, null].map((startBar) => {
+      try { play(ctx, input, { startBar, createInstruments: spy.create }); return null; } catch (err) { return err.constructor.name; }
+    });
+    // ungültiger Track: dessen Fehler kommt zuerst
+    let track = null;
+    try { play(ctx, { bpm: 120, bars: [] }, { startBar: -1 }); } catch (err) { track = err.message; }
+    return { errors, touched, factory: spy.factory.length, track };
+  }, track());
+  expect(r.errors).toEqual(Array(7).fill('RangeError'));
+  expect(r).toMatchObject({ touched: [], factory: 0 });
+  expect(r.track).toMatch(/Invalid track/);
+});
+
 test('fehlende Instrument-Schicht: play wirft, nichts läuft weiter', async ({ page }) => {
   const r = await page.evaluate(async (input) => {
     const { play } = await import('/audio/play.js');

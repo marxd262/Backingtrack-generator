@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRng } from '../../src/core/rng.js';
-import { TAG_CATEGORIES, STYLE_PRESETS, INERT_TAGS, resolveTags } from '../../src/core/tags.js';
+import { TAG_CATEGORIES, STYLE_PRESETS, INERT_TAGS, resolveTags, isSoundOnlyChange } from '../../src/core/tags.js';
 import { resolveTimbre, DEFAULT_TIMBRE } from '../../src/core/timbre.js';
 
 const NUMBERS = ['drive', 'swing', 'syncopation', 'bassLow', 'bassMovement', 'padWidth'];
@@ -137,6 +137,36 @@ test('Presets: Klangmodelle paarweise verschieden, jedes weicht bei Bass, Akkord
     }
     for (const group of ['bass', 'chords', 'pad']) {
       assert.notDeepEqual(timbres[i][group], DEFAULT_TIMBRE[group], `${STYLE_PRESETS[i].id}: ${group}`);
+    }
+  }
+});
+
+test('isSoundOnlyChange: nur reine Klang-Schlagworte geändert', () => {
+  const funk = STYLE_PRESETS.find((p) => p.id === 'funk').tags;
+  const cases = [
+    ['fuzz dazu', funk, { ...funk, bassSound: ['plucky', 'fuzz'] }, true],
+    ['glassy weg', { padSound: ['glassy', 'airy'] }, { padSound: ['airy'] }, true],
+    ['driving dazu', {}, { drums: ['driving'] }, false],
+    ['dreamy dazu (ändert auch die Pad-Stimmen)', {}, { mood: ['dreamy'] }, false],
+    ['fuzz und driving dazu', {}, { bassSound: ['fuzz'], drums: ['driving'] }, false],
+    ['gleiche Auswahl', funk, structuredClone(funk), false],
+    ['gleiche Auswahl, andere Reihenfolge', { padSound: ['airy', 'glassy'] }, { padSound: ['glassy', 'airy'] }, false],
+    ['warm, dark, bright, psychedelic, gritty dazu', {}, { synths: ['warm'], mood: ['dark', 'bright', 'psychedelic'], bass: ['gritty'] }, true],
+    ['leere Kategorie fehlt', { padSound: [] }, {}, false],
+    ['unbekanntes Schlagwort', {}, { padSound: ['shiny'] }, false],
+    ['__proto__', {}, { padSound: ['__proto__'] }, false],
+    ['null', null, { bassSound: ['fuzz'] }, false],
+    ['undefined', { bassSound: ['fuzz'] }, undefined, false],
+    ['beide fehlen', undefined, null, false],
+    ['keine Liste', { bassSound: 'fuzz' }, { bassSound: ['fuzz', 'sub'] }, false],
+    ['Zahl', 3, { bassSound: ['fuzz'] }, false],
+  ];
+  for (const [label, prev, next, expected] of cases) assert.equal(isSoundOnlyChange(prev, next), expected, label);
+  // jedes Schlagwort der vier Klang-Kategorien allein ist reiner Klang, jedes Muster-Schlagwort nicht
+  for (const c of TAG_CATEGORIES) {
+    for (const tag of c.tags) {
+      const soundOnly = SOUND_CATEGORIES.includes(c.id) || ['gritty', 'warm', 'dark', 'bright', 'psychedelic'].includes(tag);
+      assert.equal(isSoundOnlyChange({}, { [c.id]: [tag] }), soundOnly, tag);
     }
   }
 });

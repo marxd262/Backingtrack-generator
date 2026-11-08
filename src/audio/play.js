@@ -14,8 +14,10 @@ const FADE = 0.05;
  * Spielt einen Track `loops`-mal (Standard 1, Infinity erlaubt). Takte zählen über Durchläufe weiter.
  * onEvent: jedes Ereignis (auch stumm geschalteter Schichten), onBar: {bar, chord} je Takt, onEnd: nach dem letzten Durchlauf.
  * Ereignisse an die Rückrufe tragen `bar` und `t` (Liedzeit beim Originaltempo) über alle Durchläufe.
+ * startBar (ganze Zahl 0..length-1, Standard 0): beginnt mit diesem Takt; frühere Ereignisse entfallen, `bar` und `t` zählen ab
+ * dort wie beim Durchspielen weiter, der angefangene Durchlauf zählt als erster. startPerf ist der Beginn des ersten gespielten Takts.
  */
-export function play(ctx, trackInput, { loops = 1, onEvent, onBar, onEnd, createInstruments = synthInstruments } = {}) {
+export function play(ctx, trackInput, { loops = 1, startBar = 0, onEvent, onBar, onEnd, createInstruments = synthInstruments } = {}) {
   const events = buildEvents(trackInput); // wirft bei ungültigem Track, bevor ein Knoten entsteht
   if (!(loops === Infinity || (Number.isInteger(loops) && loops >= 1))) {
     throw new RangeError(`loops must be an integer >= 1 or Infinity, got ${loops}`);
@@ -23,8 +25,14 @@ export function play(ctx, trackInput, { loops = 1, onEvent, onBar, onEnd, create
   const track = normalizeTrack(trackInput);
   const bpm = track.bpm;
   const loopBars = track.length;
-  let loopSec = 0;
-  for (let i = 0; i < loopBars; i++) loopSec += (track.bars[i % track.bars.length].beats * 60) / bpm;
+  if (!(Number.isInteger(startBar) && startBar >= 0 && startBar < loopBars)) {
+    throw new RangeError(`startBar must be an integer in [0, ${loopBars - 1}], got ${startBar}`);
+  }
+  let loopSec = 0, startSec = 0; // startSec: Liedzeit am Beginn von startBar
+  for (let i = 0; i < loopBars; i++) {
+    if (i === startBar) startSec = loopSec;
+    loopSec += (track.bars[i % track.bars.length].beats * 60) / bpm;
+  }
 
   // Schlagworte sind durch buildEvents geprüft, resolveTimbre wirft hier nicht
   const instruments = createInstruments(ctx, { bpm, timbre: resolveTimbre(track.tags) });
@@ -41,7 +49,7 @@ export function play(ctx, trackInput, { loops = 1, onEvent, onBar, onEnd, create
     : performance.now() + (startCtx - ctx.currentTime) * 1000;
 
   // Liedzeit -> ctx-Zeit über Anker und Tempofaktor; setTempo setzt einen neuen Anker
-  let anchor = { song: 0, ctx: startCtx };
+  let anchor = { song: startSec, ctx: startCtx };
   let rate = 1;
   let lastCtx = startCtx; // ctx-Zeit des zuletzt geplanten Ereignisses (ungeklemmt)
   const toCtx = (song) => anchor.ctx + (song - anchor.song) / rate;
@@ -77,6 +85,7 @@ export function play(ctx, trackInput, { loops = 1, onEvent, onBar, onEnd, create
         continue;
       }
       const e = events[next];
+      if (loop === 0 && e.bar < startBar) { next++; continue; } // vor startBar: entfällt
       const song = loop * loopSec + e.t;
       const due = toCtx(song);
       if (due > horizon) return;

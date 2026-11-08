@@ -497,7 +497,8 @@ test('Schnellauswahl: jeder Stil wählt genau seine Schlagworte in allen zehn Gr
   }
 });
 
-test('Klang-Schlagwort während der Wiedergabe: Neustart ohne Fehler, genau ein Player, kein neuer AudioContext', async ({ page }) => {
+// Zählt erzeugte AudioContexts (window.__audioContexts) ab dem nächsten Laden
+async function countContexts(page) {
   await page.addInitScript(() => {
     window.__audioContexts = 0;
     const Original = window.AudioContext;
@@ -510,22 +511,76 @@ test('Klang-Schlagwort während der Wiedergabe: Neustart ohne Fehler, genau ein 
   });
   await page.reload();
   await expect(page.locator('#go')).toHaveText(/\S/);
+}
+
+// Zeichnet jeden Text der Taktzeile auf (window.__positions), auch kurze Zwischenstände wie die leere Zeile beim Neustart
+const recordPositions = (page) => page.evaluate(() => {
+  window.__positions = [];
+  const el = document.querySelector('#play-position');
+  new MutationObserver(() => window.__positions.push(el.textContent)).observe(el, { childList: true, characterData: true, subtree: true });
+});
+const positionsSince = async (page) => page.evaluate(() => window.__positions.splice(0));
+const shownBar = async (page) => Number((await position(page).textContent()).match(/^Takt (\d+) von \d+$/)?.[1] ?? NaN);
+
+// Ein reines Klang-Schlagwort startet im laufenden Takt neu: die Taktzeile springt nie auf Takt 1 zurück und läuft weiter
+async function expectInPlace(page, before, label) {
+  await expect.poll(() => shownBar(page), { message: label, timeout: BAR_TIMEOUT }).toBeGreaterThan(before);
+  const shown = (await positionsSince(page)).filter(Boolean).map((text) => Number(text.match(/^Takt (\d+) von/)[1]));
+  expect(shown.length, label).toBeGreaterThan(0);
+  for (const bar of shown) expect(bar, `${label}: ${shown}`).toBeGreaterThanOrEqual(before);
+}
+
+test('Klang-Schlagwort während der Wiedergabe: Neustart im laufenden Takt, genau ein Player, kein neuer AudioContext', async ({ page }) => {
+  await countContexts(page);
   await openPlayPage(page);
   await playFast(page);
   await expect(position(page)).toHaveText('Takt 2 von 96', { timeout: BAR_TIMEOUT });
   const contexts = () => page.evaluate(() => window.__audioContexts);
   expect(await contexts()).toBe(1);
-  // nacheinander aus jeder der vier Klang-Kategorien; jeder Klick startet neu, die Taktzeile läuft danach weiter
+  await recordPositions(page);
+  // nacheinander aus jeder der vier Klang-Kategorien; jeder Klick startet im laufenden Takt neu, die Taktzeile läuft danach weiter
   for (const [category, tag] of [['drumSound', 'boomy'], ['bassSound', 'sub'], ['chordSound', 'tremolo'], ['padSound', 'moving']]) {
-    await expect(position(page)).toHaveText('Takt 2 von 96', { timeout: BAR_TIMEOUT });
+    const before = await shownBar(page);
+    await positionsSince(page);
     await page.locator(`#tags [data-category="${category}"][data-tag="${tag}"]`).click();
     await expect(page.locator(`#tags [data-tag="${tag}"]`)).toHaveAttribute('aria-pressed', 'true');
-    await expect(position(page)).toHaveText('Takt 1 von 96', { timeout: BAR_TIMEOUT });
-    await expect(position(page)).toHaveText('Takt 2 von 96', { timeout: BAR_TIMEOUT });
+    await expectInPlace(page, before, tag);
     expect(await contexts(), tag).toBe(1);
     await expect(playGo(page)).toHaveText('Stopp');
   }
   await playGo(page).click();
   await expect(playGo(page)).toHaveText('Los');
   expect(await contexts()).toBe(1);
+});
+
+test('Funk-Vorlage im zweiten Teil: Klang-Schlagwort spielt im Takt weiter, Muster-Schlagwort und Stil starten bei Takt 1', async ({ page }) => {
+  test.setTimeout(60_000);
+  await countContexts(page);
+  await openPlayPage(page);
+  await expect(page.locator('#quick-pick [data-style="funk"]')).toHaveAttribute('aria-pressed', 'true');
+  await playFast(page);
+  // funk baut langsam auf: Akkorde oder Pad setzen erst ab Takt 9 ein (200 bpm: 1,2 s je Takt)
+  await expect.poll(() => shownBar(page), { timeout: 20_000 }).toBeGreaterThanOrEqual(9);
+  await recordPositions(page);
+  const contexts = () => page.evaluate(() => window.__audioContexts);
+  for (const [category, tag] of [['padSound', 'glassy'], ['chordSound', 'tremolo']]) {
+    const before = await shownBar(page);
+    await positionsSince(page);
+    await page.locator(`#tags [data-category="${category}"][data-tag="${tag}"]`).click();
+    await expect(page.locator(`#tags [data-category="${category}"][data-tag="${tag}"]`)).toHaveAttribute('aria-pressed', 'true');
+    await expectInPlace(page, before, tag);
+    expect(await contexts(), tag).toBe(1);
+  }
+  // Muster-Schlagwort: der Ereignisstrom ändert sich, Neustart bei Takt 1 wie bisher
+  await page.locator('#tags [data-category="drums"][data-tag="driving"]').click();
+  await expect(page.locator('#tags [data-category="drums"][data-tag="driving"]')).toHaveAttribute('aria-pressed', 'false');
+  await expect(position(page)).toHaveText('Takt 1 von 96', { timeout: BAR_TIMEOUT });
+  await expect(position(page)).toHaveText('Takt 2 von 96', { timeout: BAR_TIMEOUT });
+  // Stil aus der Schnellauswahl: ebenfalls ab Takt 1
+  await page.locator('#quick-pick [data-style="funk"]').click();
+  await expect(page.locator('#quick-pick [data-style="funk"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(position(page)).toHaveText('Takt 1 von 96', { timeout: BAR_TIMEOUT });
+  expect(await contexts()).toBe(1);
+  await playGo(page).click();
+  await expect(playGo(page)).toHaveText('Los');
 });

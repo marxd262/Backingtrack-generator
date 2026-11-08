@@ -67,6 +67,30 @@ const EFFECTS = {
 export const INERT_TAGS = Object.freeze(TAG_CATEGORIES.flatMap((c) => c.tags)
   .filter((tag) => !Object.hasOwn(EFFECTS, tag) && !Object.hasOwn(TIMBRE_EFFECTS, tag)));
 
+/**
+ * true, wenn sich die Auswahl geändert hat und jedes geänderte Schlagwort reiner Klang ist (Eintrag in TIMBRE_EFFECTS, keiner in
+ * EFFECTS): der Ereignisstrom bleibt gleich. Ungültige Eingaben werfen nicht, sie ergeben false.
+ */
+export function isSoundOnlyChange(prevTags, nextTags) {
+  const selected = (tags) => {
+    if (typeof tags !== 'object' || tags === null) return null;
+    const out = new Set();
+    for (const list of Object.values(tags)) {
+      if (!Array.isArray(list)) return null;
+      for (const tag of list) out.add(tag);
+    }
+    return out;
+  };
+  try {
+    const a = selected(prevTags), b = selected(nextTags);
+    if (!a || !b) return false;
+    const changed = [...a].filter((tag) => !b.has(tag)).concat([...b].filter((tag) => !a.has(tag)));
+    return changed.length > 0 && changed.every((tag) => Object.hasOwn(TIMBRE_EFFECTS, tag) && !Object.hasOwn(EFFECTS, tag));
+  } catch {
+    return false; // z. B. werfende Getter
+  }
+}
+
 // Gegensätze: sind beide gewählt, entscheidet rng je Aufruf, welches zählt.
 const OPPOSITES = [
   ['driving', 'loose'],

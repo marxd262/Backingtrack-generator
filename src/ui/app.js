@@ -15,7 +15,7 @@ const RHYTHMS = { funk: '1001001010100110', psych: '1010101010101010', dreamy: '
 let ctx = null;
 let player = null;
 
-function start() {
+function start(startBar = 0) {
   state.errors = [];
   try {
     ctx ??= new AudioContext(); // nur aus einem Klick heraus aufgerufen
@@ -23,6 +23,7 @@ function start() {
     // alle Schichten erzeugen und stumme per setLayer leise schalten, damit Einschalten live ohne Neustart klingt
     player = play(ctx, { ...state.track, layers: ALL_LAYERS }, {
       loops: Infinity, // läuft bis Stopp
+      startBar,
       onBar: (b) => { state.current = b; render(); },
       onEnd: () => { stop(); render(); },
     });
@@ -43,10 +44,15 @@ function stop() {
   state.current = null;
 }
 
-function restartIfPlaying() {
+// inPlace: nur der Klang hat sich geändert (Ereignisstrom gleich), also im laufenden Takt weiter statt ab Takt 1;
+// sonst hörte man neue Akkord- und Pad-Klänge im langsamen Aufbau erst nach vielen Takten
+function restartIfPlaying({ inPlace = false } = {}) {
   if (!state.playing) return;
+  const current = inPlace ? state.current : null;
   stop();
-  start();
+  start(current ? current.bar % state.track.length : 0);
+  // derselbe Takt beginnt neu: Taktzeile, Verlauf und Griffbrett bleiben dort, statt bis zum ersten onBar leer zu sein
+  if (current && state.playing) state.current = current;
 }
 
 // --- Aufbau der Auswahl (einmal), Texte kommen aus render() ---

@@ -7,6 +7,7 @@ import { saveLayout } from './layout-state.js';
 import { nextDistinctChord } from '../core/fretboard.js';
 import { createFretboard, chordSentence } from './fretboard.js';
 import { buildTags, renderTags, toggleTag, sameTags } from './tags-ui.js';
+import { isSoundOnlyChange } from '../core/tags.js';
 import { initProgressionEditor, addChord } from './progression-editor.js';
 import { drawLanes } from './lanes.js';
 import { createWheel } from './wheel.js';
@@ -36,8 +37,10 @@ export function initTuning({ render, restartIfPlaying, player }) {
   }
 
   buildTags($('tags'), (category, tag) => {
-    state.track.tags = toggleTag(state.track.tags, category, tag);
-    changed();
+    const before = state.track.tags;
+    state.track.tags = toggleTag(before, category, tag);
+    restartIfPlaying({ inPlace: isSoundOnlyChange(before, state.track.tags) });
+    render();
   });
 
   const renderProgression = initProgressionEditor(changed, render);
