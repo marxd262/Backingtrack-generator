@@ -2,13 +2,11 @@
 // Rauschen aus dem Seed statt Math.random, damit Renders reproduzierbar sind. AudioContext nur von außen.
 import { createRng } from '../core/rng.js';
 import { DEFAULT_TIMBRE, completeTimbre } from '../core/timbre.js';
-import { bassParams, drumParams } from './voice-params.js';
+import { bassParams, drumParams, chordParams, padParams, masterParams } from './voice-params.js';
 
 // Schichtpegel und Summe, aus Messungen mit tests/e2e/levels.spec.js angeglichen (Messwerte dort im Kommentar)
 const TRIM = { drums: 0.65, bass: 0.24, chords: 1, pad: 0.8 };
 const MASTER = 0.6;
-const REVERB_WET = 0.15;
-const ECHO = { feedback: 0.38, tone: 2400, wet: 0.3 };
 const TOMS = { tomHigh: 200, tomMid: 150, tomLow: 110 };
 
 const hz = (m) => 440 * 2 ** ((m - 69) / 12);
@@ -132,25 +130,45 @@ function bassNote(ctx, out, t, e, p, curve) {
   lp.connect(body);
 }
 
-// Akkorde: kurzer Zupf/Stab je Ton (der Strom enthält Stabs oder Arpeggio-Töne)
-function chordNote(ctx, out, t, e, timbre) {
-  const f = hz(e.midi), end = t + e.dur + 0.3;
+// Akkorde: kurzer Zupf/Stab je Ton (der Strom enthält Stabs oder Arpeggio-Töne). p aus chordParams (beim neutralen Klang die
+// bisherigen Konstanten); Chorus-Oszillatoren und Tremolo-LFO nur, wenn der Klang sie verlangt.
+function chordNote(ctx, out, t, e, p) {
+  const f = hz(e.midi), hold = Math.max(0.01, e.dur * 0.5 * p.holdScale);
+  const end = t + Math.max(e.dur + 0.3, p.attack + hold + p.release + 0.05);
   const lp = ctx.createBiquadFilter(); lp.type = 'lowpass';
-  lp.frequency.setValueAtTime(3600, t); lp.frequency.exponentialRampToValueAtTime(900, t + 0.25);
-  const a = ctx.createGain(); adsr(a, t, 0.003, e.vel * 0.16, Math.max(0.01, e.dur * 0.5), 0.2);
+  lp.frequency.setValueAtTime(p.lpStart, t); lp.frequency.exponentialRampToValueAtTime(p.lpEnd, t + p.lpTime);
+  const a = ctx.createGain(); adsr(a, t, p.attack, e.vel * p.peak, hold, p.release);
   osc(ctx, 'sawtooth', f, 0, lp, t, end);
   osc(ctx, 'square', f, 7, lp, t, end);
-  lp.connect(a).connect(out);
+  if (p.chorusMix > 0) {
+    for (const side of [-1, 1]) { // je ein verstimmter Sägezahn links und rechts, einige ms später gestartet (Phase gegen das Original versetzt, ohne Delay-Knoten) und in die Breite gelegt
+      const pan = ctx.createStereoPanner(); pan.pan.value = 0.6 * side; pan.connect(lp);
+      osc(ctx, 'sawtooth', f, side * p.chorusDetune, gain(ctx, p.chorusMix, pan), t + (side < 0 ? 0.011 : 0.017), end);
+    }
+  }
+  lp.connect(a);
+  if (p.tremDepth > 0) {
+    const trem = gain(ctx, p.tremBase, out);
+    osc(ctx, 'sine', p.tremRate, 0, gain(ctx, p.tremDepth / 2, trem.gain), t, end);
+    a.connect(trem);
+  } else a.connect(out);
 }
 
-// Pad: langsamer Einsatz, drei verstimmte Sägezähne durch Tiefpass mit langsamem LFO
-function padNote(ctx, out, t, e, timbre) {
-  const end = t + e.dur + 1;
-  const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.Q.value = 0.8; lp.frequency.value = 1100;
-  const depth = ctx.createGain(); depth.gain.value = 450;
-  osc(ctx, 'sine', 0.18, 0, depth, t, end); depth.connect(lp.frequency);
-  const a = ctx.createGain(); adsr(a, t, 0.45, e.vel * 0.1, Math.max(0.1, e.dur - 0.5), 0.9);
-  for (const det of [-9, 0, 9]) osc(ctx, 'sawtooth', hz(e.midi), det, lp, t, end);
+// Pad: langsamer Einsatz, verstimmte Sägezähne durch Tiefpass mit langsamem LFO, optional mehr Oszillatoren und Oktav-Anteile
+function padNote(ctx, out, t, e, p) {
+  const f = hz(e.midi), hold = Math.max(p.holdMin, e.dur - p.holdCut);
+  const end = t + Math.max(e.dur + 1, p.attack + hold + p.release + 0.1);
+  const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.Q.value = p.q; lp.frequency.value = p.cutoff;
+  osc(ctx, 'sine', p.lfoSpeed, 0, gain(ctx, p.lfoDepth, lp.frequency), t, end);
+  const a = ctx.createGain(); adsr(a, t, p.attack, e.vel * p.peak, hold, p.release);
+  for (const det of [-p.spread, 0, p.spread]) osc(ctx, 'sawtooth', f, det, lp, t, end);
+  if (p.extraMix > 0) {
+    const bus = gain(ctx, p.extraMix, lp);
+    for (const det of [-p.spread / 2, p.spread / 2]) osc(ctx, 'sawtooth', f, det, bus, t, end);
+  }
+  if (p.shimmerMix > 0) { // Oktav-Anteile (2f, 4f) am Tiefpass vorbei, leicht verstimmt gegeneinander
+    for (const [mult, level, det] of [[2, 0.8, -4], [2, 0.8, 4], [4, 0.4, 0]]) osc(ctx, 'sine', f * mult, det, gain(ctx, p.shimmerMix * level, a), t, end);
+  }
   lp.connect(a).connect(out);
 }
 
@@ -164,10 +182,11 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
   const rng = createRng(1);
   const noise = noiseBuffer(ctx, rng.fork('noise'), 1);
 
-  const master = ctx.createGain(); master.gain.value = MASTER;
+  const mix = masterParams(sound.master);
+  const master = ctx.createGain(); master.gain.value = MASTER * mix.level;
   // Hall: Rauschen aus dem Seed, exponentiell abklingend (2 s), als Impulsantwort
   const reverb = ctx.createConvolver(); reverb.buffer = noiseBuffer(ctx, rng.fork('reverb'), 2, 2, 3);
-  const reverbWet = ctx.createGain(); reverbWet.gain.value = REVERB_WET;
+  const reverbWet = ctx.createGain(); reverbWet.gain.value = mix.reverbWet;
   // Begrenzer: harte Kennlinie, kurze Ansprache; Chrome hebt automatisch nach, -10 dB ergeben gemessene Spitzen um 0,70.
   // limiter: false (nur für Pegeltests) ersetzt ihn durch eine neutrale Summe, gemessen wird dann die Mischung davor.
   const limiter = useLimiter ? ctx.createDynamicsCompressor() : ctx.createGain();
@@ -175,15 +194,21 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
     limiter.threshold.value = -10; limiter.knee.value = 0; limiter.ratio.value = 20;
     limiter.attack.value = 0.001; limiter.release.value = 0.1;
   }
-  master.connect(limiter);
-  master.connect(reverb).connect(reverbWet).connect(limiter);
+  // Helligkeit: Hochregal auf der Summe (Trockenanteil und Hall), nur bei einem Pegel ungleich 0 dB; sonst kein Knoten
+  let bus = limiter;
+  if (mix.shelfDb !== 0) {
+    bus = ctx.createBiquadFilter(); bus.type = 'highshelf'; bus.frequency.value = mix.shelfFreq; bus.gain.value = mix.shelfDb;
+    bus.connect(limiter);
+  }
+  master.connect(bus);
+  master.connect(reverb).connect(reverbWet).connect(bus);
 
   // Echo (punktierte Achtel) nur für Akkorde und Pad, nach der Stummschaltung abgegriffen; 3 s reichen bis 20 bpm
   const echoTime = (b) => (60 / b) * 0.75;
   const delay = ctx.createDelay(3); delay.delayTime.value = echoTime(bpm);
-  const fb = ctx.createGain(); fb.gain.value = ECHO.feedback;
-  const tone = ctx.createBiquadFilter(); tone.type = 'lowpass'; tone.frequency.value = ECHO.tone;
-  const echoWet = ctx.createGain(); echoWet.gain.value = ECHO.wet;
+  const fb = ctx.createGain(); fb.gain.value = mix.echoFeedback;
+  const tone = ctx.createBiquadFilter(); tone.type = 'lowpass'; tone.frequency.value = mix.echoTone;
+  const echoWet = ctx.createGain(); echoWet.gain.value = mix.echoWet;
   delay.connect(tone).connect(fb).connect(delay);
   tone.connect(echoWet).connect(master);
 
@@ -191,11 +216,12 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
   const drums = drumVoices(ctx, noise, drum);
   const bass = bassParams(sound.bass);
   const curve = bass.drive > 1 ? fuzzCurve(bass.drive) : null; // einmal je Instrumentensatz
+  const chord = chordParams(sound.chords), pad = padParams(sound.pad);
   const play = {
     drums: (out, t, e) => e.type === 'hit' && drums[e.name]?.(out, t, e.vel),
     bass: (out, t, e) => e.type === 'note' && bassNote(ctx, out, t, e, bass, curve),
-    chords: (out, t, e) => e.type === 'note' && chordNote(ctx, out, t, e, sound.chords),
-    pad: (out, t, e) => e.type === 'note' && padNote(ctx, out, t, e, sound.pad),
+    chords: (out, t, e) => e.type === 'note' && chordNote(ctx, out, t, e, chord),
+    pad: (out, t, e) => e.type === 'note' && padNote(ctx, out, t, e, pad),
   };
 
   const layers = {};

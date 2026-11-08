@@ -52,3 +52,64 @@ export function drumParams({ kickPunch, kickLength, snareTone, snareSnap, hatBri
     roomSend: 7 * room, // Pegel der Schlagzeugsumme am Hall-Eingang (der Hall ist normalisiert und danach mit REVERB_WET gedämpft)
   };
 }
+
+// Stückweise linear: x = 0 -> lo, 0.5 -> mid, 1 -> hi (mid exakt bei 0.5); für Größen, die 0 erreichen dürfen
+const lin = (x, lo, mid, hi) => (x < 0.5 ? lo + (mid - lo) * 2 * x : mid + (hi - mid) * (2 * x - 1));
+
+/** Akkorde: Timbre['chords'] (Felder 0..1) -> Parameter für chordNote in synth.js (neues Objekt je Aufruf). */
+export function chordParams({ brightness, length, chorus, tremolo }) {
+  const bright = span(brightness, 0.2, 1, 2.5); // Faktor auf Start und Ende des Filterabfalls
+  const long = span(length, 0.3, 1, 3);
+  const chorusMix = 1.6 * chorus; // Pegel der zusätzlichen verstimmten, leicht verzögerten Oszillatoren (je einer links und rechts)
+  const tremDepth = 0.95 * (1 - (1 - tremolo) ** 2); // Amplituden-LFO schwingt zwischen 1 - tremDepth und 1; schon bei tremolo 0.5 deutlich
+  const tremBase = 1 - tremDepth / 2;
+  return {
+    lpStart: 3600 * bright,
+    lpEnd: 900 * bright,
+    lpTime: 0.25 * span(length, 0.5, 1, 2),
+    holdScale: span(length, 0.5, 1, 3), // Faktor auf die Haltezeit
+    release: 0.2 * long,
+    // Chorus und Tremolo gleichen ihre Zusatzenergie über die Spitze aus (Tremolo-Mittel 1 - Tiefe / 2, Leistung + Tiefe² / 8)
+    peak: 0.16 / (Math.sqrt(1 + chorusMix ** 2) * Math.sqrt(tremBase ** 2 + tremDepth ** 2 / 8)),
+    attack: 0.003,
+    chorusMix, // 0 = ohne zusätzliche Oszillatoren
+    chorusDetune: 12, // Cent
+    tremRate: 6, // Hz
+    tremDepth, // 0 = ohne Tremolo-Knoten
+    tremBase,
+  };
+}
+
+/** Pad: Timbre['pad'] (Felder 0..1) -> Parameter für padNote in synth.js (neues Objekt je Aufruf). */
+export function padParams({ attack, cutoff, lfoSpeed, lfoDepth, shimmer, thickness }) {
+  const extraMix = Math.max(0, 2 * thickness - 1); // zwei weitere Sägezähne erst oberhalb der Mitte
+  const shimmerMix = 2 * shimmer; // Pegel der Oktav-Anteile (Sinus bei 2f und 4f)
+  return {
+    attack: span(attack, 0.05, 0.45, 1.6),
+    peak: 0.1 / (1 + 0.3 * extraMix) / (1 + 0.3 * shimmerMix), // gleicht die Zusatzenergie aus
+    holdMin: 0.1, // Haltezeit max(holdMin, dur - holdCut)
+    holdCut: 0.5,
+    release: 0.9,
+    cutoff: span(cutoff, 350, 1100, 3500) * span(thickness, 1.2, 1, 0.75), // dicker: etwas dunkler
+    q: 0.8,
+    lfoSpeed: span(lfoSpeed, 0.05, 0.18, 1.2), // Hz
+    lfoDepth: span(lfoDepth, 100, 450, 1500), // Hz
+    spread: span(thickness, 3, 9, 25), // Cent, Sägezähne bei -/0/+
+    extraMix, // 0 = ohne zusätzliche Oszillatoren
+    shimmerMix, // 0 = ohne Oktav-Anteile
+  };
+}
+
+/** Summe: Timbre['master'] (Felder 0..1) -> Parameter für die Summenkette in synth.js (neues Objekt je Aufruf). */
+export function masterParams({ brightness, echo, reverb }) {
+  const shelfDb = lin(brightness, -15, 0, 9);
+  return {
+    shelfDb, // Hochregal; exakt 0 = ohne Filterknoten
+    level: 1 / (1 + 0.05 * Math.max(0, shelfDb)), // Faktor auf den Summenpegel: hell hebt die Höhen, also bleibt die Spitze nicht höher
+    shelfFreq: 800, // tiefer als die erwarteten 3 kHz: erst so verändert das Schlagwort die Summe hörbar (diff >= 0.25)
+    echoWet: lin(echo, 0, 0.3, 1),
+    echoFeedback: lin(echo, 0.1, 0.38, 0.7),
+    echoTone: 2400,
+    reverbWet: lin(reverb, 0, 0.15, 0.6),
+  };
+}

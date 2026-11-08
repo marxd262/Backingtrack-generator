@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_TIMBRE } from '../../src/core/timbre.js';
-import { bassParams, drumParams } from '../../src/audio/voice-params.js';
+import { DEFAULT_TIMBRE, resolveTimbre } from '../../src/core/timbre.js';
+import { bassParams, drumParams, chordParams, padParams, masterParams } from '../../src/audio/voice-params.js';
 
 const STEPS = [0, 0.25, 0.5, 0.75, 1];
 const BASS_INPUTS = Object.keys(DEFAULT_TIMBRE.bass);
@@ -102,7 +102,7 @@ const DRUM_INPUTS = Object.keys(DEFAULT_TIMBRE.drums);
 const withDrum = (key, value) => ({ ...DEFAULT_TIMBRE.drums, [key]: value });
 
 // Rundungsfehler der Potenzen an den Rändern (z. B. 109.99999999999999) zählen nicht
-const within = (v, [lo, hi]) => Number.isFinite(v) && v >= lo * (1 - 1e-9) - 1e-12 && v <= hi * (1 + 1e-9);
+const within = (v, [lo, hi]) => Number.isFinite(v) && v >= lo - 1e-9 * Math.abs(lo) - 1e-12 && v <= hi + 1e-9 * Math.abs(hi);
 const DRUM_RANGES = {
   kickStart: [110, 260],
   kickEnd: [36, 53],
@@ -200,5 +200,159 @@ test('drumParams: Extreme (alle 0, alle 1, gemischt) endlich und im Bereich', ()
     for (const [field, [lo, hi]] of Object.entries(DRUM_RANGES)) {
       assert.ok(within(p[field], [lo, hi]), `${JSON.stringify(t)} -> ${field}: ${p[field]}`);
     }
+  }
+});
+
+// Akkorde, Pad und Gesamtklang: Timbre['chords' | 'pad' | 'master'] -> chordParams, padParams, masterParams
+const GROUPS = {
+  chords: {
+    fn: chordParams,
+    neutral: {
+      lpStart: 3600, // Tiefpass 3600 -> 900 Hz in 0.25 s
+      lpEnd: 900,
+      lpTime: 0.25,
+      holdScale: 1, // Haltezeit max(0.01, dur * 0.5)
+      release: 0.2,
+      peak: 0.16, // Hüllkurvenspitze vel * 0.16
+      attack: 0.003,
+      chorusMix: 0, // 0 = ohne zusätzliche Oszillatoren
+      chorusDetune: 12,
+      tremRate: 6,
+      tremDepth: 0, // 0 = ohne Tremolo-Knoten
+      tremBase: 1,
+    },
+    ranges: {
+      lpStart: [720, 9000], lpEnd: [180, 2250], lpTime: [0.125, 0.5], holdScale: [0.5, 3], release: [0.06, 0.6],
+      peak: [0.05, 0.3], attack: [0.003, 0.003], chorusMix: [0, 1.6], chorusDetune: [12, 12], tremRate: [6, 6], tremDepth: [0, 0.95], tremBase: [0.525, 1],
+    },
+    // [Eingang, Feld, +1 steigend / -1 fallend] (streng über die Tabelle, außer wo unten gesondert geprüft)
+    effects: [
+      ['brightness', 'lpStart', 1], ['brightness', 'lpEnd', 1],
+      ['length', 'holdScale', 1], ['length', 'release', 1], ['length', 'lpTime', 1],
+      ['chorus', 'peak', -1], ['tremolo', 'peak', 1], ['tremolo', 'tremBase', -1], // Tremolo hebt die Spitze an, damit der Pegel (rms) bleibt
+    ],
+  },
+  pad: {
+    fn: padParams,
+    neutral: {
+      attack: 0.45,
+      peak: 0.1, // Hüllkurvenspitze vel * 0.1
+      holdMin: 0.1, // Haltezeit max(0.1, dur - 0.5)
+      holdCut: 0.5,
+      release: 0.9,
+      cutoff: 1100, // Tiefpass, Q 0.8
+      q: 0.8,
+      lfoSpeed: 0.18, // Hz
+      lfoDepth: 450, // Hz
+      spread: 9, // Sägezähne bei -9 / 0 / +9 Cent
+      extraMix: 0, // 0 = ohne zusätzliche Oszillatoren
+      shimmerMix: 0, // 0 = ohne Oktav-Anteile
+    },
+    ranges: {
+      attack: [0.05, 1.6], peak: [0.03, 0.1], holdMin: [0.1, 0.1], holdCut: [0.5, 0.5], release: [0.9, 0.9],
+      cutoff: [300, 4500], q: [0.8, 0.8], lfoSpeed: [0.05, 1.2], lfoDepth: [100, 1500], spread: [3, 25], extraMix: [0, 1], shimmerMix: [0, 2],
+    },
+    effects: [
+      ['attack', 'attack', 1], ['cutoff', 'cutoff', 1], ['lfoSpeed', 'lfoSpeed', 1], ['lfoDepth', 'lfoDepth', 1],
+      ['thickness', 'spread', 1], ['thickness', 'cutoff', -1],
+    ],
+  },
+  master: {
+    fn: masterParams,
+    neutral: {
+      shelfDb: 0, // Hochregal bei 0 dB: kein Filterknoten
+      level: 1,
+      shelfFreq: 800,
+      echoWet: 0.3,
+      echoFeedback: 0.38,
+      echoTone: 2400,
+      reverbWet: 0.15,
+    },
+    ranges: { level: [0.68, 1], shelfDb: [-15, 9], shelfFreq: [800, 800], echoWet: [0, 1], echoFeedback: [0.1, 0.7], echoTone: [2400, 2400], reverbWet: [0, 0.6] },
+    effects: [['brightness', 'shelfDb', 1], ['echo', 'echoWet', 1], ['echo', 'echoFeedback', 1], ['reverb', 'reverbWet', 1]],
+  },
+};
+
+for (const [group, { fn, neutral, ranges, effects }] of Object.entries(GROUPS)) {
+  const inputs = Object.keys(DEFAULT_TIMBRE[group]);
+  const withKey = (key, value) => ({ ...DEFAULT_TIMBRE[group], [key]: value });
+
+  test(`${fn.name}: neutrales Klangmodell ergibt exakt die bisherigen Konstanten`, () => {
+    assert.deepEqual(fn(DEFAULT_TIMBRE[group]), neutral);
+  });
+
+  test(`${fn.name}: jedes Mal ein neues Objekt`, () => {
+    const a = fn(DEFAULT_TIMBRE[group]);
+    assert.notEqual(a, fn(DEFAULT_TIMBRE[group]));
+    a[Object.keys(neutral)[0]] = 99;
+    assert.deepEqual(fn(DEFAULT_TIMBRE[group]), neutral);
+  });
+
+  test(`${fn.name}: jedes Feld monoton in jedem Eingang (andere neutral), endlich, im Bereich`, () => {
+    for (const key of inputs) {
+      const rows = STEPS.map((v) => fn(withKey(key, v)));
+      for (const field of Object.keys(neutral)) {
+        const values = rows.map((r) => r[field]);
+        for (const v of values) assert.ok(within(v, ranges[field]), `${key} -> ${field}: ${v} nicht in [${ranges[field]}]`);
+        const steps = values.slice(1).map((v, i) => v - values[i]);
+        assert.ok(steps.every((d) => d >= 0) || steps.every((d) => d <= 0), `${key} -> ${field} nicht monoton: ${values}`);
+      }
+    }
+  });
+
+  test(`${fn.name}: beabsichtigte Richtungen (streng über die Tabelle)`, () => {
+    for (const [key, field, sign] of effects) {
+      const values = STEPS.map((v) => fn(withKey(key, v))[field]);
+      for (let i = 1; i < values.length; i++) assert.ok(sign * (values[i] - values[i - 1]) > 0, `${key} -> ${field}: ${values}`);
+    }
+  });
+
+  test(`${fn.name}: Extreme (alle 0, alle 1, gemischt) endlich und im Bereich`, () => {
+    const zero = Object.fromEntries(inputs.map((k) => [k, 0]));
+    const one = Object.fromEntries(inputs.map((k) => [k, 1]));
+    const flipped = Object.fromEntries(inputs.map((k, i) => [k, i % 2]));
+    for (const t of [zero, one, flipped, Object.fromEntries(inputs.map((k, i) => [k, 1 - (i % 2)]))]) {
+      const p = fn(t);
+      for (const [field, range] of Object.entries(ranges)) assert.ok(within(p[field], range), `${JSON.stringify(t)} -> ${field}: ${p[field]}`);
+    }
+  });
+}
+
+test('chordParams: Chorus, Tremolo und Länge schalten ihre Zusatzknoten erst oberhalb von 0 ein', () => {
+  const c = (key, v) => chordParams({ ...DEFAULT_TIMBRE.chords, [key]: v });
+  assert.equal(c('chorus', 0).chorusMix, 0);
+  assert.ok(c('chorus', 0.25).chorusMix > 0);
+  assert.ok(c('chorus', 1).chorusMix > c('chorus', 0.25).chorusMix);
+  assert.equal(c('tremolo', 0).tremDepth, 0);
+  assert.ok(c('tremolo', 0.25).tremDepth > 0 && c('tremolo', 1).tremDepth > c('tremolo', 0.25).tremDepth);
+});
+
+test('padParams: zusätzliche Oszillatoren und Oktav-Anteile erst oberhalb ihres Standards', () => {
+  const p = (key, v) => padParams({ ...DEFAULT_TIMBRE.pad, [key]: v });
+  assert.deepEqual([0, 0.25, 0.5].map((v) => p('thickness', v).extraMix), [0, 0, 0]);
+  assert.ok(p('thickness', 0.75).extraMix > 0 && p('thickness', 1).extraMix > p('thickness', 0.75).extraMix);
+  assert.equal(p('shimmer', 0).shimmerMix, 0);
+  assert.ok(p('shimmer', 0.25).shimmerMix > 0 && p('shimmer', 1).shimmerMix > p('shimmer', 0.25).shimmerMix);
+});
+
+test('masterParams: Summenpegel bleibt bis zur Mitte 1 und sinkt erst bei heller Einstellung', () => {
+  const m = (v) => masterParams({ ...DEFAULT_TIMBRE.master, brightness: v });
+  assert.deepEqual([0, 0.25, 0.5].map((v) => m(v).level), [1, 1, 1]);
+  assert.ok(m(0.75).level < 1 && m(1).level < m(0.75).level);
+  assert.equal(masterParams({ ...DEFAULT_TIMBRE.master, brightness: 0.5 }).shelfDb, 0);
+});
+
+test('alle Klang-Schlagworte zugleich: Klangmodell in [0,1], alle Stimmparameter endlich', () => {
+  const tags = {
+    drumSound: ['punchy', 'boomy', 'snappy', 'crisp', 'roomy'], bassSound: ['sub', 'fuzz', 'plucky', 'round', 'resonant'],
+    chordSound: ['mellow', 'biting', 'chorused', 'tremolo', 'ringing'], padSound: ['swelling', 'airy', 'glassy', 'thick', 'moving'],
+    mood: ['dark', 'bright', 'psychedelic', 'dreamy'], bass: ['gritty'], synths: ['warm'],
+  };
+  const timbre = resolveTimbre(tags);
+  for (const [group, fields] of Object.entries(timbre)) {
+    for (const [key, v] of Object.entries(fields)) assert.ok(Number.isFinite(v) && v >= 0 && v <= 1, `${group}.${key}: ${v}`);
+  }
+  for (const params of [bassParams(timbre.bass), drumParams(timbre.drums), chordParams(timbre.chords), padParams(timbre.pad), masterParams(timbre.master)]) {
+    for (const [field, v] of Object.entries(params)) assert.ok(Number.isFinite(v), `${field}: ${v}`);
   }
 });

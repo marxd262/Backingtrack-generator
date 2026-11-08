@@ -123,9 +123,10 @@ test('gleiche Eingabe ergibt identischen Render', async ({ page }) => {
   test.setTimeout(120_000);
   const a = await render(page, track('funk'), 6);
   const b = await render(page, track('funk'), 6);
-  // Chrome summiert viele Eingänge eines Knotens in wechselnder Reihenfolge: Abweichung ~1e-9 (Float-Rundung).
+  // Chrome summiert viele Eingänge eines Knotens in wechselnder Reihenfolge: Abweichung ~1e-9 im rms, einzelne Abtastwerte (Spitze)
+  // bis ~2e-6 (Float-Rundung; funk enthält warm, also das Hochregal der Summe, und hinter dem Begrenzer wächst sie auf diesen Wert).
   // Exakter Vergleich ist damit unmöglich; Math.random im Rauschen würde um Prozente abweichen.
-  const same = (x, y) => expect(Math.abs(x - y)).toBeLessThan(1e-6);
+  const same = (x, y) => expect(Math.abs(x - y)).toBeLessThan(1e-5);
   same(b.peak, a.peak);
   same(b.rms, a.rms);
   for (const layer of LAYERS) {
