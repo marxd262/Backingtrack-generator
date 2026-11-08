@@ -50,6 +50,7 @@ export async function renderOffline(trackInput, seconds, { limiter = true } = {}
  * diff = rms(a - b) / rms(a) ab dem ersten Ereignis (a ist der Bezug, 0 bei Stille von a); rms und Schwerpunkte ebenfalls ab dort.
  */
 export async function compareRenders(trackA, trackB, seconds, { layer, limiter = true } = {}) {
+  if (layer !== undefined && !LAYERS.includes(layer)) throw new RangeError(`Unknown layer: ${JSON.stringify(layer)}`);
   const a = (await renderLeft(trackA, seconds, layer, limiter)).subarray(FIRST);
   const b = (await renderLeft(trackB, seconds, layer, limiter)).subarray(FIRST);
   const rmsA = rms(a);

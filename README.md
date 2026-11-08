@@ -28,7 +28,10 @@ Entwicklerseite zum Anhören der drei Stile: <http://localhost:4173/ui/render-ha
 ```sh
 npm test          # Logik-Tests (node:test)
 npm run test:e2e  # Browser-Tests (Playwright, Chromium; einmalig: npx playwright install chromium)
+npx playwright test tests/e2e/play.spec.js --no-deps  # eine Datei allein
 ```
+
+Die Echtzeit-Tests (Projekt `realtime`) laufen erst nach den rechenintensiven Offline-Renders (`offline`: `levels.spec.js`, `sound.spec.js`), damit ihre Timer nicht unter Last verrutschen. Ohne `--no-deps` läuft vor einer einzelnen Echtzeit-Datei das Projekt `offline` mit.
 
 ## Dokumentation
 

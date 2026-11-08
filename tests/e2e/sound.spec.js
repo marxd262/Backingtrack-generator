@@ -60,6 +60,13 @@ test('compareRenders: Schicht allein unterscheidet sich von der Summe', async ({
   expect(bass.centroidA).toBeLessThan(sum.centroidA);
 });
 
+test('compareRenders: unbekannte Schicht wirft RangeError mit ihrem Namen', async ({ page }) => {
+  // nur ein fehlendes layer (undefined) heißt Summe; leerer Text und null sind ungültig
+  for (const [layer, shown] of [['cowbell', '"cowbell"'], ['', '""'], [null, 'null']]) {
+    await expect(compare(page, track(), track(), 1, { layer }), shown).rejects.toThrow(`RangeError: Unknown layer: ${shown}`);
+  }
+});
+
 test('renderOffline: Schwerpunkt endlich und > 0 für Summe und jede Schicht', async ({ page }) => {
   test.setTimeout(120_000);
   const r = await page.evaluate((t) => window.__render(t, 16), track());
