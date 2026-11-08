@@ -402,6 +402,12 @@ const playFrom = (page, input, options) => page.evaluate(async ([input, options]
   return { startPerf: h.startPerf, bars, events, ends, trigger: spy.trigger.map((c) => c.t), factory: spy.factory.length };
 }, [input, options]);
 
+// frühestes Ereignis nach Liedzeit, bei gleicher Zeit der Akkord (im Strom steht er vor den Tönen seines Takts)
+const firstEvent = (events) => {
+  const t = Math.min(...events.map((e) => e.t));
+  return events.find((e) => e.t === t && e.type === 'chord') ?? events.find((e) => e.t === t);
+};
+
 test('startBar: 2 spielt ab Takt 2 mit dessen Akkord, frühere Ereignisse entfallen, loops: 1 endet nach den restlichen Takten', async ({ page }) => {
   test.setTimeout(30_000);
   const input = track();
@@ -412,8 +418,9 @@ test('startBar: 2 spielt ab Takt 2 mit dessen Akkord, frühere Ereignisse entfal
   }, input);
   expect(r.bars.map((b) => b.bar)).toEqual([2, 3]);
   expect(r.bars.map((b) => b.chord)).toEqual([{ root: 'D', quality: 'min' }, { root: 'E', quality: 'maj' }]);
-  // erstes Ereignis ist der Akkord von Takt 2 zur Liedzeit 2 s (Takt 2 beginnt nach zwei Takten zu 1 s)
-  expect(r.events[0]).toEqual({ type: 'chord', bar: 2, t: 2 });
+  // frühestes Ereignis ist der Akkord von Takt 2 zur Liedzeit 2 s (Takt 2 beginnt nach zwei Takten zu 1 s). Nach Liedzeit, nicht nach
+  // Ankunft: Rückrufe zur selben Zeit können in anderer Reihenfolge kommen (ctx.currentTime springt zwischen zwei setTimeout-Aufrufen)
+  expect(firstEvent(r.events)).toEqual({ type: 'chord', bar: 2, t: 2 });
   expect(r.events.every((e) => e.bar >= 2)).toBe(true);
   expect(r.trigger).toEqual(expected);
   expect(r.factory).toBe(1);
@@ -438,7 +445,7 @@ test('startBar gleich length - 1 spielt genau einen Takt', async ({ page }) => {
   test.setTimeout(30_000);
   const r = await playFrom(page, track(), { startBar: 3 });
   expect(r.bars.map((b) => b.bar)).toEqual([3]);
-  expect(r.events[0]).toEqual({ type: 'chord', bar: 3, t: 3 });
+  expect(firstEvent(r.events)).toEqual({ type: 'chord', bar: 3, t: 3 });
   expect(r.ends.length).toBe(1);
   expect(Math.abs(r.ends[0] - r.bars[0].at - 1000)).toBeLessThan(SPACING_TOLERANCE);
 });
