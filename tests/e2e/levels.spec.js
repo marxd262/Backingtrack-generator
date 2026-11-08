@@ -121,8 +121,11 @@ test('limiter: false misst wirklich vor dem Begrenzer (ohne dessen Nachverstärk
 
 test('gleiche Eingabe ergibt identischen Render', async ({ page }) => {
   test.setTimeout(120_000);
-  const a = await render(page, track('funk'), 6);
-  const b = await render(page, track('funk'), 6);
+  // funk mit warm (seit der Klangformung nicht mehr im Stil): so liegt das Hochregal der Summe im Pfad wie bei der Messung unten
+  const input = track('funk');
+  input.tags = { ...input.tags, synths: ['warm'] };
+  const a = await render(page, input, 6);
+  const b = await render(page, input, 6);
   // Chrome summiert viele Eingänge eines Knotens in wechselnder Reihenfolge (Float-Rundung). Gemessen 2026-11-08 an funk, 6 s,
   // 12 Paare identischer Renders, größte Abweichung (absolut):
   //   mit warm (Hochregal der Summe aktiv), mit Begrenzer:   rms Summe 1.2e-8, Schichten <= 9e-9; Spitze Summe 2.2e-6, Schlagzeug 8.9e-7
@@ -146,6 +149,11 @@ test('gleiche Eingabe ergibt identischen Render', async ({ page }) => {
 // Basistrack ohne klangformende Schlagworte: Am Am Dm E, 100 bpm, Seed 1, 24 Takte, 16 s.
 // Basiswerte aufgenommen vor Einführung des Klangmodells (Commit b5467aa) über window.__render:
 // je Begrenzer-Einstellung Summe und jede Schicht allein { peak, rms }.
+// Neu aufnehmen (nur nach einem Chromium-/Playwright-Update, das die Werte verschiebt, oder nach einer gewollten Änderung des
+// Standardklangs): auf /ui/render-harness.html `await window.__render(BASE_TRACK, 16, { limiter })` für limiter true und false
+// ausführen (renderOffline: Summe und jede Schicht allein, linker Kanal) und peak/rms hier eintragen. Die Werte stammen aus dem
+// Standardklang vor dem Klangmodell; vorher prüfen, dass auf dem alten Browser dieser Test grün war, damit nur der Browser die
+// Zahlen verschiebt. Eine gewollte Änderung des Standardklangs verlangt eine neue Aufnahme und erneutes Anhören.
 const BASE_TRACK = {
   key: { root: 'A', mode: 'minor' },
   bpm: 100,

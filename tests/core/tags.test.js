@@ -129,14 +129,16 @@ test('Presets: Klang-Schlagworte ändern die Muster-Parameter nicht', () => {
   }
 });
 
-test('Presets: Klangmodelle paarweise verschieden, jedes weicht bei Bass, Akkorden und Pad vom Standard ab', () => {
+test('Presets: Klangmodelle paarweise verschieden, jedes weicht bei Bass, Akkorden und Pad vom Standard ab (funk: Pad neutral)', () => {
   const timbres = STYLE_PRESETS.map((p) => resolveTimbre(p.tags));
   for (let i = 0; i < timbres.length; i++) {
     for (let j = i + 1; j < timbres.length; j++) {
       assert.notDeepEqual(timbres[i], timbres[j], `${STYLE_PRESETS[i].id} gegen ${STYLE_PRESETS[j].id}`);
     }
     for (const group of ['bass', 'chords', 'pad']) {
-      assert.notDeepEqual(timbres[i][group], DEFAULT_TIMBRE[group], `${STYLE_PRESETS[i].id}: ${group}`);
+      // funk hat kein Pad-Schlagwort; sein Pad wich nur über warm ab, das funk nicht mehr führt (trockener, bissiger Stil)
+      if (STYLE_PRESETS[i].id === 'funk' && group === 'pad') assert.deepEqual(timbres[i].pad, DEFAULT_TIMBRE.pad);
+      else assert.notDeepEqual(timbres[i][group], DEFAULT_TIMBRE[group], `${STYLE_PRESETS[i].id}: ${group}`);
     }
   }
 });

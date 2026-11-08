@@ -51,7 +51,7 @@ Weitere Felder (`id`, `title`, `style` ...) stören nicht und werden ignoriert. 
 - `TAG_CATEGORIES`: `[{ id, tags: [id, ...] }]`, alle Kategorien und Schlagwort-IDs, die der Generator kennt.
 - `STYLE_PRESETS`: `[{ id, bpm, tags }]`. `tags` kann direkt in einen Track übernommen werden, `bpm` ist der Vorschlag des Stils.
 - Aufbau (Kategorie `development`) in Abschnitten zu 8 Takten, der letzte Abschnitt spielt immer alles: ohne Angabe Bass, Schlagzeug und Akkorde, Pad erst im letzten Abschnitt; `fullFromStart` alles von Anfang an; `buildsSlowly` Bass und Schlagzeug ab Takt 1, im zweiten Abschnitt kommt (je Seed) Akkorde oder Pad dazu, ab dem dritten alles. Der Aufbau beginnt mit jedem Durchlauf über `length` Takte neu.
-- Klang-Schlagworte: vier Kategorien (`drumSound`, `bassSound`, `chordSound`, `padSound`) und die früher wirkungslosen Schlagworte `gritty`, `warm`, `dark`, `bright`, `psychedelic`, `dreamy` ändern den **Klang**. Ausnahme ist `dreamy`: es behält seine alte Muster-Wirkung (`padWidth` +0.2, kann über 0.6 das Pad-Voicing verdoppeln) und wirkt zusätzlich auf den Klang. Zusammen sind es 26 klangrelevante Schlagworte:
+- Klang-Schlagworte: vier Kategorien (`drumSound`, `bassSound`, `chordSound`, `padSound`) und die früher wirkungslosen Schlagworte `gritty`, `warm`, `dark`, `bright`, `psychedelic` ändern den **Klang**, dazu `dreamy`. `dreamy` war nie wirkungslos: es behält seine alte Muster-Wirkung (`padWidth` +0.2, kann über 0.6 das Pad-Voicing verdoppeln) und wirkt zusätzlich auf den Klang. Zusammen sind es 26 klangrelevante Schlagworte:
 
   | Kategorie | Schlagwort-IDs | Wirkung |
   | --- | --- | --- |
@@ -64,7 +64,7 @@ Weitere Felder (`id`, `title`, `style` ...) stören nicht und werden ignoriert. 
   | | `fuzz` | übersteuerter, zerrender Bass |
   | | `plucky` | gezupfter Anschlag: Filter fällt schneller, der Ton klingt ab |
   | | `round` | runder, weicher Bass |
-  | | `resonant` | Filterresonanz, Bass „quakt" |
+  | | `resonant` | Filterresonanz, Bass „quakt“ |
   | `chordSound` | `mellow` | Akkorde dunkler und weicher |
   | | `biting` | Akkorde heller und kürzer, bissig |
   | | `chorused` | Chorus auf den Akkorden |
@@ -72,7 +72,7 @@ Weitere Felder (`id`, `title`, `style` ...) stören nicht und werden ignoriert. 
   | | `ringing` | Akkorde klingen länger aus |
   | `padSound` | `swelling` | Pad setzt langsam ein |
   | | `airy` | luftiges Pad mit Schimmer, offener Filter |
-  | | `glassy` | glasiges, dünnes Pad mit viel Schimmer |
+  | | `glassy` | gläsernes, dünnes Pad mit viel Schimmer |
   | | `thick` | dickes, breit verstimmtes Pad |
   | | `moving` | Filter des Pads bewegt sich schneller und tiefer |
   | `bass` | `gritty` | leichte Zerrung im Bass |
@@ -82,9 +82,9 @@ Weitere Felder (`id`, `title`, `style` ...) stören nicht und werden ignoriert. 
   | | `psychedelic` | mehr Echo und Hall, Chorus auf den Akkorden, tiefere Pad-Bewegung |
   | | `dreamy` | mehr Hall, Pad setzt etwas langsamer ein |
 
-- Die 25 Schlagworte ohne `dreamy` (die 20 der vier Klang-Kategorien sowie `gritty`, `warm`, `dark`, `bright`, `psychedelic`) ändern **nur den Klang, nie den Ereignisstrom**: `buildEvents` liefert für denselben Track mit und ohne sie dieselben Ereignisse. `dreamy` behält seine alte `padWidth`-Verschiebung und kann deshalb weiterhin Ereignisse ändern. Tracks mit festem Seed behalten ihre Noten; die Golden-Hashes der drei Stile bleiben unverändert, weil deren Muster-Schlagworte (darunter `dreamy` im Stil Träumerisch) gleich geblieben sind und nur Klang-Schlagworte hinzukamen. Der Klang liegt in einem internen Klangmodell (`resolveTimbre(tags)` in `src/core/timbre.js`, nicht aus `src/index.js` exportiert), das nur das Audio liest.
+- Die 25 Schlagworte ohne `dreamy` (die 20 der vier Klang-Kategorien sowie `gritty`, `warm`, `dark`, `bright`, `psychedelic`) ändern **nur den Klang, nie den Ereignisstrom**: `buildEvents` liefert für denselben Track mit und ohne sie dieselben Ereignisse. `dreamy` behält seine alte `padWidth`-Verschiebung und kann deshalb weiterhin Ereignisse ändern. Tracks mit festem Seed behalten ihre Noten; die Golden-Hashes der drei Stile bleiben unverändert, weil deren Muster-Schlagworte (darunter `dreamy` im Stil Träumerisch) gleich geblieben sind und sich nur Klang-Schlagworte geändert haben (hinzugekommen; bei `funk` fiel `warm` weg). Der Klang liegt in einem internen Klangmodell (`resolveTimbre(tags)` in `src/core/timbre.js`, nicht aus `src/index.js` exportiert), das nur das Audio liest.
 - `withBreakouts` (Kategorie `development`) hat weiterhin keine Wirkung, ist aber gültig. Unbekannte Kategorien und Schlagworte werden wie bisher abgelehnt (`badTags`).
-- Die Presets in `STYLE_PRESETS` führen alle zehn Kategorien (leere Liste, wo nichts gewählt ist); ihre Klang-Schlagworte sind: `funk` kräftig und knackig (Schlagzeug), gezupft (Bass), bissig (Akkorde); `psych` Fuzz-Bass, Chorus-Akkorde, anschwellendes und glasiges Pad; `dreamy` räumliches Schlagzeug, runder Bass, weiche Akkorde, luftiges und anschwellendes Pad.
+- Die Presets in `STYLE_PRESETS` führen alle zehn Kategorien (leere Liste, wo nichts gewählt ist); ihre Klang-Schlagworte sind: `funk` kräftig und knackig (Schlagzeug), gezupft (Bass), bissig (Akkorde), ohne `warm` (das dunkelte die ganze Mischung ab und arbeitete gegen `biting`); `psych` Fuzz-Bass, Chorus-Akkorde, anschwellendes und gläsernes Pad; `dreamy` räumliches Schlagzeug, runder Bass, weiche Akkorde, luftiges und anschwellendes Pad.
 - Beschriftungen über `t`: `category.<id>`, `tag.<Kategorie>.<id>`, `style.<id>` (Hinweis: `style.<id>.hint`), `layer.<name>`, `scale.<name>`, `mode.<name>`.
 
 ## Seed-Regel

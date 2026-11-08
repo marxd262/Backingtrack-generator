@@ -18,7 +18,7 @@ export const TAG_CATEGORIES = [
 export const STYLE_PRESETS = [
   {
     id: 'funk', bpm: 100,
-    tags: { drums: ['driving', 'dry'], bass: ['bouncy'], synths: ['warm'], rhythm: ['funky', 'syncopated'], mood: [], development: ['buildsSlowly'],
+    tags: { drums: ['driving', 'dry'], bass: ['bouncy'], synths: [], rhythm: ['funky', 'syncopated'], mood: [], development: ['buildsSlowly'],
       drumSound: ['punchy', 'snappy'], bassSound: ['plucky'], chordSound: ['biting'], padSound: [] },
   },
   {

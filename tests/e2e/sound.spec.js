@@ -452,8 +452,10 @@ test('Klang: stumme Akkorde und stummes Pad bleiben mit chorused, tremolo und ai
 // Stile: gleiche Muster (Schlagworte von funk, gleiche Akkorde, Tempo, Seed), nur die Schlagworte der vier Klang-Kategorien
 // von funk, psych und dreamy. Der Unterschied kommt also allein vom Klang. development ist fullFromStart (wie track()), nicht
 // funks buildsSlowly: sonst schweigen Akkorde und Pad in den ersten 16 s und ihre Klang-Schlagworte blieben ungeprüft.
-// Gemessen 2026-11-08 (16 s, mit Begrenzer), diff je Paar funk/psych, funk/dreamy, psych/dreamy:
-//   Summe 1.023 / 1.085 / 0.616, nur Akkorde 0.518 / 0.944 / 0.830, nur Pad 1.317 / 0.943 / 0.940
+// Gemessen 2026-11-08 (16 s, mit Begrenzer), diff je Paar funk/psych, funk/dreamy, psych/dreamy (funk ohne warm, also auch das
+// gemeinsame Muster ohne warm; Pad-Haltezeit, LFO-Grenze und Akkord-Filteruntergrenze eingerechnet):
+//   Summe 1.018 / 1.035 / 0.550, nur Akkorde 0.508 / 0.845 / 0.673, nur Pad 1.215 / 0.788 / 0.943
+//   (vorher, funk mit warm: Summe 1.023 / 1.085 / 0.616, nur Akkorde 0.518 / 0.944 / 0.830, nur Pad 1.317 / 0.943 / 0.940)
 // (Pegel der echten Presets: levels.spec.js, die Presets enthalten die Klang-Schlagworte.)
 const SOUND_CATEGORIES = ['drumSound', 'bassSound', 'chordSound', 'padSound'];
 const presetOf = (id) => STYLE_PRESETS.find((p) => p.id === id);
