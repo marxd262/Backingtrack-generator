@@ -3,6 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { play } from '../../src/audio/play.js';
+import { buildEvents } from '../../src/core/events.js';
 
 const node = () => {
   const n = { gain: { value: 1, cancelScheduledValues() {}, setValueAtTime() {}, linearRampToValueAtTime() {} }, disconnect() {} };
@@ -65,4 +66,115 @@ test('Instrumente ohne setTimbre bleiben gültig', async () => {
   } finally {
     h.stop();
   }
+});
+
+// --- setTrack: Ereignisstrom im laufenden Betrieb tauschen (240 bpm, ein Takt = 1 s, Durchlauf = 4 s, Vorlauf 0,15 s) ---
+const TAGS_B = { development: ['fullFromStart'], rhythm: ['syncopated'], synths: ['arpeggio'] };
+const isSound = (e) => e.type === 'hit' || e.type === 'note';
+const key = (layer, e) => `${layer}|${e.name ?? e.midi}|${Math.round(e.t * 1000)}`;
+// Schlüssel der Ereignisse eines Stroms (Schicht, Name oder MIDI, Zeit in ms), shift = Versatz um ganze Durchläufe
+const streamKeys = (events, pick, shift = 0) => events.filter((e) => isSound(e) && pick(e)).map((e) => key(e.layer, { ...e, t: e.t + shift })).sort();
+
+async function setup(extra = {}) {
+  const { calls, create } = spy();
+  const ctx = makeCtx();
+  const bars = [];
+  const h = play(ctx, track(extra), { loops: Infinity, createInstruments: create, onBar: (b) => bars.push(b.bar) });
+  return {
+    h, bars,
+    advance: async (to) => { ctx.currentTime = to; await tick(); await tick(); },
+    keysOf: (pick) => calls.trigger.filter((c) => pick(c.e)).map((c) => key(c.layer, c.e)).sort(),
+  };
+}
+const unique = (keys) => assert.equal(new Set(keys).size, keys.length, 'kein Ereignis doppelt');
+
+test('setTrack mitten im Durchlauf: danach spielt der neue Strom, nichts doppelt, kein Takt fehlt', async () => {
+  const A = buildEvents(track()), B = buildEvents(track({ tags: TAGS_B }));
+  const s = await setup();
+  try {
+    await s.advance(1.5);
+    assert.equal(s.h.setTrack(track({ tags: TAGS_B })), true);
+    await s.advance(4.0);
+    const late = (e) => e.bar >= 2 && e.bar <= 3;
+    assert.notDeepEqual(streamKeys(A, late), streamKeys(B, late), 'die Ströme müssen sich unterscheiden, sonst prüft der Test nichts');
+    assert.deepEqual(s.keysOf(late), streamKeys(B, late));
+    unique(s.keysOf(() => true));
+    assert.deepEqual(s.bars, [0, 1, 2, 3]);
+  } finally {
+    s.h.stop();
+  }
+});
+
+test('setTrack, wenn alle Ereignisse des Durchlaufs geplant sind: der nächste Durchlauf spielt den neuen Strom ohne Doppelung', async () => {
+  const A = buildEvents(track()), B = buildEvents(track({ tags: TAGS_B }));
+  const maxA = Math.max(...A.map((e) => e.t));
+  assert.ok(maxA < 3.99 && Math.max(...B.map((e) => e.t)) < 3.98, 'Vorbedingung: Ereignisse liegen deutlich vor dem Durchlaufende');
+  const s = await setup();
+  try {
+    await s.advance(maxA + 0.06); // Horizont deckt das letzte Ereignis, das Durchlaufende (4,15) noch nicht
+    assert.equal(s.h.setTrack(track({ tags: TAGS_B })), true);
+    await s.advance(8.04);
+    // Durchlauf 1: alle schon geplanten alten Ereignisse plus die neuen, die nach dem letzten geplanten alten liegen
+    assert.deepEqual(s.keysOf((e) => e.bar < 4), [...streamKeys(A, () => true), ...streamKeys(B, (e) => e.t > maxA)].sort());
+    assert.deepEqual(s.keysOf((e) => e.bar >= 4 && e.bar < 8), streamKeys(B, () => true, 4));
+    unique(s.keysOf(() => true));
+    assert.deepEqual(s.bars.slice(0, 8), [0, 1, 2, 3, 4, 5, 6, 7]);
+  } finally {
+    s.h.stop();
+  }
+});
+
+test('setTrack direkt nach dem Umbruch in den nächsten Durchlauf: kein Takt doppelt oder fehlend', async () => {
+  const B = buildEvents(track({ tags: TAGS_B }));
+  const s = await setup();
+  try {
+    await s.advance(4.055);
+    assert.equal(s.h.setTrack(track({ tags: TAGS_B })), true);
+    await s.advance(8.04);
+    const late = (e) => e.bar >= 5 && e.bar < 8;
+    assert.deepEqual(s.keysOf(late), streamKeys(B, (e) => e.bar >= 1, 4));
+    unique(s.keysOf(() => true));
+    assert.deepEqual(s.bars.slice(0, 8), [0, 1, 2, 3, 4, 5, 6, 7]);
+  } finally {
+    s.h.stop();
+  }
+});
+
+test('setTrack liefert false und ändert nichts bei anderer Länge oder anderer Taktlänge; ungültiger Track wirft', async () => {
+  const A = buildEvents(track());
+  const s = await setup();
+  try {
+    await s.advance(1.5);
+    assert.equal(s.h.setTrack(track({ length: 8, tags: TAGS_B })), false);
+    const odd = track({ tags: TAGS_B });
+    odd.bars = odd.bars.map((b, i) => (i === 1 ? { ...b, beats: 3 } : b));
+    assert.equal(s.h.setTrack(odd), false);
+    assert.throws(() => s.h.setTrack(track({ tags: { nope: ['x'] } })));
+    await s.advance(4.0);
+    const early = (e) => e.t <= 3.9;
+    assert.deepEqual(s.keysOf(early), streamKeys(A, early), 'der alte Strom läuft unverändert weiter');
+  } finally {
+    s.h.stop();
+  }
+});
+
+test('setTrack nach setTempo: Liedzeiten bleiben auf das Starttempo bezogen, das bpm des übergebenen Tracks zählt nicht', async () => {
+  const B = buildEvents(track({ tags: TAGS_B }));
+  const s = await setup();
+  try {
+    await s.advance(0.3);
+    s.h.setTempo(400);
+    assert.equal(s.h.setTrack(track({ tags: TAGS_B, bpm: 400 })), true);
+    await s.advance(3.0);
+    const bar3 = (e) => e.bar === 3;
+    assert.deepEqual(s.keysOf(bar3), streamKeys(B, bar3));
+  } finally {
+    s.h.stop();
+  }
+});
+
+test('setTrack nach stop() liefert false und wirft nicht', async () => {
+  const s = await setup();
+  s.h.stop();
+  assert.equal(s.h.setTrack(track({ tags: TAGS_B })), false);
 });

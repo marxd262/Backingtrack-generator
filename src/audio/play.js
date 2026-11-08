@@ -21,7 +21,7 @@ const FADE = 0.05;
  * ungültig wirft RangeError (unbekannte Schicht Error) noch vor dem ersten Ton.
  */
 export function play(ctx, trackInput, { loops = 1, startBar = 0, levels, master, onEvent, onBar, onEnd, createInstruments = synthInstruments } = {}) {
-  const events = buildEvents(trackInput); // wirft bei ungültigem Track, bevor ein Knoten entsteht
+  let events = buildEvents(trackInput); // wirft bei ungültigem Track, bevor ein Knoten entsteht; setTrack tauscht ihn
   if (!(loops === Infinity || (Number.isInteger(loops) && loops >= 1))) {
     throw new RangeError(`loops must be an integer >= 1 or Infinity, got ${loops}`);
   }
@@ -145,6 +145,24 @@ export function play(ctx, trackInput, { loops = 1, startBar = 0, levels, master,
     setMaster(value) {
       sliderGain(value);
       instruments.setMaster?.(value);
+    },
+    // Ereignisstrom live tauschen (z. B. nach einem Schlagwort mit Mustereffekt): ab dem nächsten noch nicht geplanten Ereignis
+    // spielt der neue Strom, schon geplante Töne laufen weiter. Die Liedzeit der Ereignisse bezieht sich auf das Starttempo (das
+    // bpm des übergebenen Tracks zählt nicht; Tempowechsel macht setTempo). false ohne Änderung, wenn der Player gestoppt ist oder
+    // sich Länge oder Taktlängen (damit die Dauer eines Durchlaufs) ändern; ein ungültiger Track wirft wie buildEvents.
+    setTrack(newTrack) {
+      if (stopped) return false;
+      const next2 = buildEvents({ ...newTrack, bpm });
+      const t2 = normalizeTrack({ ...newTrack, bpm });
+      let sec = 0;
+      for (let i = 0; i < t2.length; i++) sec += (t2.bars[i % t2.bars.length].beats * 60) / bpm;
+      if (t2.length !== loopBars || Math.abs(sec - loopSec) > 1e-9) return false;
+      // gleichzeitige Ereignisse plant ein Planerlauf zusammen: was bis tLast geplant ist, wird nicht wiederholt
+      const tLast = next > 0 ? events[next - 1].t : -Infinity;
+      events = next2;
+      next = events.findIndex((e) => e.t > tLast);
+      if (next < 0) next = events.length;
+      return true;
     },
     // Klang live umstellen (siehe createInstruments in synth.js); nach stop() ohne Wirkung
     setTimbre(timbre) {

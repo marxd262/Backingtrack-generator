@@ -9,6 +9,7 @@ import { stepVariant } from './variant.js';
 import { buildKeyScale } from './key-scale.js';
 import { initSidebar } from './sidebar.js';
 import { initGroups } from './groups.js';
+import { resolveTrackTimbre } from '../core/timbre.js';
 import { initTimbrePanel } from './timbre-panel.js';
 import { initViews } from './blocks.js';
 
@@ -61,6 +62,20 @@ function restartIfPlaying({ inPlace = false } = {}) {
   // derselbe Takt beginnt neu: Taktzeile, Verlauf und Griffbrett bleiben dort, statt bis zum ersten onBar leer zu sein;
   // der Akkord kommt aus der (bei einer neuen Variante anderen) Folge
   if (current && state.playing) state.current = { ...current, chord: state.track.bars[current.bar % state.track.bars.length].chord };
+}
+
+// Schlagwort- und Stilwechsel live an den laufenden Player geben statt neu zu starten: Klang per setTimbre, Tempo per setTempo,
+// Muster per setTrack (tauscht den Ereignisstrom ab dem nächsten ungeplanten Ereignis). Liefert setTrack false (Länge oder
+// Taktlängen anders) oder wirft es, bleibt der Neustart; ohne laufenden Player gibt es nichts zu tun.
+function applyLive({ patterns = false, tempo = false } = {}) {
+  if (!player) return;
+  try {
+    player.setTimbre(resolveTrackTimbre(state.track));
+    if (tempo) player.setTempo(state.track.bpm);
+    if (patterns && !player.setTrack({ ...state.track, layers: ALL_LAYERS })) restartIfPlaying();
+  } catch {
+    restartIfPlaying();
+  }
 }
 
 // Schicht ein/aus: gemeinsamer Zustand von Schichtknöpfen und Mischpult-Tasten, live ohne Neustart
@@ -184,7 +199,7 @@ for (const button of document.querySelectorAll('[popovertarget]')) {
   });
 }
 
-const renderTuning = initTuning({ render: () => render(), restartIfPlaying, toggleLayer, player: () => player });
+const renderTuning = initTuning({ render: () => render(), restartIfPlaying, toggleLayer, applyLive });
 const renderMixer = initMixer({ render: () => render(), player: () => player, toggleLayer });
 const renderTimbre = initTimbrePanel({ render: () => render(), player: () => player }); // vor initGroups: baut die Klang-Gruppen
 

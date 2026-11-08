@@ -175,15 +175,19 @@ test('Schlagworte ohne Wirkung: gedämpft, mit Hinweis in beiden Sprachen, weite
   expect(await rawKeysIn(page)).toEqual([]);
 });
 
-test('Schlagwort während der Wiedergabe: Neustart ohne Fehler, Taktzeile läuft weiter', async ({ page }) => {
+test('Schlagwort während der Wiedergabe: wirkt live ohne Neustart und Fehler, Taktzeile läuft weiter', async ({ page }) => {
+  await countContexts(page);
   await openPlayPage(page);
   await playFast(page);
   await expect(position(page)).toHaveText('Takt 2 von 96', { timeout: BAR_TIMEOUT });
+  await recordPositions(page);
+  const before = await shownBar(page);
+  await positionsSince(page);
   await page.locator('#tags [data-tag="swing"]').click();
   await expect(page.locator('#tags [data-tag="swing"]')).toHaveAttribute('aria-pressed', 'true');
-  // Neustart beginnt wieder bei Takt 1, ohne Neustart käme Takt 1 erst nach 96 Takten
-  await expect(position(page)).toHaveText('Takt 1 von 96', { timeout: BAR_TIMEOUT });
-  await expect(position(page)).toHaveText('Takt 2 von 96', { timeout: BAR_TIMEOUT });
+  // kein Neustart: die Taktzeile springt nicht auf Takt 1 zurück und es entsteht kein neuer Instrumentensatz
+  await expectContinuous(page, before, 'swing');
+  expect(await page.evaluate(() => window.__instrumentSets)).toBe(1);
   await expect(playGo(page)).toHaveText('Stopp');
   await playGo(page).click();
   await expect(playGo(page)).toHaveText('Los');
@@ -566,7 +570,7 @@ test('Klang-Schlagwort während der Wiedergabe: läuft ohne Neustart weiter, gen
   expect(await contexts()).toBe(1);
 });
 
-test('Funk-Vorlage im zweiten Teil: Klang-Schlagwort wirkt live, Muster-Schlagwort und Stil starten bei Takt 1', async ({ page }) => {
+test('Funk-Vorlage im zweiten Teil: Klang-Schlagwort, Muster-Schlagwort und Stil wirken live ohne Neustart', async ({ page }) => {
   test.setTimeout(60_000);
   await countContexts(page);
   await openPlayPage(page);
@@ -586,15 +590,21 @@ test('Funk-Vorlage im zweiten Teil: Klang-Schlagwort wirkt live, Muster-Schlagwo
     expect(await contexts(), tag).toBe(1);
     expect(await sets(), `${tag}: kein neuer Instrumentensatz`).toBe(1);
   }
-  // Muster-Schlagwort: der Ereignisstrom ändert sich, Neustart bei Takt 1 wie bisher
+  // Muster-Schlagwort: der Ereignisstrom ändert sich und wird live getauscht, ohne Neustart und ohne neuen Instrumentensatz
+  let before = await shownBar(page);
+  await positionsSince(page);
   await page.locator('#tags [data-category="drums"][data-tag="driving"]').click();
   await expect(page.locator('#tags [data-category="drums"][data-tag="driving"]')).toHaveAttribute('aria-pressed', 'false');
-  await expect(position(page)).toHaveText('Takt 1 von 96', { timeout: BAR_TIMEOUT });
-  await expect(position(page)).toHaveText('Takt 2 von 96', { timeout: BAR_TIMEOUT });
-  // Stil aus der Schnellauswahl: ebenfalls ab Takt 1
+  await expectContinuous(page, before, 'driving');
+  expect(await sets(), 'driving: kein neuer Instrumentensatz').toBe(1);
+  // Stil aus der Schnellauswahl: Tempo, Schlagworte und Klang werden live übernommen
+  before = await shownBar(page);
+  await positionsSince(page);
   await page.locator('#quick-pick [data-style="funk"]').click();
   await expect(page.locator('#quick-pick [data-style="funk"]')).toHaveAttribute('aria-pressed', 'true');
-  await expect(position(page)).toHaveText('Takt 1 von 96', { timeout: BAR_TIMEOUT });
+  await expectContinuous(page, before, 'funk');
+  expect(await sets(), 'funk: kein neuer Instrumentensatz').toBe(1);
+  await expect(page.locator('#tuning-tempo')).toHaveValue('100');
   expect(await contexts()).toBe(1);
   await playGo(page).click();
   await expect(playGo(page)).toHaveText('Los');
