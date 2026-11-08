@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRng } from '../../src/core/rng.js';
 import { TAG_CATEGORIES, STYLE_PRESETS, INERT_TAGS, resolveTags } from '../../src/core/tags.js';
-import { resolveTimbre } from '../../src/core/timbre.js';
+import { resolveTimbre, DEFAULT_TIMBRE } from '../../src/core/timbre.js';
 
 const NUMBERS = ['drive', 'swing', 'syncopation', 'bassLow', 'bassMovement', 'padWidth'];
 const seeds = Array.from({ length: 40 }, (_, i) => i + 1);
@@ -108,5 +108,35 @@ test('Presets: bpm und nur bekannte Schlagworte', () => {
       for (const t of list) assert.ok(known[cat].includes(t), `${preset.id}: ${t}`);
     }
     assert.doesNotThrow(() => resolveTags(preset.tags, createRng(1)));
+  }
+});
+
+const SOUND_CATEGORIES = ['drumSound', 'bassSound', 'chordSound', 'padSound'];
+
+test('Presets: alle vier Klang-Kategorien vorhanden, Stil-Klang wie festgelegt', () => {
+  const sound = (id) => Object.fromEntries(SOUND_CATEGORIES.map((c) => [c, STYLE_PRESETS.find((p) => p.id === id).tags[c]]));
+  assert.deepEqual(sound('funk'), { drumSound: ['punchy', 'snappy'], bassSound: ['plucky'], chordSound: ['biting'], padSound: [] });
+  assert.deepEqual(sound('psych'), { drumSound: [], bassSound: ['fuzz'], chordSound: ['chorused'], padSound: ['swelling', 'glassy'] });
+  assert.deepEqual(sound('dreamy'), { drumSound: ['roomy'], bassSound: ['round'], chordSound: ['mellow'], padSound: ['airy', 'swelling'] });
+});
+
+test('Presets: Klang-Schlagworte ändern die Muster-Parameter nicht', () => {
+  for (const preset of STYLE_PRESETS) {
+    const patternOnly = Object.fromEntries(Object.entries(preset.tags).filter(([cat]) => !SOUND_CATEGORIES.includes(cat)));
+    for (const seed of seeds) {
+      assert.deepEqual(resolveTags(preset.tags, createRng(seed)), resolveTags(patternOnly, createRng(seed)), `${preset.id} seed ${seed}`);
+    }
+  }
+});
+
+test('Presets: Klangmodelle paarweise verschieden, jedes weicht bei Bass, Akkorden und Pad vom Standard ab', () => {
+  const timbres = STYLE_PRESETS.map((p) => resolveTimbre(p.tags));
+  for (let i = 0; i < timbres.length; i++) {
+    for (let j = i + 1; j < timbres.length; j++) {
+      assert.notDeepEqual(timbres[i], timbres[j], `${STYLE_PRESETS[i].id} gegen ${STYLE_PRESETS[j].id}`);
+    }
+    for (const group of ['bass', 'chords', 'pad']) {
+      assert.notDeepEqual(timbres[i][group], DEFAULT_TIMBRE[group], `${STYLE_PRESETS[i].id}: ${group}`);
+    }
   }
 });

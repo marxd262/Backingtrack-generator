@@ -1,6 +1,7 @@
 // Spielseite (über Feintuning geöffnet): Schnellauswahl, Schlagworte, Tempo, Länge, Schichten, Verlauf, Akkordfolge, Akkordrad.
 import { test, expect } from '@playwright/test';
 import { layoutWheel } from '../../src/ui/wheel-geometry.js';
+import { STYLE_PRESETS, TAG_CATEGORIES } from '../../src/core/tags.js';
 
 const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view)\.[A-Za-z.]+$/;
 const BAR_TIMEOUT = 10_000; // ein Takt bei 100 bpm dauert 2,4 s; unter Last großzügig
@@ -118,8 +119,10 @@ test('Schnellauswahl Träumerisch belegt Schlagworte und 80 bpm vor', async ({ p
   await expect(pick).toHaveCount(3);
   await expect(page.locator('#quick-pick [data-style="funk"]')).toHaveAttribute('aria-pressed', 'true');
   await page.locator('#quick-pick').getByRole('button', { name: /Träumerisch/ }).click();
+  // Klang-Schlagworte des Stils (drumSound, bassSound, chordSound, padSound) gehören seit der Klangformung zur Vorlage
   expect(await pressedTags(page)).toEqual([
-    'bass.calm', 'development.buildsSlowly', 'drums.halftime', 'drums.loose', 'mood.dreamy', 'synths.warm', 'synths.widePad',
+    'bass.calm', 'bassSound.round', 'chordSound.mellow', 'development.buildsSlowly', 'drumSound.roomy', 'drums.halftime', 'drums.loose',
+    'mood.dreamy', 'padSound.airy', 'padSound.swelling', 'synths.warm', 'synths.widePad',
   ]);
   await expect(page.locator('#tuning-tempo-out')).toHaveText('80');
   await expect(page.locator('#tempo-btn')).toHaveText('80 bpm');
@@ -445,4 +448,84 @@ test('Wiedergabe: Rad färbt den aktuellen Akkord, große Akkordanzeige der Star
   await expect.poll(() => wheel.evaluate((c) => c.toDataURL())).toBe(still);
   await page.locator('#play-back').click();
   await expect(page.locator('#now-chord')).toBeAttached();
+});
+
+const presetPressed = (preset) => TAG_CATEGORIES
+  .flatMap(({ id }) => (preset.tags[id] ?? []).map((tag) => `${id}.${tag}`)).sort();
+
+test('Schlagworte: die vier Klang-Gruppen stehen in beiden Sprachen übersetzt in der Seitenleiste, ohne rohe Schlüssel', async ({ page }) => {
+  await openPlayPage(page);
+  const labels = {
+    de: { drumSound: 'Schlagzeugklang', bassSound: 'Bassklang', chordSound: 'Akkordklang', padSound: 'Padklang' },
+    en: { drumSound: 'Drum sound', bassSound: 'Bass sound', chordSound: 'Chord sound', padSound: 'Pad sound' },
+  };
+  for (const lang of ['de', 'en']) {
+    await page.locator(`[data-lang="${lang}"]`).click();
+    for (const [id, label] of Object.entries(labels[lang])) {
+      const group = page.locator('#side-left').getByRole('group', { name: label, exact: true });
+      await expect(group, `${lang} ${id}`).toBeVisible();
+      await expect(group.getByRole('button')).toHaveCount(5);
+      for (const button of await group.getByRole('button').all()) expect(await button.textContent(), `${lang} ${id}`).toMatch(/\S/);
+    }
+    expect(await rawKeysIn(page), lang).toEqual([]);
+    // auch Namen und Beschreibungen der Knöpfe (aria-label, title, aria-description) tragen keinen rohen Schlüssel
+    const attrs = await page.locator('#tags button').evaluateAll((els) => els.flatMap((el) => ['aria-label', 'aria-description', 'title']
+      .map((a) => el.getAttribute(a)).filter(Boolean)));
+    for (const value of attrs) expect(value).not.toMatch(RAW_KEY);
+  }
+});
+
+test('Schnellauswahl: jeder Stil wählt genau seine Schlagworte in allen zehn Gruppen, eine Klang-Änderung löst die Markierung', async ({ page }) => {
+  await openPlayPage(page);
+  for (const preset of STYLE_PRESETS) {
+    const button = page.locator(`#quick-pick [data-style="${preset.id}"]`);
+    await button.click();
+    await expect(button, preset.id).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('#quick-pick [aria-pressed="true"]')).toHaveCount(1);
+    expect(await pressedTags(page), preset.id).toEqual(presetPressed(preset));
+    // ein Klang-Schlagwort außerhalb des Stils: keine Vorlage passt mehr, zurück: wieder gedrückt
+    const extra = page.locator('#tags [data-category="padSound"][data-tag="thick"]');
+    await extra.click();
+    await expect(page.locator('#quick-pick [aria-pressed="true"]'), `${preset.id} + thick`).toHaveCount(0);
+    await extra.click();
+    await expect(button, `${preset.id} ohne thick`).toHaveAttribute('aria-pressed', 'true');
+    // ein Klang-Schlagwort des Stils abwählen löst ebenfalls
+    const own = (TAG_CATEGORIES.map(({ id }) => [id, preset.tags[id] ?? []]).find(([id, list]) => id.endsWith('Sound') && list.length));
+    const chip = page.locator(`#tags [data-category="${own[0]}"][data-tag="${own[1][0]}"]`);
+    await chip.click();
+    await expect(page.locator('#quick-pick [aria-pressed="true"]'), `${preset.id} ohne ${own[1][0]}`).toHaveCount(0);
+  }
+});
+
+test('Klang-Schlagwort während der Wiedergabe: Neustart ohne Fehler, genau ein Player, kein neuer AudioContext', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__audioContexts = 0;
+    const Original = window.AudioContext;
+    window.AudioContext = class extends Original {
+      constructor(...args) {
+        super(...args);
+        window.__audioContexts++;
+      }
+    };
+  });
+  await page.reload();
+  await expect(page.locator('#go')).toHaveText(/\S/);
+  await openPlayPage(page);
+  await playFast(page);
+  await expect(position(page)).toHaveText('Takt 2 von 96', { timeout: BAR_TIMEOUT });
+  const contexts = () => page.evaluate(() => window.__audioContexts);
+  expect(await contexts()).toBe(1);
+  // nacheinander aus jeder der vier Klang-Kategorien; jeder Klick startet neu, die Taktzeile läuft danach weiter
+  for (const [category, tag] of [['drumSound', 'boomy'], ['bassSound', 'sub'], ['chordSound', 'tremolo'], ['padSound', 'moving']]) {
+    await expect(position(page)).toHaveText('Takt 2 von 96', { timeout: BAR_TIMEOUT });
+    await page.locator(`#tags [data-category="${category}"][data-tag="${tag}"]`).click();
+    await expect(page.locator(`#tags [data-tag="${tag}"]`)).toHaveAttribute('aria-pressed', 'true');
+    await expect(position(page)).toHaveText('Takt 1 von 96', { timeout: BAR_TIMEOUT });
+    await expect(position(page)).toHaveText('Takt 2 von 96', { timeout: BAR_TIMEOUT });
+    expect(await contexts(), tag).toBe(1);
+    await expect(playGo(page)).toHaveText('Stopp');
+  }
+  await playGo(page).click();
+  await expect(playGo(page)).toHaveText('Los');
+  expect(await contexts()).toBe(1);
 });

@@ -1,5 +1,6 @@
 // Messwerkzeug für die Klangformung: compareRenders, Spektralschwerpunkt im Offline-Render, timbre-Option.
 import { test, expect } from '@playwright/test';
+import { STYLE_PRESETS } from '../../src/core/tags.js';
 
 const LAYERS = ['drums', 'bass', 'chords', 'pad'];
 // Basistrack wie in levels.spec.js: Am Am Dm E, 100 bpm, Seed 1, alle Schichten ab Takt 1
@@ -398,4 +399,26 @@ test('Klang: stumme Akkorde und stummes Pad bleiben mit chorused, tremolo und ai
     const solo = await compare(page, track(), withTags(tags), 6, { layer });
     expect(solo.diff, layer).toBeLessThan(1e-6);
   }
+});
+
+// Stile: gleiche Muster (Schlagworte von funk, gleiche Akkorde, Tempo, Seed), nur die Schlagworte der vier Klang-Kategorien
+// von funk, psych und dreamy. Der Unterschied kommt also allein vom Klang.
+// Gemessen 2026-11-08 (Summe, 16 s, mit Begrenzer): funk/psych 1.249, funk/dreamy 1.330, psych/dreamy 0.384 (kleinster Abstand: psych/dreamy).
+// (Pegel der echten Presets: levels.spec.js, die Presets enthalten die Klang-Schlagworte.)
+const SOUND_CATEGORIES = ['drumSound', 'bassSound', 'chordSound', 'padSound'];
+const presetOf = (id) => STYLE_PRESETS.find((p) => p.id === id);
+const funkPattern = Object.fromEntries(Object.entries(presetOf('funk').tags).filter(([c]) => !SOUND_CATEGORIES.includes(c)));
+const styleSound = (id) => track({ tags: { ...funkPattern, ...Object.fromEntries(SOUND_CATEGORIES.map((c) => [c, presetOf(id).tags[c]])) } });
+
+test('Stile klingen allein durch Klang-Schlagworte messbar verschieden (Summe, paarweise diff >= 0.25)', async ({ page }) => {
+  test.setTimeout(180_000);
+  const results = [];
+  for (const [a, b] of [['funk', 'psych'], ['funk', 'dreamy'], ['psych', 'dreamy']]) {
+    const r = await compare(page, styleSound(a), styleSound(b), SOUND_SECONDS);
+    results.push(`${a}/${b}: diff ${r.diff}`);
+    expect(r.diff, `${a} gegen ${b}: ${JSON.stringify(r)}`).toBeGreaterThanOrEqual(0.25);
+  }
+  // Gegenprobe: ohne Klang-Schlagworte klingen die Muster-Tracks gleich
+  const same = await compare(page, styleSound('funk'), styleSound('funk'), 6);
+  expect(same.diff).toBeLessThan(1e-6);
 });

@@ -18,15 +18,18 @@ export const TAG_CATEGORIES = [
 export const STYLE_PRESETS = [
   {
     id: 'funk', bpm: 100,
-    tags: { drums: ['driving', 'dry'], bass: ['bouncy'], synths: ['warm'], rhythm: ['funky', 'syncopated'], mood: [], development: ['buildsSlowly'] },
+    tags: { drums: ['driving', 'dry'], bass: ['bouncy'], synths: ['warm'], rhythm: ['funky', 'syncopated'], mood: [], development: ['buildsSlowly'],
+      drumSound: ['punchy', 'snappy'], bassSound: ['plucky'], chordSound: ['biting'], padSound: [] },
   },
   {
     id: 'psych', bpm: 112,
-    tags: { drums: ['driving'], bass: ['deepFat'], synths: ['arpeggio', 'widePad', 'shimmering'], rhythm: ['straight'], mood: ['psychedelic'], development: ['buildsSlowly'] },
+    tags: { drums: ['driving'], bass: ['deepFat'], synths: ['arpeggio', 'widePad', 'shimmering'], rhythm: ['straight'], mood: ['psychedelic'], development: ['buildsSlowly'],
+      drumSound: [], bassSound: ['fuzz'], chordSound: ['chorused'], padSound: ['swelling', 'glassy'] },
   },
   {
     id: 'dreamy', bpm: 80,
-    tags: { drums: ['halftime', 'loose'], bass: ['calm'], synths: ['widePad', 'warm'], rhythm: [], mood: ['dreamy'], development: ['buildsSlowly'] },
+    tags: { drums: ['halftime', 'loose'], bass: ['calm'], synths: ['widePad', 'warm'], rhythm: [], mood: ['dreamy'], development: ['buildsSlowly'],
+      drumSound: ['roomy'], bassSound: ['round'], chordSound: ['mellow'], padSound: ['airy', 'swelling'] },
   },
 ];
 

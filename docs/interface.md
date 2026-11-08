@@ -51,6 +51,40 @@ Weitere Felder (`id`, `title`, `style` ...) stören nicht und werden ignoriert. 
 - `TAG_CATEGORIES`: `[{ id, tags: [id, ...] }]`, alle Kategorien und Schlagwort-IDs, die der Generator kennt.
 - `STYLE_PRESETS`: `[{ id, bpm, tags }]`. `tags` kann direkt in einen Track übernommen werden, `bpm` ist der Vorschlag des Stils.
 - Aufbau (Kategorie `development`) in Abschnitten zu 8 Takten, der letzte Abschnitt spielt immer alles: ohne Angabe Bass, Schlagzeug und Akkorde, Pad erst im letzten Abschnitt; `fullFromStart` alles von Anfang an; `buildsSlowly` Bass und Schlagzeug ab Takt 1, im zweiten Abschnitt kommt (je Seed) Akkorde oder Pad dazu, ab dem dritten alles. Der Aufbau beginnt mit jedem Durchlauf über `length` Takte neu.
+- Klang-Schlagworte: vier Kategorien (`drumSound`, `bassSound`, `chordSound`, `padSound`) und die früher wirkungslosen Schlagworte `gritty`, `warm`, `dark`, `bright`, `psychedelic`, `dreamy` ändern den **Klang**, das Muster nur dort, wo es unten steht (`dreamy` und `warm` verschieben zusätzlich wie bisher `padWidth`). Zusammen sind es 26 klangrelevante Schlagworte:
+
+  | Kategorie | Schlagwort-IDs | Wirkung |
+  | --- | --- | --- |
+  | `drumSound` | `punchy` | Kick kräftiger und kürzer, Snare knackiger |
+  | | `boomy` | Kick länger und tiefer ausklingend |
+  | | `snappy` | Snare mit mehr Anschlag und Ton |
+  | | `crisp` | Hi-Hats heller und kürzer |
+  | | `roomy` | Schlagzeug mit Raumhall |
+  | `bassSound` | `sub` | zusätzlicher Sub-Bass, dunklerer Filter |
+  | | `fuzz` | übersteuerter, zerrender Bass |
+  | | `plucky` | gezupfter Anschlag: Filter fällt schneller, der Ton klingt ab |
+  | | `round` | runder, weicher Bass |
+  | | `resonant` | Filterresonanz, Bass „quakt" |
+  | `chordSound` | `mellow` | Akkorde dunkler und weicher |
+  | | `biting` | Akkorde heller und kürzer, bissig |
+  | | `chorused` | Chorus auf den Akkorden |
+  | | `tremolo` | Lautstärke-Tremolo auf den Akkorden |
+  | | `ringing` | Akkorde klingen länger aus |
+  | `padSound` | `swelling` | Pad setzt langsam ein |
+  | | `airy` | luftiges Pad mit Schimmer, offener Filter |
+  | | `glassy` | glasiges, dünnes Pad mit viel Schimmer |
+  | | `thick` | dickes, breit verstimmtes Pad |
+  | | `moving` | Filter des Pads bewegt sich schneller und tiefer |
+  | `bass` | `gritty` | leichte Zerrung im Bass |
+  | `synths` | `warm` | Akkorde und Pad dunkler, Bass runder, Summe etwas dunkler |
+  | `mood` | `dark` | Summe dunkler, Hi-Hats, Akkorde und Pad gedämpft |
+  | | `bright` | Summe heller, Hi-Hats heller |
+  | | `psychedelic` | mehr Echo und Hall, Chorus auf den Akkorden, tiefere Pad-Bewegung |
+  | | `dreamy` | mehr Hall, Pad setzt etwas langsamer ein |
+
+- Klang-Schlagworte ändern **nur den Klang, nie den Ereignisstrom**: `buildEvents` liefert für denselben Track mit und ohne sie dieselben Ereignisse, Tracks mit festem Seed behalten also ihre Noten, und die Golden-Hashes bleiben. Der Klang liegt in einem internen Klangmodell (`resolveTimbre(tags)` in `src/core/timbre.js`, nicht aus `src/index.js` exportiert), das nur das Audio liest.
+- `withBreakouts` (Kategorie `development`) hat weiterhin keine Wirkung, ist aber gültig. Unbekannte Kategorien und Schlagworte werden wie bisher abgelehnt (`badTags`).
+- Die Presets in `STYLE_PRESETS` führen alle zehn Kategorien (leere Liste, wo nichts gewählt ist); ihre Klang-Schlagworte sind: `funk` kräftig und knackig (Schlagzeug), gezupft (Bass), bissig (Akkorde); `psych` Fuzz-Bass, Chorus-Akkorde, anschwellendes und glasiges Pad; `dreamy` räumliches Schlagzeug, runder Bass, weiche Akkorde, luftiges und anschwellendes Pad.
 - Beschriftungen über `t`: `category.<id>`, `tag.<Kategorie>.<id>`, `style.<id>` (Hinweis: `style.<id>.hint`), `layer.<name>`, `scale.<name>`, `mode.<name>`.
 
 ## Seed-Regel
