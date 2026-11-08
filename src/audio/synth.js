@@ -182,17 +182,30 @@ function padNote(ctx, out, t, e, p) {
  * Baut die Instrumente und die Summenkette (Trims, Master, Echo auf Akkorde/Pad, Hall, Begrenzer).
  * `output` verbindet der Aufrufer mit ctx.destination. `trigger(event, when)` mit when in ctx-Zeit.
  * `timbre` (Klangmodell, siehe core/timbre.js) wird mit DEFAULT_TIMBRE aufgefüllt; ungültig zählt wie fehlend.
+ * setTimbre(timbre) stellt den Klang live um: neue Töne klingen sofort neu (die Stimmen lesen ihre Parameter beim Anschlag),
+ * die festen Knoten (Hall, Echo, Helligkeit, Raum-Sendeweg, Summenpegel) folgen über Rampen; schon laufende Töne bleiben.
  * `levels` ({drums, bass, chords, pad}, je 0..1) und `master` (0..1) sind Reglerstellungen des Mischpults (mix.js), Standard 1;
  * setLevel/setMaster ändern sie live. Der Gesamtpegel liegt hinter dem Begrenzer und ändert dessen Verhalten nicht.
  */
 export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, timbre = DEFAULT_TIMBRE, levels = {}, master: masterLevel = 1 } = {}) {
-  const sound = completeTimbre(timbre);
+  let sound = completeTimbre(timbre);
+  // Parameterobjekte bleiben dieselben, setTimbre überschreibt nur ihre Felder (die Stimmen halten sie als Referenz)
+  const mix = {}, drum = {}, bass = {}, chord = {}, pad = {};
+  let curve = null; // Fuzz-Kennlinie, null ohne Verzerrer
+  const applyTimbre = () => {
+    Object.assign(mix, masterParams(sound.master));
+    Object.assign(drum, drumParams(sound.drums));
+    Object.assign(bass, bassParams(sound.bass));
+    Object.assign(chord, chordParams(sound.chords));
+    Object.assign(pad, padParams(sound.pad));
+    curve = bass.drive > 1 ? fuzzCurve(bass.drive) : null;
+  };
+  applyTimbre();
   const rng = createRng(1);
   const noise = noiseBuffer(ctx, rng.fork('noise'), 1);
 
   for (const name of Object.keys(levels)) if (!Object.hasOwn(TRIM, name)) throw new Error(`Unknown layer: ${name}`);
 
-  const mix = masterParams(sound.master);
   const master = ctx.createGain(); master.gain.value = MASTER * mix.level;
   // Hall: Rauschen aus dem Seed, exponentiell abklingend (2 s), als Impulsantwort
   const reverb = ctx.createConvolver(); reverb.buffer = noiseBuffer(ctx, rng.fork('reverb'), 2, 2, 3);
@@ -204,12 +217,10 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
     limiter.threshold.value = -10; limiter.knee.value = 0; limiter.ratio.value = 20;
     limiter.attack.value = 0.001; limiter.release.value = 0.1;
   }
-  // Helligkeit: Hochregal auf der Summe (Trockenanteil und Hall), nur bei einem Pegel ungleich 0 dB; sonst kein Knoten
-  let bus = limiter;
-  if (mix.shelfDb !== 0) {
-    bus = ctx.createBiquadFilter(); bus.type = 'highshelf'; bus.frequency.value = mix.shelfFreq; bus.gain.value = mix.shelfDb;
-    bus.connect(limiter);
-  }
+  // Helligkeit: Hochregal auf der Summe (Trockenanteil und Hall); immer vorhanden, damit setTimbre es live verstellen kann (0 dB = neutral)
+  const shelf = ctx.createBiquadFilter(); shelf.type = 'highshelf'; shelf.frequency.value = mix.shelfFreq; shelf.gain.value = mix.shelfDb;
+  shelf.connect(limiter);
+  const bus = shelf;
   master.connect(bus);
   master.connect(reverb).connect(reverbWet).connect(bus);
 
@@ -222,11 +233,8 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
   delay.connect(tone).connect(fb).connect(delay);
   tone.connect(echoWet).connect(master);
 
-  const drum = drumParams(sound.drums);
   const drums = drumVoices(ctx, noise, drum);
-  const bass = bassParams(sound.bass);
-  const curve = bass.drive > 1 ? fuzzCurve(bass.drive) : null; // einmal je Instrumentensatz
-  const chord = chordParams(sound.chords), pad = padParams(sound.pad);
+  const roomSend = gain(ctx, drum.roomSend, reverb); // Raum-Sendeweg der Schlagzeugsumme in den Hall, immer vorhanden (0 = aus)
   const play = {
     drums: (out, t, e) => e.type === 'hit' && drums[e.name]?.(out, t, e.vel),
     bass: (out, t, e) => e.type === 'note' && bassNote(ctx, out, t, e, bass, curve),
@@ -254,8 +262,8 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
     const level = levelGains[name] = gainNode(levels[name] ?? 1);
     const trim = ctx.createGain(); trim.gain.value = TRIM[name];
     mute.connect(level).connect(trim).connect(master);
-    // room: Teil der Schlagzeugsumme in den Hall, hinter mute und trim abgegriffen (Stummschalten schaltet den Sendeweg mit stumm); ohne room kein Knoten
-    if (name === 'drums' && drum.roomSend > 0) trim.connect(gain(ctx, drum.roomSend, reverb));
+    // room: Teil der Schlagzeugsumme in den Hall, hinter mute und trim abgegriffen (Stummschalten schaltet den Sendeweg mit stumm)
+    if (name === 'drums') trim.connect(roomSend);
     if (name === 'chords' || name === 'pad') trim.connect(delay);
     layers[name] = {
       trigger(event, when) {
@@ -280,6 +288,17 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
     },
     setMaster(v) {
       ramp(volume.gain, sliderGain(v));
+    },
+    // timbre: wie die Option gleichen Namens (unvollständig oder ungültig wird aufgefüllt)
+    setTimbre(next) {
+      sound = completeTimbre(next);
+      applyTimbre();
+      ramp(master.gain, MASTER * mix.level);
+      ramp(reverbWet.gain, mix.reverbWet);
+      ramp(shelf.gain, mix.shelfDb);
+      ramp(fb.gain, mix.echoFeedback);
+      ramp(echoWet.gain, mix.echoWet);
+      ramp(roomSend.gain, drum.roomSend);
     },
     // Echo folgt einem Live-Tempowechsel; weich nachgeführt (Zeitkonstante 50 ms) statt springend
     setTempo(newBpm) {

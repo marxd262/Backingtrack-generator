@@ -109,7 +109,7 @@ export function padParams({ attack, cutoff, lfoSpeed, lfoDepth, shimmer, thickne
 export function masterParams({ brightness, echo, reverb }) {
   const shelfDb = lin(brightness, -15, 0, 9);
   return {
-    shelfDb, // Hochregal; exakt 0 = ohne Filterknoten
+    shelfDb, // Hochregal in dB; 0 = neutral (der Knoten ist immer da, damit setTimbre ihn live verstellen kann)
     level: 1 / (1 + 0.05 * Math.max(0, shelfDb)), // Faktor auf den Summenpegel: hell hebt die Höhen, also bleibt die Spitze nicht höher
     shelfFreq: 800, // tiefer als die erwarteten 3 kHz: erst so verändert das Schlagwort die Summe hörbar (diff >= 0.25)
     echoWet: lin(echo, 0, 0.3, 1),

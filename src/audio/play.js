@@ -146,6 +146,10 @@ export function play(ctx, trackInput, { loops = 1, startBar = 0, levels, master,
       sliderGain(value);
       instruments.setMaster?.(value);
     },
+    // Klang live umstellen (siehe createInstruments in synth.js); nach stop() ohne Wirkung
+    setTimbre(timbre) {
+      if (!stopped) instruments.setTimbre?.(timbre);
+    },
     setTempo(newBpm) {
       if (!(Number.isFinite(newBpm) && newBpm >= 20 && newBpm <= 400)) throw new RangeError(`bpm must be in [20, 400], got ${newBpm}`);
       // Anker nicht vor das zuletzt geplante Ereignis: geplante Ereignisse behalten ihre Zeit, nichts wird umgeordnet

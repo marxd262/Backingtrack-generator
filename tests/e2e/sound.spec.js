@@ -490,3 +490,72 @@ test('track.timbre wirkt wie ein Schlagwort und schlägt es', async ({ page }) =
   const off = track({ tags: viaTag.tags, timbre: { bass: { fuzz: 0 } } });
   expect((await compare(page, track(), off, 6, { layer: 'bass' })).diff).toBeLessThan(1e-6);
 });
+
+// --- setTimbre: Klang der laufenden Instrumente umstellen (Offline, Ereignisse mit 1 s Vorlauf, verglichen ab 1 s,
+// weil die Rampe der festen Knoten nach 0,2 s exakt ist) ---
+const LIVE_TAGS = {
+  development: ['fullFromStart'],
+  bassSound: ['fuzz', 'sub'], drumSound: ['roomy', 'punchy'], chordSound: ['chorused', 'tremolo'],
+  padSound: ['airy', 'thick'], mood: ['psychedelic', 'bright'],
+};
+
+// Rendert 4 s Ereignisse; make(ctx) liefert die Instrumente, after(inst) wirkt vor dem ersten Ton (z. B. setTimbre)
+const renderLive = (page, args) => page.evaluate(async ({ tags, create, after, against, extremes }) => {
+  const { createInstruments } = await import('/audio/synth.js');
+  const { buildEvents } = await import('/core/events.js');
+  const { resolveTimbre, DEFAULT_TIMBRE } = await import('/core/timbre.js');
+  const track = {
+    key: { root: 'A', mode: 'minor' }, bpm: 100, seed: 1, length: 24, layers: { drums: true, bass: true, chords: true, pad: true },
+    bars: [['A', 'min'], ['A', 'min'], ['D', 'min'], ['E', 'maj']].map(([root, quality]) => ({ chord: { root, quality }, beats: 4 })),
+    tags,
+  };
+  const events = buildEvents(track);
+  const spec = (s) => (s === 'default' ? DEFAULT_TIMBRE : s === 'tags' ? resolveTimbre(tags)
+    : Object.fromEntries(Object.entries(DEFAULT_TIMBRE).map(([g, f]) => [g, Object.fromEntries(Object.keys(f).map((k) => [k, s === 'zeros' ? 0 : 1]))])));
+  const run = async (createWith, afterWith) => {
+    const ctx = new OfflineAudioContext(2, 44100 * 6, 44100);
+    const inst = createInstruments(ctx, { bpm: 100, timbre: spec(createWith) });
+    inst.output.connect(ctx.destination);
+    if (afterWith) inst.setTimbre(spec(afterWith));
+    for (const e of events) if (e.t < 4 && e.layer) inst.layers[e.layer].trigger(e, 1 + e.t);
+    return (await ctx.startRendering()).getChannelData(0).slice(44100);
+  };
+  const a = await run(create, after);
+  const stats = (d) => {
+    let peak = 0, finite = true;
+    for (const v of d) { if (!Number.isFinite(v)) finite = false; peak = Math.max(peak, Math.abs(v)); }
+    return { peak, finite };
+  };
+  const b = await run(against ?? after, null);
+  if (extremes) return { ...stats(a), freshPeak: stats(b).peak };
+  let diff = 0, rms = 0;
+  for (let i = 0; i < a.length; i++) { diff = Math.max(diff, Math.abs(a[i] - b[i])); rms += b[i] * b[i]; }
+  return { diff, rms: Math.sqrt(rms / a.length) };
+}, args);
+
+test('setTimbre vor dem ersten Ton klingt wie ein Klang von Anfang an', async ({ page }) => {
+  test.setTimeout(120_000);
+  const r = await renderLive(page, { tags: LIVE_TAGS, create: 'default', after: 'tags' });
+  expect(r.rms).toBeGreaterThan(0.005);
+  expect(r.diff).toBeLessThan(1e-5); // Float32-Rauschen liegt bei ~1e-6; eine echte Abweichung ist um Größenordnungen größer
+  // Gegenprobe: ohne setTimbre unterscheidet sich der Klang deutlich
+  const control = await renderLive(page, { tags: LIVE_TAGS, create: 'default', after: null, against: 'tags' });
+  expect(control.diff).toBeGreaterThan(0.01);
+});
+
+test('setTimbre zurück auf neutral klingt wie der neutrale Klang (Helligkeit, Raum, Hall, Echo wieder aus)', async ({ page }) => {
+  test.setTimeout(120_000);
+  const r = await renderLive(page, { tags: LIVE_TAGS, create: 'tags', after: 'default' });
+  expect(r.rms).toBeGreaterThan(0.005);
+  expect(r.diff).toBeLessThan(1e-5);
+});
+
+test('setTimbre zwischen Extremen: nur endliche Werte, Spitze wie bei frisch erzeugten Instrumenten und unter 0,95', async ({ page }) => {
+  test.setTimeout(120_000);
+  for (const [create, after] of [['zeros', 'ones'], ['ones', 'zeros']]) {
+    const r = await renderLive(page, { tags: LIVE_TAGS, create, after, extremes: true });
+    expect(r.finite, `${create}->${after}`).toBe(true);
+    expect(Math.abs(r.peak - r.freshPeak), `${create}->${after}`).toBeLessThan(1e-3);
+    expect(r.peak, `${create}->${after}`).toBeLessThan(0.95);
+  }
+});
