@@ -60,7 +60,7 @@ const lin = (x, lo, mid, hi) => (x < 0.5 ? lo + (mid - lo) * 2 * x : mid + (hi -
 export function chordParams({ brightness, length, chorus, tremolo }) {
   const bright = span(brightness, 0.2, 1, 2.5); // Faktor auf Start und Ende des Filterabfalls
   const long = span(length, 0.3, 1, 3);
-  const chorusMix = 1.6 * chorus; // Pegel der zusätzlichen verstimmten, leicht verzögerten Oszillatoren (je einer links und rechts)
+  const chorusMix = 1.6 * chorus; // Pegel der zusätzlichen verstimmten, links und rechts gepannten Oszillatoren (die Breite kommt aus Verstimmung und Panning, nicht aus einer Verzögerung)
   const tremDepth = 0.95 * (1 - (1 - tremolo) ** 2); // Amplituden-LFO schwingt zwischen 1 - tremDepth und 1; schon bei tremolo 0.5 deutlich
   const tremBase = 1 - tremDepth / 2;
   return {

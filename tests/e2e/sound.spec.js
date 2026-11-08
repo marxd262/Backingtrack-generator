@@ -339,7 +339,7 @@ test('Klang psychedelic und dreamy: mehr Echo und Hall, Summen-rms im Ausklang n
   const psychedelic = await measureWindows(page, withTags({ mood: ['psychedelic'] }));
   expect(psychedelic.tailRms, label('psychedelic', psychedelic)).toBeGreaterThan(base.tailRms * 1.2);
   const dreamy = await measureWindows(page, withTags({ mood: ['dreamy'] }));
-  expect(dreamy.tailRms, label('dreamy', dreamy)).toBeGreaterThan(base.tailRms);
+  expect(dreamy.tailRms, label('dreamy', dreamy)).toBeGreaterThan(base.tailRms * 1.2); // gemessen 1.9x
 });
 
 // Gemessen 2026-11-08 (Akkorde-rms / Pad-rms vor dem Begrenzer relativ zum Standard; Schichtverhältnis kleinster / größter rms; Summe Spitze vor / nach dem Begrenzer):

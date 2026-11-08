@@ -141,7 +141,7 @@ function chordNote(ctx, out, t, e, p) {
   osc(ctx, 'sawtooth', f, 0, lp, t, end);
   osc(ctx, 'square', f, 7, lp, t, end);
   if (p.chorusMix > 0) {
-    for (const side of [-1, 1]) { // je ein verstimmter Sägezahn links und rechts, einige ms später gestartet (Phase gegen das Original versetzt, ohne Delay-Knoten) und in die Breite gelegt
+    for (const side of [-1, 1]) { // je ein verstimmter Sägezahn links und rechts; Breite und Chorus-Klang kommen aus Verstimmung (+/- Cent) und Panning, der um einige ms spätere Start staffelt nur den Einsatz (kein Delay-Knoten)
       const pan = ctx.createStereoPanner(); pan.pan.value = 0.6 * side; pan.connect(lp);
       osc(ctx, 'sawtooth', f, side * p.chorusDetune, gain(ctx, p.chorusMix, pan), t + (side < 0 ? 0.011 : 0.017), end);
     }

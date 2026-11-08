@@ -123,15 +123,23 @@ test('gleiche Eingabe ergibt identischen Render', async ({ page }) => {
   test.setTimeout(120_000);
   const a = await render(page, track('funk'), 6);
   const b = await render(page, track('funk'), 6);
-  // Chrome summiert viele Eingänge eines Knotens in wechselnder Reihenfolge: Abweichung ~1e-9 im rms, einzelne Abtastwerte (Spitze)
-  // bis ~2e-6 (Float-Rundung; funk enthält warm, also das Hochregal der Summe, und hinter dem Begrenzer wächst sie auf diesen Wert).
-  // Exakter Vergleich ist damit unmöglich; Math.random im Rauschen würde um Prozente abweichen.
-  const same = (x, y) => expect(Math.abs(x - y)).toBeLessThan(1e-5);
-  same(b.peak, a.peak);
-  same(b.rms, a.rms);
+  // Chrome summiert viele Eingänge eines Knotens in wechselnder Reihenfolge (Float-Rundung). Gemessen 2026-11-08 an funk, 6 s,
+  // 12 Paare identischer Renders, größte Abweichung (absolut):
+  //   mit warm (Hochregal der Summe aktiv), mit Begrenzer:   rms Summe 1.2e-8, Schichten <= 9e-9; Spitze Summe 2.2e-6, Schlagzeug 8.9e-7
+  //   mit warm, ohne Begrenzer:                              rms Summe 2.1e-9; Spitze Summe 7.2e-7
+  //   ohne warm (kein Hochregal), mit Begrenzer:             rms Summe 4.2e-9; Spitze Summe 1.2e-7
+  //   ohne warm, ohne Begrenzer:                             rms Summe 1.1e-10; Spitze Summe 1.2e-7
+  // Das rms streut also nur um ~1e-8 und behält die Grenze 1e-6. Die Spitze (ein einzelner Abtastwert) streut, sobald das Hochregal
+  // im Pfad ist, und hinter dem Begrenzer etwa dreimal stärker: 1e-5 ist die kleinste glatte Grenze (4x über der größten gemessenen Streuung 2.5e-6).
+  // Ungeseedetes Rauschen (Math.random im Rauschpuffer, einmal von Hand geprüft) streute dagegen im rms der Summe um 2.2e-4,
+  // im Schlagzeug-rms um 6.5e-4 und in der Spitze um 2.8e-3: beide Grenzen fangen es sicher.
+  const same = (x, y, bound) => expect(Math.abs(x - y)).toBeLessThan(bound);
+  const PEAK = 1e-5, RMS = 1e-6;
+  same(b.peak, a.peak, PEAK);
+  same(b.rms, a.rms, RMS);
   for (const layer of LAYERS) {
-    same(b.perLayer[layer].peak, a.perLayer[layer].peak);
-    same(b.perLayer[layer].rms, a.perLayer[layer].rms);
+    same(b.perLayer[layer].peak, a.perLayer[layer].peak, PEAK);
+    same(b.perLayer[layer].rms, a.perLayer[layer].rms, RMS);
   }
 });
 
