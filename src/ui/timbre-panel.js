@@ -41,6 +41,8 @@ export function initTimbrePanel({ render, player }) {
       state.track.timbre = rest;
       push();
       render();
+      // der Knopf ist jetzt deaktiviert und verlöre den Fokus an body: in der Gruppe bleiben
+      rows.find((r) => r.group === group).input.focus();
     });
     resets[group] = reset;
     details.append(reset);

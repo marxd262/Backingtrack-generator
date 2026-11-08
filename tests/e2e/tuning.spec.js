@@ -609,3 +609,17 @@ test('Funk-Vorlage im zweiten Teil: Klang-Schlagwort, Muster-Schlagwort und Stil
   await playGo(page).click();
   await expect(playGo(page)).toHaveText('Los');
 });
+
+test('Stil auf der Startseite während der Wiedergabe: wirkt live ohne Neustart', async ({ page }) => {
+  await countContexts(page);
+  await page.locator('#go').click();
+  await expect(playPage(page)).toBeVisible();
+  await expect(playGo(page)).toHaveText('Stopp');
+  await page.locator('#play-back').click();
+  await expect(start(page)).toBeVisible();
+  await page.locator('#style-btn').click();
+  await page.locator('#style-cards [data-style="psych"]').click();
+  await expect(page.locator('#style-btn')).toHaveText('Psychedelischer Indie');
+  expect(await page.evaluate(() => window.__instrumentSets), 'kein neuer Instrumentensatz').toBe(1);
+  expect(await page.evaluate(() => window.__audioContexts)).toBe(1);
+});

@@ -289,12 +289,12 @@ main {
   list-style: none; /* Standard-Dreieck ausblenden, der eigene Pfeil steht davor */
 }
 .group > summary::-webkit-details-marker { display: none; }
-.group > summary::before { content: 'B8'; flex: none; color: var(--ink-soft); }
-.group[open] > summary::before { content: 'BE'; }
+.group > summary::before { content: "▸" / ""; flex: none; color: var(--ink-soft); }
+.group[open] > summary::before { content: "▾" / ""; }
 .group > summary .label { margin: 0; color: var(--ink); font-size: 1rem; }
 .group[open] { padding-bottom: 8px; }
-.timbre-row { display: grid; grid-template-columns: minmax(0, 7rem) minmax(0, 1fr) 5.5ch; align-items: center; gap: 8px; min-height: var(--target); }
-.timbre-row label { overflow-wrap: anywhere; }
+.timbre-row { display: grid; grid-template-columns: minmax(0, 1fr) 5.5ch; align-items: center; column-gap: 8px; padding-bottom: 4px; } /* Beschriftung oben, Regler und Wert darunter: die Leiste ist an der Breitengrenze nur ~224 px breit */
+.timbre-row label { grid-column: 1 / -1; overflow-wrap: anywhere; }
 .timbre-row input { width: 100%; min-width: 0; height: var(--target); margin: 0; accent-color: var(--ink); }
 .timbre-row output { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .timbre-reset { margin-top: 4px; }

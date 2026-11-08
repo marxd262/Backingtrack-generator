@@ -201,3 +201,25 @@ test('Klang-Schlagwort während der Wiedergabe erreicht die Audioknoten (Helligk
   expect(await contexts(page)).toBe(1);
   await playGo(page).click();
 });
+
+test('Regler sind auch an der Breitengrenze (1200 px) breit genug zum Bedienen', async ({ page }) => {
+  await page.setViewportSize({ width: 1200, height: 900 });
+  if (!(await page.locator('#side-left').isVisible())) await page.locator('#toggle-left').click();
+  await openGroup(page, 'master');
+  const box = await slider(page, 'master', 'reverb').boundingBox();
+  expect(box.width).toBeGreaterThanOrEqual(100);
+});
+
+test('Zurücksetzen per Tastatur behält den Fokus in der Gruppe (nicht auf body)', async ({ page }) => {
+  await openGroup(page, 'bass');
+  await slider(page, 'bass', 'fuzz').fill('80');
+  const reset = group(page, 'bass').getByRole('button', { name: 'Zurücksetzen' });
+  await expect(reset).toBeEnabled();
+  await reset.focus();
+  await page.keyboard.press('Enter');
+  await expect(reset).toBeDisabled();
+  // Chromium korrigiert den Fokus eines deaktivierten Knopfs erst beim nächsten Rendern
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  expect(await page.evaluate(() => document.activeElement.tagName)).not.toBe('BODY');
+  expect(await page.evaluate(() => document.activeElement.closest('details')?.dataset.group)).toBe('bass');
+});

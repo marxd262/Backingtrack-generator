@@ -102,7 +102,7 @@ const keyScales = [['key-chips', 'scale-chips'], ['side-key-chips', 'side-scale-
 for (const { id } of STYLE_PRESETS) {
   const card = chip($('style-cards'), { style: id }, () => {
     applyStyle(id);
-    restartIfPlaying();
+    applyLive({ patterns: true, tempo: true });
     $('style-pop').hidePopover();
   });
   card.className = 'card';
