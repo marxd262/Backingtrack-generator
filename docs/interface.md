@@ -128,8 +128,8 @@ chordTimeline(track) // [{ time: 0, bar: 0, chord: { root: 'A', quality: 'min' }
 
 ```js
 const ctx = new AudioContext();   // der Aufrufer besitzt ihn und erzeugt ihn in einer Nutzergeste
-const h = play(ctx, track, { loops: 1, onBar: ({ bar, chord }) => {}, onEvent: (e) => {}, onEnd: () => {} });
-// h = { startPerf, stop(), setLayer(name, on), setTempo(bpm) }
+const h = play(ctx, track, { loops: 1, levels: { bass: 0.5 }, master: 1, onBar: ({ bar, chord }) => {}, onEvent: (e) => {}, onEnd: () => {} });
+// h = { startPerf, stop(), setLayer(name, on), setLevel(name, value), setMaster(value), setTempo(bpm) }
 ```
 
 - Optionen: `loops` (ganze Zahl >= 1, Standard 1, `Infinity` erlaubt, sonst `RangeError`), `onBar({bar, chord})` je Takt, `onEvent(ev)` je Ereignis (auch stummer Schichten), `onEnd()` nach dem letzten Durchlauf. `bar` und `t` zählen über alle Durchläufe weiter. `startBar` (ganze Zahl von 0 bis `length - 1`, Standard 0, sonst `RangeError`, geprüft nach dem Track und bevor ein Audioknoten entsteht): die Wiedergabe beginnt mit diesem Takt, frühere Ereignisse entfallen; das erste Ereignis ist der Akkord dieses Takts, `bar` und `t` zählen ab dort wie beim Durchspielen (ab `startBar: 10` meldet `onBar` zuerst Takt 10). Der angefangene Durchlauf zählt als erster: `loops: 1` ab Takt 10 von 96 endet nach Takt 95. `createInstruments` ist ein interner Haken und nicht Teil des Vertrags.
@@ -137,6 +137,8 @@ const h = play(ctx, track, { loops: 1, onBar: ({ bar, chord }) => {}, onEvent: (
 - `startPerf`: Beginn des ersten gespielten Takts (Liedzeit 0, mit `startBar` der Beginn dieses Takts) auf der `performance.now()`-Zeitachse (Ausgabelatenz eingerechnet). Die Gitarrenaufnahme wird an `startPerf` ausgerichtet, nicht an Rückrufzeiten. Die Ereigniszeit `t` in Rückrufen bleibt Liedzeit ab Takt 0; mit `startBar` gilt: Aufführungszeit eines Ereignisses ≈ `startPerf + (t − t_startBar) · 1000` (ms, Tempo wie gespielt), `t_startBar` ist das `t` des ersten Akkord-Ereignisses.
 - Rückrufe laufen auf der Audio-Uhr und kommen gegenüber `startPerf` etwa `ctx.outputLatency` zu früh. Für eine Anzeige reicht das, für das Ausrichten einer Aufnahme zählt `startPerf`.
 - `setLayer(name, on)`: schaltet `drums`, `bass`, `chords` oder `pad` live. Unbekannter Name wirft. Echo- und Hallfahnen klingen nach dem Stummschalten noch 1 bis 2 Sekunden nach. `setLayer(name, true)` kann eine Schicht nicht zurückholen, die im Track mit `layers[name]: false` ausgeschaltet ist: ihre Ereignisse gibt es dann gar nicht. Wer live umschalten will, übergibt alle Schichten `true` und schaltet stumm mit `setLayer` (so macht es die eigene Oberfläche).
+- `levels` (`{ drums, bass, chords, pad }`, jeder Wert 0 bis 1, fehlende gelten als 1) und `master` (0 bis 1, Standard 1): Reglerstellungen des Mischpults von der ersten Note an. Ein Wert außerhalb von 0 bis 1 oder kein Zahlentyp wirft `RangeError` (eine unbekannte Schicht in `levels` wirft `Error`), geprüft bevor ein Audioknoten entsteht.
+- `setLevel(name, value)` und `setMaster(value)`: stellen den Pegel einer Schicht bzw. die Gesamtlautstärke live (ohne Neustart, mit etwa 20 ms Rampe gegen Knacken). `value` ist die Reglerstellung 0 bis 1 (sonst `RangeError`, unbekannte Schicht `Error`); die Verstärkung ist `value * value`, also 1 exakt unverändert und nie lauter als der Standard, 0 still. Der Schichtpegel wirkt vor den Echo- und Hallwegen: sie folgen der Schicht (schon laufende Fahnen klingen nach). Die Gesamtlautstärke liegt hinter dem Begrenzer am Ausgang und ändert dessen Verhalten nicht. Der Pegel ist unabhängig vom Stummschalten mit `setLayer`.
 - `setTempo(bpm)`: ändert das Tempo live (20 bis 400, sonst `RangeError`); schon geplante Ereignisse behalten ihre Zeit. Die Echo-Verzögerung folgt dem neuen Tempo.
 - `stop()`: blendet in etwa 50 ms aus, bricht alle Rückrufe ab, ist wiederholbar und schließt den `AudioContext` nie.
 
@@ -158,7 +160,7 @@ if (errors.length) show(errors.map((e) => t('err.' + e.code, e.params)));
 | Heute (`backing.js`) | Neu |
 | --- | --- |
 | `buildEvents(track, loops)` mit `{time, bar, chord, durationSec}` | `chordTimeline(track)`; mehrere Durchläufe selbst versetzen |
-| `playBacking(ctx, track, { loops, onBar })` mit `{startPerf, stop()}` | `play(ctx, track, { loops, onBar })` mit `{startPerf, stop(), setLayer, setTempo}`; `length` auf die Taktzahl der Übung setzen (siehe unten) |
+| `playBacking(ctx, track, { loops, onBar })` mit `{startPerf, stop()}` | `play(ctx, track, { loops, onBar })` mit `{startPerf, stop(), setLayer, setLevel, setMaster, setTempo}`; `length` auf die Taktzahl der Übung setzen (siehe unten) |
 
 Achtung bei `loops`: Das alte `loops` zählte Durchläufe über `bars` (eine 4-Takt-Übung mit `loops: 3` dauerte 12 Takte). Das neue `loops` wiederholt jeweils den ganzen Track von `length` Takten, Standard 24. Ohne `length` dauert dieselbe Übung mit `loops: 3` also 72 Takte. Damit das alte Timing bleibt, gibt Interactive Scales `length: bars.length` mit (für die 4-Takt-Übung `length: 4`); dasselbe gilt für `chordTimeline`.
 | `?bpm=`-Überschreibung | überschriebenes `bpm` in den Track schreiben (Zeiten aus `chordTimeline` passen dann), oder nach dem Start `setTempo(bpm)` |

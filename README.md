@@ -19,6 +19,8 @@ Entwicklerseite zum Anhören der drei Stile: <http://localhost:4173/ui/render-ha
 
 - **Startseite:** der Startsatz (Tonart und Leiter, Stil, Tempo), Variantennummer, **Los** und **Feintuning**. Läuft die Wiedergabe, zeigt Los „Stopp“ und „Zur Spielseite“ führt zurück.
 - **Spielseite:** in der Mitte untereinander **Griffbrett**, **Verlauf** (mit den Stummschaltern je Schicht) und **Akkordrad**. Links die Seitenleiste **Klang** (Stil, Schlagworte, Tempo, Länge), rechts **Akkorde** (Tonart, Leiter, Akkordfolge bearbeiten, Ansichten).
+- **Mischpult:** der Knopf rechts in der Kopfzeile der Spielseite öffnet einen Regler je Schicht (Schlagzeug, Bass, Akkorde, Pad) und einen für die Gesamtlautstärke, 0 bis 100 % (100 % = der normale Pegel, nur leiser, nie lauter), plus je Schicht eine Taste an/stumm, die denselben Zustand zeigt wie der Schichtknopf über dem Verlauf. Alles wirkt live ohne Neustart; die Reglerstellungen merkt der Browser (`localStorage`, Schlüssel `backingtrack.mix`), die Stummschaltungen nicht.
+- **Variante wechseln:** in der Kopfzeile der Spielseite schalten ‹ und › die Variantennummer weiter (nach 9999 kommt 1, vor 1 kommt 9999), der Würfel wählt eine zufällige. Der Klang ändert sich sofort, Schlagworte, Tempo, Länge, Mischpult und Stummschaltungen bleiben. Die Akkordfolge wird aus Tonart und Nummer neu abgeleitet (eine eigene Folge entfällt, wie auf der Startseite). Bei laufender Wiedergabe geht es im laufenden Takt weiter statt bei Takt 1, auch bei der Variantenwahl auf der Startseite.
 - **Klang-Schlagworte:** vier eigene Gruppen (Schlagzeugklang, Bassklang, Akkordklang, Padklang) sowie Stimmungen wie dunkel, hell, warm formen den Klang (die Noten bleiben gleich, nur „träumerisch“ verschiebt wie bisher auch die Padlage); die drei Stile nutzen sie, und eine Auswahl startet die laufende Wiedergabe neu.
 - Beide Seitenleisten lassen sich ein- und ausklappen; der Zustand wird im Browser gemerkt (`localStorage`). Auf schmalen Fenstern liegt eine offene Leiste als Schublade über der Mitte (Escape schließt sie).
 - **Griffbrett:** zeigt alle Töne der Leiter, hebt den jetzigen Akkord hervor und markiert den folgenden; der Schalter **Namen/Stufen** wechselt die Beschriftung (Stufen zählen vom Grundton der Tonart).
@@ -32,7 +34,7 @@ npm run test:e2e  # Browser-Tests (Playwright, Chromium; einmalig: npx playwrigh
 npx playwright test tests/e2e/play.spec.js --no-deps  # eine Datei allein
 ```
 
-Die Echtzeit-Tests (Projekt `realtime`) laufen erst nach den rechenintensiven Offline-Renders (`offline`: `levels.spec.js`, `sound.spec.js`), damit ihre Timer nicht unter Last verrutschen. Ohne `--no-deps` läuft vor einer einzelnen Echtzeit-Datei das Projekt `offline` mit.
+Die Echtzeit-Tests (Projekt `realtime`) laufen erst nach den rechenintensiven Offline-Renders (`offline`: `levels.spec.js`, `sound.spec.js`, `mix.spec.js`), damit ihre Timer nicht unter Last verrutschen. Ohne `--no-deps` läuft vor einer einzelnen Echtzeit-Datei das Projekt `offline` mit.
 
 ## Dokumentation
 
