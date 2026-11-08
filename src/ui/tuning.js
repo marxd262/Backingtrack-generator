@@ -8,11 +8,12 @@ import { nextDistinctChord } from '../core/fretboard.js';
 import { createFretboard, chordSentence } from './fretboard.js';
 import { buildTags, renderTags, toggleTag, sameTags } from './tags-ui.js';
 import { isSoundOnlyChange } from '../core/tags.js';
+import { resolveTrackTimbre } from '../core/timbre.js';
 import { initProgressionEditor, addChord } from './progression-editor.js';
 import { drawLanes } from './lanes.js';
 import { createWheel } from './wheel.js';
 
-export function initTuning({ render, restartIfPlaying, toggleLayer }) {
+export function initTuning({ render, restartIfPlaying, toggleLayer, player }) {
   const changed = () => { restartIfPlaying(); render(); };
 
   for (const { id } of STYLE_PRESETS) {
@@ -35,7 +36,9 @@ export function initTuning({ render, restartIfPlaying, toggleLayer }) {
   buildTags($('tags'), (category, tag) => {
     const before = state.track.tags;
     state.track.tags = toggleTag(before, category, tag);
-    restartIfPlaying({ inPlace: isSoundOnlyChange(before, state.track.tags) });
+    // reiner Klang: live umstellen, die Musik läuft ungestört weiter; sonst ändert sich der Ereignisstrom
+    if (isSoundOnlyChange(before, state.track.tags)) player()?.setTimbre(resolveTrackTimbre(state.track));
+    else restartIfPlaying();
     render();
   });
 

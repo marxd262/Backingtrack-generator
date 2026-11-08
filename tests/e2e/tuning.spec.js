@@ -497,10 +497,17 @@ test('Schnellauswahl: jeder Stil wählt genau seine Schlagworte in allen zehn Gr
   }
 });
 
-// Zählt erzeugte AudioContexts (window.__audioContexts) ab dem nächsten Laden
+// Zählt erzeugte AudioContexts (window.__audioContexts) und Instrumentensätze (window.__instrumentSets, je einer hat genau einen
+// Faltungshall) ab dem nächsten Laden: ein Neustart der Wiedergabe baut einen neuen Satz, eine Live-Änderung nicht
 async function countContexts(page) {
   await page.addInitScript(() => {
     window.__audioContexts = 0;
+    window.__instrumentSets = 0;
+    const convolver = BaseAudioContext.prototype.createConvolver;
+    BaseAudioContext.prototype.createConvolver = function (...args) {
+      window.__instrumentSets++;
+      return convolver.apply(this, args);
+    };
     const Original = window.AudioContext;
     window.AudioContext = class extends Original {
       constructor(...args) {
@@ -522,30 +529,36 @@ const recordPositions = (page) => page.evaluate(() => {
 const positionsSince = async (page) => page.evaluate(() => window.__positions.splice(0));
 const shownBar = async (page) => Number((await position(page).textContent()).match(/^Takt (\d+) von \d+$/)?.[1] ?? NaN);
 
-// Ein reines Klang-Schlagwort startet im laufenden Takt neu: die Taktzeile springt nie auf Takt 1 zurück und läuft weiter
-async function expectInPlace(page, before, label) {
+// Ein reines Klang-Schlagwort wirkt live ohne Neustart: die Taktzeile wird nie leer (ein Neustart leerte sie kurz),
+// springt nie zurück und läuft weiter
+async function expectContinuous(page, before, label) {
   await expect.poll(() => shownBar(page), { message: label, timeout: BAR_TIMEOUT }).toBeGreaterThan(before);
-  const shown = (await positionsSince(page)).filter(Boolean).map((text) => Number(text.match(/^Takt (\d+) von/)[1]));
+  const texts = await positionsSince(page);
+  expect(texts.every(Boolean), `${label}: Taktzeile war leer: ${JSON.stringify(texts)}`).toBe(true);
+  const shown = texts.map((text) => Number(text.match(/^Takt (\d+) von/)[1]));
   expect(shown.length, label).toBeGreaterThan(0);
   for (const bar of shown) expect(bar, `${label}: ${shown}`).toBeGreaterThanOrEqual(before);
 }
 
-test('Klang-Schlagwort während der Wiedergabe: Neustart im laufenden Takt, genau ein Player, kein neuer AudioContext', async ({ page }) => {
+test('Klang-Schlagwort während der Wiedergabe: läuft ohne Neustart weiter, genau ein Player, kein neuer AudioContext', async ({ page }) => {
   await countContexts(page);
   await openPlayPage(page);
   await playFast(page);
   await expect(position(page)).toHaveText('Takt 2 von 96', { timeout: BAR_TIMEOUT });
   const contexts = () => page.evaluate(() => window.__audioContexts);
+  const sets = () => page.evaluate(() => window.__instrumentSets);
   expect(await contexts()).toBe(1);
+  expect(await sets()).toBe(1);
   await recordPositions(page);
-  // nacheinander aus jeder der vier Klang-Kategorien; jeder Klick startet im laufenden Takt neu, die Taktzeile läuft danach weiter
+  // nacheinander aus jeder der vier Klang-Kategorien; jeder Klick wirkt live, die Taktzeile läuft ohne Unterbrechung weiter
   for (const [category, tag] of [['drumSound', 'boomy'], ['bassSound', 'sub'], ['chordSound', 'tremolo'], ['padSound', 'moving']]) {
     const before = await shownBar(page);
     await positionsSince(page);
     await page.locator(`#tags [data-category="${category}"][data-tag="${tag}"]`).click();
     await expect(page.locator(`#tags [data-tag="${tag}"]`)).toHaveAttribute('aria-pressed', 'true');
-    await expectInPlace(page, before, tag);
+    await expectContinuous(page, before, tag);
     expect(await contexts(), tag).toBe(1);
+    expect(await sets(), `${tag}: kein neuer Instrumentensatz`).toBe(1);
     await expect(playGo(page)).toHaveText('Stopp');
   }
   await playGo(page).click();
@@ -553,7 +566,7 @@ test('Klang-Schlagwort während der Wiedergabe: Neustart im laufenden Takt, gena
   expect(await contexts()).toBe(1);
 });
 
-test('Funk-Vorlage im zweiten Teil: Klang-Schlagwort spielt im Takt weiter, Muster-Schlagwort und Stil starten bei Takt 1', async ({ page }) => {
+test('Funk-Vorlage im zweiten Teil: Klang-Schlagwort wirkt live, Muster-Schlagwort und Stil starten bei Takt 1', async ({ page }) => {
   test.setTimeout(60_000);
   await countContexts(page);
   await openPlayPage(page);
@@ -563,13 +576,15 @@ test('Funk-Vorlage im zweiten Teil: Klang-Schlagwort spielt im Takt weiter, Must
   await expect.poll(() => shownBar(page), { timeout: 20_000 }).toBeGreaterThanOrEqual(9);
   await recordPositions(page);
   const contexts = () => page.evaluate(() => window.__audioContexts);
+  const sets = () => page.evaluate(() => window.__instrumentSets);
   for (const [category, tag] of [['padSound', 'glassy'], ['chordSound', 'tremolo']]) {
     const before = await shownBar(page);
     await positionsSince(page);
     await page.locator(`#tags [data-category="${category}"][data-tag="${tag}"]`).click();
     await expect(page.locator(`#tags [data-category="${category}"][data-tag="${tag}"]`)).toHaveAttribute('aria-pressed', 'true');
-    await expectInPlace(page, before, tag);
+    await expectContinuous(page, before, tag);
     expect(await contexts(), tag).toBe(1);
+    expect(await sets(), `${tag}: kein neuer Instrumentensatz`).toBe(1);
   }
   // Muster-Schlagwort: der Ereignisstrom ändert sich, Neustart bei Takt 1 wie bisher
   await page.locator('#tags [data-category="drums"][data-tag="driving"]').click();

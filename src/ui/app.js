@@ -184,7 +184,7 @@ for (const button of document.querySelectorAll('[popovertarget]')) {
   });
 }
 
-const renderTuning = initTuning({ render: () => render(), restartIfPlaying, toggleLayer });
+const renderTuning = initTuning({ render: () => render(), restartIfPlaying, toggleLayer, player: () => player });
 const renderMixer = initMixer({ render: () => render(), player: () => player, toggleLayer });
 const renderTimbre = initTimbrePanel({ render: () => render(), player: () => player }); // vor initGroups: baut die Klang-Gruppen
 

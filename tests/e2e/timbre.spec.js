@@ -189,3 +189,15 @@ test('schmale Schublade mit allen Klang-Gruppen offen: scrollbar, letzter Regler
   await page.keyboard.press('Escape');
   await expect(page.locator('#side-left')).toBeHidden();
 });
+
+test('Klang-Schlagwort während der Wiedergabe erreicht die Audioknoten (Helligkeit), ohne neuen Instrumentensatz', async ({ page }) => {
+  await playFast(page);
+  const chip = page.locator('#tags [data-category="mood"][data-tag="bright"]');
+  await chip.click();
+  await expect(chip).toHaveAttribute('aria-pressed', 'true');
+  const expected = masterParams(resolveTimbre(await currentTags(page)).master).shelfDb;
+  expect(expected).not.toBe(0);
+  await expect.poll(() => targets(page)).toContain(expected);
+  expect(await contexts(page)).toBe(1);
+  await playGo(page).click();
+});
