@@ -171,3 +171,74 @@ test('Bassklang: stummer Bass bleibt mit fuzz exakt still (abgeschaltet und übe
   const drums = await compare(page, track(), withTags(fuzz), 6, { layer: 'drums' });
   expect(drums.diff).toBeLessThan(1e-6);
 });
+
+// Schlagzeugklang: gleicher Basistrack (16 s), genau ein Schlagwort aus drumSound gegen den Standard, nur Schlagzeug-Schicht.
+const DRUM_SECONDS = 16;
+// Schlagzeug-rms vor dem Begrenzer im Standardklang (levels.spec.js, BASELINE.pre.drums, gleicher Track und gleiche Länge)
+const DEFAULT_DRUMS_PRE_RMS = 0.05009726748802992;
+// Gemessen 2026-11-08 (Schlagzeug allein, mit Begrenzer; diff / Schwerpunkt Standard 5641 Hz -> mit Schlagwort / rms 0.0933 -> mit Schlagwort):
+//   punchy 1.232 / 6075 Hz / 0.0783, boomy 1.337 / 5550 Hz / 0.1083, snappy 0.269 / 6385 Hz / 0.0958,
+//   crisp 0.309 / 9346 Hz / 0.0889, roomy 0.348 / 5516 Hz / 0.1024 (Hall: rms steigt, Schwerpunkt fast gleich)
+// Der Kick trägt fast die ganze Energie (rms 0.093 von 0.0935 gesamt, Snare 0.019, Hi-Hats 0.007 und 0.007): Snare und Hi-Hat
+// müssen deshalb stark eingreifen, damit diff 0.25 erreicht wird (Rauschen gleicher Quelle bleibt in den Filtern korreliert).
+const DRUM_TAGS = ['punchy', 'boomy', 'snappy', 'crisp', 'roomy'];
+// Schwerpunkt dominieren die breitbandigen Hi-Hats (betragsgewichtet); Richtung des Schwerpunkts: -1 tiefer, +1 höher, 0 egal (roomy: der Hall verschiebt ihn nicht verlässlich, dort zählt rms)
+const DRUM_DIRECTION = { punchy: 0, boomy: -1, snappy: 1, crisp: 1, roomy: 0 };
+const drumTag = (name) => withTags({ drumSound: [name] });
+
+for (const name of DRUM_TAGS) {
+  test(`Schlagzeugklang ${name}: Schlagzeug-Schicht deutlich anders, Schwerpunkt in Richtung`, async ({ page }) => {
+    test.setTimeout(120_000);
+    const r = await compare(page, track(), drumTag(name), DRUM_SECONDS, { layer: 'drums' });
+    const label = `${name}: ${JSON.stringify(r)}`;
+    expect(r.diff, label).toBeGreaterThanOrEqual(0.25);
+    if (DRUM_DIRECTION[name] < 0) expect(r.centroidB, label).toBeLessThan(r.centroidA);
+    if (DRUM_DIRECTION[name] > 0) expect(r.centroidB, label).toBeGreaterThan(r.centroidA);
+    if (name === 'roomy') expect(r.rmsB, label).toBeGreaterThan(r.rmsA); // der Hallanteil bringt Energie
+  });
+
+  // Gemessen 2026-11-08, 16 s (Schlagzeug-rms vor dem Begrenzer / Standard, Summe Spitze vor / nach dem Begrenzer):
+  //   punchy 0.884, 0.719 / 0.706; boomy 1.119, 0.755 / 0.713; snappy 1.041, 0.869 / 0.735;
+  //   crisp 1.068, 0.721 / 0.722; roomy 1.104, 0.699 / 0.697. Ohne Ausgleich lag die Spitze von snappy bei 0.99.
+  test(`Schlagzeugklang ${name}: Pegel sicher (Schlagzeug hörbar und im Rahmen, Summe ohne Übersteuern)`, async ({ page }) => {
+    test.setTimeout(120_000);
+    const input = drumTag(name);
+    const pre = await page.evaluate(([i, s]) => window.__render(i, s, { limiter: false }), [input, DRUM_SECONDS]);
+    const post = await page.evaluate(([i, s]) => window.__render(i, s), [input, DRUM_SECONDS]);
+    const ratio = pre.perLayer.drums.rms / DEFAULT_DRUMS_PRE_RMS;
+    const label = `${name}: ratio ${ratio}, pre peak ${pre.peak}, post peak ${post.peak}, drums rms ${post.perLayer.drums.rms}`;
+    expect(post.perLayer.drums.rms, label).toBeGreaterThan(0.005);
+    expect(ratio, label).toBeGreaterThanOrEqual(0.25);
+    expect(ratio, label).toBeLessThanOrEqual(3);
+    expect(post.peak, label).toBeLessThan(0.9);
+    expect(pre.peak, label).toBeLessThan(0.95);
+  });
+}
+
+// gemessen 2026-11-08: Spitze nach dem Begrenzer 0.792 (davor 1.193), Schlagzeug-rms 0.1094 (1.329 x Standard)
+// Mood-Schlagworte dark/bright (hatBright -/+0.15): diff 0.030 / 0.071, Spitze 0.688 / 0.703, ohne Wirkung auf die Pegelgrenzen
+test('Schlagzeugklang: alle fünf Schlagworte zugleich bleiben endlich und sicher', async ({ page }) => {
+  test.setTimeout(120_000);
+  const input = withTags({ drumSound: DRUM_TAGS });
+  const r = await page.evaluate(([i, s]) => window.__render(i, s), [input, DRUM_SECONDS]);
+  const values = [r.peak, r.rms, r.centroid, ...LAYERS.flatMap((l) => Object.values(r.perLayer[l]))];
+  expect(values.every(Number.isFinite), JSON.stringify(r)).toBe(true);
+  expect(r.peak).toBeLessThan(0.9);
+  expect(r.perLayer.drums.rms).toBeGreaterThan(0.005);
+});
+
+test('Schlagzeugklang: stilles Schlagzeug bleibt mit roomy exakt still (abgeschaltet und über setMuted)', async ({ page }) => {
+  test.setTimeout(120_000);
+  const roomy = { drumSound: ['roomy'] };
+  const off = { drums: false, bass: true, chords: true, pad: true };
+  const without = await page.evaluate(([i, s]) => window.__render(i, s), [track({ layers: off }), 6]);
+  const withRoom = await page.evaluate(([i, s]) => window.__render(i, s), [track({ layers: off, tags: { development: ['fullFromStart'], ...roomy } }), 6]);
+  expect(withRoom.perLayer.drums).toEqual({ peak: 0, rms: 0, centroid: 0 });
+  expect(Math.abs(withRoom.rms - without.rms), 'Summe').toBeLessThanOrEqual(1e-6 * without.rms);
+  expect(Math.abs(withRoom.peak - without.peak), 'Spitze').toBeLessThanOrEqual(1e-6 * without.peak);
+  // eine andere Schicht allein: das Schlagzeug spielt mit roomy, ist aber über setMuted stumm geschaltet; nur Float-Rundung erlaubt
+  for (const layer of ['bass', 'chords', 'pad']) {
+    const solo = await compare(page, track(), withTags(roomy), 6, { layer });
+    expect(solo.diff, layer).toBeLessThan(1e-6);
+  }
+});

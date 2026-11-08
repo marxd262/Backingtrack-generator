@@ -2,7 +2,7 @@
 // Rauschen aus dem Seed statt Math.random, damit Renders reproduzierbar sind. AudioContext nur von außen.
 import { createRng } from '../core/rng.js';
 import { DEFAULT_TIMBRE, completeTimbre } from '../core/timbre.js';
-import { bassParams } from './voice-params.js';
+import { bassParams, drumParams } from './voice-params.js';
 
 // Schichtpegel und Summe, aus Messungen mit tests/e2e/levels.spec.js angeglichen (Messwerte dort im Kommentar)
 const TRIM = { drums: 0.65, bass: 0.24, chords: 1, pad: 0.8 };
@@ -41,27 +41,40 @@ function osc(ctx, type, freq, detune, dest, t, end) {
   return o;
 }
 
-// Die Stimmen bekommen ihre Gruppe des Klangmodells (timbre); außer dem Bass noch unbenutzt, der Klang ist der bisherige.
-function drumVoices(ctx, noise, timbre) {
+// Schlagzeugstimmen; p aus drumParams (beim neutralen Klang die bisherigen Konstanten). Toms folgen dem Klangmodell nicht.
+function drumVoices(ctx, noise, p) {
   const kick = (out, t, v) => {
     const o = ctx.createOscillator(), a = ctx.createGain();
-    o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(46, t + 0.12);
-    a.gain.setValueAtTime(v * 0.9, t); a.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
-    o.connect(a).connect(out); o.start(t); o.stop(t + 0.45);
+    o.frequency.setValueAtTime(p.kickStart, t); o.frequency.exponentialRampToValueAtTime(p.kickEnd, t + p.kickDrop);
+    a.gain.setValueAtTime(v * p.kickPeak, t); a.gain.exponentialRampToValueAtTime(0.001, t + p.kickDecay);
+    o.connect(a).connect(out); o.start(t); o.stop(t + p.kickDecay + 0.05);
+    if (p.kickClick > 0) { // kurzer Anschlagklick aus Rauschen, nur wenn der Kick es verlangt
+      const n = ctx.createBufferSource(); n.buffer = noise;
+      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 3500;
+      const c = ctx.createGain(); adsr(c, t, 0.001, v * p.kickClick, 0, 0.012);
+      n.connect(lp).connect(c).connect(out); n.start(t); n.stop(t + 0.05);
+    }
   };
   const snare = (out, t, v) => {
     const n = ctx.createBufferSource(); n.buffer = noise;
-    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1900; bp.Q.value = 0.8;
-    const a = ctx.createGain(); adsr(a, t, 0.001, v * 0.55, 0.02, 0.16);
-    n.connect(bp).connect(a).connect(out); n.start(t); n.stop(t + 0.25);
-    const b = ctx.createGain(); adsr(b, t, 0.001, v * 0.3, 0.01, 0.1);
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = p.snareFreq; bp.Q.value = p.snareQ;
+    const a = ctx.createGain(); adsr(a, t, 0.001, v * p.snareNoise, 0.02, p.snareDecay);
+    n.connect(bp).connect(a).connect(out); n.start(t); n.stop(t + p.snareDecay + 0.09);
+    if (p.snareClick > 0) { // heller Anschlagklick, nur wenn die Snare es verlangt
+      const c = ctx.createBufferSource(); c.buffer = noise;
+      const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 5000;
+      const g = ctx.createGain(); adsr(g, t, 0.001, v * p.snareClick, 0, 0.025);
+      c.connect(hp).connect(g).connect(out); c.start(t); c.stop(t + 0.05);
+    }
+    const b = ctx.createGain(); adsr(b, t, 0.001, v * p.snareTone, 0.01, 0.1);
     osc(ctx, 'triangle', 185, 0, b, t, t + 0.15); b.connect(out);
   };
   const hat = (open) => (out, t, v) => {
+    const hold = open ? 0.06 : 0.01, decay = open ? p.hatOpenDecay : p.hatClosedDecay;
     const n = ctx.createBufferSource(); n.buffer = noise;
-    const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 7500;
-    const a = ctx.createGain(); adsr(a, t, 0.001, v * 0.3, open ? 0.06 : 0.01, open ? 0.2 : 0.04);
-    n.connect(hp).connect(a).connect(out); n.start(t); n.stop(t + 0.35);
+    const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = p.hatFreq;
+    const a = ctx.createGain(); adsr(a, t, 0.001, v * p.hatPeak, hold, decay);
+    n.connect(hp).connect(a).connect(out); n.start(t); n.stop(t + Math.max(0.35, hold + decay + 0.05));
   };
   const tom = (f) => (out, t, v) => {
     const o = ctx.createOscillator(), a = ctx.createGain();
@@ -174,7 +187,8 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
   delay.connect(tone).connect(fb).connect(delay);
   tone.connect(echoWet).connect(master);
 
-  const drums = drumVoices(ctx, noise, sound.drums);
+  const drum = drumParams(sound.drums);
+  const drums = drumVoices(ctx, noise, drum);
   const bass = bassParams(sound.bass);
   const curve = bass.drive > 1 ? fuzzCurve(bass.drive) : null; // einmal je Instrumentensatz
   const play = {
@@ -189,6 +203,8 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
     const mute = ctx.createGain();
     const trim = ctx.createGain(); trim.gain.value = TRIM[name];
     mute.connect(trim).connect(master);
+    // room: Teil der Schlagzeugsumme in den Hall, hinter mute und trim abgegriffen (Stummschalten schaltet den Sendeweg mit stumm); ohne room kein Knoten
+    if (name === 'drums' && drum.roomSend > 0) trim.connect(gain(ctx, drum.roomSend, reverb));
     if (name === 'chords' || name === 'pad') trim.connect(delay);
     layers[name] = {
       trigger(event, when) {

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULT_TIMBRE } from '../../src/core/timbre.js';
-import { bassParams } from '../../src/audio/voice-params.js';
+import { bassParams, drumParams } from '../../src/audio/voice-params.js';
 
 const STEPS = [0, 0.25, 0.5, 0.75, 1];
 const BASS_INPUTS = Object.keys(DEFAULT_TIMBRE.bass);
@@ -93,6 +93,112 @@ test('bassParams: Extreme (alle 0, alle 1, gemischt) endlich und im Bereich', ()
     const p = bassParams(t);
     for (const [field, [lo, hi]] of Object.entries(RANGES)) {
       assert.ok(Number.isFinite(p[field]) && p[field] >= lo && p[field] <= hi, `${JSON.stringify(t)} -> ${field}: ${p[field]}`);
+    }
+  }
+});
+
+// Schlagzeug: Timbre['drums'] -> drumParams
+const DRUM_INPUTS = Object.keys(DEFAULT_TIMBRE.drums);
+const withDrum = (key, value) => ({ ...DEFAULT_TIMBRE.drums, [key]: value });
+
+// Rundungsfehler der Potenzen an den Rändern (z. B. 109.99999999999999) zählen nicht
+const within = (v, [lo, hi]) => Number.isFinite(v) && v >= lo * (1 - 1e-9) - 1e-12 && v <= hi * (1 + 1e-9);
+const DRUM_RANGES = {
+  kickStart: [110, 260],
+  kickEnd: [36, 53],
+  kickDrop: [0.07, 0.2],
+  kickDecay: [0.15, 0.9],
+  kickPeak: [0.67, 1],
+  kickClick: [0, 0.5],
+  snareFreq: [1020, 4800], // Tonlage 1200..3200 Hz, knackig bis x1.5
+  snareQ: [0.6, 2],
+  snareNoise: [0.19, 4.2], // nur am Rand der Kombination (snareSnap und snareTone je 1): x7.5 gegenüber dem Standard
+  snareClick: [0, 1.6],
+  snareTone: [0.12, 0.6],
+  snareDecay: [0.07, 0.3],
+  hatFreq: [4500, 11000],
+  hatPeak: [0.14, 2.1],
+  hatClosedDecay: [0.012, 0.1],
+  hatOpenDecay: [0.06, 0.5],
+  roomSend: [0, 7],
+};
+
+test('drumParams: neutrales Schlagzeug ergibt exakt die bisherigen Konstanten aus drumVoices', () => {
+  assert.deepEqual(drumParams(DEFAULT_TIMBRE.drums), {
+    kickStart: 150,
+    kickEnd: 46,
+    kickDrop: 0.12, // Tonhöhenabfall in s
+    kickDecay: 0.4, // Pegelabfall bis 0.001 in s
+    kickPeak: 0.9, // Spitze vel * 0.9
+    kickClick: 0, // 0 = ohne Klick-Knoten
+    snareFreq: 1900, // Bandpass
+    snareQ: 0.8,
+    snareNoise: 0.55, // Rauschspitze vel * 0.55
+    snareClick: 0, // 0 = ohne Klick-Knoten
+    snareTone: 0.3, // Dreieck 185 Hz, vel * 0.3
+    snareDecay: 0.16, // Ausklang des Rauschens in s
+    hatFreq: 7500, // Hochpass
+    hatPeak: 0.3,
+    hatClosedDecay: 0.04,
+    hatOpenDecay: 0.2,
+    roomSend: 0, // 0 = ohne Sendeweg
+  });
+});
+
+test('drumParams: jedes Mal ein neues Objekt', () => {
+  const a = drumParams(DEFAULT_TIMBRE.drums);
+  assert.notEqual(a, drumParams(DEFAULT_TIMBRE.drums));
+  a.kickStart = 99;
+  assert.equal(drumParams(DEFAULT_TIMBRE.drums).kickStart, 150);
+});
+
+test('drumParams: jedes Feld monoton in jedem Eingang (andere neutral), endlich, im Bereich', () => {
+  for (const key of DRUM_INPUTS) {
+    const rows = STEPS.map((v) => drumParams(withDrum(key, v)));
+    for (const field of Object.keys(DRUM_RANGES)) {
+      const values = rows.map((r) => r[field]);
+      const [lo, hi] = DRUM_RANGES[field];
+      for (const v of values) assert.ok(within(v, [lo, hi]), `${key} -> ${field}: ${v} nicht in [${lo}, ${hi}]`);
+      const steps = values.slice(1).map((v, i) => v - values[i]);
+      assert.ok(steps.every((d) => d >= 0) || steps.every((d) => d <= 0), `${key} -> ${field} nicht monoton: ${values}`);
+    }
+  }
+});
+
+test('drumParams: beabsichtigte Richtungen (streng über die Tabelle, ab der Mitte für die Klicks, ab 0 für roomSend)', () => {
+  // [Eingang, Feld, +1 steigend / -1 fallend]
+  const effects = [
+    ['kickPunch', 'kickStart', 1],
+    ['kickLength', 'kickDecay', 1], ['kickLength', 'kickEnd', -1], ['kickLength', 'kickDrop', 1], ['kickLength', 'kickPeak', -1],
+    ['snareTone', 'snareFreq', 1], ['snareTone', 'snareNoise', 1],
+    ['snareSnap', 'snareFreq', 1], ['snareSnap', 'snareNoise', 1], ['snareSnap', 'snareTone', -1], ['snareSnap', 'snareDecay', -1], ['snareSnap', 'snareQ', 1],
+    ['hatBright', 'hatFreq', 1], ['hatBright', 'hatPeak', 1],
+    ['hatLength', 'hatClosedDecay', 1], ['hatLength', 'hatOpenDecay', 1],
+  ];
+  for (const [key, field, sign] of effects) {
+    const values = STEPS.map((v) => drumParams(withDrum(key, v))[field]);
+    for (let i = 1; i < values.length; i++) assert.ok(sign * (values[i] - values[i - 1]) > 0, `${key} -> ${field}: ${values}`);
+  }
+  // Klick und Raum wirken erst oberhalb ihres Standards
+  assert.deepEqual([0, 0.25, 0.5].map((v) => drumParams(withDrum('kickPunch', v)).kickClick), [0, 0, 0]);
+  assert.ok(drumParams(withDrum('kickPunch', 0.75)).kickClick > 0);
+  assert.ok(drumParams(withDrum('kickPunch', 1)).kickClick > drumParams(withDrum('kickPunch', 0.75)).kickClick);
+  assert.deepEqual([0, 0.25, 0.5].map((v) => drumParams(withDrum('snareSnap', v)).snareClick), [0, 0, 0]);
+  assert.ok(drumParams(withDrum('snareSnap', 1)).snareClick > drumParams(withDrum('snareSnap', 0.75)).snareClick);
+  assert.equal(drumParams(withDrum('room', 0)).roomSend, 0);
+  assert.ok(drumParams(withDrum('room', 0.25)).roomSend > 0);
+  assert.ok(drumParams(withDrum('room', 1)).roomSend > drumParams(withDrum('room', 0.25)).roomSend);
+});
+
+test('drumParams: Extreme (alle 0, alle 1, gemischt) endlich und im Bereich', () => {
+  const zero = Object.fromEntries(DRUM_INPUTS.map((k) => [k, 0]));
+  const one = Object.fromEntries(DRUM_INPUTS.map((k) => [k, 1]));
+  const mixed = { kickPunch: 1, kickLength: 0, snareTone: 1, snareSnap: 0, hatBright: 1, hatLength: 0, room: 1 };
+  const flipped = { kickPunch: 0, kickLength: 1, snareTone: 0, snareSnap: 1, hatBright: 0, hatLength: 1, room: 1 };
+  for (const t of [zero, one, mixed, flipped]) {
+    const p = drumParams(t);
+    for (const [field, [lo, hi]] of Object.entries(DRUM_RANGES)) {
+      assert.ok(within(p[field], [lo, hi]), `${JSON.stringify(t)} -> ${field}: ${p[field]}`);
     }
   }
 });
