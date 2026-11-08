@@ -3,6 +3,7 @@ import { STYLE_PRESETS } from '../index.js';
 import { detectLanguage } from '../i18n/index.js';
 import { progressionFor } from '../core/progressions.js';
 import { loadLayout } from './layout-state.js';
+import { loadMix } from './mix-state.js';
 
 export const ROOTS = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
 // Skala ist nur Oberflächen-Zustand; der Generator kennt nur den Modus
@@ -63,6 +64,7 @@ export const state = {
   lang: readLang(),
   page: 'start', // 'start' | 'play'
   layout: loadLayout(layoutStorage), // Leisten, Ansichten, Beschriftung; Änderungen über saveLayout
+  mix: loadMix(layoutStorage), // Mischpult-Regler { drums, bass, chords, pad, master }, je 0..1; Änderungen über saveMix
   current: null, // { bar, chord } aus onBar
   errors: [], // [{ code, params }], übersetzt erst in render()
   notice: null, // Schlüssel einer Hinweis-Meldung der Akkordfolge, z. B. volle Folge

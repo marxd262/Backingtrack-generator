@@ -12,7 +12,7 @@ import { initProgressionEditor, addChord } from './progression-editor.js';
 import { drawLanes } from './lanes.js';
 import { createWheel } from './wheel.js';
 
-export function initTuning({ render, restartIfPlaying, player }) {
+export function initTuning({ render, restartIfPlaying, toggleLayer }) {
   const changed = () => { restartIfPlaying(); render(); };
 
   for (const { id } of STYLE_PRESETS) {
@@ -28,11 +28,7 @@ export function initTuning({ render, restartIfPlaying, player }) {
   for (const name of LAYERS) {
     const b = Object.assign(document.createElement('button'), { type: 'button', className: 'chip' });
     Object.assign(b.dataset, { layer: name, i18n: `layer.${name}` });
-    b.addEventListener('click', () => {
-      state.track.layers = { ...state.track.layers, [name]: !state.track.layers[name] };
-      player()?.setLayer(name, state.track.layers[name]); // live, ohne Neustart
-      render();
-    });
+    b.addEventListener('click', () => { toggleLayer(name); render(); });
     $('lane-buttons').append(b);
   }
 

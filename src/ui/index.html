@@ -75,12 +75,20 @@
       <p class="play-next" id="play-next"></p>
       <p class="position" id="play-position"></p>
       <button type="button" class="go" id="play-go"></button>
-      <p class="play-variant" id="play-variant"></p>
+      <div class="variant-switch" role="group" data-i18n-label="ui.variantSwitch">
+        <button type="button" class="chip" id="variant-prev" data-i18n-label="ui.variantPrev">&lsaquo;</button>
+        <p class="play-variant" id="play-variant"></p>
+        <button type="button" class="chip" id="variant-next" data-i18n-label="ui.variantNext">&rsaquo;</button>
+        <button type="button" class="chip" id="variant-random" data-i18n-label="ui.variantRandom">&#x2684;</button>
+      </div>
       <div class="play-toggles">
+        <button type="button" class="chip" id="mixer-btn" popovertarget="mixer-pop" aria-haspopup="dialog" aria-expanded="false" aria-controls="mixer-pop" data-i18n="ui.mixer"></button>
         <button type="button" class="chip side-toggle" id="toggle-left" aria-expanded="false" aria-controls="side-left" data-i18n="ui.sidebarSound"></button>
         <button type="button" class="chip side-toggle" id="toggle-right" aria-expanded="false" aria-controls="side-right" data-i18n="ui.sidebarChords"></button>
       </div>
       <p class="message" id="play-message" aria-live="polite"></p>
+      <!-- Mischpult: Regler und Stummtasten baut mixer.js; die Tasten teilen den Zustand mit den Schichtknöpfen über dem Verlauf -->
+      <div class="pop" id="mixer-pop" popover role="dialog" aria-labelledby="mixer-btn"><div class="mixer" id="mixer"></div></div>
     </div>
 
     <div class="stage">

@@ -261,6 +261,10 @@ main {
 .play-next:empty { display: none; }
 .play-next, .play-variant { margin: 0; color: var(--ink-soft); }
 .play-next { min-width: 20ch; color: var(--accent2); }
+/* Variante: Nummer zwischen Zurück/Vor, dann Würfel; feste Breite, damit die Knöpfe beim Weiterschalten nicht wandern */
+.variant-switch { display: flex; align-items: center; gap: 6px; }
+.variant-switch .chip { font-size: 1.4rem; line-height: 1; }
+.variant-switch .play-variant { min-width: 13ch; text-align: center; font-variant-numeric: tabular-nums; }
 .play-head .position { min-width: 9em; }
 .play-head .go { min-width: 8rem; font-size: 1.25rem; }
 .play-head .message { flex-basis: 100%; margin: 0; }
@@ -282,6 +286,15 @@ main {
 #toggle-right::after { content: " ◂" / ""; }
 #toggle-right[aria-expanded="true"]::after { content: " ▸" / ""; }
 .side-toggle[aria-expanded="true"] { background: var(--ink); color: var(--paper); }
+
+/* Mischpult-Popover unter seinem Knopf, rechtsbündig zu ihm */
+#mixer-btn { anchor-name: --mixer; }
+#mixer-pop { position-anchor: --mixer; position-area: block-end span-inline-start; width: min(26rem, calc(100vw - 32px)); }
+.mixer { display: grid; gap: 4px; }
+.mix-row { display: grid; grid-template-columns: 6.5rem 1fr 5.5ch auto; align-items: center; gap: 8px; min-height: var(--target); }
+.mix-row:first-child { margin-bottom: 6px; padding-bottom: 6px; border-bottom: 1px solid var(--ink-soft); }
+.mix-row input { width: 100%; min-width: 0; height: var(--target); margin: 0; accent-color: var(--ink); }
+.mix-row output { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 
 .stage { margin-top: 16px; }
 .side-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }

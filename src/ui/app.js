@@ -4,6 +4,8 @@ import { positionLabel } from './position.js';
 import { $, LAYERS, ALL_LAYERS, state, layoutStorage, chordName, rollVariant, preset, pressed, setText, setAttr, saveLang, deriveBars, applyStyle } from './state.js';
 import { saveLayout } from './layout-state.js';
 import { initTuning } from './tuning.js';
+import { initMixer } from './mixer.js';
+import { stepVariant } from './variant.js';
 import { buildKeyScale } from './key-scale.js';
 import { initSidebar } from './sidebar.js';
 import { initViews } from './blocks.js';
@@ -17,6 +19,7 @@ let player = null;
 
 function start(startBar = 0) {
   state.errors = [];
+  const { master, ...layerLevels } = state.mix;
   try {
     ctx ??= new AudioContext(); // nur aus einem Klick heraus aufgerufen
     if (ctx.state === 'suspended') ctx.resume().catch(() => {});
@@ -24,6 +27,8 @@ function start(startBar = 0) {
     player = play(ctx, { ...state.track, layers: ALL_LAYERS }, {
       loops: Infinity, // läuft bis Stopp
       startBar,
+      levels: layerLevels, // Mischpult von der ersten Note an
+      master,
       onBar: (b) => { state.current = b; render(); },
       onEnd: () => { stop(); render(); },
     });
@@ -51,8 +56,15 @@ function restartIfPlaying({ inPlace = false } = {}) {
   const current = inPlace ? state.current : null;
   stop();
   start(current ? current.bar % state.track.length : 0);
-  // derselbe Takt beginnt neu: Taktzeile, Verlauf und Griffbrett bleiben dort, statt bis zum ersten onBar leer zu sein
-  if (current && state.playing) state.current = current;
+  // derselbe Takt beginnt neu: Taktzeile, Verlauf und Griffbrett bleiben dort, statt bis zum ersten onBar leer zu sein;
+  // der Akkord kommt aus der (bei einer neuen Variante anderen) Folge
+  if (current && state.playing) state.current = { ...current, chord: state.track.bars[current.bar % state.track.bars.length].chord };
+}
+
+// Schicht ein/aus: gemeinsamer Zustand von Schichtknöpfen und Mischpult-Tasten, live ohne Neustart
+function toggleLayer(name) {
+  state.track.layers = { ...state.track.layers, [name]: !state.track.layers[name] };
+  player?.setLayer(name, state.track.layers[name]);
 }
 
 // --- Aufbau der Auswahl (einmal), Texte kommen aus render() ---
@@ -130,13 +142,18 @@ $('tune-btn').addEventListener('click', () => openFrom('tune-btn', { sidebars: {
 $('to-play').addEventListener('click', () => openFrom('to-play'));
 $('play-back').addEventListener('click', () => showPage('start'));
 
+// Neue Variante leitet die Folge aus Tonart und Nummer neu ab (eigene Folge entfällt). Während der Wiedergabe geht es im
+// laufenden Takt weiter, damit der Aufbau schon voll ist.
 function setVariant(seed) {
   state.track.seed = seed;
   deriveBars();
-  restartIfPlaying();
+  restartIfPlaying({ inPlace: true });
   render();
 }
 $('new-variant').addEventListener('click', () => setVariant(rollVariant()));
+$('variant-random').addEventListener('click', () => setVariant(rollVariant()));
+$('variant-prev').addEventListener('click', () => setVariant(stepVariant(state.track.seed, -1)));
+$('variant-next').addEventListener('click', () => setVariant(stepVariant(state.track.seed, 1)));
 
 // Eingabe übernehmen (Enter oder Verlassen); Ungültiges ignorieren, beim Verlassen zeigt das Feld wieder die Variante
 $('variant').addEventListener('change', (e) => {
@@ -165,7 +182,8 @@ for (const button of document.querySelectorAll('[popovertarget]')) {
   });
 }
 
-const renderTuning = initTuning({ render: () => render(), restartIfPlaying, player: () => player });
+const renderTuning = initTuning({ render: () => render(), restartIfPlaying, toggleLayer });
+const renderMixer = initMixer({ render: () => render(), player: () => player, toggleLayer });
 
 // Leisten "Klang" (links) und "Akkorde" (rechts): offen/zu steht im gemerkten Layout
 const sidebars = ['left', 'right'].map((side) => initSidebar({
@@ -242,6 +260,7 @@ function render() {
   for (const s of sidebars) s.render(); // nach dem Seitenwechsel: modal nur, wenn die Schublade sichtbar ist
   views.render(); // vor renderTuning: das Akkordrad zeichnet nur, wenn sein Block sichtbar ist
   renderTuning();
+  renderMixer();
 }
 
 deriveBars();

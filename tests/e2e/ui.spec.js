@@ -274,14 +274,21 @@ test('ungültige Variantennummer (0, 10000, Buchstaben, leer) wird ignoriert, Fe
   expect(await shownChords(page)).toEqual(chords);
 });
 
-test('Variantennummer während der Wiedergabe startet neu; auf Englisch ohne rohe Schlüssel', async ({ page }) => {
+test('Variantennummer während der Wiedergabe startet im laufenden Takt neu; auf Englisch ohne rohe Schlüssel', async ({ page }) => {
   await goAndBack(page);
   const position = page.locator('#position');
   await expect(position).toHaveText('Takt 2 von 96', { timeout: BAR_TIMEOUT });
   const field = page.locator('#variant');
+  // Absichtliche Verhaltensänderung: kein Sprung mehr auf Takt 1, die Taktzeile läuft weiter (Aufbau schon voll)
+  await page.evaluate(() => {
+    window.__positions = [];
+    const el = document.querySelector('#position');
+    new MutationObserver(() => window.__positions.push(el.textContent)).observe(el, { childList: true, characterData: true, subtree: true });
+  });
   await field.fill('321');
   await field.press('Enter');
-  await expect(position).toHaveText('Takt 1 von 96', { timeout: BAR_TIMEOUT });
+  await expect(position).toHaveText(/^Takt [3-9] von 96$/, { timeout: BAR_TIMEOUT });
+  expect((await page.evaluate(() => window.__positions)).filter(Boolean)).not.toContain('Takt 1 von 96');
   await expect(go(page)).toHaveText('Stopp');
   expect(await shownChords(page)).toEqual(expectedChords({ root: 'A', mode: 'minor' }, 321));
   await go(page).click();
