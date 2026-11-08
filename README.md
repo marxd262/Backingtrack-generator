@@ -45,3 +45,7 @@ The documents below are written in German.
 - Interface for Interactive Scales: [docs/interface.md](docs/interface.md)
 - Design: [docs/superpowers/specs/2026-11-07-backingtrack-generator-design.md](docs/superpowers/specs/2026-11-07-backingtrack-generator-design.md)
 - Implementation plan: [docs/superpowers/plans/2026-11-07-backingtrack-generator.md](docs/superpowers/plans/2026-11-07-backingtrack-generator.md)
+
+## License
+
+[MIT](LICENSE)
