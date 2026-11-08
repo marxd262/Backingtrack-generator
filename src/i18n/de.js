@@ -48,7 +48,7 @@ export default {
   'tag.bassSound.resonant': 'resonant',
   'tag.chordSound.mellow': 'sanft',
   'tag.chordSound.biting': 'bissig',
-  'tag.chordSound.chorused': 'breit',
+  'tag.chordSound.chorused': 'Chorus',
   'tag.chordSound.tremolo': 'zitternd',
   'tag.chordSound.ringing': 'klingend',
   'tag.padSound.swelling': 'anschwellend',
