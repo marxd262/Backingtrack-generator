@@ -557,7 +557,7 @@ test.describe('Seitenleisten', () => {
   test('Tastatur: Tab zum Auslöser, Enter und Leertaste, Inhalt der Schublade erreichbar (800 px)', async ({ page }) => {
     await page.setViewportSize({ width: 800, height: 740 });
     await openWithGo(page);
-    await playGo(page).focus();
+    await page.locator('#mixer-btn').focus(); // Reihenfolge: Los, Variante, Mischpult, Klang
     await page.keyboard.press('Tab');
     await expect(toggle(page, 'left')).toBeFocused();
     await page.keyboard.press('Enter');
