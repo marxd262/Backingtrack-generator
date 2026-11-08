@@ -250,12 +250,12 @@ const SOUND_SECONDS = 16;
 const DEFAULT_PRE_RMS = { drums: 0.05009726748802992, bass: 0.09297909625210916, chords: 0.0683636709576798, pad: 0.04085044316844499 };
 // [Name, Schlagworte, Schicht ('' = Summe), Mindest-diff, Richtung des Schwerpunkts: -1 tiefer, +1 höher, 0 egal]
 // Gemessen 2026-11-08 (16 s, mit Begrenzer; diff / Schwerpunkt Standard -> mit Schlagwort / rms Standard -> mit Schlagwort):
-//   Akkorde (1237 Hz, rms 0.121): mellow 0.560 / 602 Hz / 0.136, biting 0.398 / 1697 Hz / 0.103, chorused 0.311 / 1293 Hz / 0.106,
+//   Akkorde (1237 Hz, rms 0.121): mellow 0.497 / 633 Hz / 0.135 (Tiefpass-Ende nie unter 450 Hz; vorher 0.560 / 602 Hz), biting 0.398 / 1697 Hz / 0.103, chorused 0.311 / 1293 Hz / 0.106,
 //     tremolo 0.290 / 1255 Hz / 0.109, ringing 0.892 / 1246 Hz / 0.166
 //   Pad (1014 Hz, rms 0.079): swelling 0.258 / 1018 Hz / 0.069 (vor der kürzeren Haltezeit 0.566: der Akkord hing in den nächsten Takt), airy 0.828 / 1166 Hz / 0.085, glassy 1.299 / 1493 Hz / 0.081,
-//     thick 1.247 / 786 Hz / 0.078, moving 0.714 / 955 Hz / 0.076, dreamy 1.083 / 1130 Hz / 0.097 (Hall)
-//   Summe (2992 Hz, rms 0.219): dark 0.305 / 1359 Hz / 0.220, bright 0.285 / 5119 Hz / 0.181, psychedelic 0.333 / 2748 Hz / 0.230
-//   warm: Akkorde 0.335 / 731 Hz, Pad 0.375 / 741 Hz
+//     thick 1.247 / 786 Hz / 0.078, moving 0.671 / 949 Hz / 0.077 (LFO-Tiefe höchstens 0.8 x cutoff; vorher 0.714), dreamy 1.083 / 1130 Hz / 0.097 (Hall)
+//   Summe (2992 Hz, rms 0.219): dark 0.302 / 1360 Hz / 0.220, bright 0.285 / 5119 Hz / 0.181, psychedelic 0.333 / 2748 Hz / 0.230
+//   warm: Akkorde 0.298 / 750 Hz (vorher 0.335 / 731 Hz), Pad 0.375 / 741 Hz
 // Die Summe wird von Schlagzeug und Bass getragen: dark und bright brauchten dafür ein Hochregal bei 800 Hz (bei 3 kHz lag diff nur bei 0.12).
 const SHAPING_TAGS = [
   ['mellow', { chordSound: ['mellow'] }, 'chords', 0.25, -1],
@@ -298,7 +298,8 @@ test('Klang warm: Akkorde und Pad dunkler, mindestens eine Schicht deutlich ande
 });
 
 // Eigener Offline-Render im Browser (wie renderLeft in render.js, linker Kanal, ohne Begrenzer): Spitze der ersten 0,5 s nach dem
-// ersten Ereignis und rms im Ausklang, gemessen ab dem Ende des letzten Ereignisses (Note samt Dauer) über 3 s.
+// ersten Ereignis und rms im Ausklang über 3 s, gemessen ab 1 s nach dem Ende des letzten Ereignisses (Note samt Dauer): dann sind
+// die trockenen Töne verklungen (Pad-Ausklang 0,9 s), es bleiben Echo und Hall.
 async function measureWindows(page, input, layer) {
   return page.evaluate(async ([track, solo]) => {
     const { buildEvents } = await import('/core/events.js');
@@ -306,7 +307,7 @@ async function measureWindows(page, input, layer) {
     const { createInstruments } = await import('/audio/synth.js');
     const rate = 44100, offset = 0.1, seconds = 8, tail = 3;
     const events = buildEvents(track).filter((e) => e.layer && e.t < seconds);
-    const ctx = new OfflineAudioContext(2, Math.ceil(rate * (offset + seconds + tail + 2)), rate);
+    const ctx = new OfflineAudioContext(2, Math.ceil(rate * (offset + seconds + tail + 3)), rate);
     const { output, layers } = createInstruments(ctx, { bpm: track.bpm, limiter: false, timbre: resolveTimbre(track.tags) });
     output.connect(ctx.destination);
     if (solo) for (const name of Object.keys(layers)) layers[name].setMuted(name !== solo);
@@ -314,7 +315,7 @@ async function measureWindows(page, input, layer) {
     const d = (await ctx.startRendering()).getChannelData(0);
     const last = Math.max(...events.map((e) => e.t + (e.dur ?? 0)));
     let firstPeak = 0, sum = 0;
-    const from = Math.round(rate * (offset + last));
+    const from = Math.round(rate * (offset + last + 1));
     for (let i = Math.round(rate * offset); i < Math.round(rate * (offset + 0.5)); i++) firstPeak = Math.max(firstPeak, Math.abs(d[i]));
     for (let i = from; i < from + rate * tail; i++) sum += d[i] * d[i];
     return { firstPeak, tailRms: Math.sqrt(sum / (rate * tail)), last };
@@ -376,8 +377,10 @@ for (const [name, tags, bpm] of [
   });
 }
 
-// Gemessen 2026-11-08 (Summe ohne Begrenzer, 3 s ab dem Ende des letzten Ereignisses bei 9.6 s): Ausklang-rms Standard 0.00791,
-// psychedelic 0.02004 (2.5x), dreamy 0.01516 (1.9x)
+// Gemessen 2026-11-08 (Summe ohne Begrenzer, 3 s ab 1 s nach dem Ende des letzten Ereignisses bei 9.6 s): Ausklang-rms Standard 0.00091,
+// psychedelic 0.00655 (7.2x), dreamy 0.00121 (1.33x). Das Fenster begann früher direkt am Ende des letzten Ereignisses (dreamy 1.9x):
+// dort zählte das in den nächsten Takt hängende Pad mit (langsamerer Einsatz ohne kürzere Haltezeit); seit der Korrektur klingt es
+// wie im Standard vor dem Taktstrich aus, im alten Fenster bliebe dreamy bei 1.14x, obwohl Echo und Hall unverändert sind.
 test('Klang psychedelic und dreamy: mehr Echo und Hall, Summen-rms im Ausklang nach dem letzten Ereignis größer als im Standard', async ({ page }) => {
   test.setTimeout(120_000);
   const base = await measureWindows(page, track());
@@ -385,15 +388,15 @@ test('Klang psychedelic und dreamy: mehr Echo und Hall, Summen-rms im Ausklang n
   const psychedelic = await measureWindows(page, withTags({ mood: ['psychedelic'] }));
   expect(psychedelic.tailRms, label('psychedelic', psychedelic)).toBeGreaterThan(base.tailRms * 1.2);
   const dreamy = await measureWindows(page, withTags({ mood: ['dreamy'] }));
-  expect(dreamy.tailRms, label('dreamy', dreamy)).toBeGreaterThan(base.tailRms * 1.2); // gemessen 1.9x
+  expect(dreamy.tailRms, label('dreamy', dreamy)).toBeGreaterThan(base.tailRms * 1.2); // gemessen 1.33x
 });
 
 // Gemessen 2026-11-08 (Akkorde-rms / Pad-rms vor dem Begrenzer relativ zum Standard; Schichtverhältnis kleinster / größter rms; Summe Spitze vor / nach dem Begrenzer):
-//   mellow 1.142 / 1.000; 0.439; 0.789 / 0.704    biting 0.864 / 1.000; 0.439; 0.691 / 0.698    chorused 0.814 / 1.000; 0.439; 0.631 / 0.685
+//   mellow 1.127 / 1.000; 0.439; 0.789 / 0.704    biting 0.864 / 1.000; 0.439; 0.691 / 0.698    chorused 0.814 / 1.000; 0.439; 0.631 / 0.685
 //   tremolo 1.099 / 1.000; 0.439; 0.822 / 0.704   ringing 1.422 / 1.000; 0.420; 0.769 / 0.709   swelling 1.000 / 0.876; 0.464; 0.693 / 0.690
 //   airy 1.000 / 1.081; 0.475; 0.692 / 0.697      glassy 1.000 / 1.026; 0.451; 0.652 / 0.695    thick 1.000 / 0.993; 0.436; 0.704 / 0.697
-//   moving 1.000 / 0.963; 0.423; 0.702 / 0.704    dark 0.939 / 0.880; 0.388; 0.651 / 0.672       bright 0.851 / 0.906; 0.520; 0.675 / 0.706
-//   psychedelic 1.211 / 1.260; 0.546; 0.815 / 0.725   dreamy 0.992 / 1.228; 0.538; 0.750 / 0.699   warm 0.989 / 0.960; 0.412; 0.695 / 0.690
+//   moving 1.000 / 0.979; 0.423; 0.702 / 0.704    dark 0.938 / 0.880; 0.388; 0.651 / 0.672       bright 0.851 / 0.906; 0.520; 0.675 / 0.706
+//   psychedelic 1.211 / 1.260; 0.546; 0.815 / 0.725   dreamy 0.992 / 1.228; 0.538; 0.750 / 0.699   warm 0.985 / 0.960; 0.412; 0.695 / 0.690
 // Schichtverhältnis im Standard: 0.44 (Pad / Bass). Ohne den Summenpegel-Faktor (masterParams.level) lag die Spitze von bright vor dem Begrenzer bei 0.888.
 // Pegelsicherheit je Schlagwort. Verhältnis = Schicht-rms vor dem Begrenzer / Standard (Akkorde und Pad; die anderen Schichten
 // bleiben bis auf den Hall unverändert), Schichtverhältnis = kleinster / größter Schicht-rms der Mischung vor dem Begrenzer.

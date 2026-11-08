@@ -357,3 +357,59 @@ test('alle Klang-Schlagworte zugleich: Klangmodell in [0,1], alle Stimmparameter
     for (const [field, v] of Object.entries(params)) assert.ok(Number.isFinite(v), `${field}: ${v}`);
   }
 });
+
+// Pad-Filter: der LFO darf die Grenzfrequenz nie unter 0 Hz drücken (Chrome klemmt dort auf 0, das Filter macht zu und pumpt)
+const GRID = Array.from({ length: 21 }, (_, i) => i / 20);
+const padFloor = (p) => p.cutoff - p.lfoDepth;
+
+test('padParams: tiefste Filterfrequenz cutoff - lfoDepth >= 0.2 x cutoff für jede Kombination aus cutoff, lfoDepth und thickness', () => {
+  for (const cutoff of GRID) {
+    for (const lfoDepth of GRID) {
+      for (const thickness of GRID) {
+        const p = padParams({ ...DEFAULT_TIMBRE.pad, cutoff, lfoDepth, thickness });
+        const label = JSON.stringify({ cutoff, lfoDepth, thickness, p: [p.cutoff, p.lfoDepth] });
+        assert.ok(p.cutoff > 0 && padFloor(p) >= 0.2 * p.cutoff - 1e-9, label);
+      }
+    }
+  }
+});
+
+test('padParams: moving mit warm, dark, psychedelic bleibt über 0 Hz', () => {
+  for (const tags of [
+    { padSound: ['moving'], synths: ['warm'] },
+    { padSound: ['moving'], mood: ['dark'] },
+    { padSound: ['moving'], mood: ['psychedelic'] },
+    { padSound: ['moving'], synths: ['warm'], mood: ['dark'] },
+    { padSound: ['moving', 'thick'], synths: ['warm'], mood: ['dark', 'psychedelic'] },
+  ]) {
+    const p = padParams(resolveTimbre(tags).pad);
+    assert.ok(padFloor(p) >= 0.2 * p.cutoff - 1e-9 && padFloor(p) > 0, `${JSON.stringify(tags)}: ${p.cutoff} - ${p.lfoDepth}`);
+  }
+  // neutral unverändert: 450 Hz Tiefe liegt unter 0.8 x 1100 Hz
+  assert.equal(padParams(DEFAULT_TIMBRE.pad).lfoDepth, 450);
+});
+
+// Akkord-Tiefpass: Ende nie unter 450 Hz (die Grundtöne der Akkorde liegen bei 220-330 Hz), Start mindestens 1.5 x Ende
+const chordFloorOk = (p) => p.lpEnd >= 450 - 1e-9 && p.lpStart >= 1.5 * p.lpEnd - 1e-9;
+
+test('chordParams: Tiefpass-Ende >= 450 Hz und Start >= 1.5 x Ende bei jeder Helligkeit, neutral 3600 / 900', () => {
+  for (const brightness of GRID) {
+    for (const length of [0, 0.5, 1]) {
+      const p = chordParams({ ...DEFAULT_TIMBRE.chords, brightness, length });
+      assert.ok(chordFloorOk(p), `${brightness}: ${p.lpStart} / ${p.lpEnd}`);
+    }
+  }
+  const zero = chordParams({ ...DEFAULT_TIMBRE.chords, brightness: 0 });
+  assert.ok(chordFloorOk(zero), `${zero.lpStart} / ${zero.lpEnd}`);
+  const neutral = chordParams(DEFAULT_TIMBRE.chords);
+  assert.deepEqual([neutral.lpStart, neutral.lpEnd], [3600, 900]);
+});
+
+test('chordParams: warm + mellow + dark (Helligkeit 0) und warm + mellow (wie im Stil Träumerisch) halten die Untergrenzen', () => {
+  for (const tags of [{ synths: ['warm'], chordSound: ['mellow'], mood: ['dark'] }, { synths: ['warm'], chordSound: ['mellow'] }]) {
+    const timbre = resolveTimbre(tags);
+    const p = chordParams(timbre.chords);
+    assert.ok(chordFloorOk(p), `${JSON.stringify(tags)} (brightness ${timbre.chords.brightness}): ${p.lpStart} / ${p.lpEnd}`);
+  }
+  assert.equal(resolveTimbre({ synths: ['warm'], chordSound: ['mellow'], mood: ['dark'] }).chords.brightness, 0);
+});
