@@ -252,7 +252,7 @@ const DEFAULT_PRE_RMS = { drums: 0.05009726748802992, bass: 0.09297909625210916,
 // Gemessen 2026-11-08 (16 s, mit Begrenzer; diff / Schwerpunkt Standard -> mit Schlagwort / rms Standard -> mit Schlagwort):
 //   Akkorde (1237 Hz, rms 0.121): mellow 0.560 / 602 Hz / 0.136, biting 0.398 / 1697 Hz / 0.103, chorused 0.311 / 1293 Hz / 0.106,
 //     tremolo 0.290 / 1255 Hz / 0.109, ringing 0.892 / 1246 Hz / 0.166
-//   Pad (1014 Hz, rms 0.079): swelling 0.566 / 988 Hz / 0.083, airy 0.828 / 1166 Hz / 0.085, glassy 1.299 / 1493 Hz / 0.081,
+//   Pad (1014 Hz, rms 0.079): swelling 0.258 / 1018 Hz / 0.069 (vor der kürzeren Haltezeit 0.566: der Akkord hing in den nächsten Takt), airy 0.828 / 1166 Hz / 0.085, glassy 1.299 / 1493 Hz / 0.081,
 //     thick 1.247 / 786 Hz / 0.078, moving 0.714 / 955 Hz / 0.076, dreamy 1.083 / 1130 Hz / 0.097 (Hall)
 //   Summe (2992 Hz, rms 0.219): dark 0.305 / 1359 Hz / 0.220, bright 0.285 / 5119 Hz / 0.181, psychedelic 0.333 / 2748 Hz / 0.230
 //   warm: Akkorde 0.335 / 731 Hz, Pad 0.375 / 741 Hz
@@ -331,6 +331,51 @@ test('Klang swelling: langsamerer Einsatz, Pad-Spitze der ersten 0,5 s niedriger
   expect(swell.firstPeak, label).toBeLessThan(0.7 * base.firstPeak);
 });
 
+// Eine einzelne taktlange Pad-Note (A3, vel 0.8) durch die echten Instrumente, Offline, ohne Begrenzer. Echo und Hall im
+// Klangmodell auf 0 (echoWet und reverbWet 0): gemessen wird so genau der trockene Pad-Weg (Pad -> Trim -> Summe), linker Kanal.
+// Ergebnis: rms im Fenster [Taktende + 0,3 s, + 0,6 s] relativ zum Haltepegel im Fenster [Taktende - 0,6 s, - 0,3 s].
+async function padLateRatio(page, tags, bpm) {
+  return page.evaluate(async ([tags, bpm]) => {
+    const { resolveTimbre } = await import('/core/timbre.js');
+    const { createInstruments } = await import('/audio/synth.js');
+    const rate = 44100, offset = 0.1, dur = (4 * 60) / bpm;
+    const timbre = resolveTimbre(tags);
+    timbre.master = { ...timbre.master, echo: 0, reverb: 0 };
+    const ctx = new OfflineAudioContext(2, Math.ceil(rate * (offset + dur + 2)), rate);
+    const { output, layers } = createInstruments(ctx, { bpm, limiter: false, timbre });
+    output.connect(ctx.destination);
+    layers.pad.trigger({ type: 'note', layer: 'pad', midi: 57, vel: 0.8, dur }, offset);
+    const d = (await ctx.startRendering()).getChannelData(0);
+    const end = offset + dur;
+    const rmsIn = (a, b) => {
+      let sum = 0, n = 0;
+      for (let i = Math.round(rate * a); i < Math.round(rate * b); i++, n++) sum += d[i] * d[i];
+      return Math.sqrt(sum / n);
+    };
+    const sustain = rmsIn(end - 0.6, end - 0.3);
+    return { sustain, late: rmsIn(end + 0.3, end + 0.6), ratio: rmsIn(end + 0.3, end + 0.6) / sustain };
+  }, [tags, bpm]);
+}
+
+// Musikalische Probe: der Akkord eines Takts darf nicht in den nächsten Takt hinein auf vollem Pegel weiterklingen
+// (sonst liegt z. B. das E von Am noch über F-Dur). Fälle: Standard, swelling, die Pad-Schlagworte von psych und dreamy bei deren Tempo.
+// Gemessen 2026-11-08, Verhältnis spät / Halten: Standard 0.041, swelling 0.041, psych 0.060, dreamy 0.036, swelling bei 200 bpm 0.034;
+// vor der Korrektur (Haltezeit unabhängig vom Einsatz) swelling 0.911, psych 1.743, dreamy 1.126, swelling bei 200 bpm 1.629.
+for (const [name, tags, bpm] of [
+  ['Standard', {}, 100],
+  ['swelling', { padSound: ['swelling'] }, 100],
+  ['psych (swelling + glassy)', { padSound: ['swelling', 'glassy'] }, 112],
+  ['dreamy (airy + swelling)', { padSound: ['airy', 'swelling'] }, 80],
+  ['swelling, kurzer Takt', { padSound: ['swelling'] }, 200],
+]) {
+  test(`Pad ${name}: der Akkord ist 0,3-0,6 s nach dem Taktstrich höchstens ein Viertel so laut wie davor`, async ({ page }) => {
+    const r = await padLateRatio(page, tags, bpm);
+    const label = `${name}: ${JSON.stringify(r)}`;
+    expect(r.sustain, label).toBeGreaterThan(0.005);
+    expect(r.ratio, label).toBeLessThanOrEqual(0.25);
+  });
+}
+
 // Gemessen 2026-11-08 (Summe ohne Begrenzer, 3 s ab dem Ende des letzten Ereignisses bei 9.6 s): Ausklang-rms Standard 0.00791,
 // psychedelic 0.02004 (2.5x), dreamy 0.01516 (1.9x)
 test('Klang psychedelic und dreamy: mehr Echo und Hall, Summen-rms im Ausklang nach dem letzten Ereignis größer als im Standard', async ({ page }) => {
@@ -345,7 +390,7 @@ test('Klang psychedelic und dreamy: mehr Echo und Hall, Summen-rms im Ausklang n
 
 // Gemessen 2026-11-08 (Akkorde-rms / Pad-rms vor dem Begrenzer relativ zum Standard; Schichtverhältnis kleinster / größter rms; Summe Spitze vor / nach dem Begrenzer):
 //   mellow 1.142 / 1.000; 0.439; 0.789 / 0.704    biting 0.864 / 1.000; 0.439; 0.691 / 0.698    chorused 0.814 / 1.000; 0.439; 0.631 / 0.685
-//   tremolo 1.099 / 1.000; 0.439; 0.822 / 0.704   ringing 1.422 / 1.000; 0.420; 0.769 / 0.709   swelling 1.000 / 1.057; 0.464; 0.693 / 0.690
+//   tremolo 1.099 / 1.000; 0.439; 0.822 / 0.704   ringing 1.422 / 1.000; 0.420; 0.769 / 0.709   swelling 1.000 / 0.876; 0.464; 0.693 / 0.690
 //   airy 1.000 / 1.081; 0.475; 0.692 / 0.697      glassy 1.000 / 1.026; 0.451; 0.652 / 0.695    thick 1.000 / 0.993; 0.436; 0.704 / 0.697
 //   moving 1.000 / 0.963; 0.423; 0.702 / 0.704    dark 0.939 / 0.880; 0.388; 0.651 / 0.672       bright 0.851 / 0.906; 0.520; 0.675 / 0.706
 //   psychedelic 1.211 / 1.260; 0.546; 0.815 / 0.725   dreamy 0.992 / 1.228; 0.538; 0.750 / 0.699   warm 0.989 / 0.960; 0.412; 0.695 / 0.690

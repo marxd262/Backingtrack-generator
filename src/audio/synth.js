@@ -156,11 +156,14 @@ function chordNote(ctx, out, t, e, p) {
 
 // Pad: langsamer Einsatz, verstimmte Sägezähne durch Tiefpass mit langsamem LFO, optional mehr Oszillatoren und Oktav-Anteile
 function padNote(ctx, out, t, e, p) {
-  const f = hz(e.midi), hold = Math.max(p.holdMin, e.dur - p.holdCut);
-  const end = t + Math.max(e.dur + 1, p.attack + hold + p.release + 0.1);
+  // Einsatz länger als holdAttack: die Haltezeit schrumpft um das Mehr, damit der Akkord wie beim neutralen Klang kurz vor dem
+  // Taktstrich ausklingt; passt der Einsatz nicht in die Note, wird er gekürzt (nie unter holdAttack, neutral also unverändert)
+  const attack = Math.min(p.attack, Math.max(p.holdAttack, e.dur - p.holdCut - p.holdMin + p.holdAttack));
+  const f = hz(e.midi), hold = Math.max(p.holdMin, e.dur - p.holdCut - Math.max(0, attack - p.holdAttack));
+  const end = t + Math.max(e.dur + 1, attack + hold + p.release + 0.1);
   const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.Q.value = p.q; lp.frequency.value = p.cutoff;
   osc(ctx, 'sine', p.lfoSpeed, 0, gain(ctx, p.lfoDepth, lp.frequency), t, end);
-  const a = ctx.createGain(); adsr(a, t, p.attack, e.vel * p.peak, hold, p.release);
+  const a = ctx.createGain(); adsr(a, t, attack, e.vel * p.peak, hold, p.release);
   for (const det of [-p.spread, 0, p.spread]) osc(ctx, 'sawtooth', f, det, lp, t, end);
   if (p.extraMix > 0) {
     const bus = gain(ctx, p.extraMix, lp);

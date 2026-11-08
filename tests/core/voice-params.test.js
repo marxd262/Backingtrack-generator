@@ -239,6 +239,7 @@ const GROUPS = {
       peak: 0.1, // Hüllkurvenspitze vel * 0.1
       holdMin: 0.1, // Haltezeit max(0.1, dur - 0.5)
       holdCut: 0.5,
+      holdAttack: 0.45, // ein längerer Einsatz verkürzt die Haltezeit um das Mehr
       release: 0.9,
       cutoff: 1100, // Tiefpass, Q 0.8
       q: 0.8,
@@ -249,7 +250,7 @@ const GROUPS = {
       shimmerMix: 0, // 0 = ohne Oktav-Anteile
     },
     ranges: {
-      attack: [0.05, 1.6], peak: [0.03, 0.1], holdMin: [0.1, 0.1], holdCut: [0.5, 0.5], release: [0.9, 0.9],
+      attack: [0.05, 1.6], peak: [0.03, 0.1], holdMin: [0.1, 0.1], holdCut: [0.5, 0.5], holdAttack: [0.45, 0.45], release: [0.9, 0.9],
       cutoff: [300, 4500], q: [0.8, 0.8], lfoSpeed: [0.05, 1.2], lfoDepth: [100, 1500], spread: [3, 25], extraMix: [0, 1], shimmerMix: [0, 2],
     },
     effects: [

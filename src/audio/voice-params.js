@@ -87,8 +87,9 @@ export function padParams({ attack, cutoff, lfoSpeed, lfoDepth, shimmer, thickne
   return {
     attack: span(attack, 0.05, 0.45, 1.6),
     peak: 0.1 / (1 + 0.3 * extraMix) / (1 + 0.3 * shimmerMix), // gleicht die Zusatzenergie aus
-    holdMin: 0.1, // Haltezeit max(holdMin, dur - holdCut)
+    holdMin: 0.1, // Haltezeit max(holdMin, dur - holdCut - max(0, attack - holdAttack))
     holdCut: 0.5,
+    holdAttack: 0.45, // neutraler Einsatz: neutral gilt attack + Haltezeit = dur - 0,05 s, die Note klingt vor dem Taktstrich aus
     release: 0.9,
     cutoff: span(cutoff, 350, 1100, 3500) * span(thickness, 1.2, 1, 0.75), // dicker: etwas dunkler
     q: 0.8,
