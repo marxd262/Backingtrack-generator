@@ -48,3 +48,19 @@ export function resolveTimbre(tags) {
   }
   return timbre;
 }
+
+/**
+ * Klangmodell eines Tracks: die Schlagworte (resolveTimbre), darüber je Feld die Überschreibungen aus `track.timbre`.
+ * Nur endliche Zahlen zählen (auf [0,1] begrenzt); Unbekanntes und Ungültiges wird ignoriert. Neue Kopie.
+ */
+export function resolveTrackTimbre(track) {
+  const timbre = resolveTimbre(track?.tags);
+  const over = track?.timbre;
+  const isRecord = (x) => typeof x === 'object' && x !== null && !Array.isArray(x);
+  if (!isRecord(over)) return timbre;
+  for (const [group, fields] of Object.entries(timbre)) {
+    if (!isRecord(over[group])) continue;
+    for (const key of Object.keys(fields)) if (Number.isFinite(over[group][key])) fields[key] = clamp01(over[group][key]);
+  }
+  return timbre;
+}

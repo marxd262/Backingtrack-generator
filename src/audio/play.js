@@ -1,7 +1,7 @@
 // Echtzeit-Wiedergabe mit Vorausplanung: Timer alle 25 ms plant die Ereignisse der nächsten 100 ms.
 // Der Aufrufer besitzt den AudioContext; stop() schließt ihn nie.
 import { buildEvents } from '../core/events.js';
-import { resolveTimbre } from '../core/timbre.js';
+import { resolveTrackTimbre } from '../core/timbre.js';
 import { normalizeTrack } from '../core/track.js';
 import { createInstruments as synthInstruments } from './synth.js';
 import { sliderGain } from './mix.js';
@@ -39,7 +39,7 @@ export function play(ctx, trackInput, { loops = 1, startBar = 0, levels, master,
   }
 
   // Schlagworte sind durch buildEvents geprüft, resolveTimbre wirft hier nicht
-  const instruments = createInstruments(ctx, { bpm, timbre: resolveTimbre(track.tags), levels, master });
+  const instruments = createInstruments(ctx, { bpm, timbre: resolveTrackTimbre(track), levels, master });
   for (const e of events) {
     if (e.layer && !Object.hasOwn(instruments.layers, e.layer)) throw new Error(`Instruments lack layer: ${e.layer}`);
   }

@@ -478,3 +478,15 @@ test('Stile klingen allein durch Klang-Schlagworte messbar verschieden (Summe, A
   const same = await compare(page, styleSound('funk'), styleSound('funk'), 6);
   expect(same.diff).toBeLessThan(1e-6);
 });
+
+test('track.timbre wirkt wie ein Schlagwort und schlägt es', async ({ page }) => {
+  test.setTimeout(120_000);
+  const viaTag = track({ tags: { development: ['fullFromStart'], bassSound: ['fuzz'] } });
+  const viaTimbre = track({ timbre: { bass: { fuzz: 0.6 } } });
+  expect((await compare(page, viaTag, viaTimbre, 6, { layer: 'bass' })).diff).toBeLessThan(1e-6);
+  const loud = track({ timbre: { bass: { fuzz: 1 } } });
+  expect((await compare(page, track(), loud, 6, { layer: 'bass' })).diff).toBeGreaterThan(0.25);
+  // Überschreibung gewinnt gegen das Schlagwort (fuzz 0.6 gegen 0)
+  const off = track({ tags: viaTag.tags, timbre: { bass: { fuzz: 0 } } });
+  expect((await compare(page, track(), off, 6, { layer: 'bass' })).diff).toBeLessThan(1e-6);
+});

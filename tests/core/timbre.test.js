@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createRng } from '../../src/core/rng.js';
 import { TAG_CATEGORIES, resolveTags } from '../../src/core/tags.js';
 import { TIMBRE_EFFECTS } from '../../src/core/timbre-effects.js';
-import { DEFAULT_TIMBRE, completeTimbre, resolveTimbre } from '../../src/core/timbre.js';
+import { DEFAULT_TIMBRE, completeTimbre, resolveTimbre, resolveTrackTimbre } from '../../src/core/timbre.js';
 
 const EPS = 1e-9;
 const near = (a, b, msg) => assert.ok(Math.abs(a - b) < EPS, `${msg ?? ''} ${a} != ${b}`);
@@ -132,4 +132,41 @@ test('completeTimbre: vollständiges Klangmodell bleibt gleich, Ergebnis ist ein
   assert.notEqual(t, full);
   assert.notEqual(t.bass, full.bass);
   assert.deepEqual(completeTimbre(DEFAULT_TIMBRE), DEFAULT_TIMBRE);
+});
+
+test('resolveTrackTimbre ohne timbre: gleich resolveTimbre(tags), neue Kopie', () => {
+  const tags = { bassSound: ['fuzz'], mood: ['dark'] };
+  assert.deepEqual(resolveTrackTimbre({ tags }), resolveTimbre(tags));
+  const t = resolveTrackTimbre({ tags });
+  assert.notEqual(t.bass, DEFAULT_TIMBRE.bass);
+});
+
+test('resolveTrackTimbre: Überschreibung setzt nur ihr Feld und schlägt das Schlagwort', () => {
+  const tags = { bassSound: ['fuzz'] };
+  const base = resolveTimbre(tags);
+  const t = resolveTrackTimbre({ tags, timbre: { bass: { fuzz: 0.9 } } });
+  near(t.bass.fuzz, 0.9);
+  for (const [group, fields] of Object.entries(base)) {
+    for (const key of Object.keys(fields)) if (!(group === 'bass' && key === 'fuzz')) near(t[group][key], base[group][key], `${group}.${key}`);
+  }
+});
+
+test('resolveTrackTimbre: Werte werden auf [0,1] begrenzt', () => {
+  const t = resolveTrackTimbre({ timbre: { bass: { fuzz: 1.5, sub: -1 } } });
+  near(t.bass.fuzz, 1);
+  near(t.bass.sub, 0);
+});
+
+test('resolveTrackTimbre: Ungültiges wird ignoriert und wirft nie', () => {
+  const bad = [
+    { bass: { fuzz: NaN } }, { bass: { fuzz: 'x' } }, { bass: { fuzz: null } }, { bass: { fuzz: Infinity } },
+    { nope: { x: 1 } }, { bass: { nope: 1 } }, { bass: 5 }, { bass: [0.9] }, [], 'text', 7, null,
+  ];
+  for (const timbre of bad) assert.deepEqual(resolveTrackTimbre({ timbre }), DEFAULT_TIMBRE, JSON.stringify(timbre));
+  for (const track of [null, undefined, {}, 'x']) assert.deepEqual(resolveTrackTimbre(track), DEFAULT_TIMBRE);
+});
+
+test('resolveTrackTimbre: ungültige Schlagworte werfen wie resolveTimbre', () => {
+  assert.throws(() => resolveTrackTimbre({ tags: { nope: ['x'] } }));
+  assert.throws(() => resolveTimbre({ nope: ['x'] }));
 });

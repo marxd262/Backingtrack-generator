@@ -1,6 +1,6 @@
 // Offline-Render mit Pegelmessung (läuft im Browser). Misst den linken Kanal wie __render in backing-demo.html.
 import { buildEvents } from '../core/events.js';
-import { resolveTimbre } from '../core/timbre.js';
+import { resolveTrackTimbre } from '../core/timbre.js';
 import { createInstruments } from './synth.js';
 import { spectralCentroid } from './spectrum.js';
 
@@ -15,7 +15,7 @@ const FIRST = Math.round(SAMPLE_RATE * OFFSET); // Abtastwert des ersten Ereigni
 async function renderLeft(trackInput, seconds, solo, limiter, mix) {
   const events = buildEvents(trackInput); // prüft den Track samt Schlagworten
   const ctx = new OfflineAudioContext(2, Math.ceil(SAMPLE_RATE * (OFFSET + seconds + TAIL)), SAMPLE_RATE);
-  const { output, layers } = createInstruments(ctx, { bpm: trackInput.bpm, limiter, timbre: resolveTimbre(trackInput.tags), ...mix });
+  const { output, layers } = createInstruments(ctx, { bpm: trackInput.bpm, limiter, timbre: resolveTrackTimbre(trackInput), ...mix });
   output.connect(ctx.destination);
   if (solo) for (const name of LAYERS) layers[name].setMuted(name !== solo);
   for (const e of events) if (e.t < seconds && e.layer) layers[e.layer].trigger(e, OFFSET + e.t);
