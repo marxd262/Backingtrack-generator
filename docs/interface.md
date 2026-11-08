@@ -37,6 +37,7 @@ import {
 | `length` | nein | `24` | Anzahl Takte, 1 bis 512; `bars` läuft im Kreis darüber |
 | `meter` | nein | `[4, 4]` | im Format vorhanden, wird aber derzeit ignoriert: das Raster ergibt sich aus `beats`; angeboten wird nur 4/4 |
 | `tags` | nein | `{}` | `{Kategorie: [Schlagwort-IDs]}` (Objekt, je Kategorie ein Array), nur Kategorien und IDs aus `TAG_CATEGORIES`, sonst `badTags`; `null` gilt wie fehlend |
+| `timbre` | nein | `{}` | Klangregler: `{Gruppe: {Feld: Zahl 0 bis 1}}` mit den Gruppen und Feldern von `DEFAULT_TIMBRE` (`src/core/timbre.js`: `drums`, `bass`, `chords`, `pad`, `master`). Nur die gesetzten Felder zählen; sie liegen **über** dem, was die Schlagworte ergeben, und schlagen sie. Werte außerhalb von 0 bis 1 werden begrenzt; unbekannte Gruppen oder Felder, Nicht-Zahlen und ein Nicht-Objekt werden ohne Fehler ignoriert |
 | `layers` | nein | alle `true` | `drums`, `bass`, `chords`, `pad`; `false` lässt die Schicht aus dem Strom weg |
 | `seed` | nein | `1` | siehe Seed-Regel |
 
@@ -129,7 +130,7 @@ chordTimeline(track) // [{ time: 0, bar: 0, chord: { root: 'A', quality: 'min' }
 ```js
 const ctx = new AudioContext();   // der Aufrufer besitzt ihn und erzeugt ihn in einer Nutzergeste
 const h = play(ctx, track, { loops: 1, levels: { bass: 0.5 }, master: 1, onBar: ({ bar, chord }) => {}, onEvent: (e) => {}, onEnd: () => {} });
-// h = { startPerf, stop(), setLayer(name, on), setLevel(name, value), setMaster(value), setTempo(bpm) }
+// h = { startPerf, stop(), setLayer(name, on), setLevel(name, value), setMaster(value), setTempo(bpm), setTimbre(timbre), setTrack(track) }
 ```
 
 - Optionen: `loops` (ganze Zahl >= 1, Standard 1, `Infinity` erlaubt, sonst `RangeError`), `onBar({bar, chord})` je Takt, `onEvent(ev)` je Ereignis (auch stummer Schichten), `onEnd()` nach dem letzten Durchlauf. `bar` und `t` zählen über alle Durchläufe weiter. `startBar` (ganze Zahl von 0 bis `length - 1`, Standard 0, sonst `RangeError`, geprüft nach dem Track und bevor ein Audioknoten entsteht): die Wiedergabe beginnt mit diesem Takt, frühere Ereignisse entfallen; das erste Ereignis ist der Akkord dieses Takts, `bar` und `t` zählen ab dort wie beim Durchspielen (ab `startBar: 10` meldet `onBar` zuerst Takt 10). Der angefangene Durchlauf zählt als erster: `loops: 1` ab Takt 10 von 96 endet nach Takt 95. `createInstruments` ist ein interner Haken und nicht Teil des Vertrags.
@@ -140,6 +141,8 @@ const h = play(ctx, track, { loops: 1, levels: { bass: 0.5 }, master: 1, onBar: 
 - `levels` (`{ drums, bass, chords, pad }`, jeder Wert 0 bis 1, fehlende gelten als 1) und `master` (0 bis 1, Standard 1): Reglerstellungen des Mischpults von der ersten Note an. Ein Wert außerhalb von 0 bis 1 oder kein Zahlentyp wirft `RangeError` (eine unbekannte Schicht in `levels` wirft `Error`), geprüft bevor ein Audioknoten entsteht.
 - `setLevel(name, value)` und `setMaster(value)`: stellen den Pegel einer Schicht bzw. die Gesamtlautstärke live (ohne Neustart, mit etwa 20 ms Rampe gegen Knacken). `value` ist die Reglerstellung 0 bis 1 (sonst `RangeError`, unbekannte Schicht `Error`); die Verstärkung ist `value * value`, also 1 exakt unverändert und nie lauter als der Standard, 0 still. Der Schichtpegel wirkt vor den Echo- und Hallwegen: sie folgen der Schicht (schon laufende Fahnen klingen nach). Die Gesamtlautstärke liegt hinter dem Begrenzer am Ausgang und ändert dessen Verhalten nicht. Der Pegel ist unabhängig vom Stummschalten mit `setLayer`.
 - `setTempo(bpm)`: ändert das Tempo live (20 bis 400, sonst `RangeError`); schon geplante Ereignisse behalten ihre Zeit. Die Echo-Verzögerung folgt dem neuen Tempo.
+- `setTimbre(timbre)`: stellt den Klang live um (ohne Neustart), `timbre` im Format des Klangmodells (`resolveTrackTimbre(track)` aus `src/core/timbre.js`, nicht aus `src/index.js` exportiert, liefert es aus Schlagworten und `track.timbre`; unvollständig oder ungültig wird mit dem Standard aufgefüllt). Neue Töne klingen sofort neu; Hall, Echo, Helligkeit, Raum-Anteil und Summenpegel folgen über kurze Rampen. Schon klingende Töne behalten ihren Klang, beim Pad (Töne liegen einen Takt) hört man die Änderung deshalb ab dem nächsten Akkord. Nach `stop()` ohne Wirkung.
+- `setTrack(track)`: tauscht den Ereignisstrom live aus, etwa nach einem Schlagwort mit Mustereffekt: ab dem nächsten noch nicht geplanten Ereignis spielt der neue Strom, schon geplante Töne laufen weiter und gleichzeitig geplante Ereignisse werden nie doppelt gespielt. Die Liedzeit bezieht sich auf das Starttempo von `play`; das `bpm` des übergebenen Tracks zählt nicht (Tempowechsel macht `setTempo`). Rückgabe `true` bei Erfolg, `false` ohne jede Änderung, wenn der Player gestoppt ist oder sich `length` oder die Taktlängen (`beats`) und damit die Dauer eines Durchlaufs ändern; der Aufrufer startet dann neu. Ein ungültiger Track wirft wie `play` und ändert nichts. Klang ändert `setTrack` nicht, dafür `setTimbre`.
 - `stop()`: blendet in etwa 50 ms aus, bricht alle Rückrufe ab, ist wiederholbar und schließt den `AudioContext` nie.
 
 ## Prüfung
@@ -160,7 +163,7 @@ if (errors.length) show(errors.map((e) => t('err.' + e.code, e.params)));
 | Heute (`backing.js`) | Neu |
 | --- | --- |
 | `buildEvents(track, loops)` mit `{time, bar, chord, durationSec}` | `chordTimeline(track)`; mehrere Durchläufe selbst versetzen |
-| `playBacking(ctx, track, { loops, onBar })` mit `{startPerf, stop()}` | `play(ctx, track, { loops, onBar })` mit `{startPerf, stop(), setLayer, setLevel, setMaster, setTempo}`; `length` auf die Taktzahl der Übung setzen (siehe unten) |
+| `playBacking(ctx, track, { loops, onBar })` mit `{startPerf, stop()}` | `play(ctx, track, { loops, onBar })` mit `{startPerf, stop(), setLayer, setLevel, setMaster, setTempo, setTimbre, setTrack}`; `length` auf die Taktzahl der Übung setzen (siehe unten) |
 
 Achtung bei `loops`: Das alte `loops` zählte Durchläufe über `bars` (eine 4-Takt-Übung mit `loops: 3` dauerte 12 Takte). Das neue `loops` wiederholt jeweils den ganzen Track von `length` Takten, Standard 24. Ohne `length` dauert dieselbe Übung mit `loops: 3` also 72 Takte. Damit das alte Timing bleibt, gibt Interactive Scales `length: bars.length` mit (für die 4-Takt-Übung `length: 4`); dasselbe gilt für `chordTimeline`.
 | `?bpm=`-Überschreibung | überschriebenes `bpm` in den Track schreiben (Zeiten aus `chordTimeline` passen dann), oder nach dem Start `setTempo(bpm)` |
