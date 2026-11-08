@@ -116,7 +116,7 @@ test('Feintuning öffnet die Spielseite, zurück zur Startseite: Navigation ohne
 test('Schnellauswahl Träumerisch belegt Schlagworte und 80 bpm vor', async ({ page }) => {
   await openPlayPage(page);
   const pick = page.locator('#quick-pick button');
-  await expect(pick).toHaveCount(3);
+  await expect(pick).toHaveCount(STYLE_PRESETS.length);
   await expect(page.locator('#quick-pick [data-style="funk"]')).toHaveAttribute('aria-pressed', 'true');
   await page.locator('#quick-pick').getByRole('button', { name: /Träumerisch/ }).click();
   // Klang-Schlagworte des Stils (drumSound, bassSound, chordSound, padSound) gehören seit der Klangformung zur Vorlage

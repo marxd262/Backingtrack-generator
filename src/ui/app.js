@@ -14,7 +14,11 @@ import { initTimbrePanel } from './timbre-panel.js';
 import { initViews } from './blocks.js';
 
 // Dekoratives 16tel-Bild je Stil, 1 = Schlag
-const RHYTHMS = { funk: '1001001010100110', psych: '1010101010101010', dreamy: '1000000010000000' };
+const RHYTHMS = {
+  funk: '1001001010100110', psych: '1010101010101010', dreamy: '1000000010000000',
+  blues: '1000100110001001', rock: '1000001010100000', hardrock: '1010001010100010',
+  reggae: '0000100000001000', country: '1000001010000010', poppunk: '1011101110111011',
+};
 
 // --- Wiedergabe: ein AudioContext für alle Starts, nie zwei Player gleichzeitig ---
 let ctx = null;

@@ -31,6 +31,37 @@ export const STYLE_PRESETS = [
     tags: { drums: ['halftime', 'loose'], bass: ['calm'], synths: ['widePad', 'warm'], rhythm: [], mood: ['dreamy'], development: ['buildsSlowly'],
       drumSound: ['roomy'], bassSound: ['round'], chordSound: ['mellow'], padSound: ['airy', 'swelling'] },
   },
+  // Gitarren-Stile (siehe docs/superpowers/specs/2026-11-09-guitar-styles-design.md); nur aus vorhandenen Schlagworten gebaut
+  {
+    id: 'blues', bpm: 88,
+    tags: { drums: ['loose'], bass: ['bouncy'], synths: ['warm'], rhythm: ['swing'], mood: [], development: ['fullFromStart'],
+      drumSound: ['roomy'], bassSound: ['round'], chordSound: ['mellow'], padSound: [] },
+  },
+  {
+    id: 'rock', bpm: 124,
+    tags: { drums: ['driving', 'heavy'], bass: ['gritty'], synths: [], rhythm: ['straight'], mood: ['bright'], development: ['fullFromStart'],
+      drumSound: ['punchy', 'snappy'], bassSound: ['resonant'], chordSound: ['biting'], padSound: ['thick'] },
+  },
+  {
+    id: 'hardrock', bpm: 148,
+    tags: { drums: ['driving', 'heavy'], bass: ['deepFat', 'gritty'], synths: ['deepSynths'], rhythm: ['straight'], mood: ['dark'], development: ['fullFromStart'],
+      drumSound: ['boomy'], bassSound: ['fuzz'], chordSound: ['biting', 'ringing'], padSound: [] },
+  },
+  {
+    id: 'reggae', bpm: 76,
+    tags: { drums: ['halftime', 'loose'], bass: ['calm', 'deepFat'], synths: ['warm'], rhythm: ['syncopated'], mood: [], development: ['fullFromStart'],
+      drumSound: ['roomy'], bassSound: ['sub', 'round'], chordSound: ['biting'], padSound: [] },
+  },
+  {
+    id: 'country', bpm: 112,
+    tags: { drums: ['dry'], bass: ['bouncy'], synths: [], rhythm: ['straight'], mood: ['bright'], development: ['fullFromStart'],
+      drumSound: ['crisp'], bassSound: ['plucky'], chordSound: ['ringing'], padSound: ['airy'] },
+  },
+  {
+    id: 'poppunk', bpm: 172,
+    tags: { drums: ['driving', 'heavy'], bass: ['bouncy'], synths: [], rhythm: ['straight'], mood: ['bright'], development: ['fullFromStart'],
+      drumSound: ['crisp', 'snappy'], bassSound: ['plucky'], chordSound: ['biting'], padSound: ['thick'] },
+  },
 ];
 
 const DEFAULTS = {

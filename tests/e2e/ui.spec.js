@@ -2,6 +2,7 @@
 import { test, expect } from '@playwright/test';
 import { allowedChords } from '../../src/core/music.js';
 import { progressionFor } from '../../src/core/progressions.js';
+import { STYLE_PRESETS } from '../../src/core/tags.js';
 
 const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view)\.[A-Za-z.]+$/;
 const SYMBOLS = { maj: '', min: 'm', dim: 'dim' };
@@ -120,7 +121,7 @@ test('Stil-Popover: Träumerisch ändert Satz und Tempo, schließt und gibt den 
   const pop = page.locator('#style-pop');
   await expect(pop).toBeVisible();
   await expect(button).toHaveAttribute('aria-expanded', 'true');
-  await expect(pop.getByRole('button')).toHaveCount(3);
+  await expect(pop.getByRole('button')).toHaveCount(STYLE_PRESETS.length);
   await pop.getByRole('button', { name: /Träumerisch/ }).click();
   await expect(pop).toBeHidden();
   await expect(button).toBeFocused();
@@ -431,4 +432,31 @@ test('360 px breit: kein waagerechtes Scrollen, Popover im Bild, Knöpfe mindest
     expect(await small(), id).toEqual([]);
     await page.keyboard.press('Escape');
   }
+});
+
+test('Stil-Karten: jeder Stil hat Name, Tempo, Hinweis und ein 16er-Rhythmusbild, ohne rohe Schlüsselnamen', async ({ page }) => {
+  await page.locator('#style-btn').click();
+  const cards = page.locator('#style-cards .card');
+  await expect(cards).toHaveCount(STYLE_PRESETS.length);
+  for (const { id, bpm } of STYLE_PRESETS) {
+    const card = page.locator(`#style-cards [data-style="${id}"]`);
+    await expect(card.locator('.card-name'), id).toHaveText(/\S/);
+    await expect(card.locator('.card-hint'), id).toHaveText(/\S/);
+    await expect(card.locator('.card-bpm'), id).toContainText(String(bpm));
+    await expect(card.locator('.rhythm i'), id).toHaveCount(16);
+    for (const part of ['.card-name', '.card-hint']) expect(RAW_KEY.test((await card.locator(part).textContent()).trim()), `${id} ${part}`).toBe(false);
+  }
+});
+
+test('jeder neue Stil: Auswahl setzt Tempo und Namen, Los startet ohne Fehler', async ({ page }) => {
+  test.setTimeout(60_000);
+  for (const { id, bpm } of STYLE_PRESETS.filter((p) => !['funk', 'psych', 'dreamy'].includes(p.id))) {
+    await page.locator('#style-btn').click();
+    await page.locator(`#style-cards [data-style="${id}"]`).click();
+    await expect(page.locator(`#style-cards [data-style="${id}"]`)).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('#tempo-btn'), id).toContainText(String(bpm));
+  }
+  await go(page).click();
+  await expect(page.locator('#play')).toBeVisible();
+  await expect(page.locator('#play-go')).toHaveText('Stopp');
 });

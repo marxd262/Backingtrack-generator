@@ -100,7 +100,10 @@ test('INERT_TAGS: genau die Schlagworte ohne Wirkung, alle gültig', () => {
 });
 
 test('Presets: bpm und nur bekannte Schlagworte', () => {
-  assert.deepEqual(STYLE_PRESETS.map((p) => [p.id, p.bpm]), [['funk', 100], ['psych', 112], ['dreamy', 80]]);
+  assert.deepEqual(STYLE_PRESETS.map((p) => [p.id, p.bpm]), [
+    ['funk', 100], ['psych', 112], ['dreamy', 80],
+    ['blues', 88], ['rock', 124], ['hardrock', 148], ['reggae', 76], ['country', 112], ['poppunk', 172],
+  ]);
   const known = Object.fromEntries(TAG_CATEGORIES.map((c) => [c.id, c.tags]));
   for (const preset of STYLE_PRESETS) {
     for (const [cat, list] of Object.entries(preset.tags)) {
@@ -118,6 +121,32 @@ test('Presets: alle vier Klang-Kategorien vorhanden, Stil-Klang wie festgelegt',
   assert.deepEqual(sound('funk'), { drumSound: ['punchy', 'snappy'], bassSound: ['plucky'], chordSound: ['biting'], padSound: [] });
   assert.deepEqual(sound('psych'), { drumSound: [], bassSound: ['fuzz'], chordSound: ['chorused'], padSound: ['swelling', 'glassy'] });
   assert.deepEqual(sound('dreamy'), { drumSound: ['roomy'], bassSound: ['round'], chordSound: ['mellow'], padSound: ['airy', 'swelling'] });
+});
+
+test('Gitarren-Stile: Charakter-Eckwerte der aufgelösten Parameter und des Klangs', () => {
+  const resolved = (id) => {
+    const p = STYLE_PRESETS.find((s) => s.id === id);
+    return { params: resolveTags(p.tags, createRng(1)), timbre: resolveTimbre(p.tags), bpm: p.bpm, tags: p.tags };
+  };
+  const blues = resolved('blues');
+  assert.ok(blues.params.swing >= 0.4 && blues.params.drive <= 0.5, 'Blues: Swing, lockerer Beat');
+  for (const id of ['rock', 'hardrock', 'poppunk']) {
+    const r = resolved(id);
+    assert.equal(r.params.swing, 0, `${id}: gerade`);
+    assert.ok(r.params.drive >= 0.7, `${id}: treibend`);
+  }
+  assert.ok(resolved('hardrock').params.drive >= 0.9 && resolved('hardrock').params.bassLow >= 0.7, 'Hardrock: schwer und tief');
+  assert.ok(resolved('hardrock').timbre.bass.fuzz >= 0.5 && resolved('hardrock').timbre.master.brightness < 0.5, 'Hardrock: verzerrt und dunkel');
+  assert.ok(resolved('rock').timbre.master.brightness > 0.5 && resolved('rock').timbre.chords.brightness > 0.5, 'Rock: hell und bissig');
+  const reggae = resolved('reggae');
+  assert.ok(reggae.params.drive <= 0.4 && reggae.params.syncopation >= 0.7, 'Reggae: Halbzeit, synkopiert');
+  assert.ok(reggae.timbre.bass.sub >= 0.5 && reggae.timbre.chords.length < 0.5, 'Reggae: Sub-Bass, kurze Akkorde');
+  const country = resolved('country');
+  assert.ok(country.params.swing === 0 && country.params.bassMovement >= 0.7 && country.timbre.bass.pluck > 0.5, 'Country: gerade, wechselnder zupfender Bass');
+  assert.ok(resolved('poppunk').bpm >= 150, 'Pop-Punk: schnell');
+  for (const id of ['blues', 'rock', 'hardrock', 'reggae', 'country', 'poppunk']) {
+    assert.deepEqual(resolved(id).tags.development, ['fullFromStart'], `${id}: setzt sofort ein`);
+  }
 });
 
 test('Presets: Klang-Schlagworte ändern die Muster-Parameter nicht', () => {
