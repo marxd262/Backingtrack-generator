@@ -1,7 +1,7 @@
 // Klangregler der Spielseite (echte Seite /ui/index.html): ein Regler je Klangfeld, live ohne Neustart.
 import { test, expect } from '@playwright/test';
 import { STYLE_PRESETS } from '../../src/core/tags.js';
-import { DEFAULT_TIMBRE, resolveTimbre } from '../../src/core/timbre.js';
+import { DEFAULT_TIMBRE, resolveTimbre, resolveTrackTimbre } from '../../src/core/timbre.js';
 import { masterParams } from '../../src/audio/voice-params.js';
 
 const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view|group|timbre)\.[A-Za-z.]+$/;
@@ -89,8 +89,9 @@ test('26 Regler in 5 Gruppen, alle beschriftet ohne rohen Schlüsselnamen', asyn
   for (const text of summaries) expect(RAW_KEY.test(text.trim()), text).toBe(false);
 });
 
-test('Startwerte der Regler kommen aus den Schlagworten der Vorlage', async ({ page }) => {
-  const timbre = resolveTimbre(funk.tags);
+test('Startwerte der Regler kommen aus den Schlagworten der Vorlage und dem leichten Klang-Drift der Variante', async ({ page }) => {
+  const seed = Number(await page.locator('#variant').inputValue());
+  const timbre = resolveTrackTimbre({ tags: funk.tags, seed, variety: true });
   for (const [g, f] of FIELDS) {
     await expect(slider(page, g, f), `${g}.${f}`).toHaveValue(percent(timbre[g][f]));
   }
