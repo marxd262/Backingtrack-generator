@@ -1,4 +1,4 @@
-// Merkt sich Seitenleisten, Ansichten und Beschriftung; der Speicher wird übergeben (keine Browser-Globals).
+// Merkt sich Seitenleisten, ihre Gruppen, Ansichten und Beschriftung; der Speicher wird übergeben (keine Browser-Globals).
 // Die ausblendbaren Ansichten kommen aus der Registry (views.js); nicht ausblendbare und unbekannte werden verworfen.
 import { VIEWS } from './views.js';
 
@@ -7,6 +7,11 @@ export const LAYOUT_KEY = 'backingtrack.layout';
 export const DEFAULT_LAYOUT = Object.freeze({
   sidebars: Object.freeze({ left: false, right: false }),
   views: Object.freeze(Object.fromEntries(VIEWS.filter((v) => v.hideable).map((v) => [v.id, true]))),
+  // einklappbare Gruppen der Seitenleisten (true = offen); die Klang-Gruppen (Schlagzeug bis Gesamt) starten zu
+  groups: Object.freeze({
+    style: true, tempo: true, drums: false, bass: false, chords: false, pad: false, master: false,
+    key: true, progression: true, views: true,
+  }),
   labels: 'names',
 });
 
@@ -27,6 +32,7 @@ const sanitize = (raw) => {
   return {
     sidebars: pickBooleans(src.sidebars, DEFAULT_LAYOUT.sidebars),
     views: pickBooleans(src.views, DEFAULT_LAYOUT.views),
+    groups: pickBooleans(src.groups, DEFAULT_LAYOUT.groups),
     labels: src.labels === 'names' || src.labels === 'degrees' ? src.labels : DEFAULT_LAYOUT.labels,
   };
 };

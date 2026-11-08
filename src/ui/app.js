@@ -8,6 +8,7 @@ import { initMixer } from './mixer.js';
 import { stepVariant } from './variant.js';
 import { buildKeyScale } from './key-scale.js';
 import { initSidebar } from './sidebar.js';
+import { initGroups } from './groups.js';
 import { initViews } from './blocks.js';
 
 // Dekoratives 16tel-Bild je Stil, 1 = Schlag
@@ -196,6 +197,16 @@ const sidebars = ['left', 'right'].map((side) => initSidebar({
     saveLayout(layoutStorage, state.layout);
   },
 }));
+
+// Gruppen in den Leisten: offen/zu steht ebenfalls im gemerkten Layout
+const groupBinding = {
+  get: (id) => state.layout.groups[id],
+  set: (id, open) => {
+    state.layout = { ...state.layout, groups: { ...state.layout.groups, [id]: open } };
+    saveLayout(layoutStorage, state.layout);
+  },
+};
+initGroups(document, groupBinding);
 
 // Ansichten: Schalter in der rechten Leiste, Zustand im gemerkten Layout
 const views = initViews($('views'), {

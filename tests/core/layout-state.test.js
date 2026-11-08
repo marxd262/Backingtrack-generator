@@ -3,6 +3,12 @@ import assert from 'node:assert/strict';
 import { VIEWS } from '../../src/ui/views.js';
 import { LAYOUT_KEY, DEFAULT_LAYOUT, loadLayout, saveLayout } from '../../src/ui/layout-state.js';
 
+// Standardzustand der einklappbaren Gruppen (Seitenleisten); Klang-Gruppen starten zu
+const GROUPS = {
+  style: true, tempo: true, drums: false, bass: false, chords: false, pad: false, master: false,
+  key: true, progression: true, views: true,
+};
+
 // Minimaler Speicher mit fester Rückgabe für getItem
 const storageWith = (raw) => ({ getItem: () => raw });
 const throwing = {
@@ -15,9 +21,11 @@ test('Schlüssel und Standardwerte', () => {
   assert.deepEqual(DEFAULT_LAYOUT, {
     sidebars: { left: false, right: false },
     views: { fretboard: true, wheel: true },
+    groups: GROUPS,
     labels: 'names',
   });
   assert.ok(Object.isFrozen(DEFAULT_LAYOUT));
+  assert.ok(Object.isFrozen(DEFAULT_LAYOUT.groups));
   assert.ok(Object.isFrozen(DEFAULT_LAYOUT.sidebars));
   assert.ok(Object.isFrozen(DEFAULT_LAYOUT.views));
 });
@@ -38,6 +46,7 @@ test('Rundreise saveLayout -> loadLayout', () => {
   const layout = {
     sidebars: { left: true, right: false },
     views: { fretboard: false, wheel: true },
+    groups: { ...GROUPS, style: false, drums: true },
     labels: 'degrees',
   };
   saveLayout(storage, layout);
@@ -57,6 +66,7 @@ test('saveLayout schreibt nur bekannte, gültige Felder', () => {
   assert.deepEqual(JSON.parse(map.get(LAYOUT_KEY)), {
     sidebars: { left: true, right: false },
     views: { fretboard: true, wheel: true },
+    groups: GROUPS,
     labels: 'names',
   });
 });
@@ -81,9 +91,24 @@ test('Teilangaben werden aufgefüllt, unbekannte Schlüssel verworfen', () => {
   assert.deepEqual(l, {
     sidebars: { left: false, right: false },
     views: { fretboard: false, wheel: true },
+    groups: GROUPS,
     labels: 'names',
   });
   assert.ok(!('lanes' in l.views));
+});
+
+test('Gruppen: unbekannte Schlüssel fallen weg, Nicht-Boolesches fällt auf den Standard', () => {
+  const l = loadLayout(storageWith('{"groups":{"style":false,"tempo":"x","nope":true,"bass":1}}'));
+  assert.deepEqual(l.groups, { ...GROUPS, style: false });
+  assert.ok(!('nope' in l.groups));
+  assert.deepEqual(loadLayout(storageWith('{"groups":5}')).groups, GROUPS);
+});
+
+test('Gruppen: Rundreise merkt offen und zu', () => {
+  const map = new Map();
+  const storage = { getItem: (k) => map.get(k) ?? null, setItem: (k, v) => map.set(k, v) };
+  saveLayout(storage, { ...DEFAULT_LAYOUT, groups: { ...GROUPS, style: false, bass: true } });
+  assert.deepEqual(loadLayout(storage).groups, { ...GROUPS, style: false, bass: true });
 });
 
 test('fehlender oder werfender Speicher wirft nie', () => {

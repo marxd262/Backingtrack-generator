@@ -133,19 +133,25 @@
           <h3 class="side-title" id="side-left-title" tabindex="-1" data-i18n="ui.sidebarSound"></h3>
           <button type="button" class="chip side-close" data-i18n="ui.close"></button>
         </div>
-        <h4 class="label" id="quick-title" data-i18n="ui.quickPick"></h4>
-        <div class="chips" id="quick-pick" role="group" aria-labelledby="quick-title"></div>
-        <div class="settings">
-          <label class="label" for="tuning-tempo" data-i18n="ui.tempo"></label>
-          <div class="tempo-row">
-            <input type="range" id="tuning-tempo" min="40" max="200" step="1">
-            <span><output id="tuning-tempo-out" for="tuning-tempo"></output> <span data-i18n="ui.bpm"></span></span>
+        <details class="group" data-group="style">
+          <summary data-i18n="group.style"></summary>
+          <h4 class="label" id="quick-title" data-i18n="ui.quickPick"></h4>
+          <div class="chips" id="quick-pick" role="group" aria-labelledby="quick-title"></div>
+          <h4 class="label" data-i18n="ui.tags"></h4>
+          <div id="tags"></div>
+        </details>
+        <details class="group" data-group="tempo">
+          <summary data-i18n="group.tempo"></summary>
+          <div class="settings">
+            <label class="label" for="tuning-tempo" data-i18n="ui.tempo"></label>
+            <div class="tempo-row">
+              <input type="range" id="tuning-tempo" min="40" max="200" step="1">
+              <span><output id="tuning-tempo-out" for="tuning-tempo"></output> <span data-i18n="ui.bpm"></span></span>
+            </div>
+            <label class="label" for="length" data-i18n="ui.length"></label>
+            <select id="length"></select>
           </div>
-          <label class="label" for="length" data-i18n="ui.length"></label>
-          <select id="length"></select>
-        </div>
-        <h4 class="label" data-i18n="ui.tags"></h4>
-        <div id="tags"></div>
+        </details>
       </aside>
 
       <aside class="side" id="side-right" aria-labelledby="side-right-title" hidden>
@@ -153,17 +159,24 @@
           <h3 class="side-title" id="side-right-title" tabindex="-1" data-i18n="ui.sidebarChords"></h3>
           <button type="button" class="chip side-close" data-i18n="ui.close"></button>
         </div>
-        <h4 class="label" id="side-key-label" data-i18n="ui.key"></h4>
-        <div class="chips" role="group" aria-labelledby="side-key-label" id="side-key-chips"></div>
-        <h4 class="label" id="side-scale-label" data-i18n="ui.scale"></h4>
-        <div class="chips" role="group" aria-labelledby="side-scale-label" id="side-scale-chips"></div>
-        <h4 class="label" id="progression-title" data-i18n="ui.progression"></h4>
-        <div class="chips" id="progression" role="group" aria-labelledby="progression-title"></div>
-        <p class="message" id="tuning-message" aria-live="polite"></p>
-        <h4 class="label" id="add-title" data-i18n="ui.addChord"></h4>
-        <div class="chips" id="add-chords" role="group" aria-labelledby="add-title"></div>
-        <h4 class="label" id="views-title" data-i18n="ui.views"></h4>
-        <div id="views" role="group" aria-labelledby="views-title"></div>
+        <details class="group" data-group="key">
+          <summary data-i18n="group.key"></summary>
+          <h4 class="label" id="side-key-label" data-i18n="ui.key"></h4>
+          <div class="chips" role="group" aria-labelledby="side-key-label" id="side-key-chips"></div>
+          <h4 class="label" id="side-scale-label" data-i18n="ui.scale"></h4>
+          <div class="chips" role="group" aria-labelledby="side-scale-label" id="side-scale-chips"></div>
+        </details>
+        <details class="group" data-group="progression">
+          <summary><h4 class="label" id="progression-title" data-i18n="ui.progression"></h4></summary>
+          <div class="chips" id="progression" role="group" aria-labelledby="progression-title"></div>
+          <p class="message" id="tuning-message" aria-live="polite"></p>
+          <h4 class="label" id="add-title" data-i18n="ui.addChord"></h4>
+          <div class="chips" id="add-chords" role="group" aria-labelledby="add-title"></div>
+        </details>
+        <details class="group" data-group="views">
+          <summary><h4 class="label" id="views-title" data-i18n="ui.views"></h4></summary>
+          <div id="views" role="group" aria-labelledby="views-title"></div>
+        </details>
       </aside>
       <!-- schmal hinter der offenen Schublade: dunkelt die (inerte) Seite ab, nur Optik, ohne Klick-Verhalten -->
       <div class="drawer-backdrop" aria-hidden="true"></div>
