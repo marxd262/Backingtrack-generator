@@ -38,6 +38,7 @@ import {
 | `meter` | nein | `[4, 4]` | im Format vorhanden, wird aber derzeit ignoriert: das Raster ergibt sich aus `beats`; angeboten wird nur 4/4 |
 | `tags` | nein | `{}` | `{Kategorie: [Schlagwort-IDs]}` (Objekt, je Kategorie ein Array), nur Kategorien und IDs aus `TAG_CATEGORIES`, sonst `badTags`; `null` gilt wie fehlend |
 | `timbre` | nein | `{}` | Klangregler: `{Gruppe: {Feld: Zahl 0 bis 1}}` mit den Gruppen und Feldern von `DEFAULT_TIMBRE` (`src/core/timbre.js`: `drums`, `bass`, `chords`, `pad`, `master`). Nur die gesetzten Felder zählen; sie liegen **über** dem, was die Schlagworte ergeben, und schlagen sie. Werte außerhalb von 0 bis 1 werden begrenzt; unbekannte Gruppen oder Felder, Nicht-Zahlen und ein Nicht-Objekt werden ohne Fehler ignoriert |
+| `variety` | nein | `false` | `true` lässt den Seed (die Variante) mehr verändern: er streut Synkopen, Bass-Bewegung und Swing leicht innerhalb der Schlagwort-Werte, schaltet zusätzliche Muster frei und verschiebt sieben Klangfelder um höchstens ±0,08 (unter `timbre`, das gewinnt). Ohne den Schalter ist der Ereignisstrom bitgleich wie ohne dieses Feld; die eigene Oberfläche setzt ihn auf `true`. Das Klangmodell mit Drift liefert `resolveTrackTimbre(track)`, es braucht dafür den `seed` im Track |
 | `layers` | nein | alle `true` | `drums`, `bass`, `chords`, `pad`; `false` lässt die Schicht aus dem Strom weg |
 | `seed` | nein | `1` | siehe Seed-Regel |
 

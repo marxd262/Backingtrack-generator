@@ -57,6 +57,7 @@ export const state = {
     timbre: {}, // Klangregler: nur die vom Nutzer gesetzten Felder { gruppe: { feld: 0..1 } }, über den Schlagworten
     layers: { drums: true, bass: true, chords: true, pad: true },
     seed: rollVariant(), // Variantennummer
+    variety: true, // reichere Varianten: der Seed streut Muster-Werte und Klang stärker (siehe docs/superpowers/specs/2026-11-09-variant-richness-design.md)
     length: 96,
   },
   scale: 'minorPentatonic',

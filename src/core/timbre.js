@@ -1,5 +1,6 @@
 // Klangmodell: Schlagworte -> Klangwerte je Instrument (alle in [0,1]). Reine Logik, kein Audio/DOM, kein Zufall.
 import { collectTags } from './tags.js';
+import { createRng } from './rng.js';
 import { TIMBRE_EFFECTS } from './timbre-effects.js';
 
 const deepFreeze = (o) => {
@@ -49,12 +50,24 @@ export function resolveTimbre(tags) {
   return timbre;
 }
 
+// Felder, die der Seed mit dem Track-Schalter `variety` leicht verschiebt (höchstens ±DRIFT_SPAN)
+const DRIFT_FIELDS = ['drums.snareTone', 'drums.hatBright', 'bass.cutoff', 'chords.brightness', 'pad.cutoff', 'pad.lfoSpeed', 'master.echo'];
+const DRIFT_SPAN = 0.08;
+
 /**
- * Klangmodell eines Tracks: die Schlagworte (resolveTimbre), darüber je Feld die Überschreibungen aus `track.timbre`.
+ * Klangmodell eines Tracks: die Schlagworte (resolveTimbre), mit `variety` und endlichem `seed` ein kleiner Klang-Drift,
+ * darüber je Feld die Überschreibungen aus `track.timbre` (die Regler des Nutzers gewinnen immer).
  * Nur endliche Zahlen zählen (auf [0,1] begrenzt); Unbekanntes und Ungültiges wird ignoriert. Neue Kopie.
  */
 export function resolveTrackTimbre(track) {
   const timbre = resolveTimbre(track?.tags);
+  if (track?.variety === true && Number.isFinite(track.seed)) {
+    const rng = createRng(track.seed).fork('timbre-drift');
+    for (const path of DRIFT_FIELDS) {
+      const [group, field] = path.split('.');
+      timbre[group][field] = clamp01(timbre[group][field] + (rng.next() * 2 - 1) * DRIFT_SPAN);
+    }
+  }
   const over = track?.timbre;
   const isRecord = (x) => typeof x === 'object' && x !== null && !Array.isArray(x);
   if (!isRecord(over)) return timbre;

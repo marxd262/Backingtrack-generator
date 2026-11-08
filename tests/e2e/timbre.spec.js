@@ -223,3 +223,26 @@ test('Zurücksetzen per Tastatur behält den Fokus in der Gruppe (nicht auf body
   expect(await page.evaluate(() => document.activeElement.tagName)).not.toBe('BODY');
   expect(await page.evaluate(() => document.activeElement.closest('details')?.dataset.group)).toBe('bass');
 });
+
+test('Variantenwechsel verschiebt den Klang leicht (Regler zeigen den hörbaren Wert), eigene Regler bleiben', async ({ page }) => {
+  await openGroup(page, 'master');
+  const values = new Set();
+  for (let i = 0; i < 12; i++) {
+    values.add(await slider(page, 'master', 'echo').inputValue());
+    await page.locator('#variant-next').click();
+  }
+  expect(values.size, `verschiedene Echo-Werte: ${[...values]}`).toBeGreaterThan(1);
+  // nicht gedriftet: Felder außerhalb der Drift-Liste bleiben gleich
+  const reverb = new Set();
+  for (let i = 0; i < 6; i++) {
+    reverb.add(await slider(page, 'master', 'reverb').inputValue());
+    await page.locator('#variant-next').click();
+  }
+  expect(reverb.size).toBe(1);
+  // ein eigener Regler gewinnt über alle Varianten
+  await slider(page, 'master', 'echo').fill('90');
+  for (let i = 0; i < 6; i++) {
+    await page.locator('#variant-next').click();
+    await expect(slider(page, 'master', 'echo')).toHaveValue('90');
+  }
+});

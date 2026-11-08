@@ -115,6 +115,21 @@ export function collectTags(tags) {
   return selected;
 }
 
+/**
+ * Mit dem Track-Schalter `variety`: der Seed streut Synkopen und Bass-Bewegung um höchstens ±0,12 und skaliert den Swing
+ * (Faktor 0,75 bis 1,25, ein gerader Stil bleibt gerade). drive, bassLow, padWidth, arp und buildUp tragen den Stil und bleiben.
+ * Neue Kopie, rng sollte ein eigener Zweig sein (master.fork('drift')), damit sich die Schichten nicht verschieben.
+ */
+export function driftParams(params, rng) {
+  const spread = () => (rng.next() * 2 - 1) * 0.12;
+  return {
+    ...params,
+    swing: clamp01(params.swing * (0.75 + 0.5 * rng.next())),
+    syncopation: clamp01(params.syncopation + spread()),
+    bassMovement: clamp01(params.bassMovement + spread()),
+  };
+}
+
 export function resolveTags(tags, rng) {
   const selected = collectTags(tags);
   for (const [a, b] of OPPOSITES) {

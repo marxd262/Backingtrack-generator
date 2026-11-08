@@ -3,7 +3,7 @@
 import { createRng } from './rng.js';
 import { CHORD_QUALITIES, chordMidi, noteToPc } from './music.js';
 import { checkedTrack, barTimeline, r6 } from './timeline.js';
-import { resolveTags } from './tags.js';
+import { resolveTags, driftParams } from './tags.js';
 import { buildArrangement } from './arrange.js';
 
 /** Schlagzeug-Vokabular (Task 6 ordnet jedem Namen eine Stimme zu); Geisternoten sind `snare` mit vel < 0.3. */
@@ -26,6 +26,14 @@ const DRUMS = [
   { kicks: [[0, 10], [0, 11], [0, 7, 10]], snare: [8], ghosts: [], hat: [0.3, 0, 0.2, 0] }, // Halbzeit
   { kicks: [[0, 8], [0, 8, 10], [0, 6, 8], [0, 8, 11]], snare: [4, 12], ghosts: [7, 9, 15], hat: [0.5, 0, 0.3, 0] },
   { kicks: [[0, 3, 8, 10], [0, 3, 10], [0, 3, 8, 11], [0, 6, 8, 10]], snare: [4, 12], ghosts: [7, 9, 15], hat: [0.6, 0.25, 0.45, 0.25] },
+];
+// Zusätzliche Muster, die erst mit dem Track-Schalter `variety` (params.variety) in die Listen kommen; die bisherigen Einträge bleiben
+// die ersten, ohne den Schalter ändert sich nichts (auch nicht, welche Zufallszahl welches Muster wählt)
+const pool = (base, extra, params) => (params.variety ? [...base, ...extra] : base);
+const EXTRA_KICKS = [[[0, 7], [0, 10, 14]], [[0, 5, 8], [0, 8, 13]], [[0, 3, 6, 10], [0, 3, 8, 14]]];
+const EXTRA_FILLS = [
+  ['snare', 'snare', 'tomHigh', 'tomHigh', 'tomMid', 'tomMid', 'tomLow', 'tomLow'],
+  [null, 'snare', null, 'snare', 'tomHigh', 'tomHigh', 'tomMid', 'tomLow'],
 ];
 const OFFBEAT_KICKS = [3, 6, 7, 11, 14];
 // Fills über 2 Zählzeiten (8 Sechzehntel), Toms absteigend; kürzere Fills nehmen das Ende
@@ -51,7 +59,19 @@ const BASS = [
   ],
 ];
 
+// zusätzliche Bassmuster je bassMovement-Stufe (Zählzeit 1 immer Grundton, Anlauf 'ap' am Taktende, wie die bisherigen)
+const EXTRA_BASS = [
+  [[[0, 'r', 8], [8, 'r', 4], [12, '5', 4]]],
+  [
+    [[0, 'r', 4], [4, '5', 4], [8, 'r', 4], [12, 'o', 2], [14, 'ap', 2]],
+    [[0, 'r', 2], [2, 'r', 2], [4, 'o', 2], [6, 'r', 2], [8, '5', 4], [12, 'b7', 2], [14, 'ap', 2]],
+  ],
+  [[[0, 'r', 2], [2, 'r', 1], [4, '5', 1], [6, 'o', 1], [8, 'r', 2], [11, 'b7', 1], [12, '5', 1], [14, 'o', 1], [15, 'ap', 1]]],
+];
+
 const STABS = [[0, 8], [4, 12], [0, 6, 10], [2, 8, 14]];
+const EXTRA_STABS = [[0, 10], [4, 10], [0, 4, 10]];
+const EXTRA_ARPS = [[0, 2, 1, 2, 3, 2, 1, 2], [0, 1, 0, 2, 0, 3, 2, 1]];
 const OFFBEAT_STABS = [3, 6, 7, 10, 14];
 // Arpeggio-Folgen über [Grundton, Terz, Quinte, Oktave]
 const ARPS = [[0, 1, 2, 3, 2, 1, 2, 3], [0, 2, 1, 3, 0, 2, 1, 3], [3, 2, 1, 0, 1, 2, 3, 2]];
@@ -69,8 +89,10 @@ const note = (b, layer, step, t, midi, vel, dur) =>
   ({ t, bar: b.index, beat: step / 4, type: 'note', layer, midi, vel, dur: r6(Math.min(dur, b.end - t)) });
 
 const drumSection = (params, rng) => {
-  const tier = DRUMS[level(params.drive)];
-  return { tier, kicks: [rng.pick(tier.kicks), rng.pick(tier.kicks)], openHat: rng.next() < 0.5, fill: rng.pick(FILLS) };
+  const step = level(params.drive);
+  const tier = DRUMS[step];
+  const kicks = pool(tier.kicks, EXTRA_KICKS[step], params);
+  return { tier, kicks: [rng.pick(kicks), rng.pick(kicks)], openHat: rng.next() < 0.5, fill: rng.pick(pool(FILLS, EXTRA_FILLS, params)) };
 };
 
 function playDrums(b, v, rng, params, fill) {
@@ -129,7 +151,7 @@ function playBass(b, pattern, rng, params) {
     note(b, 'bass', s, times[k], fold(degree[d]), humanVel(0.95, rng), Math.min(len * b.stepSec, (times[k + 1] ?? b.end) - times[k])));
 }
 
-const chordsSection = (params, rng) => (params.arp ? { arp: rng.pick(ARPS) } : { stabs: rng.pick(STABS) });
+const chordsSection = (params, rng) => (params.arp ? { arp: rng.pick(pool(ARPS, EXTRA_ARPS, params)) } : { stabs: rng.pick(pool(STABS, EXTRA_STABS, params)) });
 
 function playChords(b, v, rng, params) {
   const tones = chordMidi(b.chord, 3);
@@ -162,7 +184,7 @@ function playPad(b, v, rng, params) {
 
 const PLAYERS = {
   drums: { section: drumSection, play: playDrums },
-  bass: { section: (params, rng) => rng.pick(BASS[level(params.bassMovement)]), play: playBass },
+  bass: { section: (params, rng) => { const step = level(params.bassMovement); return rng.pick(pool(BASS[step], EXTRA_BASS[step], params)); }, play: playBass },
   chords: { section: chordsSection, play: playChords },
   pad: { section: () => null, play: playPad },
 };
@@ -173,7 +195,9 @@ const RANK = { chord: 0, marker: 1 };
 export function buildEvents(input) {
   const track = checkedTrack(input);
   const master = createRng(track.seed);
-  const params = resolveTags(track.tags, master.fork('tags'));
+  let params = resolveTags(track.tags, master.fork('tags'));
+  // variety: der Seed streut die Schlagwort-Werte und schaltet zusätzliche Muster frei (der eigene Zweig 'drift' verschiebt nichts)
+  if (track.variety === true) params = { ...driftParams(params, master.fork('drift')), variety: true };
   const { sections } = buildArrangement(track, params, master.fork('arrangement'));
   const bars = barTimeline(track);
 
