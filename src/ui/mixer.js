@@ -1,4 +1,4 @@
-// Mischpult der Spielseite: ein Regler je Schicht plus Gesamt (0..100 %), je Schicht eine Taste für "an"/stumm.
+// Mischpult der Spielseite: ein Regler je Schicht plus Gesamt (0..100 %), je Schicht eine Stummtaste.
 // Die Taste ist derselbe Zustand wie der Schichtknopf über dem Verlauf (state.track.layers, toggleLayer aus app.js).
 import { t } from '../index.js';
 import { $, LAYERS, state, layoutStorage, pressed, setText, setAttr } from './state.js';
@@ -24,7 +24,7 @@ export function initMixer({ render, player, toggleLayer }) {
     let mute = null;
     if (name !== 'master') {
       mute = Object.assign(document.createElement('button'), { type: 'button', className: 'chip' });
-      mute.dataset.i18n = 'ui.mixOn';
+      mute.dataset.i18n = 'ui.mixMute';
       mute.addEventListener('click', () => { toggleLayer(name); render(); });
       row.append(mute);
     }
@@ -41,8 +41,8 @@ export function initMixer({ render, player, toggleLayer }) {
       setText(out, shown);
       setAttr(input, 'aria-valuetext', shown);
       if (mute) {
-        pressed(mute, state.track.layers[name]);
-        setAttr(mute, 'aria-label', t('ui.mixLayerOn', { layer: t(`layer.${name}`) }));
+        pressed(mute, !state.track.layers[name]); // gedrückt = stumm (umgekehrt zum Schichtknopf)
+        setAttr(mute, 'aria-label', t('ui.mixLayerMute', { layer: t(`layer.${name}`) }));
       }
     }
   };

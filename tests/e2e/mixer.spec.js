@@ -107,7 +107,7 @@ test('Mischpult-Knopf öffnet das Popover: 5 Regler, 4 Tasten, Namen deutsch und
     await expect(slider(page, name)).toHaveAttribute('min', '0');
     await expect(slider(page, name)).toHaveAttribute('max', '100');
   }
-  await expect(pop(page).getByRole('button', { name: 'Bass an', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(pop(page).getByRole('button', { name: 'Bass stumm', exact: true })).toHaveAttribute('aria-pressed', 'false');
   await expect(page.locator('#mixer output')).toHaveText(['100 %', '100 %', '100 %', '100 %', '100 %']);
 
   // Fokus beim Öffnen im Popover, Pfeiltasten ändern den Wert, Escape schließt und gibt den Fokus an den Knopf zurück
@@ -125,7 +125,7 @@ test('Mischpult-Knopf öffnet das Popover: 5 Regler, 4 Tasten, Namen deutsch und
   for (const [label, value] of [['Overall', '99'], ['Drums', '100'], ['Bass', '100'], ['Chords', '100'], ['Pad', '100']]) {
     await expect(pop(page).getByRole('slider', { name: label, exact: true })).toHaveValue(value);
   }
-  await expect(pop(page).getByRole('button', { name: 'Drums on', exact: true })).toBeVisible();
+  await expect(pop(page).getByRole('button', { name: 'Drums muted', exact: true })).toBeVisible();
   await expect(page.locator('#mixer .mix-row').first().locator('output')).toHaveText('99%');
   const texts = await page.locator('#mixer, #variant-prev, #variant-next, #variant-random').evaluateAll((els) => els.flatMap((el) => [el.textContent, el.getAttribute('aria-label')]).filter(Boolean));
   for (const text of texts) expect(text).not.toMatch(RAW_KEY);
@@ -157,7 +157,7 @@ test('Stummtaste im Mischpult und Schichtknopf zeigen immer denselben Zustand, i
   await playFast(page);
   const same = async (name, expected) => {
     await expect(laneBtn(page, name), `Schichtknopf ${name}`).toHaveAttribute('aria-pressed', String(expected));
-    await expect(mixMute(page, name), `Taste ${name}`).toHaveAttribute('aria-pressed', String(expected));
+    await expect(mixMute(page, name), `Taste ${name}`).toHaveAttribute('aria-pressed', String(!expected)); // Stummtaste: gedrückt = stumm, also umgekehrt zum Schichtknopf
   };
   for (const name of LAYERS) await same(name, true);
   await mixerBtn(page).click();
@@ -192,7 +192,7 @@ test('Mix überlebt das Neuladen, Stummschaltungen nicht; kaputter Speicher wird
   await expect(slider(page, 'bass')).toHaveValue('40');
   await expect(slider(page, 'master')).toHaveValue('70');
   await expect(slider(page, 'drums')).toHaveValue('100');
-  await expect(mixMute(page, 'chords')).toHaveAttribute('aria-pressed', 'true');
+  await expect(mixMute(page, 'chords')).toHaveAttribute('aria-pressed', 'false');
   // Start: die gespeicherten Pegel werden gleich beim Bau der Instrumente gesetzt (nicht erst per Rampe danach)
   await page.keyboard.press('Escape');
   await page.evaluate(() => { window.__assigned.length = 0; window.__targets.length = 0; });

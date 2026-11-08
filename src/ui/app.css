@@ -291,8 +291,9 @@ main {
 #mixer-btn { anchor-name: --mixer; }
 #mixer-pop { position-anchor: --mixer; position-area: block-end span-inline-start; width: min(26rem, calc(100vw - 32px)); }
 .mixer { display: grid; gap: 4px; }
-.mix-row { display: grid; grid-template-columns: 6.5rem 1fr 5.5ch auto; align-items: center; gap: 8px; min-height: var(--target); }
+.mix-row { display: grid; grid-template-columns: 6rem 1fr 5.5ch auto; align-items: center; gap: 8px; min-height: var(--target); }
 .mix-row:first-child { margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--ink-soft); }
+.mix-row .chip { padding: 0 8px; } /* schmal: "Stumm" soll dem Regler nicht die Breite nehmen */
 .mix-row input { width: 100%; min-width: 0; height: var(--target); margin: 0; accent-color: var(--ink); }
 .mix-row output { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 
