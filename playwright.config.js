@@ -8,7 +8,7 @@ export default defineConfig({
   // Offline-Renders lasten die CPU aus und verzögern Timer: Echtzeit-Tests laufen erst danach auf ruhiger Maschine.
   // Eine einzelne Datei ohne die Offline-Tests davor: npx playwright test tests/e2e/play.spec.js --no-deps
   projects: [
-    { name: 'offline', testMatch: /(levels|sound)\.spec\.js$/ },
-    { name: 'realtime', testIgnore: /(levels|sound)\.spec\.js$/, dependencies: ['offline'] },
+    { name: 'offline', testMatch: /(levels|sound|mix)\.spec\.js$/ },
+    { name: 'realtime', testIgnore: /(levels|sound|mix)\.spec\.js$/, dependencies: ['offline'] },
   ],
 });

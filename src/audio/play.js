@@ -4,6 +4,7 @@ import { buildEvents } from '../core/events.js';
 import { resolveTimbre } from '../core/timbre.js';
 import { normalizeTrack } from '../core/track.js';
 import { createInstruments as synthInstruments } from './synth.js';
+import { sliderGain } from './mix.js';
 
 const TICK_MS = 25;
 const LOOKAHEAD = 0.1;
@@ -16,12 +17,15 @@ const FADE = 0.05;
  * Ereignisse an die Rückrufe tragen `bar` und `t` (Liedzeit beim Originaltempo) über alle Durchläufe.
  * startBar (ganze Zahl 0..length-1, Standard 0): beginnt mit diesem Takt; frühere Ereignisse entfallen, `bar` und `t` zählen ab
  * dort wie beim Durchspielen weiter, der angefangene Durchlauf zählt als erster. startPerf ist der Beginn des ersten gespielten Takts.
+ * levels ({drums, bass, chords, pad}, je 0..1, fehlend 1) und master (0..1) sind die Reglerstellungen des Mischpults von Beginn an;
+ * ungültig wirft RangeError (unbekannte Schicht Error) noch vor dem ersten Ton.
  */
-export function play(ctx, trackInput, { loops = 1, startBar = 0, onEvent, onBar, onEnd, createInstruments = synthInstruments } = {}) {
+export function play(ctx, trackInput, { loops = 1, startBar = 0, levels, master, onEvent, onBar, onEnd, createInstruments = synthInstruments } = {}) {
   const events = buildEvents(trackInput); // wirft bei ungültigem Track, bevor ein Knoten entsteht
   if (!(loops === Infinity || (Number.isInteger(loops) && loops >= 1))) {
     throw new RangeError(`loops must be an integer >= 1 or Infinity, got ${loops}`);
   }
+  for (const v of [master ?? 1, ...Object.values(levels ?? {})]) sliderGain(v); // wirft RangeError, bevor ein Knoten entsteht
   const track = normalizeTrack(trackInput);
   const bpm = track.bpm;
   const loopBars = track.length;
@@ -35,7 +39,7 @@ export function play(ctx, trackInput, { loops = 1, startBar = 0, onEvent, onBar,
   }
 
   // Schlagworte sind durch buildEvents geprüft, resolveTimbre wirft hier nicht
-  const instruments = createInstruments(ctx, { bpm, timbre: resolveTimbre(track.tags) });
+  const instruments = createInstruments(ctx, { bpm, timbre: resolveTimbre(track.tags), levels, master });
   for (const e of events) {
     if (e.layer && !Object.hasOwn(instruments.layers, e.layer)) throw new Error(`Instruments lack layer: ${e.layer}`);
   }
@@ -131,6 +135,16 @@ export function play(ctx, trackInput, { loops = 1, startBar = 0, onEvent, onBar,
     setLayer(name, on) {
       if (!Object.hasOwn(instruments.layers, name)) throw new Error(`Unknown layer: ${name}`);
       instruments.layers[name].setMuted(!on);
+    },
+    // Reglerstellung 0..1 (Quadrat, 1 = unverändert); wirkt auf die Schicht samt Echo und Hall. Ungültig: RangeError, unbekannter Name: Error.
+    setLevel(name, value) {
+      if (!Object.hasOwn(instruments.layers, name)) throw new Error(`Unknown layer: ${name}`);
+      sliderGain(value);
+      instruments.setLevel?.(name, value); // optional wie setTempo
+    },
+    setMaster(value) {
+      sliderGain(value);
+      instruments.setMaster?.(value);
     },
     setTempo(newBpm) {
       if (!(Number.isFinite(newBpm) && newBpm >= 20 && newBpm <= 400)) throw new RangeError(`bpm must be in [20, 400], got ${newBpm}`);

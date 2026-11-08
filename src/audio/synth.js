@@ -3,11 +3,14 @@
 import { createRng } from '../core/rng.js';
 import { DEFAULT_TIMBRE, completeTimbre } from '../core/timbre.js';
 import { bassParams, drumParams, chordParams, padParams, masterParams } from './voice-params.js';
+import { sliderGain } from './mix.js';
 
 // Schichtpegel und Summe, aus Messungen mit tests/e2e/levels.spec.js angeglichen (Messwerte dort im Kommentar)
 const TRIM = { drums: 0.65, bass: 0.24, chords: 1, pad: 0.8 };
 const MASTER = 0.6;
 const TOMS = { tomHigh: 200, tomMid: 150, tomLow: 110 };
+
+const LEVEL_TC = 0.02; // Zeitkonstante der Pegelrampe (s), gegen Knacken
 
 const hz = (m) => 440 * 2 ** ((m - 69) / 12);
 
@@ -179,11 +182,15 @@ function padNote(ctx, out, t, e, p) {
  * Baut die Instrumente und die Summenkette (Trims, Master, Echo auf Akkorde/Pad, Hall, Begrenzer).
  * `output` verbindet der Aufrufer mit ctx.destination. `trigger(event, when)` mit when in ctx-Zeit.
  * `timbre` (Klangmodell, siehe core/timbre.js) wird mit DEFAULT_TIMBRE aufgefüllt; ungültig zählt wie fehlend.
+ * `levels` ({drums, bass, chords, pad}, je 0..1) und `master` (0..1) sind Reglerstellungen des Mischpults (mix.js), Standard 1;
+ * setLevel/setMaster ändern sie live. Der Gesamtpegel liegt hinter dem Begrenzer und ändert dessen Verhalten nicht.
  */
-export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, timbre = DEFAULT_TIMBRE } = {}) {
+export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, timbre = DEFAULT_TIMBRE, levels = {}, master: masterLevel = 1 } = {}) {
   const sound = completeTimbre(timbre);
   const rng = createRng(1);
   const noise = noiseBuffer(ctx, rng.fork('noise'), 1);
+
+  for (const name of Object.keys(levels)) if (!Object.hasOwn(TRIM, name)) throw new Error(`Unknown layer: ${name}`);
 
   const mix = masterParams(sound.master);
   const master = ctx.createGain(); master.gain.value = MASTER * mix.level;
@@ -227,11 +234,26 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
     pad: (out, t, e) => e.type === 'note' && padNote(ctx, out, t, e, pad),
   };
 
+  // Lautstärke weich nachführen und am Ende exakt setzen (setTargetAtTime nähert sich nur an)
+  const ramp = (g, value) => {
+    const now = ctx.currentTime;
+    g.cancelScheduledValues(now);
+    g.setValueAtTime(g.value, now);
+    g.setTargetAtTime(value, now, LEVEL_TC);
+    g.setValueAtTime(value, now + 10 * LEVEL_TC);
+  };
+  const gainNode = (v) => { const g = ctx.createGain(); g.gain.value = sliderGain(v); return g; };
+  const volume = gainNode(masterLevel); // ganz am Ausgang, hinter dem Begrenzer
+  limiter.connect(volume);
+
   const layers = {};
+  const levelGains = {};
   for (const [name, voice] of Object.entries(play)) {
     const mute = ctx.createGain();
+    // Schichtpegel vor dem Trim: Hall-, Raum- und Echo-Sendewege hängen hinter dem Trim und folgen ihm
+    const level = levelGains[name] = gainNode(levels[name] ?? 1);
     const trim = ctx.createGain(); trim.gain.value = TRIM[name];
-    mute.connect(trim).connect(master);
+    mute.connect(level).connect(trim).connect(master);
     // room: Teil der Schlagzeugsumme in den Hall, hinter mute und trim abgegriffen (Stummschalten schaltet den Sendeweg mit stumm); ohne room kein Knoten
     if (name === 'drums' && drum.roomSend > 0) trim.connect(gain(ctx, drum.roomSend, reverb));
     if (name === 'chords' || name === 'pad') trim.connect(delay);
@@ -249,8 +271,16 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
     };
   }
   return {
-    output: limiter,
+    output: volume,
     layers,
+    // v: Reglerstellung 0..1; ungültig wirft RangeError
+    setLevel(name, v) {
+      if (!Object.hasOwn(levelGains, name)) throw new Error(`Unknown layer: ${name}`);
+      ramp(levelGains[name].gain, sliderGain(v));
+    },
+    setMaster(v) {
+      ramp(volume.gain, sliderGain(v));
+    },
     // Echo folgt einem Live-Tempowechsel; weich nachgeführt (Zeitkonstante 50 ms) statt springend
     setTempo(newBpm) {
       delay.delayTime.setTargetAtTime(echoTime(newBpm), ctx.currentTime, 0.05);
