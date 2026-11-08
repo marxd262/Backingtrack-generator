@@ -9,6 +9,7 @@ import { stepVariant } from './variant.js';
 import { buildKeyScale } from './key-scale.js';
 import { initSidebar } from './sidebar.js';
 import { initGroups } from './groups.js';
+import { initTimbrePanel } from './timbre-panel.js';
 import { initViews } from './blocks.js';
 
 // Dekoratives 16tel-Bild je Stil, 1 = Schlag
@@ -185,6 +186,7 @@ for (const button of document.querySelectorAll('[popovertarget]')) {
 
 const renderTuning = initTuning({ render: () => render(), restartIfPlaying, toggleLayer });
 const renderMixer = initMixer({ render: () => render(), player: () => player, toggleLayer });
+const renderTimbre = initTimbrePanel({ render: () => render(), player: () => player }); // vor initGroups: baut die Klang-Gruppen
 
 // Leisten "Klang" (links) und "Akkorde" (rechts): offen/zu steht im gemerkten Layout
 const sidebars = ['left', 'right'].map((side) => initSidebar({
@@ -272,6 +274,7 @@ function render() {
   views.render(); // vor renderTuning: das Akkordrad zeichnet nur, wenn sein Block sichtbar ist
   renderTuning();
   renderMixer();
+  renderTimbre();
 }
 
 deriveBars();

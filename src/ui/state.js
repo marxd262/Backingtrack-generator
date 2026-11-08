@@ -54,6 +54,7 @@ export const state = {
     bpm: funk.bpm,
     bars: [],
     tags: structuredClone(funk.tags),
+    timbre: {}, // Klangregler: nur die vom Nutzer gesetzten Felder { gruppe: { feld: 0..1 } }, über den Schlagworten
     layers: { drums: true, bass: true, chords: true, pad: true },
     seed: rollVariant(), // Variantennummer
     length: 96,
@@ -82,4 +83,5 @@ export function applyStyle(id) {
   state.style = id;
   state.track.bpm = p.bpm;
   state.track.tags = structuredClone(p.tags);
+  state.track.timbre = {}; // neue Vorlage, neuer Ausgangspunkt für die Regler
 }
