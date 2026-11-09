@@ -172,8 +172,16 @@
           <summary><h4 class="label" id="progression-title" data-i18n="ui.progression"></h4></summary>
           <div class="chips" id="progression" role="group" aria-labelledby="progression-title"></div>
           <p class="message" id="tuning-message" aria-live="polite"></p>
+          <h4 class="label" id="color-title" data-i18n="ui.chordColor"></h4>
+          <div class="chips" id="chord-color" role="group" aria-labelledby="color-title"></div>
           <h4 class="label" id="add-title" data-i18n="ui.addChord"></h4>
-          <div class="chips" id="add-chords" role="group" aria-labelledby="add-title"></div>
+          <!-- zweistufig: erst der Grundton, dann die Akkordart; Chips baut progression-editor.js -->
+          <div id="add-chords" role="group" aria-labelledby="add-title">
+            <p class="sub-label" id="add-root-label" data-i18n="ui.addRoot"></p>
+            <div class="chips" id="add-roots" role="group" aria-labelledby="add-root-label"></div>
+            <p class="sub-label" id="add-quality-label" data-i18n="ui.addQuality"></p>
+            <div id="add-qualities" role="group" aria-labelledby="add-quality-label"></div>
+          </div>
         </details>
         <details class="group" data-group="views">
           <summary><h4 class="label" id="views-title" data-i18n="ui.views"></h4></summary>

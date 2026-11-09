@@ -1,5 +1,6 @@
 // Griffbrett-Block der Spielseite: Rollen je Bund, Namen/Stufen, folgender Akkord, Textfassung, Breiten.
 import { test, expect } from '@playwright/test';
+import { addChordByName } from './chord-helpers.js';
 
 const BAR_TIMEOUT = 10_000; // ein Takt bei 200 bpm dauert 1,2 s; unter Last großzügig
 const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view)\.[A-Za-z.]+$/;
@@ -36,7 +37,7 @@ async function openPlayPage(page) {
 // Folge über die rechte Leiste setzen: bis auf einen Akkord entfernen, anfügen, den übrigen ersten entfernen
 async function setProgression(page, names) {
   while (await progression(page).count() > 1) await progression(page).first().click();
-  for (const name of names) await page.locator('#add-chords button', { hasText: new RegExp(`^${name}$`) }).click();
+  for (const name of names) await addChordByName(page, name);
   await progression(page).first().click();
   await expect.poll(() => shownChords(page)).toEqual(names);
 }
@@ -296,6 +297,7 @@ test('Graustufen: ein Ton in beiden Akkorden sieht anders aus als ein Ton nur im
   // Graustufen, ohne Beschriftung und ohne Saiten/Bünde (Buchstaben und Linien unterscheiden sich ohnehin): nur das Zeichen zählt
   await page.addStyleTag({ content: '#fretboard { filter: grayscale(1); } #fretboard :is(.fret-note text, .string, .fret-wire, .nut, .board, .inlay) { visibility: hidden; }' });
   const shot = async (fret) => {
+    await note(page, 5, fret).scrollIntoViewIfNeeded(); // die Seite ist durch die Akkordauswahl höher: beim Klicken in die Leiste scrollt sie
     const b = await note(page, 5, fret).locator('.dot').boundingBox();
     const [cx, cy] = [b.x + b.width / 2, b.y + b.height / 2];
     return (await page.screenshot({ clip: { x: Math.round(cx) - 18, y: Math.round(cy) - 18, width: 36, height: 36 } })).toString('base64');

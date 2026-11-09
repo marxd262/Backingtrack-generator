@@ -1,6 +1,7 @@
 // Kopfzeile und Griffbrett springen nicht, wenn der Akkord wechselt (Spec-Antiziel "Das Layout springt"): lange und kurze
 // Akkordnamen im Wechsel (As-Moll: Bbdim, E, Dbm, B), Lagen je Takt in einem einzigen evaluate gelesen, ohne Schlafzeiten.
 import { test, expect } from '@playwright/test';
+import { addChordByName } from './chord-helpers.js';
 
 const BAR_TIMEOUT = 10_000; // ein Takt bei 200 bpm dauert 1,2 s; unter Last großzügig
 const PROGRESSION = ['Bbdim', 'E', 'Dbm', 'B'];
@@ -29,7 +30,7 @@ const shownChords = async (page) => (await page.locator('#chords').textContent()
 // Folge über die rechte Leiste setzen: bis auf einen Akkord entfernen, anfügen, den übrigen ersten entfernen
 async function setProgression(page, names) {
   while (await progression(page).count() > 1) await progression(page).first().click();
-  for (const name of names) await page.locator('#add-chords button', { hasText: new RegExp(`^${name}$`) }).click();
+  for (const name of names) await addChordByName(page, name);
   await progression(page).first().click();
   await expect.poll(() => shownChords(page)).toEqual(names);
 }

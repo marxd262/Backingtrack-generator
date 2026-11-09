@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { layoutWheel, hitTest, FIFTHS } from '../../src/ui/wheel-geometry.js';
+import { layoutWheel, hitTest, nodeMatches, FIFTHS } from '../../src/ui/wheel-geometry.js';
 import { allowedChords, noteToPc, MODE_NAMES } from '../../src/core/music.js';
 
 const ROOTS = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
@@ -97,4 +97,21 @@ test('jeder erlaubte Akkord jeder Tonart hat genau einen Knoten', () => {
       }
     }
   }
+});
+
+test('nodeMatches: ein gefärbter Akkord trifft den Knoten seiner Stufe, sonst keinen', () => {
+  const key = { root: 'A', mode: 'minor' };
+  const l = layoutWheel(400, key);
+  const at = (root, quality) => l.nodes.find((n) => noteToPc(n.chord.root) === noteToPc(root) && n.chord.quality === quality);
+  const hits = (chord) => l.nodes.filter((n) => nodeMatches(n, chord, key));
+  assert.deepEqual(hits({ root: 'A', quality: 'min7' }), [at('A', 'min')]);
+  assert.deepEqual(hits({ root: 'E', quality: 'dom7' }), [at('E', 'maj')]);
+  assert.deepEqual(hits({ root: 'E', quality: 'min9' }), [at('E', 'min')]);
+  assert.deepEqual(hits({ root: 'E', quality: 'sus4' }), [at('E', 'min')], 'diatonisch Em, nicht die Dominante');
+  assert.deepEqual(hits({ root: 'D', quality: 'sus4' }), [at('D', 'min')]);
+  assert.deepEqual(hits({ root: 'B', quality: 'm7b5' }), [at('B', 'dim')]);
+  assert.deepEqual(hits({ root: 'C', quality: 'maj7' }), [at('C', 'maj')]);
+  assert.deepEqual(hits({ root: 'A', quality: 'min' }), [at('A', 'min')], 'Dreiklänge wie bisher');
+  assert.deepEqual(hits({ root: 'C#', quality: 'power' }), [], 'Grundton ohne Stufe');
+  assert.deepEqual(hits({ root: 'A', quality: 'nope' }), []);
 });

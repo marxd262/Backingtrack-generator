@@ -6,7 +6,7 @@ Der Generator läuft allein (eigene Oberfläche unter `src/ui`). Die Lern-App In
 
 ```js
 import {
-  play, buildEvents, chordTimeline, validateTrack, VALIDATION_CODES, allowedChords,
+  play, buildEvents, chordTimeline, validateTrack, VALIDATION_CODES, allowedChords, chordOptions, chordName, CHORDS,
   TAG_CATEGORIES, STYLE_PRESETS, DRUM_NAMES, t, setLanguage, getLanguage,
 } from './src/index.js';
 ```
@@ -44,9 +44,43 @@ import {
 
 Weitere Felder (`id`, `title`, `style` ...) stören nicht und werden ignoriert. Ein Track im alten Format von Interactive Scales (`{ id, title, key, bpm, bars }`) ist gültig.
 
-- Akkordarten: `maj`, `min`, `dim`. Akkordsymbole bleiben international (`B` bleibt `B`, nie das deutsche `H`).
-- Jeder Akkord muss zur Tonart gehören: diatonisch, in Moll zusätzlich die Dur-Dominante (`allowedChords(key)` aus `src/index.js`). Sonst meldet `validateTrack` `chordNotInKey`. Dorisch hat keine Zusatzakkorde (A-Dorisch: `Am Bm C D Em F#dim G`).
+- Akkordarten: die 17 des Registers (Abschnitt "Akkordarten"). Akkordsymbole bleiben international (`B` bleibt `B`, nie das deutsche `H`).
+- Jeder Akkord muss zur Tonart gehören: sein Grundton ist eine Stufe der Tonart (diatonisch, in Moll zusätzlich die Dur-Dominante) **und** seine Art darf laut Register auf dieser Stufe stehen (Spalte "erlaubt auf"). Sonst meldet `validateTrack` `chordNotInKey`, eine Art ohne Registereintrag `unknownQuality`. `allowedChords(key)` liefert unverändert nur die Dreiklänge der Stufen; die erlaubten Arten je Grundton liefert `chordOptions(key)`. Dorisch hat keine Zusatzakkorde (A-Dorisch: `Am Bm C D Em F#dim G`).
 - `allowedChords` schreibt die Akkorde in der Vorzeichnung der Tonart (D-Moll: `Bb`, E-Moll: `F#dim`); ein Grundton mit `#` oder `b` behält sein Vorzeichen. Geprüft wird nach Tonhöhe, `A#` und `Bb` sind im Track gleichwertig.
+
+## Akkordarten
+
+Das Akkord-Register `CHORDS` (aus `src/index.js`, definiert in `src/core/chords.js`) ist die einzige Quelle für Intervalle, Symbole und die Stufen, auf denen eine Art stehen darf. `chordName({ root, quality })` liefert den Namen (`Am7`, `Cmaj7`, `G7`), `chordOptions(key)` je Grundton der Tonart die erlaubten Arten (`[{ root, qualities }]`, in Moll teilen sich die Moll-Stufe und die Dur-Dominante einen Grundton).
+
+| Art (`quality`) | Symbol | Intervalle (Halbtöne) | erlaubt auf Stufen | Gruppe |
+| --- | --- | --- | --- | --- |
+| `maj` | (leer) | 0, 4, 7 | Dur | triad |
+| `min` | `m` | 0, 3, 7 | Moll | triad |
+| `dim` | `dim` | 0, 3, 6 | verm. | triad |
+| `aug` | `aug` | 0, 4, 8 | Dur | triad |
+| `sus2` | `sus2` | 0, 2, 7 | Dur, Moll | triad |
+| `sus4` | `sus4` | 0, 5, 7 | Dur, Moll | triad |
+| `power` | `5` | 0, 7 | Dur, Moll, verm. | triad |
+| `dom7` | `7` | 0, 4, 7, 10 | Dur | seventh |
+| `maj7` | `maj7` | 0, 4, 7, 11 | Dur | seventh |
+| `min7` | `m7` | 0, 3, 7, 10 | Moll | seventh |
+| `m7b5` | `m7b5` | 0, 3, 6, 10 | verm. | seventh |
+| `dim7` | `dim7` | 0, 3, 6, 9 | verm. | seventh |
+| `maj6` | `6` | 0, 4, 7, 9 | Dur | extended |
+| `min6` | `m6` | 0, 3, 7, 9 | Moll | extended |
+| `add9` | `add9` | 0, 4, 7, 14 | Dur | extended |
+| `dom9` | `9` | 0, 4, 7, 10, 14 | Dur | extended |
+| `min9` | `m9` | 0, 3, 7, 10, 14 | Moll | extended |
+
+Die Grundart einer Stufe ist `maj`, `min` oder `dim` (Dur, Moll, vermindert). Die Dominante steht bei Dur auf der Stufe V, bei Moll ist es die ergänzte Dur-Dominante, bei Dorisch die Dur-Stufe IV. Die Muster nutzen die Intervalle des Akkords: der Bass spielt die Quinte und Septime des Akkords, Stabs und Pad alle seine Töne (ein Powerchord hat nur zwei), Arpeggios die ersten vier Töne zyklisch über die Oktaven (bei `dom9` und `min9` kommt die None darin nicht vor).
+
+**Akkordfarbe** (nur die eigene Oberfläche; `colorProgression` in `src/core/harmony.js`, nicht aus `src/index.js`): schreibt die Arten einer Folge um, `triads` (Dreiklänge), `sevenths` (Septakkorde: Dur `maj7`, Dominante `dom7`, Moll `min7`, vermindert `m7b5`), `extended` (Dur `add9`, Dominante `dom9`, Moll `min9`, vermindert `dim7`) und `power` (Powerchords). Wählt man eine Farbe, während die Folge noch genau die aus Tonart und Variante erzeugte ist, wird sie in der neuen Farbe neu abgeleitet (verlustfrei, auch von `power` aus). Eine von Hand geänderte Folge wird umgefärbt; dabei geht bei `power` die Information über die Stufe verloren, weil `E5` in A-Moll nicht verrät, ob es die Moll-Stufe oder die Dominante war (zurück auf `triads` wird es `Em`).
+
+### So ergänzt man eine Akkordart
+
+1. In `src/core/chords.js` einen Eintrag in `CHORDS` ergänzen: `intervals` (aufsteigend, beginnt mit 0), `symbol` (eindeutig), `base` (`maj`, `min`, `dim` oder `null`), `on` (Grundarten der Stufen, auf denen die Art stehen darf), `group` (`triad`, `seventh`, `extended`), `fifth` (Quinte für den Bass) und optional `short` und `seventh`.
+2. Ihren Namen `chord.<id>` in `src/i18n/de.js` und `src/i18n/en.js` ergänzen.
+3. `npm test` ausführen: `tests/core/chords.test.js`, `chord-events.test.js` und `i18n.test.js` laufen über alle Arten und melden Unvollständiges; sie schreiben weder die Anzahl noch eine vollständige Liste fest. Prüfung, Muster, Rad, Griffbrett, Namen und die Auswahl in der Oberfläche brauchen keine Änderung. Nur `tests/e2e/chord-picker.spec.js` hält für A-Moll feste Listen der aktiven Chips; erlaubt die neue Art dort eine Stufe, trägt man sie in diesen Listen ein.
 
 ## Schlagworte und Stile
 

@@ -193,3 +193,31 @@ test('normalizeTrack: null und undefined ergeben Standardwerte', () => {
     assert.equal(t.seed, 1);
   }
 });
+
+const cMajor = { key: { root: 'C', mode: 'major' }, bars: [] };
+const withBars = (base, ...chords) => ({ ...good(), ...base, bars: chords.map(([r, q]) => bar(r, q)) });
+
+test('validateTrack: neue Akkordarten sind auf ihren Stufen gültig', () => {
+  assert.deepEqual(codes(withBars({}, ['A', 'min7'], ['E', 'dom7'], ['B', 'm7b5'], ['D', 'sus4'], ['C', 'power'], ['C', 'add9'], ['F', 'maj7'], ['G', 'dom9'])), []);
+  assert.deepEqual(codes(withBars(cMajor, ['G', 'dom7'], ['E', 'min7'], ['B', 'm7b5'], ['C', 'maj7'], ['A', 'min7'], ['B', 'dim7'], ['D', 'min9'])), []);
+  assert.deepEqual(codes(withBars({}, ['E', 'min'], ['E', 'maj'], ['E', 'sus2'], ['E', 'aug'])), [], 'E ist in A-Moll Moll-Stufe und Dur-Dominante');
+});
+
+test('validateTrack: neue Akkordart auf der falschen Stufe ergibt chordNotInKey mit dem Namen', () => {
+  for (const [root, quality, name] of [['B', 'maj7', 'Bmaj7'], ['D', 'dom7', 'D7'], ['C', 'min7', 'Cm7'], ['A', 'dom9', 'A9']]) {
+    assert.deepEqual(validateTrack(withBars(cMajor, [root, quality])), [{ code: 'chordNotInKey', params: { bar: 1, chord: name } }], name);
+  }
+});
+
+test('validateTrack: A# und Bb sind dieselbe Stufe, auch bei neuen Arten', () => {
+  const f = { key: { root: 'F', mode: 'major' } };
+  assert.deepEqual(codes(withBars(f, ['Bb', 'dom7'])), []);
+  assert.deepEqual(codes(withBars(f, ['A#', 'dom7'])), []);
+  assert.deepEqual(codes(withBars(f, ['A#', 'min7'])), ['chordNotInKey']);
+});
+
+test('validateTrack: unbekannte Art meldet nur unknownQuality, auch bei Prototyp-Namen', () => {
+  for (const quality of ['dom11', 'toString', '__proto__', 'constructor', 5, null]) {
+    assert.deepEqual(codes(withBars({}, ['A', quality])), ['unknownQuality'], String(quality));
+  }
+});

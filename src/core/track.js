@@ -1,8 +1,8 @@
 // Track-Format: Standardwerte und sprachfreie Validierung (nur Codes + Parameter).
-import { CHORD_QUALITIES, noteToPc, isNoteName, isValidKey, allowedChords } from './music.js';
+import { noteToPc, isNoteName, isValidKey, allowedChords } from './music.js';
+import { CHORDS, isChordQuality, chordName } from './chords.js';
 import { TAG_CATEGORIES } from './tags.js';
 
-const SYMBOLS = { maj: '', min: 'm', dim: 'dim' };
 
 /**
  * Alle Codes, die validateTrack melden kann; die Oberfläche übersetzt sie über `err.<code>`.
@@ -72,7 +72,8 @@ export function validateTrack(track) {
   }
 
   // Tonart ungültig: Akkord-in-Tonart-Prüfung entfällt, badKey ist schon gemeldet
-  const allowed = keyOk ? allowedChords(t.key).map((c) => `${noteToPc(c.root)}:${c.quality}`) : null;
+  // Stufen der Tonart als [Tonhöhe, Grundart]; eine Akkordart darf auf einer Stufe stehen, wenn ihr `on` die Grundart enthält
+  const steps = keyOk ? allowedChords(t.key).map((c) => [noteToPc(c.root), c.quality]) : null;
 
   for (let i = 0; i < t.bars.length; i++) {
     const b = t.bars[i];
@@ -82,11 +83,11 @@ export function validateTrack(track) {
       continue;
     }
     const { root, quality } = b.chord;
-    const known = typeof quality === 'string' && Object.hasOwn(CHORD_QUALITIES, quality);
-    const chord = root + (known ? (SYMBOLS[quality] ?? quality) : show(quality));
+    const known = isChordQuality(quality);
+    const chord = known ? chordName({ root, quality }) : root + show(quality);
     if (!isPosInt(b.beats) || b.beats > MAX_BEATS) add('badBeats', { bar, beats: show(b.beats) });
     if (!known) add('unknownQuality', { bar, chord });
-    else if (allowed && !(isNoteName(root) && allowed.includes(`${noteToPc(root)}:${quality}`))) {
+    else if (steps && !(isNoteName(root) && steps.some(([pc, base]) => pc === noteToPc(root) && CHORDS[quality].on.includes(base)))) {
       add('chordNotInKey', { bar, chord });
     }
   }

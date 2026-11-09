@@ -9,6 +9,7 @@ import { createFretboard, chordSentence } from './fretboard.js';
 import { buildTags, renderTags, toggleTag, sameTags } from './tags-ui.js';
 import { isSoundOnlyChange } from '../core/tags.js';
 import { initProgressionEditor, addChord } from './progression-editor.js';
+import { initChordColor } from './chord-color.js';
 import { drawLanes } from './lanes.js';
 import { createWheel } from './wheel.js';
 
@@ -41,6 +42,7 @@ export function initTuning({ render, restartIfPlaying, toggleLayer, applyLive })
   });
 
   const renderProgression = initProgressionEditor(changed, render);
+  const renderChordColor = initChordColor({ changed });
   const wheelState = () => ({
     key: state.track.key,
     progression: state.track.bars.map((b) => b.chord),
@@ -110,6 +112,7 @@ export function initTuning({ render, restartIfPlaying, toggleLayer, applyLive })
     for (const o of $('length').options) setText(o, t('ui.barsCount', { n: o.value }));
     for (const b of $('lane-buttons').children) pressed(b, track.layers[b.dataset.layer]);
     renderProgression();
+    renderChordColor();
     renderFretboard();
     drawCanvases();
   };

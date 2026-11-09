@@ -5,8 +5,8 @@ import { CHORD_QUALITIES, MODE_NAMES, isNoteName, isValidKey, noteToPc, chordMid
 const aMinor = { root: 'A', mode: 'minor' };
 const name = (c) => `${c.root}:${c.quality}`;
 
-test('CHORD_QUALITIES enthält maj, min, dim', () => {
-  assert.deepEqual(CHORD_QUALITIES, { maj: [0, 4, 7], min: [0, 3, 7], dim: [0, 3, 6] });
+test('CHORD_QUALITIES enthält maj, min, dim unverändert (die weiteren Arten prüft chords.test.js)', () => {
+  assert.deepEqual({ maj: CHORD_QUALITIES.maj, min: CHORD_QUALITIES.min, dim: CHORD_QUALITIES.dim }, { maj: [0, 4, 7], min: [0, 3, 7], dim: [0, 3, 6] });
 });
 
 test('noteToPc kennt Kreuze und Bs', () => {

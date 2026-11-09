@@ -6,6 +6,7 @@ import { t, setLanguage, getLanguage, detectLanguage } from '../../src/i18n/inde
 import { TAG_CATEGORIES, STYLE_PRESETS } from '../../src/core/tags.js';
 import { VALIDATION_CODES } from '../../src/core/track.js';
 import { SCALE_NAMES, MODE_NAMES } from '../../src/core/music.js';
+import { CHORDS, CHORD_GROUPS } from '../../src/core/chords.js';
 
 const LAYERS = ['drums', 'bass', 'chords', 'pad'];
 const placeholders = (s) => [...new Set(s.match(/\{\w+\}/g) ?? [])].sort();
@@ -36,6 +37,22 @@ test('jede Kategorie, jedes Schlagwort, Stil, Schicht, Skala, Modus und Fehlerco
   for (const k of keys) {
     assert.ok(Object.hasOwn(de, k), `de: ${k}`);
     assert.ok(Object.hasOwn(en, k), `en: ${k}`);
+  }
+});
+
+test('jede Akkordart des Registers, jede Gruppe und jede Akkordfarbe hat in beiden Sprachen einen Namen', () => {
+  const keys = [
+    ...Object.keys(CHORDS).map((id) => `chord.${id}`),
+    ...CHORD_GROUPS.map((g) => `chordGroup.${g}`),
+    ...['triads', 'sevenths', 'extended', 'power'].map((c) => `chordColor.${c}`),
+    'ui.addRoot', 'ui.addQuality', 'ui.chordColor',
+  ];
+  assert.equal(keys.length, Object.keys(CHORDS).length + 3 + 4 + 3);
+  for (const k of keys) {
+    for (const [lang, dict] of [['de', de], ['en', en]]) {
+      assert.ok(Object.hasOwn(dict, k), `${lang}: ${k}`);
+      assert.ok(typeof dict[k] === 'string' && dict[k].trim() !== '' && dict[k] !== k, `${lang}: ${k} leer`);
+    }
   }
 });
 

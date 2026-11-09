@@ -1,10 +1,10 @@
 // Oberfläche: Startsatz, Auswahl-Popover, Los/Stopp, Variante, Sprachumschalter (echte Seite /ui/index.html).
 import { test, expect } from '@playwright/test';
-import { allowedChords } from '../../src/core/music.js';
+import { allowedChords, chordOptions } from '../../src/core/music.js';
 import { progressionFor } from '../../src/core/progressions.js';
 import { STYLE_PRESETS } from '../../src/core/tags.js';
 
-const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view)\.[A-Za-z.]+$/;
+const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view|group|timbre|chord|chordGroup|chordColor)\.[A-Za-z.]+$/;
 const SYMBOLS = { maj: '', min: 'm', dim: 'dim' };
 const namesIn = (root, mode) => allowedChords({ root, mode }).map((c) => c.root + SYMBOLS[c.quality]);
 const BAR_TIMEOUT = 10_000; // ein Takt bei 100 bpm dauert 2,4 s; unter Last großzügig
@@ -203,7 +203,7 @@ test('Dorisch: Satz, Akkorde der dorischen Tonart (mit Dur-IV), Feintuning und E
   for (const c of await shownChords(page)) expect(namesIn('G', 'dorian')).toContain(c);
   await page.keyboard.press('Escape');
   await page.locator('#tune-btn').click();
-  expect(await page.locator('#add-chords button').allTextContents()).toEqual(namesIn('G', 'dorian'));
+  expect(await page.locator('#add-roots button').allTextContents()).toEqual(chordOptions({ root: 'G', mode: 'dorian' }).map((o) => o.root));
   await page.getByRole('button', { name: /^EN/i }).click();
   await expect(sentence(page)).toContainText('G dorian');
   expect(await rawKeysIn(page)).toEqual([]);

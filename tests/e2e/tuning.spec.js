@@ -1,9 +1,10 @@
 // Spielseite (über Feintuning geöffnet): Schnellauswahl, Schlagworte, Tempo, Länge, Schichten, Verlauf, Akkordfolge, Akkordrad.
 import { test, expect } from '@playwright/test';
+import { addChordByName } from './chord-helpers.js';
 import { layoutWheel } from '../../src/ui/wheel-geometry.js';
 import { STYLE_PRESETS, TAG_CATEGORIES } from '../../src/core/tags.js';
 
-const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view)\.[A-Za-z.]+$/;
+const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view|group|timbre|chord|chordGroup|chordColor)\.[A-Za-z.]+$/;
 const BAR_TIMEOUT = 10_000; // ein Takt bei 100 bpm dauert 2,4 s; unter Last großzügig
 const SYMBOLS = { maj: '', min: 'm', dim: 'dim' };
 const AM = { root: 'A', mode: 'minor' };
@@ -296,9 +297,10 @@ test('Akkordrad: Canvas mit Beschriftung, Klick auf passenden Akkord fügt an, a
 
 test('Tastatur: Akkord-Knöpfe fügen an und entfernen, nie leer, höchstens 8', async ({ page }) => {
   await openPlayPage(page);
-  const add = page.locator('#add-chords button');
-  await expect(add).toHaveCount(8); // A-Moll: sieben leitereigene plus E-Dur
-  expect(await add.allTextContents()).toEqual(['Am', 'Bdim', 'C', 'Dm', 'Em', 'F', 'G', 'E']);
+  const add = page.locator('#add-qualities button'); // Akkordart-Chips; mit dem vorgewählten Grundton A ist Am der erste aktive
+  const roots = page.locator('#add-roots button');
+  await expect(roots).toHaveCount(7); // A-Moll: sieben Grundtöne, die Dur-Dominante E teilt sich den Chip mit Em
+  expect(await roots.allTextContents()).toEqual(['A', 'B', 'C', 'D', 'E', 'F', 'G']);
   await expect(page.getByRole('heading', { name: 'Akkord hinzufügen' })).toBeVisible();
 
   // per Tastatur entfernen bis einer übrig ist
@@ -314,11 +316,11 @@ test('Tastatur: Akkord-Knöpfe fügen an und entfernen, nie leer, höchstens 8',
   expect(await focusState(page)).toEqual(usableFocus);
 
   // per Tastatur anfügen bis 8
-  await add.filter({ hasText: /^Dm$/ }).focus();
+  await add.filter({ hasText: /^Am$/ }).focus();
   for (let n = 2; n <= 8; n++) {
     await page.keyboard.press('Enter');
     await expect(progression(page)).toHaveCount(n);
-    await expect(add.filter({ hasText: /^Dm$/ })).toBeFocused();
+    await expect(add.filter({ hasText: /^Am$/ })).toBeFocused();
   }
   await expect(progression(page).first()).toBeEnabled();
   const message = page.locator('#tuning-message');
@@ -327,7 +329,7 @@ test('Tastatur: Akkord-Knöpfe fügen an und entfernen, nie leer, höchstens 8',
   await page.keyboard.press('Enter');
   await expect(message).toHaveText(/8/);
   await expect(progression(page)).toHaveCount(8);
-  await expect(add.filter({ hasText: /^Dm$/ })).toBeFocused();
+  await expect(add.filter({ hasText: /^Am$/ })).toBeFocused();
   // Rad ebenfalls gesperrt
   await page.locator('#wheel').click({ position: await wheelPoint(page, 'C', 'maj') });
   await expect(progression(page)).toHaveCount(8);
@@ -348,7 +350,7 @@ test('Tastatur: Akkord-Knöpfe fügen an und entfernen, nie leer, höchstens 8',
 
 test('Live-Region: Hinweis bleibt bei Taktwechseln still, zweite Ablehnung meldet sich neu', async ({ page }) => {
   await openPlayPage(page);
-  const add = page.locator('#add-chords button');
+  const add = page.locator('#add-qualities button:not([disabled])'); // erster aktiver Chip: Am
   while ((await progression(page).count()) < 8) await add.first().click();
   await playFast(page);
   const message = page.locator('#tuning-message');
@@ -381,8 +383,8 @@ test('Live-Region: Hinweis bleibt bei Taktwechseln still, zweite Ablehnung melde
 
 test('eigene Folge übersteht Stilwahl, Variante und Tonart leiten neu ab', async ({ page }) => {
   await openPlayPage(page);
-  await page.locator('#add-chords button', { hasText: /^G$/ }).click();
-  await page.locator('#add-chords button', { hasText: /^C$/ }).click();
+  await addChordByName(page, 'G');
+  await addChordByName(page, 'C');
   const edited = await shownChords(page);
   expect(edited).toHaveLength(6);
   await page.locator('#quick-pick [data-style="psych"]').click();
@@ -395,7 +397,7 @@ test('eigene Folge übersteht Stilwahl, Variante und Tonart leiten neu ab', asyn
   await openPlayPage(page);
   await expect(progression(page)).toHaveCount(4);
 
-  await page.locator('#add-chords button', { hasText: /^G$/ }).click();
+  await addChordByName(page, 'G');
   expect(await shownChords(page)).toHaveLength(5);
   await page.locator('#play-back').click();
   await page.locator('#key-btn').click();
@@ -404,7 +406,7 @@ test('eigene Folge übersteht Stilwahl, Variante und Tonart leiten neu ab', asyn
   await expect.poll(async () => (await shownChords(page)).length).toBe(4);
   await openPlayPage(page);
   // Akkord-Knöpfe folgen der Tonart
-  expect(await page.locator('#add-chords button').allTextContents()).toEqual(['Dm', 'Edim', 'F', 'Gm', 'Am', 'Bb', 'C', 'A']);
+  expect(await page.locator('#add-roots button').allTextContents()).toEqual(['D', 'E', 'F', 'G', 'A', 'Bb', 'C']);
 });
 
 test('keine rohen Schlüssel in beiden Sprachen auf der Spielseite', async ({ page }) => {

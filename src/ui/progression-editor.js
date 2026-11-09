@@ -1,8 +1,9 @@
-// Akkordfolge bearbeiten: Klick auf einen Akkord der Folge entfernt ihn (nie leer), die Akkord-Knöpfe der Tonart
-// (Tastatur-Gegenstück zum Rad) fügen an (höchstens MAX_CHORDS). Eigene Folge gilt bis Tonart, Skala oder Variante.
-import { allowedChords } from '../core/music.js';
+// Akkordfolge bearbeiten: Klick auf einen Akkord der Folge entfernt ihn (nie leer); die zweistufige Auswahl (erst ein Grundton der
+// Tonart, dann eine Akkordart, Tastatur-Gegenstück zum Rad) fügt an (höchstens MAX_CHORDS). Eigene Folge gilt bis Tonart, Skala oder Variante.
+import { chordOptions } from '../core/music.js';
+import { CHORDS, CHORD_GROUPS, chordName } from '../core/chords.js';
 import { t } from '../index.js';
-import { $, state, chordName, setText, setAttr, MAX_CHORDS } from './state.js';
+import { $, state, setText, setAttr, pressed, MAX_CHORDS } from './state.js';
 
 let refusals = 0; // zählt Ablehnungen, damit eine wiederholte Ablehnung erneut angesagt wird
 
@@ -33,9 +34,25 @@ const button = (onClick) => {
 // changed(): nach einer Änderung (Neustart falls nötig, neu rendern); render(): nur neu zeichnen (Ablehnung)
 export function initProgressionEditor(changed, render) {
   const row = $('progression');
-  const add = $('add-chords');
+  const rootsBox = $('add-roots');
   const region = $('tuning-message');
   let addKey = '';
+  let options = []; // chordOptions der gewählten Tonart
+  let picked = ''; // gewählter Grundton
+  // Chips der Akkordarten einmal bauen (alle des Registers, je Gruppe eine Reihe); beim Rendern wechseln nur Text und Aktivierung
+  const qualityChips = [];
+  for (const group of CHORD_GROUPS) {
+    const label = Object.assign(document.createElement('p'), { className: 'sub-label' });
+    label.dataset.i18n = `chordGroup.${group}`;
+    const chips = Object.assign(document.createElement('div'), { className: 'chips' });
+    for (const quality of Object.keys(CHORDS).filter((id) => CHORDS[id].group === group)) {
+      const b = button(() => (addChord({ root: picked, quality }) ? changed() : render()));
+      b.dataset.quality = quality;
+      chips.append(b);
+      qualityChips.push(b);
+    }
+    $('add-qualities').append(label, chips);
+  }
   let shown = { text: '', refusals: 0 };
 
   // Live-Region nur bei Änderung schreiben; gleiche Meldung erneut: leeren und im nächsten Frame wieder setzen
@@ -59,9 +76,9 @@ export function initProgressionEditor(changed, render) {
         const i = [...row.children].indexOf(b);
         if (!removeChord(i)) return;
         changed();
-        // nur noch ein (gesperrter) Akkord: Fokus auf den ersten Anfüge-Knopf; sonst bleibt er an derselben
+        // nur noch ein (gesperrter) Akkord: Fokus auf den ersten aktiven Chip der Akkordart; sonst bleibt er an derselben
         // Stelle (nächster Akkord), war der entfernte Knopf der letzte, auf dem neuen letzten
-        if (row.children.length === 1) add.firstElementChild?.focus();
+        if (row.children.length === 1) qualityChips.find((c) => !c.disabled)?.focus();
         else if (!row.contains(document.activeElement)) row.children[Math.min(i, row.children.length - 1)].focus();
       });
       row.append(b);
@@ -77,17 +94,29 @@ export function initProgressionEditor(changed, render) {
       else b.removeAttribute('aria-current');
     });
 
+    // Grundtöne der Tonart; bei neuer Tonart wieder der erste gewählt
     const key = JSON.stringify(state.track.key);
     if (key !== addKey) {
       addKey = key;
-      add.replaceChildren(...allowedChords(state.track.key).map((chord) => {
-        const b = button(() => (addChord(chord) ? changed() : render()));
-        b.textContent = chordName(chord);
-        b.dataset.chord = chordName(chord);
+      options = chordOptions(state.track.key);
+      picked = options[0].root;
+      rootsBox.replaceChildren(...options.map(({ root }) => {
+        const b = button(() => { picked = root; render(); });
+        b.textContent = root;
+        b.dataset.root = root;
         return b;
       }));
     }
-    for (const b of add.children) setAttr(b, 'aria-label', t('ui.addChordNamed', { chord: b.dataset.chord }));
+    for (const b of rootsBox.children) pressed(b, b.dataset.root === picked);
+    // Akkordarten für den gewählten Grundton: Name mit dem Grundton, nur erlaubte aktiv
+    const allowed = options.find((o) => o.root === picked)?.qualities ?? [];
+    for (const b of qualityChips) {
+      const name = chordName({ root: picked, quality: b.dataset.quality });
+      setText(b, name);
+      setAttr(b, 'aria-label', t('ui.addChordNamed', { chord: name }));
+      const off = !allowed.includes(b.dataset.quality);
+      if (b.disabled !== off) b.disabled = off;
+    }
     announce(state.notice ? t(state.notice, { max: MAX_CHORDS }) : '');
   }
   return renderProgression;

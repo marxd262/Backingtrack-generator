@@ -1,7 +1,8 @@
 // Ereignisstrom: Track -> zeitlich sortierte Ereignisse (Akkorde, Marker, Schlagzeug, Bass, Akkorde, Pad).
 // Reine Logik ohne Audio: gleicher Track mit gleichem Seed ergibt denselben Strom.
 import { createRng } from './rng.js';
-import { CHORD_QUALITIES, chordMidi, noteToPc } from './music.js';
+import { chordTones, noteToPc } from './music.js';
+import { CHORDS } from './chords.js';
 import { checkedTrack, barTimeline, r6 } from './timeline.js';
 import { resolveTags, driftParams } from './tags.js';
 import { buildArrangement } from './arrange.js';
@@ -132,9 +133,9 @@ function playBass(b, pattern, rng, params) {
   const up = rng.next() < 0.3 || nextRoot - 1 < BASS_MIN;
   const degree = {
     r: root,
-    5: root + CHORD_QUALITIES[b.chord.quality][2], // Quinte aus dem Akkord selbst (dim: Tritonus)
+    5: root + CHORDS[b.chord.quality].fifth, // Quinte aus dem Akkord selbst (dim: Tritonus, aug: übermäßig)
     o: root + 12,
-    b7: root + 10,
+    b7: root + (CHORDS[b.chord.quality].seventh ?? 10), // Septime des Akkords (maj7: groß, dim7: vermindert), sonst die kleine
     ap: nextRoot === root ? root + 10 : up ? nextRoot + 1 : nextRoot - 1,
   };
   const ap = pattern.find(([, d]) => d === 'ap');
@@ -153,14 +154,21 @@ function playBass(b, pattern, rng, params) {
 
 const chordsSection = (params, rng) => (params.arp ? { arp: rng.pick(pool(ARPS, EXTRA_ARPS, params)) } : { stabs: rng.pick(pool(STABS, EXTRA_STABS, params)) });
 
+/**
+ * Vorrat der Arpeggio-Muster (Index 0..3): die Akkordtöne zyklisch über die Oktaven, eine Oktave höher. Dreiklänge ergeben Grundton,
+ * Terz, Quinte, Grundton + Oktave (wie bisher), Septakkorde die Septime als vierten Ton, ein Powerchord Grundton, Quinte und beide
+ * eine Oktave höher.
+ */
+export const arpPool = (tones) => Array.from({ length: 4 }, (_, i) => tones[i % tones.length] + 12 * Math.floor(i / tones.length) + 12);
+
 function playChords(b, v, rng, params) {
-  const tones = chordMidi(b.chord, 3);
+  const tones = chordTones(b.chord, 3);
   const out = [];
   if (v.arp) {
-    const pool = [...tones, tones[0] + 12].map((m) => m + 12);
+    const notes = arpPool(tones);
     for (let s = 0; s < b.steps; s += 2) {
       const t = at(b, s, rng, params.swing);
-      out.push(note(b, 'chords', s, t, pool[v.arp[(s / 2) % 8]], humanVel(s % 4 ? 0.7 : 0.85, rng), 2 * b.stepSec));
+      out.push(note(b, 'chords', s, t, notes[v.arp[(s / 2) % 8]], humanVel(s % 4 ? 0.7 : 0.85, rng), 2 * b.stepSec));
     }
     return out;
   }
@@ -176,7 +184,7 @@ function playChords(b, v, rng, params) {
 }
 
 function playPad(b, v, rng, params) {
-  const tones = chordMidi(b.chord, 3);
+  const tones = chordTones(b.chord, 3);
   const midis = params.padWidth > 0.6 ? [...tones, ...tones.map((m) => m + 12)] : tones;
   const t = r6(b.start);
   return midis.map((m) => note(b, 'pad', 0, t, m, humanVel(0.6, rng), b.end - b.start));

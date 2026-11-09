@@ -559,3 +559,20 @@ test('setTimbre zwischen Extremen: nur endliche Werte, Spitze wie bei frisch erz
     expect(r.peak, `${create}->${after}`).toBeLessThan(0.95);
   }
 });
+
+test('Septakkord-, Erweiterungs- und Powerchord-Folgen: Spitze nach dem Begrenzer unter 0,9, jede Schicht hörbar', async ({ page }) => {
+  test.setTimeout(180_000);
+  const funk = presetOf('funk');
+  const folgen = [
+    [['A', 'min7'], ['D', 'min7'], ['E', 'dom7'], ['A', 'min9']],
+    [['A', 'min9'], ['E', 'dom9'], ['C', 'add9'], ['B', 'dim7']],
+    [['A', 'power'], ['D', 'power'], ['E', 'power'], ['A', 'power']],
+  ];
+  for (const chords of folgen) {
+    const input = track({ bars: chords.map(([root, quality]) => ({ chord: { root, quality }, beats: 4 })), bpm: funk.bpm, tags: { ...funk.tags, development: ['fullFromStart'] } });
+    const r = await page.evaluate((t) => window.__render(t, 6), input);
+    const label = chords.map((c) => c.join(':')).join(' ');
+    expect(r.peak, label).toBeLessThan(0.9);
+    for (const layer of LAYERS) expect(r.perLayer[layer].rms, `${label} ${layer}`).toBeGreaterThan(0.005);
+  }
+});

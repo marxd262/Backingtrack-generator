@@ -1,11 +1,11 @@
 // Akkordrad: Quintenzirkel auf Canvas. Passende Akkorde kräftig umrandet, die Folge gestrichelt verbunden,
 // der aktuelle Akkord als einziges farbiges Objekt. Geometrie und Trefferprüfung in wheel-geometry.js.
 import { allowedChords, diatonicChords, noteToPc } from '../core/music.js';
-import { layoutWheel, hitTest } from './wheel-geometry.js';
+import { layoutWheel, hitTest, nodeMatches } from './wheel-geometry.js';
+import { chordShort } from '../core/chords.js';
 import { fitCanvas, cssColors } from './canvas.js';
 
 const same = (a, b) => noteToPc(a.root) === noteToPc(b.root) && a.quality === b.quality;
-const label = (c) => c.root + { maj: '', min: 'm', dim: '°' }[c.quality];
 
 export function createWheel(canvas, state, onPick) {
   let current = state;
@@ -25,7 +25,7 @@ export function createWheel(canvas, state, onPick) {
     const c = cssColors(canvas);
     const l = layoutWheel(fit.width, current.key);
     const diatonic = diatonicChords(current.key);
-    const nodeOf = (chord) => l.nodes.find((n) => same(n.chord, chord));
+    const nodeOf = (chord) => l.nodes.find((n) => nodeMatches(n, chord, current.key));
 
     ctx.strokeStyle = c.ink;
     ctx.globalAlpha = 0.25;
@@ -52,7 +52,7 @@ export function createWheel(canvas, state, onPick) {
 
     for (const n of l.nodes) {
       const chord = allowedAt(n);
-      const isCurrent = chord && current.current && same(n.chord, current.current);
+      const isCurrent = chord && current.current && nodeMatches(n, current.current, current.key);
       ctx.globalAlpha = chord ? 1 : 0.3;
       ctx.setLineDash(chord && !diatonic.some((d) => same(d, chord)) ? [4, 3] : []); // Dur-Dominante in Moll
       ctx.lineWidth = chord ? 2.5 : 1;
@@ -66,7 +66,7 @@ export function createWheel(canvas, state, onPick) {
       ctx.font = `${Math.round(n.r * 0.72)}px ${c.font}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(label(chord ?? n.chord), n.x, n.y);
+      ctx.fillText(chordShort(chord ?? n.chord), n.x, n.y);
     }
     ctx.globalAlpha = 1;
     ctx.setLineDash([]);

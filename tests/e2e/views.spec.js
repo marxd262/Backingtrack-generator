@@ -1,5 +1,6 @@
 // Ansichten ein- und ausblenden: Schalter in der rechten Leiste, gemerkter Zustand, Canvas und Griffbrett beim Wiedereinblenden.
 import { test, expect } from '@playwright/test';
+import { addChordByName } from './chord-helpers.js';
 import { layoutWheel } from '../../src/ui/wheel-geometry.js';
 
 const BAR_TIMEOUT = 10_000; // ein Takt bei 200 bpm dauert 1,2 s; unter Last großzügig
@@ -138,7 +139,7 @@ test('verborgenes Akkordrad wird nicht gezeichnet, beim Einblenden schon', async
   await switchOf(page, 'Akkordrad').uncheck();
   // Puffer leeren, dann die Folge ändern: im verborgenen Zustand darf nichts gemalt werden
   await page.evaluate(() => { const c = document.getElementById('wheel'); c.getContext('2d').clearRect(0, 0, c.width, c.height); });
-  await page.locator('#add-chords button', { hasText: /^C$/ }).click();
+  await addChordByName(page, 'C');
   expect(await canvasHasPixels(page, 'wheel')).toBe(false);
   await switchOf(page, 'Akkordrad').check();
   await expect.poll(() => canvasHasPixels(page, 'wheel')).toBe(true);

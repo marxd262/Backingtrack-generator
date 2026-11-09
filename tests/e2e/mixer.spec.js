@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 import { progressionFor } from '../../src/core/progressions.js';
 
 const BAR_TIMEOUT = 10_000; // ein Takt bei 200 bpm dauert 1,2 s; unter Last großzügig
-const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view)\.[A-Za-z.]+$/;
+const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view|group|timbre|chord|chordGroup|chordColor)\.[A-Za-z.]+$/;
 const SYMBOLS = { maj: '', min: 'm', dim: 'dim' };
 const AM = { root: 'A', mode: 'minor' };
 const LAYERS = ['drums', 'bass', 'chords', 'pad'];

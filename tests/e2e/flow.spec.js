@@ -3,9 +3,10 @@
 // Alles, was an einem laufenden Takt hängt, wird in einem einzigen evaluate gelesen (Schnappschuss) und nie mit Schlafzeiten
 // abgepasst: Takte kommen aus #play-position.
 import { test, expect } from '@playwright/test';
+import { addChordByName } from './chord-helpers.js';
 
 const BAR_TIMEOUT = 10_000; // ein Takt bei 200 bpm dauert 1,2 s; unter Last großzügig
-const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view)\.[A-Za-z.]+$/;
+const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view|group|timbre|chord|chordGroup|chordColor)\.[A-Za-z.]+$/;
 const PROGRESSION = ['Am', 'Am', 'Dm', 'E'];
 
 const TEXT = {
@@ -50,7 +51,7 @@ async function openPlayPage(page) {
 // Folge über die rechte Leiste setzen (bis auf einen entfernen, anfügen, den übrigen ersten entfernen); Tonart und Leiter bleiben
 async function setProgression(page, names) {
   while (await progression(page).count() > 1) await progression(page).first().click();
-  for (const name of names) await page.locator('#add-chords button', { hasText: new RegExp(`^${name}$`) }).click();
+  for (const name of names) await addChordByName(page, name);
   await progression(page).first().click();
   await expect.poll(() => shownChords(page)).toEqual(names);
 }

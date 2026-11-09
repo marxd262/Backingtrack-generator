@@ -1,5 +1,6 @@
 // Start- und Spielseite: Navigation, Fokus, Wiedergabe über den Seitenwechsel, gemeinsamer Zustand, Leisten.
 import { test, expect } from '@playwright/test';
+import { addChordByName } from './chord-helpers.js';
 import { layoutWheel } from '../../src/ui/wheel-geometry.js';
 
 const BAR_TIMEOUT = 10_000; // ein Takt bei 100 bpm dauert 2,4 s; unter Last großzügig
@@ -171,7 +172,7 @@ test('Tonart in der rechten Leiste: Folge ändert sich, Popover der Startseite z
   await expect(side.getByRole('button', { name: 'A', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await side.getByRole('button', { name: 'D', exact: true }).click();
   await expect(side.getByRole('button', { name: 'D', exact: true })).toHaveAttribute('aria-pressed', 'true');
-  expect(await page.locator('#add-chords button').allTextContents()).toEqual(['Dm', 'Edim', 'F', 'Gm', 'Am', 'Bb', 'C', 'A']);
+  expect(await page.locator('#add-roots button').allTextContents()).toEqual(['D', 'E', 'F', 'G', 'A', 'Bb', 'C']);
   const chords = await shownChords(page);
   expect(await progression(page).allTextContents()).toEqual(chords);
   await page.locator('#side-scale-chips').getByRole('button', { name: 'Dur-Pentatonik' }).click();
@@ -200,7 +201,7 @@ test('Feintuning-Funktionen arbeiten auf der Spielseite: Schlagworte, Länge, Ak
   await expect(page.locator('#tuning-tempo-out')).toHaveText('120');
 
   const before = await shownChords(page);
-  await page.locator('#side-right #add-chords button', { hasText: /^C$/ }).click();
+  await addChordByName(page, 'C', '#side-right');
   await expect.poll(() => shownChords(page)).toEqual([...before, 'C']);
   await page.locator('#side-right #progression button').last().click();
   await expect.poll(() => shownChords(page)).toEqual(before);
@@ -348,7 +349,7 @@ test('1280 px: Leisten neben den Blöcken; 360 px: eine Leiste als Schublade im 
 // --- Einklappbare Seitenleisten (Task 4); ohne Bewegung, damit Maße nicht in eine Einblendung fallen ---
 test.describe('Seitenleisten', () => {
   test.use({ reducedMotion: 'reduce' });
-  const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view)\.[A-Za-z.]+$/;
+  const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view|group|timbre|chord|chordGroup|chordColor)\.[A-Za-z.]+$/;
 
   test('erster Besuch: Los öffnet die Spielseite mit beiden Leisten zu; Auslöser in der Kopfzeile', async ({ page }) => {
     await openWithGo(page);

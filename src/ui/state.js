@@ -4,6 +4,8 @@ import { detectLanguage } from '../i18n/index.js';
 import { progressionFor } from '../core/progressions.js';
 import { loadLayout } from './layout-state.js';
 import { loadMix } from './mix-state.js';
+import { chordName } from '../core/chords.js';
+import { colorProgression } from '../core/harmony.js';
 
 export const ROOTS = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
 // Skala ist nur Oberflächen-Zustand; der Generator kennt nur den Modus
@@ -12,11 +14,10 @@ export const LAYERS = ['drums', 'bass', 'chords', 'pad'];
 export const ALL_LAYERS = Object.fromEntries(LAYERS.map((l) => [l, true]));
 export const LENGTHS = [24, 48, 96, 192];
 export const MAX_CHORDS = 8;
-const SYMBOLS = { maj: '', min: 'm', dim: 'dim' };
 const STORAGE_KEY = 'backingtrack.lang';
 
 export const $ = (id) => document.getElementById(id);
-export const chordName = (c) => c.root + SYMBOLS[c.quality];
+export { chordName }; // Name mit Symbol aus dem Akkord-Register
 export const rollVariant = () => (crypto.getRandomValues(new Uint32Array(1))[0] % 9999) + 1;
 export const preset = (id) => STYLE_PRESETS.find((p) => p.id === id);
 // Nur bei Änderung schreiben: render() läuft je Takt, gleiche Werte sollen keine DOM-Mutation (und keine Ansage) auslösen
@@ -61,6 +62,7 @@ export const state = {
     length: 96,
   },
   scale: 'minorPentatonic',
+  chordColor: 'triads', // Akkordfarbe: wie erzeugte Folgen gefärbt werden (triads, sevenths, extended, power); deriveBars wendet sie an
   style: 'funk',
   playing: false,
   lang: readLang(),
@@ -72,10 +74,16 @@ export const state = {
   notice: null, // Schlüssel einer Hinweis-Meldung der Akkordfolge, z. B. volle Folge
 };
 
-// Folge aus Tonart und Variante; überschreibt eigene Änderungen (nur bei Tonart, Skala, Variante)
+// Die aus Tonart und Variante erzeugte Folge in einer Akkordfarbe, ohne den Zustand zu ändern
+export const derivedBars = (color = state.chordColor) => {
+  const bars = progressionFor(state.track.key, state.track.seed).map((chord) => ({ chord, beats: 4 }));
+  return colorProgression(bars, color, state.track.key);
+};
+
+// Folge aus Tonart und Variante in der gewählten Akkordfarbe; überschreibt eigene Änderungen (nur bei Tonart, Skala, Variante)
 export const deriveBars = () => {
   state.notice = null;
-  state.track.bars = progressionFor(state.track.key, state.track.seed).map((chord) => ({ chord, beats: 4 }));
+  state.track.bars = derivedBars();
 };
 
 // Stil-Vorlage: Tempo und Schlagworte, Variante und Folge bleiben

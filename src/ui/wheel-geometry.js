@@ -1,5 +1,5 @@
 // Akkordrad als reine Geometrie: Knotenpositionen und Trefferprüfung, ohne DOM (läuft auch in Node-Tests).
-import { diatonicChords, noteToPc } from '../core/music.js';
+import { diatonicChords, noteToPc, stepBase } from '../core/music.js';
 
 // Quintenzirkel ab C oben im Uhrzeigersinn; innen die Moll-Parallele (kleine Terz tiefer)
 export const FIFTHS = ['C', 'G', 'D', 'A', 'E', 'B', 'F#', 'Db', 'Ab', 'Eb', 'Bb', 'F'];
@@ -10,6 +10,12 @@ const OUTER = 0.4;
 const INNER = 0.25;
 const OUTER_NODE = 0.06;
 const INNER_NODE = 0.055;
+
+/**
+ * Gehört der Akkord zu diesem Knoten? Gleicher Grundton (nach Tonhöhe) und die Ring-Grundart des Knotens ist die Grundart der
+ * Stufe des Akkords in der Tonart: Am7 trifft Am (innen), E7 in A-Moll die Dur-Dominante E (außen), Em7 und Esus4 den Knoten Em.
+ */
+export const nodeMatches = (node, chord, key) => noteToPc(node.chord.root) === noteToPc(chord.root) && node.chord.quality === stepBase(chord, key);
 
 /**
  * Knoten des Rads für ein Quadrat der Kantenlänge size. Mit Tonart wird außen der Dur-Akkord durch den
