@@ -7,10 +7,10 @@ import { TAG_CATEGORIES } from './tags.js';
 
 /**
  * Alle Codes, die validateTrack melden kann; die Oberfläche übersetzt sie über `err.<code>`.
- * @type {readonly ('emptyBars'|'chordNotInKey'|'badBpm'|'unknownQuality'|'badBeats'|'badLength'|'badKey'|'badBar'|'badTags'|'badMeter')[]}
+ * @type {readonly ('emptyBars'|'chordNotInKey'|'badBpm'|'unknownQuality'|'badBeats'|'badLength'|'badKey'|'badBar'|'badTags'|'badMeter'|'badComplexity')[]}
  */
 export const VALIDATION_CODES = Object.freeze([
-  'emptyBars', 'chordNotInKey', 'badBpm', 'unknownQuality', 'badBeats', 'badLength', 'badKey', 'badBar', 'badTags', 'badMeter',
+  'emptyBars', 'chordNotInKey', 'badBpm', 'unknownQuality', 'badBeats', 'badLength', 'badKey', 'badBar', 'badTags', 'badMeter', 'badComplexity',
 ]);
 
 /** Obergrenze für `length` (Takte); schützt Arrangement und Audio vor riesigen Eingaben. */
@@ -54,7 +54,7 @@ function checkTags(tags, add) {
 /**
  * Sammelt Meldungen, wirft nie (leer = gültig). bpm muss in [20, 400] liegen, length in [1, MAX_LENGTH],
  * beats in [1, MAX_BEATS].
- * @returns {{ code: 'emptyBars'|'chordNotInKey'|'badBpm'|'unknownQuality'|'badBeats'|'badLength'|'badKey'|'badBar'|'badTags'|'badMeter',
+ * @returns {{ code: 'emptyBars'|'chordNotInKey'|'badBpm'|'unknownQuality'|'badBeats'|'badLength'|'badKey'|'badBar'|'badTags'|'badMeter'|'badComplexity',
  *             params: Record<string, string|number> }[]}
  */
 export function validateTrack(track) {
@@ -66,6 +66,8 @@ export function validateTrack(track) {
   if (!isPosInt(t.length) || t.length > MAX_LENGTH) add('badLength', { length: show(t.length) });
   // Taktart: fehlend oder null gilt 4/4; sonst eine der unterstützten (Text für die Meldung '2/4', bei Unbrauchbarem '?')
   if (t.meter != null && !isMeter(t.meter)) add('badMeter', { meter: Array.isArray(t.meter) && t.meter.length === 2 ? t.meter.join('/') : '?' });
+  // Komplexität: fehlend oder null gilt 0,5; sonst eine endliche Zahl von 0 bis 1
+  if (t.complexity != null && !(Number.isFinite(t.complexity) && t.complexity >= 0 && t.complexity <= 1)) add('badComplexity', { complexity: show(t.complexity) });
   const keyOk = isValidKey(t.key);
   if (!keyOk) add('badKey');
   checkTags(t.tags, add);

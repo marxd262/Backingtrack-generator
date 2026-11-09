@@ -6,7 +6,7 @@ import { CHORDS } from './chords.js';
 import { checkedTrack, barTimeline, r6 } from './timeline.js';
 import { resolveTags, driftParams } from './tags.js';
 import { buildArrangement } from './arrange.js';
-import { grooveFor, grooveCycle, levelOf } from './grooves.js';
+import { grooveFor, grooveCycle, levelOf, applyComplexity } from './grooves.js';
 
 /** Schlagzeug-Vokabular (Task 6 ordnet jedem Namen eine Stimme zu); Geisternoten sind `snare` mit vel < 0.3. */
 export const DRUM_NAMES = ['kick', 'snare', 'hat', 'openHat', 'tomHigh', 'tomMid', 'tomLow'];
@@ -161,6 +161,8 @@ export function buildEvents(input) {
   let params = resolveTags(track.tags, master.fork('tags'));
   // variety: der Seed streut die Schlagwort-Werte und schaltet zusätzliche Muster frei (der eigene Zweig 'drift' verschiebt nichts)
   if (track.variety === true) params = { ...driftParams(params, master.fork('drift')), variety: true };
+  // Komplexität: verschiebt die Parameter nach der Streuung durch variety (bei 0,5 und ohne Angabe bleibt alles gleich)
+  params = applyComplexity(params, track.complexity);
   const g = grooveFor(track);
   const { sections } = buildArrangement(track, params, master.fork('arrangement'));
   const bars = barTimeline(track);

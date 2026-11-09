@@ -27,6 +27,22 @@ export const isMeter = (meter) => Object.hasOwn(METERS, meterKey(meter));
 /** Schläge und Schritte je Schlag; für Unbekanntes das Raster von 4/4 (geprüfte Tracks haben immer eine bekannte Taktart). */
 export const meterGrid = (meter) => (isMeter(meter) ? METERS[meterKey(meter)] : METERS['4/4']);
 
+const clamp01 = (x) => Math.min(1, Math.max(0, x));
+
+/**
+ * Komplexität (0 bis 1, fehlend oder null = 0,5) verschiebt die Muster-Parameter, die die Stufen der Grooves wählen: drive und
+ * bassMovement um (c - 0,5), syncopation um 0,6 * (c - 0,5), jeweils auf [0,1] begrenzt. Bei 0,5 bleibt alles gleich. Neue Kopie.
+ */
+export function applyComplexity(params, complexity) {
+  const shift = (complexity ?? 0.5) - 0.5;
+  return {
+    ...params,
+    drive: clamp01(params.drive + shift),
+    bassMovement: clamp01(params.bassMovement + shift),
+    syncopation: clamp01(params.syncopation + shift * 0.6),
+  };
+}
+
 /** Schritte eines Musterzyklus im Raster der Taktart des Grooves (4/4: 16). */
 export const grooveCycle = (groove) => METERS[groove.meter].beats * METERS[groove.meter].sub;
 
