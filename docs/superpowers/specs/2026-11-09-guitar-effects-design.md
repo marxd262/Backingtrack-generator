@@ -53,7 +53,7 @@ Stimmen -> [Eingang x ref] -> Overdrive -> Distortion -> Fuzz -> Box -> [x 1/ref
 - Bekannte Grenze: Im untersten Teil des Fuzz-Wegs (Verstärkung unter etwa 5) ändert sich der Gleichanteil der Vorspannung mit der
   Verstärkung; Drehen am Regler dort pocht leise (unter -30 dB). Ein Gegenabzug mit zweiter Quelle scheiterte an der Latenz des überabgetasteten Shapers.
 - WaveShaper mit 2- bis 4-fachem Oversampling.
-- Der Pegelausgleich ist je Schicht und Stufe aus Messungen des rms gegen den sauberen Klang angeglichen (0,7 bis 1,26).
+- Der Pegelausgleich ist je Schicht und Stufe aus Messungen des rms gegen den sauberen Klang angeglichen (etwa 0,65 bis 1,15; alle Regler aller Schichten auf 1 bleiben mit Begrenzer unter 0,95).
 
 ## Nicht Teil dieser Fassung
 

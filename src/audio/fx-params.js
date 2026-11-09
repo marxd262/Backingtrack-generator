@@ -14,7 +14,7 @@ const db = (x) => 10 ** (x / 20);
 export const NOMINAL = 0.15;
 // Pegelausgleich hinter den Kappungsstufen, gemessen an den Akkorden (rms gegen sauber ~1). Overdrive wird mit mehr Verstärkung lauter, weil
 // das Signal sich einem Rechteck nähert; Distortion und Fuzz sind schon bei wenig Regler gekappt und bleiben gleich.
-const OD_MAKEUP = 0.21, DIST_MAKEUP = 0.061, FUZZ_MAKEUP = 0.125;
+const OD_MAKEUP = 0.19, DIST_MAKEUP = 0.055, FUZZ_MAKEUP = 0.113;
 const mix = (a) => Math.min(1, 8 * a); // schon bei einem Achtel des Reglers ganz in der Stufe, darunter blendet sie stetig ein
 
 // Schichtprofile. ref: Faktor am Eingang der Kette, bringt die Spitze der Stimmen (gemessen: Bass 0.88, Akkorde 0.43, Pad 0.22) auf
