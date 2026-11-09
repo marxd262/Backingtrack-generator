@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULT_TIMBRE, resolveTimbre } from '../../src/core/timbre.js';
-import { bassParams, drumParams, chordParams, padParams, masterParams } from '../../src/audio/voice-params.js';
+import { bassParams, drumParams, chordParams, padParams, masterParams, fxParams } from '../../src/audio/voice-params.js';
 
 const STEPS = [0, 0.25, 0.5, 0.75, 1];
 const BASS_INPUTS = Object.keys(DEFAULT_TIMBRE.bass);
@@ -17,7 +17,10 @@ const RANGES = {
   sawMix: [0, 1],
   triMix: [0, 1],
   sineGain: [0.4, 4],
-  drive: [1, 20],
+  drive: [1, 60],
+  odDrive: [1, 6],
+  distDrive: [1, 30],
+  distClip: [2.4, 4],
   peak: [0.2, 0.5],
   sustain: [0.2, 1],
   attack: [0.004, 0.004],
@@ -36,7 +39,10 @@ test('bassParams: neutraler Bass ergibt exakt die bisherigen Konstanten aus bass
     sawMix: 1,
     triMix: 0,
     sineGain: 1, // Sinus direkt auf die Hüllkurve
-    drive: 1, // 1 = ohne Verzerrer
+    drive: 1, // 1 = ohne Fuzz
+    odDrive: 1, // 1 = ohne Overdrive
+    distDrive: 1, // 1 = ohne Distortion
+    distClip: 4, // Kappungspegel der Distortion, 4 = Rand des Eingangsbereichs (keine Wirkung)
     peak: 0.5, // Hüllkurvenspitze vel * 0.5
     sustain: 1, // flach während der Haltezeit
     attack: 0.004,
@@ -71,6 +77,8 @@ test('bassParams: beabsichtigte Richtungen (streng über die Tabelle)', () => {
   const effects = [
     ['sub', 'sineGain', 1], ['sub', 'sawMix', -1], ['sub', 'lpEnd', -1], ['sub', 'lpStart', -1],
     ['fuzz', 'drive', 1], ['fuzz', 'peak', -1],
+    ['overdrive', 'odDrive', 1], ['overdrive', 'peak', -1],
+    ['distortion', 'distDrive', 1], ['distortion', 'distClip', -1], ['distortion', 'peak', -1],
     ['pluck', 'lpTime', -1], ['pluck', 'lpStart', 1],
     ['cutoff', 'lpStart', 1], ['cutoff', 'lpEnd', 1],
     ['resonance', 'q', 1], ['resonance', 'sineGain', -1], ['resonance', 'lpTime', 1],
@@ -88,7 +96,7 @@ test('bassParams: beabsichtigte Richtungen (streng über die Tabelle)', () => {
 test('bassParams: Extreme (alle 0, alle 1, gemischt) endlich und im Bereich', () => {
   const zero = Object.fromEntries(BASS_INPUTS.map((k) => [k, 0]));
   const one = Object.fromEntries(BASS_INPUTS.map((k) => [k, 1]));
-  const mixed = { sub: 1, fuzz: 1, pluck: 0, cutoff: 0, resonance: 1, roundness: 1 };
+  const mixed = { sub: 1, fuzz: 1, overdrive: 1, distortion: 1, pluck: 0, cutoff: 0, resonance: 1, roundness: 1 };
   for (const t of [zero, one, mixed, { ...one, cutoff: 0 }, { ...zero, cutoff: 1, resonance: 1 }]) {
     const p = bassParams(t);
     for (const [field, [lo, hi]] of Object.entries(RANGES)) {
@@ -220,16 +228,23 @@ const GROUPS = {
       tremRate: 6,
       tremDepth: 0, // 0 = ohne Tremolo-Knoten
       tremBase: 1,
+      drive: 1, // 1 = ohne Fuzz
+      odDrive: 1, // 1 = ohne Overdrive
+      distDrive: 1, // 1 = ohne Distortion
+      distClip: 4, // 4 = Rand des Eingangsbereichs (keine Wirkung)
     },
     ranges: {
       lpStart: [720, 9000], lpEnd: [180, 2250], lpTime: [0.125, 0.5], holdScale: [0.5, 3], release: [0.06, 0.6],
-      peak: [0.05, 0.3], attack: [0.003, 0.003], chorusMix: [0, 1.6], chorusDetune: [12, 12], tremRate: [6, 6], tremDepth: [0, 0.95], tremBase: [0.525, 1],
+      peak: [0.03, 0.3], attack: [0.003, 0.003], chorusMix: [0, 1.6], chorusDetune: [12, 12], tremRate: [6, 6], tremDepth: [0, 0.95], tremBase: [0.525, 1],
+      drive: [1, 60], odDrive: [1, 6], distDrive: [1, 30], distClip: [2.4, 4],
     },
     // [Eingang, Feld, +1 steigend / -1 fallend] (streng über die Tabelle, außer wo unten gesondert geprüft)
     effects: [
       ['brightness', 'lpStart', 1], ['brightness', 'lpEnd', 1],
       ['length', 'holdScale', 1], ['length', 'release', 1], ['length', 'lpTime', 1],
       ['chorus', 'peak', -1], ['tremolo', 'peak', 1], ['tremolo', 'tremBase', -1], // Tremolo hebt die Spitze an, damit der Pegel (rms) bleibt
+      ['fuzz', 'drive', 1], ['fuzz', 'peak', -1], ['overdrive', 'odDrive', 1], ['overdrive', 'peak', -1],
+      ['distortion', 'distDrive', 1], ['distortion', 'distClip', -1], ['distortion', 'peak', -1],
     ],
   },
   pad: {
@@ -248,14 +263,21 @@ const GROUPS = {
       spread: 9, // Sägezähne bei -9 / 0 / +9 Cent
       extraMix: 0, // 0 = ohne zusätzliche Oszillatoren
       shimmerMix: 0, // 0 = ohne Oktav-Anteile
+      drive: 1, // 1 = ohne Fuzz
+      odDrive: 1, // 1 = ohne Overdrive
+      distDrive: 1, // 1 = ohne Distortion
+      distClip: 4, // 4 = Rand des Eingangsbereichs (keine Wirkung)
     },
     ranges: {
-      attack: [0.05, 1.6], peak: [0.03, 0.1], holdMin: [0.1, 0.1], holdCut: [0.5, 0.5], holdAttack: [0.45, 0.45], release: [0.9, 0.9],
+      attack: [0.05, 1.6], peak: [0.018, 0.1], holdMin: [0.1, 0.1], holdCut: [0.5, 0.5], holdAttack: [0.45, 0.45], release: [0.9, 0.9],
       cutoff: [300, 4500], q: [0.8, 0.8], lfoSpeed: [0.05, 1.2], lfoDepth: [100, 1500], spread: [3, 25], extraMix: [0, 1], shimmerMix: [0, 2],
+      drive: [1, 60], odDrive: [1, 6], distDrive: [1, 30], distClip: [2.4, 4],
     },
     effects: [
       ['attack', 'attack', 1], ['cutoff', 'cutoff', 1], ['lfoSpeed', 'lfoSpeed', 1], ['lfoDepth', 'lfoDepth', 1],
       ['thickness', 'spread', 1], ['thickness', 'cutoff', -1],
+      ['fuzz', 'drive', 1], ['fuzz', 'peak', -1], ['overdrive', 'odDrive', 1], ['overdrive', 'peak', -1],
+      ['distortion', 'distDrive', 1], ['distortion', 'distClip', -1], ['distortion', 'peak', -1],
     ],
   },
   master: {
@@ -412,4 +434,26 @@ test('chordParams: warm + mellow + dark (Helligkeit 0) und warm + mellow (wie im
     assert.ok(chordFloorOk(p), `${JSON.stringify(tags)} (brightness ${timbre.chords.brightness}): ${p.lpStart} / ${p.lpEnd}`);
   }
   assert.equal(resolveTimbre({ synths: ['warm'], chordSound: ['mellow'], mood: ['dark'] }).chords.brightness, 0);
+});
+
+test('fxParams: neutral ohne Wirkung, stetig steigend, Pegelausgleich fällt; Fuzz geht deutlich weiter als Overdrive und Distortion', () => {
+  const fx = (over) => fxParams({ fuzz: 0, overdrive: 0, distortion: 0, ...over });
+  assert.deepEqual(fx({}), { odDrive: 1, distDrive: 1, distClip: 4, drive: 1, comp: 1 });
+  assert.deepEqual(fxParams({}), fx({}), 'fehlende Felder zählen als 0');
+  const full = fx({ fuzz: 1, overdrive: 1, distortion: 1 });
+  assert.ok(full.drive > full.distDrive && full.distDrive > full.odDrive, `${full.drive} > ${full.distDrive} > ${full.odDrive}`);
+  assert.ok(full.drive >= 3 * 20, 'Fuzz mindestens dreimal so stark wie der bisherige (Verstärkung 20)');
+  for (const key of ['fuzz', 'overdrive', 'distortion']) {
+    const comps = STEPS.map((v) => fx({ [key]: v }).comp);
+    for (let i = 1; i < comps.length; i++) assert.ok(comps[i] < comps[i - 1] && comps[i] > 0, `${key}: ${comps}`);
+  }
+});
+
+test('Klangmodell: Fuzz, Overdrive und Distortion für Bass, Akkorde und Pad; Schlagzeug und Summe bleiben ohne', () => {
+  for (const group of ['bass', 'chords', 'pad']) {
+    for (const field of ['fuzz', 'overdrive', 'distortion']) assert.equal(DEFAULT_TIMBRE[group][field], 0, `${group}.${field}`);
+  }
+  for (const group of ['drums', 'master']) {
+    for (const field of ['fuzz', 'overdrive', 'distortion']) assert.ok(!(field in DEFAULT_TIMBRE[group]), `${group}.${field}`);
+  }
 });

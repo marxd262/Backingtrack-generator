@@ -593,3 +593,74 @@ test('Grooves in jeder Taktart bei hoher Komplexität: Spitze nach dem Begrenzer
     for (const layer of LAYERS) expect(r.perLayer[layer].rms, `${id} ${layer}`).toBeGreaterThan(0.005);
   }
 });
+
+// Verzerrer (Fuzz, Overdrive, Distortion) für Bass, Akkorde und Pad: je Regler allein auf 0,7, Schicht allein, 6 s.
+// Gemessen 2026-11-09 (16 s, Regler 1, vor dem Begrenzer: rms gegen Standard; Schwerpunkt Standard -> mit Effekt):
+//   Bass (525 Hz): fuzz 0.91 / 2255 Hz, overdrive 0.94 / 923 Hz, distortion 0.61 / 2799 Hz
+//   Akkorde (1239 Hz): fuzz 1.20 / 3700 Hz, overdrive 1.22 / 1742 Hz, distortion 0.80 / 4029 Hz
+//   Pad (1020 Hz): fuzz 1.35 / 4396 Hz, overdrive 1.26 / 1455 Hz, distortion 1.14 / 4575 Hz
+const FX_SECONDS = 6;
+const withTimbre = (timbre) => track({ timbre });
+for (const layer of ['bass', 'chords', 'pad']) {
+  for (const fx of ['fuzz', 'overdrive', 'distortion']) {
+    test(`Verzerrer ${layer}.${fx}: Schicht deutlich anders und obertonreicher, Pegel im Rahmen`, async ({ page }) => {
+      test.setTimeout(120_000);
+      const r = await compare(page, track(), withTimbre({ [layer]: { [fx]: 0.7 } }), FX_SECONDS, { layer });
+      const label = `${layer}.${fx}: ${JSON.stringify(r)}`;
+      expect(r.diff, label).toBeGreaterThanOrEqual(0.15);
+      expect(r.centroidB, label).toBeGreaterThan(r.centroidA);
+      expect(r.rmsB / r.rmsA, label).toBeGreaterThan(0.4);
+      expect(r.rmsB / r.rmsA, label).toBeLessThan(2.5);
+    });
+  }
+}
+
+test('Verzerrer: Schlagzeug bleibt unverändert, auch wenn ihm ein Effekt-Feld mitgegeben wird; andere Schichten ändern sich nur durch ihre eigenen Regler', async ({ page }) => {
+  test.setTimeout(120_000);
+  const drumsTried = withTimbre({ drums: { fuzz: 1, overdrive: 1, distortion: 1 } });
+  expect((await compare(page, track(), drumsTried, FX_SECONDS)).diff).toBeLessThan(1e-6);
+  const chordsOnly = withTimbre({ chords: { fuzz: 1, overdrive: 1, distortion: 1 } });
+  for (const layer of ['drums', 'bass', 'pad']) {
+    expect((await compare(page, track(), chordsOnly, FX_SECONDS, { layer })).diff, layer).toBeLessThan(1e-6);
+  }
+});
+
+test('Verzerrer: alle Effekte aller Instrumente auf 1 bleiben endlich und vor dem Begrenzer unter 1 (kein Gleichanteil vor dem Anschlag)', async ({ page }) => {
+  test.setTimeout(120_000);
+  const all = { fuzz: 1, overdrive: 1, distortion: 1 };
+  const r = await page.evaluate(([t, s]) => window.__render(t, s, { limiter: false }), [withTimbre({ bass: all, chords: all, pad: all }), FX_SECONDS]);
+  expect([r.peak, r.rms].every(Number.isFinite), JSON.stringify(r)).toBe(true);
+  expect(r.peak, JSON.stringify(r)).toBeLessThan(1);
+  // jede Schicht für sich: ein Fuzz-Gleichanteil vor dem Anschlag hatte die Spitze auf über 16 getrieben
+  for (const layer of ['bass', 'chords', 'pad']) {
+    const solo = await page.evaluate(([t, s]) => window.__render(t, s, { limiter: false }), [withTimbre({ [layer]: all }), FX_SECONDS]);
+    expect(solo.perLayer[layer].peak, layer).toBeLessThan(1);
+  }
+});
+
+test('Bass-Fuzz ist deutlich stärker als vorher: bei 1 mehr Obertöne als beim Schlagwort fuzz (0,6)', async ({ page }) => {
+  test.setTimeout(120_000);
+  const tag = await compare(page, track(), withTags({ bassSound: ['fuzz'] }), FX_SECONDS, { layer: 'bass' });
+  const full = await compare(page, track(), withTimbre({ bass: { fuzz: 1 } }), FX_SECONDS, { layer: 'bass' });
+  expect(full.centroidB, `${JSON.stringify(full)} gegen ${JSON.stringify(tag)}`).toBeGreaterThan(tag.centroidB);
+});
+
+test('createInstruments: setTimbre schaltet die Verzerrer live, auch mitten im Spiel, ohne zu werfen', async ({ page }) => {
+  const r = await page.evaluate(async () => {
+    const { createInstruments } = await import('/audio/synth.js');
+    const ctx = new OfflineAudioContext(1, 44100, 44100);
+    const inst = createInstruments(ctx, { bpm: 100, limiter: false });
+    inst.output.connect(ctx.destination);
+    const note = (layer, midi) => ({ type: 'note', layer, midi, dur: 0.3, vel: 1 });
+    for (const layer of ['bass', 'chords', 'pad']) inst.layers[layer].trigger(note(layer, layer === 'bass' ? 40 : 57), 0.05);
+    const all = { fuzz: 1, overdrive: 1, distortion: 1 };
+    inst.setTimbre({ bass: all, chords: all, pad: all });
+    for (const layer of ['bass', 'chords', 'pad']) inst.layers[layer].trigger(note(layer, layer === 'bass' ? 43 : 60), 0.4);
+    inst.setTimbre({});
+    const d = (await ctx.startRendering()).getChannelData(0);
+    let peak = 0;
+    for (const v of d) peak = Math.max(peak, Math.abs(v));
+    return peak;
+  });
+  expect(Number.isFinite(r) && r > 0 && r < 1, String(r)).toBe(true);
+});

@@ -74,8 +74,8 @@ const currentTags = (page) => page.locator('#tags button[aria-pressed="true"]').
   return tags;
 });
 
-test('26 Regler in 5 Gruppen, alle beschriftet ohne rohen Schlüsselnamen', async ({ page }) => {
-  expect(FIELDS).toHaveLength(26);
+test('34 Regler in 5 Gruppen, alle beschriftet ohne rohen Schlüsselnamen', async ({ page }) => {
+  expect(FIELDS).toHaveLength(34);
   for (const [g, fields] of Object.entries(DEFAULT_TIMBRE)) {
     await expect(group(page, g), g).toHaveCount(1);
     await expect(group(page, g).locator('input[type="range"]'), g).toHaveCount(Object.keys(fields).length);

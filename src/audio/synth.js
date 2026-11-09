@@ -95,17 +95,50 @@ function gain(ctx, value, dest) {
   return g;
 }
 
-// Tanh-Kennlinie für den Bass-Verzerrer, Eingang -FUZZ_HEAD..FUZZ_HEAD. k = drive - 1: bei k -> 0 die Identität,
-// der Klang geht also stetig aus dem unverzerrten hervor. Ungerade Länge: 0 trifft genau einen Stützpunkt (Stille bleibt 0).
+// Verzerrer. Alle Kennlinien liegen über dem Eingangsbereich -FUZZ_HEAD..FUZZ_HEAD (die Stufe davor skaliert mit 1/FUZZ_HEAD auf -1..1)
+// und sind bei Verstärkung 1 die Identität, der Klang geht also stetig aus dem unverzerrten hervor. Ungerade Länge: 0 trifft genau
+// einen Stützpunkt (Stille bleibt 0). Die Reihenfolge der Kette ist Overdrive -> Distortion -> Fuzz wie bei Bodenpedalen.
 const FUZZ_HEAD = 4;
-function fuzzCurve(drive) {
-  const k = drive - 1, n = 4097;
-  return Float32Array.from({ length: n }, (_, i) => (FUZZ_HEAD * Math.tanh(k * ((2 * i) / (n - 1) - 1))) / Math.tanh(k));
+const CURVE_POINTS = 4097;
+const curveOf = (shape) => Float32Array.from({ length: CURVE_POINTS }, (_, i) => FUZZ_HEAD * shape((2 * i) / (CURVE_POINTS - 1) - 1));
+// Overdrive: weiche, symmetrische tanh-Kappung
+const overdriveCurve = (drive) => { const k = drive - 1; return curveOf((x) => Math.tanh(k * x) / Math.tanh(k)); };
+// Distortion: harte Kappung bei clip (in Eingangseinheiten), Verstärkung drive davor
+const distortionCurve = (drive, clip) => curveOf((x) => Math.max(-clip, Math.min(clip, drive * x * FUZZ_HEAD)) / FUZZ_HEAD);
+// Fuzz: starke tanh-Kappung mit Vorspannung. Sie verschiebt die Nulldurchgänge (Impulse mit ungleichen Hälften: gerade Obertöne,
+// Oktavklang) und lässt leise Töne in den Kappungsbereich fallen (Sputtern beim Ausklingen). Wichtig: Eingang 0 ergibt Ausgang 0
+// (tanh(k*b) wird abgezogen), sonst läge schon vor dem Anschlag ein Gleichanteil an der Hüllkurve, deren Anfangswert 1 ist.
+// Der übrige Gleichanteil fällt im Hochpass der Kette weg.
+const FUZZ_BIAS = 0.15;
+const fuzzCurve = (drive) => {
+  const k = drive - 1, b = FUZZ_BIAS * Math.min(1, k / 10), t = Math.tanh(k * b);
+  return curveOf((x) => (Math.tanh(k * (x + b)) - t) / (Math.tanh(k) * (1 + 0.3 * t)));
+};
+
+// Kennlinien der Kette eines Instruments aus seinen Stimmparametern (voice-params.js, fxParams); null = Stufe aus
+const curvesOf = (p) => ({
+  od: p.odDrive > 1 ? overdriveCurve(p.odDrive) : null,
+  dist: p.distDrive > 1 ? distortionCurve(p.distDrive, p.distClip) : null,
+  fuzz: p.drive > 1 ? fuzzCurve(p.drive) : null,
+});
+
+// Baut die Kette hinter `dest` auf und gibt ihren Eingang zurück (ohne Stufe: dest selbst). Von hinten nach vorn gebaut; zwischen den
+// Stufen bringt eine Verstärkung 1/FUZZ_HEAD den Ausgangsbereich wieder auf -1..1. Der Hochpass nimmt dem Fuzz den Gleichanteil.
+function driveChain(ctx, curves, dest) {
+  let sink = dest;
+  if (curves.fuzz) { const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 20; hp.connect(dest); sink = hp; }
+  for (const curve of [curves.fuzz, curves.dist, curves.od]) {
+    if (!curve) continue;
+    const shaper = ctx.createWaveShaper(); shaper.curve = curve; shaper.oversample = '2x';
+    shaper.connect(sink);
+    sink = gain(ctx, 1 / FUZZ_HEAD, shaper);
+  }
+  return sink;
 }
 
 // Bass: zwei leicht verstimmte Sägezähne (oder Dreiecke) mit Tiefpass-Zupfhüllkurve, Sinus als Fundament,
-// optional Verzerrer nach dem Filter. p aus bassParams, curve aus fuzzCurve (null ohne Verzerrer).
-function bassNote(ctx, out, t, e, p, curve) {
+// optional Verzerrerkette nach dem Filter. p aus bassParams, curves aus curvesOf.
+function bassNote(ctx, out, t, e, p, curves) {
   const f = hz(e.midi), end = t + e.dur + 0.1;
   const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.Q.value = p.q;
   lp.frequency.setValueAtTime(p.lpStart, t); lp.frequency.exponentialRampToValueAtTime(p.lpEnd, t + p.lpTime);
@@ -123,19 +156,14 @@ function bassNote(ctx, out, t, e, p, curve) {
     const bus = gain(ctx, mix, lp);
     for (const det of [-p.sawDetune, p.sawDetune]) osc(ctx, type, f, det, bus, t, end);
   }
-  let body = a;
-  if (curve) {
-    const shaper = ctx.createWaveShaper(); shaper.curve = curve;
-    body = gain(ctx, 1 / FUZZ_HEAD, shaper);
-    shaper.connect(a);
-  }
+  const body = driveChain(ctx, curves, a);
   osc(ctx, 'sine', f, 0, gain(ctx, p.sineGain, body), t, end);
   lp.connect(body);
 }
 
 // Akkorde: kurzer Zupf/Stab je Ton (der Strom enthält Stabs oder Arpeggio-Töne). p aus chordParams (beim neutralen Klang die
 // bisherigen Konstanten); Chorus-Oszillatoren und Tremolo-LFO nur, wenn der Klang sie verlangt.
-function chordNote(ctx, out, t, e, p) {
+function chordNote(ctx, out, t, e, p, curves) {
   const f = hz(e.midi), hold = Math.max(0.01, e.dur * 0.5 * p.holdScale);
   const end = t + Math.max(e.dur + 0.3, p.attack + hold + p.release + 0.05);
   const lp = ctx.createBiquadFilter(); lp.type = 'lowpass';
@@ -149,7 +177,7 @@ function chordNote(ctx, out, t, e, p) {
       osc(ctx, 'sawtooth', f, side * p.chorusDetune, gain(ctx, p.chorusMix, pan), t + (side < 0 ? 0.011 : 0.017), end);
     }
   }
-  lp.connect(a);
+  lp.connect(driveChain(ctx, curves, a)); // Verzerrerkette zwischen Filter und Hüllkurve (jeder Ton für sich)
   if (p.tremDepth > 0) {
     const trem = gain(ctx, p.tremBase, out);
     osc(ctx, 'sine', p.tremRate, 0, gain(ctx, p.tremDepth / 2, trem.gain), t, end);
@@ -158,7 +186,7 @@ function chordNote(ctx, out, t, e, p) {
 }
 
 // Pad: langsamer Einsatz, verstimmte Sägezähne durch Tiefpass mit langsamem LFO, optional mehr Oszillatoren und Oktav-Anteile
-function padNote(ctx, out, t, e, p) {
+function padNote(ctx, out, t, e, p, curves) {
   // Einsatz länger als holdAttack: die Haltezeit schrumpft um das Mehr, damit der Akkord wie beim neutralen Klang kurz vor dem
   // Taktstrich ausklingt; passt der Einsatz nicht in die Note, wird er gekürzt (nie unter holdAttack, neutral also unverändert)
   const attack = Math.min(p.attack, Math.max(p.holdAttack, e.dur - p.holdCut - p.holdMin + p.holdAttack));
@@ -175,7 +203,8 @@ function padNote(ctx, out, t, e, p) {
   if (p.shimmerMix > 0) { // Oktav-Anteile (2f, 4f) am Tiefpass vorbei, leicht verstimmt gegeneinander
     for (const [mult, level, det] of [[2, 0.8, -4], [2, 0.8, 4], [4, 0.4, 0]]) osc(ctx, 'sine', f * mult, det, gain(ctx, p.shimmerMix * level, a), t, end);
   }
-  lp.connect(a).connect(out);
+  lp.connect(driveChain(ctx, curves, a)); // Oktav-Anteile (shimmer) gehen am Filter und an der Kette vorbei und bleiben sauber
+  a.connect(out);
 }
 
 /**
@@ -191,14 +220,16 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
   let sound = completeTimbre(timbre);
   // Parameterobjekte bleiben dieselben, setTimbre überschreibt nur ihre Felder (die Stimmen halten sie als Referenz)
   const mix = {}, drum = {}, bass = {}, chord = {}, pad = {};
-  let curve = null; // Fuzz-Kennlinie, null ohne Verzerrer
+  let bassCurves, chordCurves, padCurves; // Kennlinien der Verzerrerketten (null je Stufe, die aus ist)
   const applyTimbre = () => {
     Object.assign(mix, masterParams(sound.master));
     Object.assign(drum, drumParams(sound.drums));
     Object.assign(bass, bassParams(sound.bass));
     Object.assign(chord, chordParams(sound.chords));
     Object.assign(pad, padParams(sound.pad));
-    curve = bass.drive > 1 ? fuzzCurve(bass.drive) : null;
+    bassCurves = curvesOf(bass);
+    chordCurves = curvesOf(chord);
+    padCurves = curvesOf(pad);
   };
   applyTimbre();
   const rng = createRng(1);
@@ -237,9 +268,9 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
   const roomSend = gain(ctx, drum.roomSend, reverb); // Raum-Sendeweg der Schlagzeugsumme in den Hall, immer vorhanden (0 = aus)
   const play = {
     drums: (out, t, e) => e.type === 'hit' && drums[e.name]?.(out, t, e.vel),
-    bass: (out, t, e) => e.type === 'note' && bassNote(ctx, out, t, e, bass, curve),
-    chords: (out, t, e) => e.type === 'note' && chordNote(ctx, out, t, e, chord),
-    pad: (out, t, e) => e.type === 'note' && padNote(ctx, out, t, e, pad),
+    bass: (out, t, e) => e.type === 'note' && bassNote(ctx, out, t, e, bass, bassCurves),
+    chords: (out, t, e) => e.type === 'note' && chordNote(ctx, out, t, e, chord, chordCurves),
+    pad: (out, t, e) => e.type === 'note' && padNote(ctx, out, t, e, pad, padCurves),
   };
 
   // Lautstärke weich nachführen und am Ende exakt setzen (setTargetAtTime nähert sich nur an)
