@@ -125,6 +125,20 @@ test('kein roher Schlüssel in beiden Sprachen, englische Gruppennamen', async (
   for (const text of await texts()) expect(RAW_KEY.test(text), text).toBe(false);
 });
 
+test('jeder Chip nennt die Akkordart als Hilfetext und im zugänglichen Namen, in beiden Sprachen', async ({ page }) => {
+  const am7 = quality(page, 'Am7');
+  await expect(am7).toHaveAttribute('title', 'Mollseptakkord');
+  await expect(am7).toHaveAttribute('aria-label', 'Am7 (Mollseptakkord) hinzufügen');
+  await expect(quality(page, 'A5')).toHaveAttribute('title', 'Powerchord');
+  await page.locator('[data-lang="en"]').click();
+  await expect(am7).toHaveAttribute('title', 'Minor seventh');
+  await expect(am7).toHaveAttribute('aria-label', 'Add Am7 (Minor seventh)');
+  for (const q of Object.keys(CHORDS)) {
+    const title = await page.locator(`#add-qualities button[data-quality="${q}"]`).getAttribute('title');
+    expect(title && !title.startsWith('chord.'), q).toBeTruthy();
+  }
+});
+
 test('helper addChordByName fügt einen Akkord über beide Schritte an', async ({ page }) => {
   const before = await shown(page);
   await addChordByName(page, 'G', '#side-right');

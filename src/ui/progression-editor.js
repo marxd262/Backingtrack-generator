@@ -117,7 +117,10 @@ export function initProgressionEditor(changed, render) {
     for (const b of qualityChips) {
       const name = chordName({ root: picked, quality: b.dataset.quality });
       setText(b, name);
-      setAttr(b, 'aria-label', t('ui.addChordNamed', { chord: name }));
+      // Hilfetext und zugänglicher Name nennen die Art (Mollseptakkord), damit man das Symbol nicht lesen können muss
+      const kind = t(`chord.${b.dataset.quality}`);
+      setAttr(b, 'title', kind);
+      setAttr(b, 'aria-label', t('ui.addChordKind', { chord: name, kind }));
       const off = !allowed.includes(b.dataset.quality);
       if (b.disabled !== off) b.disabled = off;
     }

@@ -131,7 +131,7 @@ export default {
   'ui.lanesLabel': 'Verlauf: Schlagzeug, Bass, Akkorde und Pad über alle Takte, mit Abschnitten, Fills und Zeiger',
   'ui.wheelLabel': 'Akkordrad im Quintenzirkel: Akkorde der Tonart kräftig umrandet, die Folge gestrichelt verbunden',
   'ui.addChord': 'Akkord hinzufügen',
-  'ui.addChordNamed': '{chord} hinzufügen',
+  'ui.addChordKind': '{chord} ({kind}) hinzufügen',
   'ui.removeChord': '{chord} entfernen',
   'ui.progressionFull': 'Die Akkordfolge hat schon {max} Akkorde, mehr passen nicht hinein.',
   'ui.quickPick': 'Schnellauswahl',

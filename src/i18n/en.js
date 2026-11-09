@@ -131,7 +131,7 @@ export default {
   'ui.lanesLabel': 'Timeline: drums, bass, chords and pad across all bars, with sections, fills and playhead',
   'ui.wheelLabel': 'Chord wheel in the circle of fifths: chords of the key outlined, the progression joined by dashed lines',
   'ui.addChord': 'Add a chord',
-  'ui.addChordNamed': 'Add {chord}',
+  'ui.addChordKind': 'Add {chord} ({kind})',
   'ui.removeChord': 'Remove {chord}',
   'ui.progressionFull': 'The progression already has {max} chords, no more fit.',
   'ui.quickPick': 'Quick pick',
