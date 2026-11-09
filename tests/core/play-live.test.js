@@ -178,3 +178,34 @@ test('setTrack nach stop() liefert false und wirft nicht', async () => {
   s.h.stop();
   assert.equal(s.h.setTrack(track({ tags: TAGS_B })), false);
 });
+
+test('setTrack meldet false bei geänderter Taktart, auch wenn die Dauer eines Durchlaufs gleich bleibt (4/4 zu 12/8)', async () => {
+  const A = buildEvents(track());
+  const s = await setup();
+  try {
+    await s.advance(1.5);
+    assert.equal(s.h.setTrack(track({ meter: [12, 8] })), false);
+    assert.equal(s.h.setTrack(track({ meter: [3, 4], bars: track().bars.map((b) => ({ ...b, beats: 4 })) })), false, 'auch 3/4 mit gleich langen Takten');
+    await s.advance(4.0);
+    const early = (e) => e.t <= 3.9;
+    assert.deepEqual(s.keysOf(early), streamKeys(A, early), 'der alte Strom läuft unverändert weiter');
+  } finally {
+    s.h.stop();
+  }
+});
+
+test('setTrack: anderer Groove oder andere Komplexität bei gleicher Taktart tauscht live, meter fehlend und [4,4] sind dieselbe Taktart', async () => {
+  const A = buildEvents(track());
+  const B = buildEvents(track({ groove: 'latin', complexity: 0.9 }));
+  const s = await setup();
+  try {
+    await s.advance(1.5);
+    assert.equal(s.h.setTrack(track({ groove: 'latin', complexity: 0.9, meter: [4, 4] })), true);
+    await s.advance(4.0);
+    const late = (e) => e.bar >= 2 && e.bar <= 3;
+    assert.notDeepEqual(streamKeys(A, late), streamKeys(B, late), 'die Ströme müssen sich unterscheiden, sonst prüft der Test nichts');
+    assert.deepEqual(s.keysOf(late), streamKeys(B, late));
+  } finally {
+    s.h.stop();
+  }
+});

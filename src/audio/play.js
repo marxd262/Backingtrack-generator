@@ -3,6 +3,7 @@
 import { buildEvents } from '../core/events.js';
 import { resolveTrackTimbre } from '../core/timbre.js';
 import { normalizeTrack } from '../core/track.js';
+import { meterKey } from '../core/grooves.js';
 import { createInstruments as synthInstruments } from './synth.js';
 import { sliderGain } from './mix.js';
 
@@ -27,6 +28,7 @@ export function play(ctx, trackInput, { loops = 1, startBar = 0, levels, master,
   }
   for (const v of [master ?? 1, ...Object.values(levels ?? {})]) sliderGain(v); // wirft RangeError, bevor ein Knoten entsteht
   const track = normalizeTrack(trackInput);
+  const startMeter = meterKey(track.meter);
   const bpm = track.bpm;
   const loopBars = track.length;
   if (!(Number.isInteger(startBar) && startBar >= 0 && startBar < loopBars)) {
@@ -149,14 +151,15 @@ export function play(ctx, trackInput, { loops = 1, startBar = 0, levels, master,
     // Ereignisstrom live tauschen (z. B. nach einem Schlagwort mit Mustereffekt): ab dem nächsten noch nicht geplanten Ereignis
     // spielt der neue Strom, schon geplante Töne laufen weiter. Die Liedzeit der Ereignisse bezieht sich auf das Starttempo (das
     // bpm des übergebenen Tracks zählt nicht; Tempowechsel macht setTempo). false ohne Änderung, wenn der Player gestoppt ist oder
-    // sich Länge oder Taktlängen (damit die Dauer eines Durchlaufs) ändern; ein ungültiger Track wirft wie buildEvents.
+    // sich Länge, Taktlängen (damit die Dauer eines Durchlaufs) oder die Taktart (auch bei gleicher Dauer, etwa 4/4 zu 12/8) ändern;
+    // ein ungültiger Track wirft wie buildEvents. Groove und Komplexität bei gleicher Taktart tauschen den Strom.
     setTrack(newTrack) {
       if (stopped) return false;
       const next2 = buildEvents({ ...newTrack, bpm });
       const t2 = normalizeTrack({ ...newTrack, bpm });
       let sec = 0;
       for (let i = 0; i < t2.length; i++) sec += (t2.bars[i % t2.bars.length].beats * 60) / bpm;
-      if (t2.length !== loopBars || Math.abs(sec - loopSec) > 1e-9) return false;
+      if (t2.length !== loopBars || Math.abs(sec - loopSec) > 1e-9 || meterKey(t2.meter) !== startMeter) return false;
       // gleichzeitige Ereignisse plant ein Planerlauf zusammen: was bis tLast geplant ist, wird nicht wiederholt
       const tLast = next > 0 ? events[next - 1].t : -Infinity;
       events = next2;
