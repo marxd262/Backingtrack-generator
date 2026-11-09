@@ -1,7 +1,7 @@
 // Bedienung der Gruppe "Rhythmus" in der linken Leiste: Taktart, Groove der Taktart und Komplexität. Die Rechnung steht in
 // core/grooves.js. Groove und Komplexität wirken live (applyLive), ein Taktartwechsel startet eine laufende Wiedergabe neu.
 import { t } from '../index.js';
-import { $, state, pressed, setText, setMeter } from './state.js';
+import { $, state, pressed, setText, setAttr, setMeter } from './state.js';
 import { METERS, groovesFor, meterKey, grooveIdFor } from '../core/grooves.js';
 
 const chip = (props) => Object.assign(document.createElement('button'), { type: 'button', className: 'chip', ...props });
@@ -52,6 +52,8 @@ export function initRhythm({ render, restartIfPlaying, applyLive }) {
     for (const b of $('groove-chips').children) pressed(b, b.dataset.groove === current);
     const percent = String(Math.round((state.track.complexity ?? 0.5) * 100));
     if (slider.value !== percent) slider.value = percent;
-    setText($('complexity-out'), t('ui.percent', { n: percent }));
+    const shown = t('ui.percent', { n: percent });
+    setText($('complexity-out'), shown);
+    setAttr(slider, 'aria-valuetext', shown);
   };
 }

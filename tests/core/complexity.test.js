@@ -1,7 +1,7 @@
 // Komplexität: verschiebt drive, bassMovement und syncopation; 0,5 und fehlende Angabe lassen alles wie es ist.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyComplexity } from '../../src/core/grooves.js';
+import { applyComplexity, GROOVES, METERS } from '../../src/core/grooves.js';
 import { buildEvents } from '../../src/core/events.js';
 import { validateTrack } from '../../src/core/track.js';
 import { STYLE_PRESETS } from '../../src/core/tags.js';
@@ -58,6 +58,27 @@ test('Dichte: Schlagzeug- und Bass-Ereignisse je Takt steigen mit der Komplexit�
       });
       for (let i = 1; i < mean.length; i++) assert.ok(mean[i] >= mean[i - 1] * 0.97, `${p.id} variety=${variety}: ${mean.map((m) => m.toFixed(1))}`);
       assert.ok(mean[4] > mean[0] * 1.05, `${p.id} variety=${variety}: bei 1 mehr als bei 0 (${mean[4].toFixed(1)} gegen ${mean[0].toFixed(1)})`);
+    }
+  }
+});
+
+test('Dichte je Groove: Schlagzeug-Ereignisse je Takt steigen mit der Komplexität (alle Grooves, alle Taktarten, mit und ohne variety)', () => {
+  const SEEDS = Array.from({ length: 20 }, (_, i) => i + 1);
+  const funk = STYLE_PRESETS[0];
+  for (const [id, g] of Object.entries(GROOVES)) {
+    const { beats } = METERS[g.meter];
+    const grooveBars = ['A', 'A', 'D', 'E'].map((root, i) => ({ chord: { root, quality: i === 3 ? 'maj' : 'min' }, beats }));
+    for (const variety of [false, true]) {
+      const mean = COMPLEXITIES.map((complexity) => {
+        let total = 0;
+        for (const seed of SEEDS) {
+          const t = track(funk, { seed, variety, complexity, meter: g.meter.split('/').map(Number), groove: id, bars: grooveBars });
+          total += buildEvents(t).filter((e) => e.layer === 'drums' && e.type === 'hit').length;
+        }
+        return total / (SEEDS.length * 8);
+      });
+      for (let i = 1; i < mean.length; i++) assert.ok(mean[i] >= mean[i - 1] * 0.97, `${id} variety=${variety}: ${mean.map((m) => m.toFixed(1))}`);
+      assert.ok(mean[4] > mean[0] * 1.05, `${id} variety=${variety}: bei 1 mehr als bei 0 (${mean[4].toFixed(1)} gegen ${mean[0].toFixed(1)})`);
     }
   }
 });

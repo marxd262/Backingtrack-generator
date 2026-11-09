@@ -12,6 +12,7 @@ import { initProgressionEditor, addChord } from './progression-editor.js';
 import { initChordColor } from './chord-color.js';
 import { drawLanes } from './lanes.js';
 import { createWheel } from './wheel.js';
+import { convertTempo, meterKey } from '../core/grooves.js';
 
 export function initTuning({ render, restartIfPlaying, toggleLayer, applyLive }) {
   const changed = () => { restartIfPlaying(); render(); };
@@ -102,7 +103,7 @@ export function initTuning({ render, restartIfPlaying, toggleLayer, applyLive })
     const { track } = state;
     for (const b of $('quick-pick').children) {
       const p = preset(b.dataset.style);
-      pressed(b, p.bpm === track.bpm && sameTags(p.tags, track.tags));
+      pressed(b, convertTempo(p.bpm, '4/4', meterKey(track.meter)) === track.bpm && sameTags(p.tags, track.tags));
     }
     renderTags($('tags'), track.tags);
     // nur bei Änderung: <output>.value ersetzt den Textknoten, die offene Längen-Auswahl bleibt unberührt

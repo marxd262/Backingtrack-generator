@@ -83,8 +83,38 @@ test('Taktartwechsel: Akkorde bleiben, Tempo wird umgerechnet (Achtelgeschwindig
   await meter(page, '6/8').click();
   await expect(tempo(page)).toHaveValue('67');
   expect(await progression(page).allTextContents()).toEqual(before);
+  // zurück zur vorigen Taktart ohne eigene Tempoänderung: das alte Tempo, keine Rundungsabweichung
   await meter(page, '4/4').click();
-  await expect(tempo(page)).toHaveValue('101');
+  await expect(tempo(page)).toHaveValue('100');
+});
+
+test('Rückwechsel gibt das alte Tempo nur zurück, wenn das Tempo nicht verändert wurde', async ({ page }) => {
+  await tempo(page).fill('100');
+  await meter(page, '6/8').click();
+  await expect(tempo(page)).toHaveValue('67');
+  await tempo(page).fill('70');
+  await meter(page, '4/4').click();
+  await expect(tempo(page)).toHaveValue('105');
+});
+
+test('ein Stil in 6/8 oder 12/8 bringt sein Tempo in Achtelgeschwindigkeit mit, der Stil bleibt gedrückt', async ({ page }) => {
+  await meter(page, '6/8').click();
+  await page.locator('#quick-pick [data-style="blues"]').click();
+  await expect(tempo(page)).toHaveValue('59'); // 88 * 2/3
+  await expect(page.locator('#quick-pick [data-style="blues"]')).toHaveAttribute('aria-pressed', 'true');
+  await meter(page, '12/8').click();
+  await page.locator('#quick-pick [data-style="funk"]').click();
+  await expect(tempo(page)).toHaveValue('67');
+  await expect(page.locator('#quick-pick [data-style="funk"]')).toHaveAttribute('aria-pressed', 'true');
+  await meter(page, '3/4').click(); // einfache Taktart: Stiltempo unverändert
+  await page.locator('#quick-pick [data-style="blues"]').click();
+  await expect(tempo(page)).toHaveValue('88');
+});
+
+test('der Komplexitätsregler nennt seinen Wert mit aria-valuetext', async ({ page }) => {
+  await expect(complexity(page)).toHaveAttribute('aria-valuetext', '50 %');
+  await complexity(page).fill('80');
+  await expect(complexity(page)).toHaveAttribute('aria-valuetext', '80 %');
 });
 
 test('Wiedergabe in 3/4: ein Takt dauert drei Schläge, in 4/4 vier', async ({ page }) => {

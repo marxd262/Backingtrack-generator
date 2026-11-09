@@ -109,7 +109,8 @@ export function applyStyle(id) {
   state.style = id;
   state.chordColorFromStyle = true;
   setChordColor(styleChordColor(p, state.track.seed, state.track.variety));
-  state.track.bpm = p.bpm;
+  // das Stiltempo ist ein Viertel-Tempo: in 6/8 und 12/8 (Puls = punktierte Viertel) gilt dieselbe Achtelgeschwindigkeit
+  state.track.bpm = convertTempo(p.bpm, '4/4', meterKey(state.track.meter));
   state.track.tags = structuredClone(p.tags);
   state.track.timbre = {}; // neue Vorlage, neuer Ausgangspunkt für die Regler
 }
@@ -119,9 +120,16 @@ export function applyStyle(id) {
 export function setMeter(key) {
   const prev = meterKey(state.track.meter);
   if (!Object.hasOwn(METERS, key) || key === prev) return false;
+  // Tempo als unabgerundeter Viertel-Wert führen: solange der Nutzer es nicht anfasst, gibt jeder Wechsel (auch über mehrere
+  // Taktarten und zurück) wieder genau das alte Tempo, ohne Rundungsabweichung (100, 67, 101) und ohne Klemmen an 40 und 200
+  const ref = state.tempoRef;
+  const untouched = ref && ref.key === prev && ref.shown === state.track.bpm;
+  const quarter = untouched ? ref.quarter : state.track.bpm * (METERS[prev].sub === 3 ? 3 / 2 : 1);
+  const bpm = Math.min(200, Math.max(40, Math.round(quarter * (METERS[key].sub === 3 ? 2 / 3 : 1))));
+  state.tempoRef = { key, quarter, shown: bpm };
   state.track.meter = key.split('/').map(Number);
   delete state.track.groove;
-  state.track.bpm = convertTempo(state.track.bpm, prev, key);
+  state.track.bpm = bpm;
   state.track.bars = state.track.bars.map((bar) => ({ ...bar, beats: METERS[key].beats }));
   return true;
 }
