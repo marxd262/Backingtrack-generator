@@ -6,6 +6,7 @@ import { loadLayout } from './layout-state.js';
 import { loadMix } from './mix-state.js';
 import { chordName } from '../core/chords.js';
 import { colorProgression } from '../core/harmony.js';
+import { styleChordColor } from '../core/tags.js';
 
 export const ROOTS = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
 // Skala ist nur Oberflächen-Zustand; der Generator kennt nur den Modus
@@ -63,6 +64,7 @@ export const state = {
   },
   scale: 'minorPentatonic',
   chordColor: 'triads', // Akkordfarbe: wie erzeugte Folgen gefärbt werden (triads, sevenths, extended, power); deriveBars wendet sie an
+  chordColorFromStyle: true, // true: die Farbe kommt vom Stil (und folgt der Variante), false: der Nutzer hat sie gewählt
   style: 'funk',
   playing: false,
   lang: readLang(),
@@ -83,13 +85,27 @@ export const derivedBars = (color = state.chordColor) => {
 // Folge aus Tonart und Variante in der gewählten Akkordfarbe; überschreibt eigene Änderungen (nur bei Tonart, Skala, Variante)
 export const deriveBars = () => {
   state.notice = null;
+  // Farbe vom Stil: mit variety kann die Variante die Ausweichfarbe des Stils wählen
+  if (state.chordColorFromStyle) state.chordColor = styleChordColor(preset(state.style), state.track.seed, state.track.variety);
   state.track.bars = derivedBars();
 };
 
-// Stil-Vorlage: Tempo und Schlagworte, Variante und Folge bleiben
+// Akkordfarbe setzen: eine unveränderte erzeugte Folge wird in der neuen Farbe neu abgeleitet (verlustfrei, auch von Powerchords aus),
+// eine von Hand geänderte umgefärbt
+export function setChordColor(color) {
+  const untouched = JSON.stringify(state.track.bars) === JSON.stringify(derivedBars(state.chordColor));
+  state.chordColor = color;
+  if (untouched) deriveBars();
+  else state.track.bars = colorProgression(state.track.bars, color, state.track.key);
+  state.notice = null;
+}
+
+// Stil-Vorlage: Tempo, Schlagworte und Akkordfarbe (die Folge wird umgefärbt, Variante und Tonart bleiben)
 export function applyStyle(id) {
   const p = preset(id);
   state.style = id;
+  state.chordColorFromStyle = true;
+  setChordColor(styleChordColor(p, state.track.seed, state.track.variety));
   state.track.bpm = p.bpm;
   state.track.tags = structuredClone(p.tags);
   state.track.timbre = {}; // neue Vorlage, neuer Ausgangspunkt für die Regler

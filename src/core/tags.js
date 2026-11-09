@@ -1,6 +1,7 @@
 // Schlagworte, Stil-Presets und Auflösung zu Parametern. Reine Logik, kein Audio/DOM.
 // Beschriftungen stehen nur in src/i18n.
 import { TIMBRE_EFFECTS } from './timbre-effects.js';
+import { createRng } from './rng.js';
 
 export const TAG_CATEGORIES = [
   { id: 'drums', tags: ['driving', 'loose', 'halftime', 'dry', 'heavy'] },
@@ -33,7 +34,7 @@ export const STYLE_PRESETS = [
   },
   // Gitarren-Stile (siehe docs/superpowers/specs/2026-11-09-guitar-styles-design.md); nur aus vorhandenen Schlagworten gebaut
   {
-    id: 'blues', bpm: 88,
+    id: 'blues', bpm: 88, chordColor: 'sevenths', chordColorAlt: 'extended',
     tags: { drums: ['loose'], bass: ['bouncy'], synths: ['warm'], rhythm: ['swing'], mood: [], development: ['fullFromStart'],
       drumSound: ['roomy'], bassSound: ['round'], chordSound: ['mellow'], padSound: [] },
   },
@@ -43,7 +44,7 @@ export const STYLE_PRESETS = [
       drumSound: ['punchy', 'snappy'], bassSound: ['resonant'], chordSound: ['biting'], padSound: ['thick'] },
   },
   {
-    id: 'hardrock', bpm: 148,
+    id: 'hardrock', bpm: 148, chordColor: 'power', chordColorAlt: 'triads',
     tags: { drums: ['driving', 'heavy'], bass: ['deepFat', 'gritty'], synths: ['deepSynths'], rhythm: ['straight'], mood: ['dark'], development: ['fullFromStart'],
       drumSound: ['boomy'], bassSound: ['fuzz'], chordSound: ['biting', 'ringing'], padSound: [] },
   },
@@ -58,11 +59,21 @@ export const STYLE_PRESETS = [
       drumSound: ['crisp'], bassSound: ['plucky'], chordSound: ['ringing'], padSound: ['airy'] },
   },
   {
-    id: 'poppunk', bpm: 172,
+    id: 'poppunk', bpm: 172, chordColor: 'power', chordColorAlt: 'triads',
     tags: { drums: ['driving', 'heavy'], bass: ['bouncy'], synths: [], rhythm: ['straight'], mood: ['bright'], development: ['fullFromStart'],
       drumSound: ['crisp', 'snappy'], bassSound: ['plucky'], chordSound: ['biting'], padSound: ['thick'] },
   },
 ];
+
+/**
+ * Akkordfarbe eines Stils (siehe harmony.js): `chordColor`, ohne Angabe Dreiklänge. Mit variety wählt der Seed in etwa jeder vierten
+ * Variante die Ausweichfarbe `chordColorAlt`, falls der Stil eine hat; eigener Zweig des Zufalls, damit sich sonst nichts verschiebt.
+ */
+export function styleChordColor(preset, seed, variety = false) {
+  const color = preset?.chordColor ?? 'triads';
+  if (variety && preset?.chordColorAlt && createRng(seed).fork('chordColor').next() < 0.25) return preset.chordColorAlt;
+  return color;
+}
 
 const DEFAULTS = {
   drive: 0.5, swing: 0, syncopation: 0.5, bassLow: 0.5, bassMovement: 0.5,
