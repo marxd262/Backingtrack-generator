@@ -98,6 +98,7 @@ function gain(ctx, value, dest) {
 // Verzerrer. Alle Kennlinien liegen über dem Eingangsbereich -FUZZ_HEAD..FUZZ_HEAD (die Stufe davor skaliert mit 1/FUZZ_HEAD auf -1..1)
 // und sind bei Verstärkung 1 die Identität, der Klang geht also stetig aus dem unverzerrten hervor. Ungerade Länge: 0 trifft genau
 // einen Stützpunkt (Stille bleibt 0). Die Reihenfolge der Kette ist Overdrive -> Distortion -> Fuzz wie bei Bodenpedalen.
+// Lauter als FUZZ_HEAD Einheiten am Eingang (Akkorde mit chorus 1 etwa 5, Bass mit sub 1 etwa 5) werden hart gekappt, auch bei winzigem Regler.
 const FUZZ_HEAD = 4;
 const CURVE_POINTS = 4097;
 const curveOf = (shape) => Float32Array.from({ length: CURVE_POINTS }, (_, i) => FUZZ_HEAD * shape((2 * i) / (CURVE_POINTS - 1) - 1));
@@ -106,7 +107,7 @@ const overdriveCurve = (drive) => { const k = drive - 1; return curveOf((x) => M
 // Distortion: harte Kappung bei clip (in Eingangseinheiten), Verstärkung drive davor
 const distortionCurve = (drive, clip) => curveOf((x) => Math.max(-clip, Math.min(clip, drive * x * FUZZ_HEAD)) / FUZZ_HEAD);
 // Fuzz: starke tanh-Kappung mit Vorspannung. Sie verschiebt die Nulldurchgänge (Impulse mit ungleichen Hälften: gerade Obertöne,
-// Oktavklang) und lässt leise Töne in den Kappungsbereich fallen (Sputtern beim Ausklingen). Wichtig: Eingang 0 ergibt Ausgang 0
+// Oktavklang) und lässt leise Töne in den Kappungsbereich fallen (Sputtern, wenn der Filter-Abfall den Pegel senkt; die Hüllkurve folgt erst danach). Wichtig: Eingang 0 ergibt Ausgang 0
 // (tanh(k*b) wird abgezogen), sonst läge schon vor dem Anschlag ein Gleichanteil an der Hüllkurve, deren Anfangswert 1 ist.
 // Der übrige Gleichanteil fällt im Hochpass der Kette weg.
 const FUZZ_BIAS = 0.15;

@@ -648,19 +648,27 @@ test('Bass-Fuzz ist deutlich stärker als vorher: bei 1 mehr Obertöne als beim 
 test('createInstruments: setTimbre schaltet die Verzerrer live, auch mitten im Spiel, ohne zu werfen', async ({ page }) => {
   const r = await page.evaluate(async () => {
     const { createInstruments } = await import('/audio/synth.js');
-    const ctx = new OfflineAudioContext(1, 44100, 44100);
-    const inst = createInstruments(ctx, { bpm: 100, limiter: false });
-    inst.output.connect(ctx.destination);
-    const note = (layer, midi) => ({ type: 'note', layer, midi, dur: 0.3, vel: 1 });
-    for (const layer of ['bass', 'chords', 'pad']) inst.layers[layer].trigger(note(layer, layer === 'bass' ? 40 : 57), 0.05);
     const all = { fuzz: 1, overdrive: 1, distortion: 1 };
-    inst.setTimbre({ bass: all, chords: all, pad: all });
-    for (const layer of ['bass', 'chords', 'pad']) inst.layers[layer].trigger(note(layer, layer === 'bass' ? 43 : 60), 0.4);
-    inst.setTimbre({});
-    const d = (await ctx.startRendering()).getChannelData(0);
-    let peak = 0;
-    for (const v of d) peak = Math.max(peak, Math.abs(v));
-    return peak;
+    // gleiche Töne, einmal mit setTimbre vor dem zweiten Satz Töne, einmal ohne; Spitze der Zeit 0,4 bis 0,8 s
+    const render = async (live) => {
+      const ctx = new OfflineAudioContext(1, 44100, 44100);
+      const inst = createInstruments(ctx, { bpm: 100, limiter: false });
+      inst.output.connect(ctx.destination);
+      const note = (layer, midi) => ({ type: 'note', layer, midi, dur: 0.3, vel: 1 });
+      for (const layer of ['bass', 'chords', 'pad']) inst.layers[layer].trigger(note(layer, layer === 'bass' ? 40 : 57), 0.05);
+      if (live) inst.setTimbre({ bass: all, chords: all, pad: all });
+      for (const layer of ['bass', 'chords', 'pad']) inst.layers[layer].trigger(note(layer, layer === 'bass' ? 43 : 60), 0.4);
+      const d = (await ctx.startRendering()).getChannelData(0);
+      const early = d.slice(0, 17640), late = d.slice(17640, 35280);
+      const peak = (x) => x.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
+      return { early: Array.from(early.slice(0, 2000)), late: Array.from(late), peak: peak(d) };
+    };
+    const clean = await render(false);
+    const live = await render(true);
+    const sum = (x) => x.reduce((s, v, i) => s + Math.abs(v - clean.late[i]), 0);
+    return { peak: live.peak, earlySame: live.early.every((v, i) => v === clean.early[i]), lateDiff: sum(live.late) / live.late.length };
   });
-  expect(Number.isFinite(r) && r > 0 && r < 1, String(r)).toBe(true);
+  expect(Number.isFinite(r.peak) && r.peak > 0 && r.peak < 1, JSON.stringify(r)).toBe(true);
+  expect(r.earlySame, 'Töne vor setTimbre bleiben unverändert').toBe(true);
+  expect(r.lateDiff, 'Töne nach setTimbre klingen anders').toBeGreaterThan(0.001);
 });
