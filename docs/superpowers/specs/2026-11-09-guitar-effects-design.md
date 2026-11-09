@@ -47,8 +47,11 @@ Stimmen -> [Eingang x ref] -> Overdrive -> Distortion -> Fuzz -> Box -> [x 1/ref
 - **Box:** Hochpass, Buckel (Gitarre: Präsenz 2,5 kHz +4 dB; Bass: Resonanz 90 Hz +3 dB), zwei Tiefpässe hintereinander (5 kHz, Bass 3,2 kHz).
 - Alle Kennlinien sind bei Eingang 0 genau 0 (sonst läge vor dem Anschlag ein Gleichanteil an der Hüllkurve; die erste Fassung hatte
   diesen Fehler, die Spitze stieg auf über 30).
-- Die Kette entsteht erst beim ersten Regler über 0 und wird nach 0,15 s eingeblendet. Davor geht das Signal unverändert durch einen
-  Verstärkungsknoten mit 1.
+- Die Kette entsteht erst beim ersten Regler über 0 und wird eingeblendet (nach 0,08 s beim Anlegen der Instrumente, der Player lässt 0,15 s
+  Vorlauf; nach 0,15 s bei einer Aktivierung mitten im Spiel). Davor geht das Signal unverändert durch einen Verstärkungsknoten mit 1.
+  `dispose()` (vom Player nach dem Stopp aufgerufen) hält die Vorspannungs-Quelle an, sonst hielte sie den ganzen Graphen am Leben.
+- Bekannte Grenze: Im untersten Teil des Fuzz-Wegs (Verstärkung unter etwa 5) ändert sich der Gleichanteil der Vorspannung mit der
+  Verstärkung; Drehen am Regler dort pocht leise (unter -30 dB). Ein Gegenabzug mit zweiter Quelle scheiterte an der Latenz des überabgetasteten Shapers.
 - WaveShaper mit 2- bis 4-fachem Oversampling.
 - Der Pegelausgleich ist je Schicht und Stufe aus Messungen des rms gegen den sauberen Klang angeglichen (0,7 bis 1,26).
 

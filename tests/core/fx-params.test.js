@@ -74,3 +74,11 @@ test('Pegelausgleich: je Schicht und Stufe positiv und endlich; Overdrive fällt
   assert.ok(od('bass').every((m) => m === od('bass')[0]), 'Bass: konstant');
   assert.throws(() => fxChainParams({}, 'drums'), TypeError);
 });
+
+test('Einblenden ist stetig: unterhalb eines Achtels des Reglers liegen Mischung und Box zwischen 0 und 1', () => {
+  for (const stage of STAGES) {
+    const p = one(stage, 0.05);
+    assert.ok(p[stage].mix > 0 && p[stage].mix < 1, `${stage}: ${p[stage].mix}`);
+    assert.ok(p.cab > 0 && p.cab < 1, `${stage}: Box ${p.cab}`);
+  }
+});

@@ -116,7 +116,7 @@ export function play(ctx, trackInput, { loops = 1, startBar = 0, levels, master,
     out.gain.cancelScheduledValues(now);
     out.gain.setValueAtTime(out.gain.value, now);
     out.gain.linearRampToValueAtTime(0, now + FADE);
-    setTimeout(() => out.disconnect(), FADE * 2000);
+    setTimeout(() => { out.disconnect(); instruments.dispose?.(); }, FADE * 2000);
   }
   // Fehler beim Planen (z. B. werfendes trigger) stoppt alles, sonst bliebe ein Planer übrig, den niemand anhalten kann
   function tick() {

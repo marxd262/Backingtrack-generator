@@ -163,12 +163,12 @@ test('Bassklang: alle fünf Bass-Schlagworte und gritty zugleich bleiben endlich
   expect(r.perLayer.bass.rms).toBeGreaterThan(0.005);
 });
 
-test('Bassklang: stummer Bass bleibt mit fuzz exakt still (abgeschaltet und über setMuted)', async ({ page }) => {
+test('Bassklang: stummer Bass bleibt mit fuzz still (abgeschaltet: unter -54 dB, über setMuted: exakt)', async ({ page }) => {
   test.setTimeout(120_000);
   const fuzz = { bassSound: ['fuzz'] };
   const off = await page.evaluate(([i, s]) => window.__render(i, s), [track({ layers: { drums: true, bass: false, chords: true, pad: true }, tags: { development: ['fullFromStart'], ...fuzz } }), 6]);
-  // ohne Bass-Töne bleibt nur ein Rest der Fuzz-Vorspannung (gemessen unter 5e-6, -106 dB); er ist nicht mehr exakt 0
-  expect(off.perLayer.bass.peak).toBeLessThan(1e-4);
+  // ohne Bass-Töne bleibt nur das Einschwingen der Fuzz-Vorspannung in den ersten 100 ms (gemessen unter 8e-4, -62 dB, danach unter 5e-6)
+  expect(off.perLayer.bass.peak).toBeLessThan(2e-3);
   // Schlagzeug allein: der Bass spielt mit fuzz, ist aber über setMuted stumm geschaltet; nur Float-Rundung erlaubt
   const drums = await compare(page, track(), withTags(fuzz), 6, { layer: 'drums' });
   expect(drums.diff).toBeLessThan(1e-6);
@@ -677,7 +677,7 @@ test('Verzerrer-Charakter: Distortion ungerade Obertöne, Fuzz auch gerade, Over
   expect(r.odMid, label).toBeGreaterThan(r.odLow + 20);
 });
 
-test('Verzerrer: die Box nimmt die Höhen (fast nichts über 8 kHz) und schaltet stetig ein', async ({ page }) => {
+test('Verzerrer: die Box nimmt die Höhen (fast nichts über 8 kHz)', async ({ page }) => {
   test.setTimeout(120_000);
   const r = await page.evaluate(async () => {
     const { createGuitarFx } = await import('/audio/guitar-fx.js');
@@ -707,32 +707,61 @@ test('Verzerrer: die Box nimmt die Höhen (fast nichts über 8 kHz) und schaltet
   expect(r.full, JSON.stringify(r)).toBeLessThan(0.002);
 });
 
-test('createInstruments: setTimbre schaltet die Verzerrer mitten im Spiel um (vorher sauber, danach verzerrt, auch bei schon klingenden Tönen)', async ({ page }) => {
+test('createInstruments: setTimbre schaltet die Verzerrer mitten im Spiel um und wieder aus (vorher sauber, danach verzerrt, auch bei schon klingenden Tönen, zuletzt wieder sauber)', async ({ page }) => {
   const r = await page.evaluate(async () => {
     const { createInstruments } = await import('/audio/synth.js');
     const all = { fuzz: 1, overdrive: 1, distortion: 1 };
     const render = async (live) => {
-      const ctx = new OfflineAudioContext(1, 44100, 44100);
-      const inst = createInstruments(ctx, { bpm: 100, limiter: false });
+      const ctx = new OfflineAudioContext(1, 66150, 44100);
+      // Echo und Hall aus: sie spielten sonst noch verzerrte Töne nach dem Ausschalten weiter
+      const room = { echo: 0, reverb: 0 };
+      const inst = createInstruments(ctx, { bpm: 100, limiter: false, timbre: { master: room } });
       inst.output.connect(ctx.destination);
       const note = (layer, midi, dur) => ({ type: 'note', layer, midi, dur, vel: 1 });
       for (const layer of ['bass', 'chords', 'pad']) inst.layers[layer].trigger(note(layer, layer === 'bass' ? 40 : 57, 0.7), 0.05);
       for (const layer of ['bass', 'chords', 'pad']) inst.layers[layer].trigger(note(layer, layer === 'bass' ? 43 : 60, 0.3), 0.5);
-      // bei 0,3 s im laufenden Render umschalten
-      if (live) ctx.suspend(0.3).then(() => { inst.setTimbre({ bass: all, chords: all, pad: all }); ctx.resume(); });
+      for (const layer of ['bass', 'chords', 'pad']) inst.layers[layer].trigger(note(layer, layer === 'bass' ? 45 : 62, 0.3), 1.1);
+      // bei 0,3 s im laufenden Render ein, bei 0,9 s wieder aus
+      if (live) {
+        ctx.suspend(0.3).then(() => { inst.setTimbre({ bass: all, chords: all, pad: all, master: room }); ctx.resume(); });
+        ctx.suspend(0.9).then(() => { inst.setTimbre({ master: room }); ctx.resume(); });
+      }
       return (await ctx.startRendering()).getChannelData(0);
     };
     const clean = await render(false);
     const live = await render(true);
-    const switchAt = Math.round(0.3 * 44100);
-    const diff = (from, to) => { let s = 0; for (let i = from; i < to; i++) s += Math.abs(live[i] - clean[i]); return s / (to - from); };
+    const at = (s) => Math.round(s * 44100);
+    const diff = (from, to) => { let sum = 0; for (let i = at(from); i < at(to); i++) sum += Math.abs(live[i] - clean[i]); return sum / (at(to) - at(from)); };
     let peak = 0;
     for (const v of live) peak = Math.max(peak, Math.abs(v));
-    return { peak, before: diff(0, switchAt), ringing: diff(switchAt + 4410, 22050), after: diff(22050, 44100) };
+    return { peak, before: diff(0, 0.3), ringing: diff(0.4, 0.5), after: diff(0.5, 0.8), restored: diff(1.2, 1.5) };
   });
   const label = JSON.stringify(r);
   expect(Number.isFinite(r.peak) && r.peak > 0 && r.peak < 1, label).toBe(true);
   expect(r.before, `${label}: vor dem Umschalten sauber (nur Float-Rundung der Summe)`).toBeLessThan(1e-6);
   expect(r.ringing, `${label}: schon klingende Töne ändern sich`).toBeGreaterThan(0.001);
   expect(r.after, `${label}: neue Töne klingen verzerrt`).toBeGreaterThan(0.001);
+  expect(r.restored, `${label}: nach dem Ausschalten wieder sauber`).toBeLessThan(1e-5);
+});
+
+test('Verzerrer: Stille bleibt praktisch still, auch wenn der Fuzz-Regler verstellt wird (nach oben kein Pochen), und dispose ist wiederholbar', async ({ page }) => {
+  const r = await page.evaluate(async () => {
+    const { createInstruments } = await import('/audio/synth.js');
+    const ctx = new OfflineAudioContext(1, 44100, 44100);
+    const inst = createInstruments(ctx, { bpm: 100, limiter: false, timbre: { bass: { fuzz: 0.3 }, chords: { fuzz: 0.3 }, pad: { fuzz: 0.3 } } });
+    inst.output.connect(ctx.destination);
+    ctx.suspend(0.2).then(() => { inst.setTimbre({ bass: { fuzz: 1 }, chords: { fuzz: 0.6 }, pad: { fuzz: 0.4 } }); ctx.resume(); });
+    ctx.suspend(0.5).then(() => { inst.setTimbre({ bass: { fuzz: 0.05 }, chords: { overdrive: 0.5 }, pad: { distortion: 0.5 } }); ctx.resume(); });
+    const d = (await ctx.startRendering()).getChannelData(0);
+    const peak = (from, to) => { let m = 0; for (let i = Math.round(from * 44100); i < Math.round(to * 44100); i++) m = Math.max(m, Math.abs(d[i])); return m; };
+    inst.dispose();
+    inst.dispose();
+    inst.setTimbre({ bass: { fuzz: 0.3 } }); // nach dispose ohne Wirkung und ohne Fehler
+    return { start: peak(0, 0.2), up: peak(0.25, 0.5), down: peak(0.5, 1) };
+  });
+  const label = JSON.stringify(r);
+  expect(r.start, `${label}: Einschwingen beim Anlegen`).toBeLessThan(2e-3);
+  expect(r.up, `${label}: Regler nach oben`).toBeLessThan(1e-3);
+  // Bekannte Grenze: im untersten Teil des Wegs (Verstärkung unter etwa 5) ändert sich der Gleichanteil der Vorspannung noch mit der Verstärkung
+  expect(r.down, `${label}: Regler nach unten`).toBeLessThan(0.05);
 });

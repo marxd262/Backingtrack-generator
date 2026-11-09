@@ -293,6 +293,10 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
       ramp(roomSend.gain, drum.roomSend);
       applyFx();
     },
+    // nach dem Stopp: hält die Quellen der Verzerrerketten an (sonst hielten sie den ganzen Graphen am Leben)
+    dispose() {
+      for (const fx of Object.values(guitarFx)) fx.dispose();
+    },
     // Echo folgt einem Live-Tempowechsel; weich nachgeführt (Zeitkonstante 50 ms) statt springend
     setTempo(newBpm) {
       delay.delayTime.setTargetAtTime(echoTime(newBpm), ctx.currentTime, 0.05);

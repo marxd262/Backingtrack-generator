@@ -1,7 +1,7 @@
 // Verzerrerkette einer Schicht (Bass, Akkorde oder Pad) als feste Knotenkette hinter den Stimmen: Overdrive -> Distortion -> Fuzz -> Box.
 // Verzerrt wird die Summe aller klingenden Töne (nicht jeder Ton für sich): Akkordtöne mischen sich in der Kappung, und der Pegel der
-// Hüllkurve steuert die Kappung, so wie die Gitarre den Verstärker. Die Kette entsteht erst beim ersten Regler über 0; davor geht das
-// Signal unverändert durch einen Verstärkungsknoten mit 1. Werte und Vorbilder: fx-params.js.
+// Hüllkurve steuert die Kappung, so wie die Gitarre den Verstärker. Die Kette entsteht erst beim ersten Regler über 0 und bleibt dann bis
+// dispose() bestehen; davor (und bei 0) geht das Signal unverändert durch einen Verstärkungsknoten mit 1. Werte und Vorbilder: fx-params.js.
 import { LAYER_FX } from './fx-params.js';
 
 const POINTS = 16385; // fein genug für die steilen Kappungen; einmal berechnet und von allen Schichten geteilt
@@ -21,13 +21,21 @@ const CURVES = {
 const memo = {};
 const curve = (name) => (memo[name] ??= CURVES[name]());
 
-const FUZZ_BIAS = 0.04; // Eingangspegel der Stimmen nach ref ist 0.15; 0.04 verschiebt die Nulldurchgänge um etwa ein Viertel
-const START_DELAY = 0.15; // s, siehe set
+// Eingangspegel der Stimmen nach ref ist 0.15; 0.06 verschiebt die Nulldurchgänge um etwa ein Drittel und sättigt die Kennlinie schon ab
+// Verstärkung 5 (Gleichanteil am Ausgang dann konstant: beim Drehen am Regler pocht nur der untere Teil des Wegs)
+const FUZZ_BIAS = 0.06;
+const FUZZ_DRIVE_TC = 0.1; // langsame Rampe der Fuzz-Verstärkung (s): der Gleichanteil ändert sich so langsamer als der Hochpass ihn abbaut
+// Einblendung der Kette beim ersten Aufbau (siehe set): Verzögerung und Zeitkonstante in s. Beim Anlegen der Instrumente knapp, denn
+// der Player lässt 0.15 s Vorlauf bis zum ersten Ton; mitten im Spiel großzügig, damit das Einschwingen der Hochpässe ganz verklingt.
+const CREATE = { delay: 0.08, tc: 0.008 };
+const LAZY = { delay: 0.15, tc: 0.02 };
+const BIAS_TC = 0.04; // Einlaufzeit der Vorspannung (s)
 const TC = 0.02; // Zeitkonstante der Reglerrampen (s), gegen Knacken
 
 /**
  * Kette für `layer` ('bass' | 'chords' | 'pad'), Ausgang an `destination`. Die Stimmen verbinden sich mit `input`.
- * set(params, { immediate }) setzt die Werte aus fxChainParams; Rampen statt Sprüngen, es sei denn immediate.
+ * set(params, { immediate }) setzt die Werte aus fxChainParams; Rampen statt Sprüngen, es sei denn immediate (so beim Anlegen der
+ * Instrumente). dispose() hält die Quellen an und trennt die Kette (nach dem Stopp).
  */
 export function createGuitarFx(ctx, layer, destination) {
   const profile = LAYER_FX[layer];
@@ -46,6 +54,8 @@ export function createGuitarFx(ctx, layer, destination) {
   const series = (...nodes) => nodes.reduce((a, b) => { a.connect(b); return b; });
 
   let chain = null; // { wetOut, stages: {od, dist, fuzz}, cabDry, cabWet }
+  const sources = []; // laufende Quellen, dispose hält sie an
+  let disposed = false;
 
   const build = () => {
     const wetOut = gain(0, destination);
@@ -86,9 +96,10 @@ export function createGuitarFx(ctx, layer, destination) {
       // stark getrieben wird (Rechteck mit ungleichen Hälften: gerade Obertöne), und leise Ausklänge fallen unter sie (Sputtern)
       const bias = ctx.createConstantSource();
       bias.offset.value = 0;
-      bias.offset.setTargetAtTime(FUZZ_BIAS, ctx.currentTime, 0.04); // weich einlaufen: ein Sprung schwingt lange in den Hochpässen nach
+      bias.offset.setTargetAtTime(FUZZ_BIAS, ctx.currentTime, BIAS_TC); // weich einlaufen: ein Sprung schwingt lange in den Hochpässen nach
       bias.connect(drive);
       bias.start();
+      sources.push(bias);
       const muff = series(from, drive, shaper('fuzz', '4x'), filter('highpass', 35), gain(1.5), shaper('muff', '2x'));
       series(muff, filter('lowpass', profile.toneHz), gain(0.7), makeup);
       series(muff, filter('highpass', profile.toneHz), gain(0.6), makeup);
@@ -110,34 +121,42 @@ export function createGuitarFx(ctx, layer, destination) {
   return {
     input,
     set(p, { immediate = false } = {}) {
-      // Erster Aufbau: Stufen sofort setzen, die Kette selbst erst nach START_DELAY einblenden. Die Vorspannung des Fuzz erzeugt beim
-      // Start einen Gleichanteil-Anstieg, der in den Hochpässen nachschwingt (gemessen: bis unter 1e-5 nach 100 ms); so hört man ihn nicht.
-      let delay = 0;
+      if (disposed) return;
+      // Erster Aufbau: Stufen sofort setzen, die Kette selbst erst nach einer Verzögerung einblenden. Die Vorspannung des Fuzz erzeugt
+      // beim Start einen Gleichanteil-Anstieg, der in den Hochpässen nachschwingt (gemessen: unter 1e-5 nach 100 ms); so hört man ihn nicht.
+      let fade = { delay: 0, tc: TC };
       if (!chain) {
         if (!p.active) return;
         build();
+        fade = immediate ? CREATE : LAZY;
         immediate = true;
-        delay = START_DELAY;
       }
       const now = ctx.currentTime;
-      const to = (param, value, wait = 0) => {
-        if (immediate && wait === 0) { param.value = value; return; }
+      const to = (param, value, { delay = 0, tc = TC } = {}) => {
+        if (immediate && delay === 0) { param.value = value; return; }
         param.cancelScheduledValues(now);
         param.setValueAtTime(param.value, now);
-        param.setTargetAtTime(value, now + wait, TC);
-        param.setValueAtTime(value, now + wait + 10 * TC); // setTargetAtTime nähert sich nur an
+        param.setTargetAtTime(value, now + delay, tc);
+        param.setValueAtTime(value, now + delay + 10 * tc); // setTargetAtTime nähert sich nur an
       };
-      to(dry.gain, p.active ? 0 : 1, delay);
-      to(chain.wetOut.gain, p.active ? 1 : 0, delay);
+      to(dry.gain, p.active ? 0 : 1, fade);
+      to(chain.wetOut.gain, p.active ? 1 : 0, fade);
       for (const name of ['od', 'dist', 'fuzz']) {
         const s = chain.stages[name], v = p[name];
         to(s.bypass.gain, 1 - v.mix);
         to(s.wet.gain, v.mix);
-        to(s.drive.gain, v.drive);
+        to(s.drive.gain, v.drive, name === 'fuzz' ? { tc: FUZZ_DRIVE_TC } : undefined);
         to(s.makeup.gain, v.makeup);
       }
       to(chain.cabDry.gain, 1 - p.cab);
       to(chain.cabWet.gain, p.cab);
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      for (const source of sources) source.stop();
+      input.disconnect();
+      chain?.wetOut.disconnect();
     },
   };
 }
