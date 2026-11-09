@@ -7,6 +7,7 @@ import { TAG_CATEGORIES, STYLE_PRESETS } from '../../src/core/tags.js';
 import { VALIDATION_CODES } from '../../src/core/track.js';
 import { SCALE_NAMES, MODE_NAMES } from '../../src/core/music.js';
 import { CHORDS, CHORD_GROUPS } from '../../src/core/chords.js';
+import { GROOVES } from '../../src/core/grooves.js';
 
 const LAYERS = ['drums', 'bass', 'chords', 'pad'];
 const placeholders = (s) => [...new Set(s.match(/\{\w+\}/g) ?? [])].sort();
@@ -48,6 +49,16 @@ test('jede Akkordart des Registers, jede Gruppe und jede Akkordfarbe hat in beid
     'ui.addRoot', 'ui.addQuality', 'ui.chordColor',
   ];
   assert.equal(keys.length, Object.keys(CHORDS).length + 3 + 4 + 3);
+  for (const k of keys) {
+    for (const [lang, dict] of [['de', de], ['en', en]]) {
+      assert.ok(Object.hasOwn(dict, k), `${lang}: ${k}`);
+      assert.ok(typeof dict[k] === 'string' && dict[k].trim() !== '' && dict[k] !== k, `${lang}: ${k} leer`);
+    }
+  }
+});
+
+test('jeder Groove des Registers hat in beiden Sprachen einen Namen und die Gruppen- und Reglertexte sind da', () => {
+  const keys = [...Object.keys(GROOVES).map((id) => `groove.${id}`), 'group.rhythm', 'ui.meter', 'ui.groove', 'ui.complexity'];
   for (const k of keys) {
     for (const [lang, dict] of [['de', de], ['en', en]]) {
       assert.ok(Object.hasOwn(dict, k), `${lang}: ${k}`);

@@ -576,3 +576,20 @@ test('Septakkord-, Erweiterungs- und Powerchord-Folgen: Spitze nach dem Begrenze
     for (const layer of LAYERS) expect(r.perLayer[layer].rms, `${label} ${layer}`).toBeGreaterThan(0.005);
   }
 });
+
+test('Grooves in jeder Taktart bei hoher Komplexität: Spitze nach dem Begrenzer unter 0,9, jede Schicht hörbar', async ({ page }) => {
+  test.setTimeout(240_000);
+  const { GROOVES, METERS } = await import('../../src/core/grooves.js');
+  const funk = presetOf('funk');
+  for (const [id, g] of Object.entries(GROOVES)) {
+    const beats = METERS[g.meter].beats;
+    const input = track({
+      meter: g.meter.split('/').map(Number), groove: id, complexity: 1, bpm: g.meter.endsWith('/8') ? 70 : funk.bpm,
+      bars: ['A', 'A', 'D', 'E'].map((root, i) => ({ chord: { root, quality: i === 3 ? 'maj' : 'min' }, beats })),
+      tags: { ...funk.tags, development: ['fullFromStart'] },
+    });
+    const r = await page.evaluate((t) => window.__render(t, 6), input);
+    expect(r.peak, id).toBeLessThan(0.9);
+    for (const layer of LAYERS) expect(r.perLayer[layer].rms, `${id} ${layer}`).toBeGreaterThan(0.005);
+  }
+});
