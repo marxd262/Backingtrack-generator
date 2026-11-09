@@ -5,7 +5,7 @@ import { colorProgression } from '../../src/core/harmony.js';
 import { chordName } from '../../src/core/chords.js';
 import { addChordByName } from './chord-helpers.js';
 
-const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view|group|timbre|chord|chordGroup|chordColor)\.[A-Za-z.]+$/;
+const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view|group|timbre|chord|chordGroup|chordColor|groove|meter)\.[A-Za-z.]+$/;
 const AM = { root: 'A', mode: 'minor' };
 
 let problems;

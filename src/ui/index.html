@@ -152,6 +152,20 @@
             <select id="length"></select>
           </div>
         </details>
+        <details class="group" data-group="rhythm">
+          <summary data-i18n="group.rhythm"></summary>
+          <h4 class="label" id="meter-title" data-i18n="ui.meter"></h4>
+          <div class="chips" id="meter-chips" role="group" aria-labelledby="meter-title"></div>
+          <h4 class="label" id="groove-title" data-i18n="ui.groove"></h4>
+          <div class="chips" id="groove-chips" role="group" aria-labelledby="groove-title"></div>
+          <div class="settings">
+            <label class="label" for="complexity" data-i18n="ui.complexity"></label>
+            <div class="tempo-row">
+              <input type="range" id="complexity" min="0" max="100" step="1">
+              <span><output id="complexity-out" for="complexity"></output></span>
+            </div>
+          </div>
+        </details>
         <!-- Klangregler: Gruppen und Regler baut timbre-panel.js -->
         <div id="timbre-groups"></div>
       </aside>

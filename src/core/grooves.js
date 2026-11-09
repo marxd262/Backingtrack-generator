@@ -410,10 +410,25 @@ export const DEFAULT_GROOVE = deepFreeze({ '4/4': 'straight', '3/4': 'waltz', '6
 /** IDs der Grooves einer Taktart ('4/4') in Registerreihenfolge. */
 export const groovesFor = (key) => Object.keys(GROOVES).filter((id) => GROOVES[id].meter === key);
 
-/** Groove eines Tracks: `track.groove`, wenn er zur Taktart des Tracks gehört, sonst der Standard der Taktart. */
-export function grooveFor(track) {
+/** ID des Grooves eines Tracks: `track.groove`, wenn er zur Taktart des Tracks gehört, sonst der Standard der Taktart. */
+export function grooveIdFor(track) {
   const key = meterKey(track?.meter) || '4/4';
-  const chosen = typeof track?.groove === 'string' && Object.hasOwn(GROOVES, track.groove) ? GROOVES[track.groove] : null;
-  if (chosen && chosen.meter === key) return chosen;
-  return GROOVES[DEFAULT_GROOVE[key] ?? 'straight'];
+  const id = track?.groove;
+  if (typeof id === 'string' && Object.hasOwn(GROOVES, id) && GROOVES[id].meter === key) return id;
+  return DEFAULT_GROOVE[key] ?? 'straight';
+}
+
+/** Groove eines Tracks (Datensatz zu grooveIdFor). */
+export const grooveFor = (track) => GROOVES[grooveIdFor(track)];
+
+/**
+ * Tempo beim Wechsel der Taktart in der Oberfläche: zwischen einfachen (Viertel-Puls) und zusammengesetzten Taktarten (punktierter
+ * Puls) bleibt die Achtelgeschwindigkeit gleich (einfach zu zusammengesetzt mal 2/3, zurück mal 3/2), auf 40 bis 200 begrenzt;
+ * innerhalb derselben Art und bei Unbekanntem bleibt das Tempo.
+ */
+export function convertTempo(bpm, fromKey, toKey) {
+  if (!Object.hasOwn(METERS, fromKey) || !Object.hasOwn(METERS, toKey)) return bpm;
+  const [from, to] = [METERS[fromKey].sub, METERS[toKey].sub];
+  if (from === to) return bpm;
+  return Math.min(200, Math.max(40, Math.round(bpm * (to === 3 ? 2 / 3 : 3 / 2))));
 }

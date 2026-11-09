@@ -7,6 +7,7 @@ import { loadMix } from './mix-state.js';
 import { chordName } from '../core/chords.js';
 import { colorProgression } from '../core/harmony.js';
 import { styleChordColor } from '../core/tags.js';
+import { METERS, meterKey, convertTempo } from '../core/grooves.js';
 
 export const ROOTS = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
 // Skala ist nur Oberflächen-Zustand; der Generator kennt nur den Modus
@@ -61,6 +62,7 @@ export const state = {
     seed: rollVariant(), // Variantennummer
     variety: true, // reichere Varianten: der Seed streut Muster-Werte und Klang stärker (siehe docs/superpowers/specs/2026-11-09-variant-richness-design.md)
     length: 96,
+    meter: [4, 4], // Taktart; groove und complexity fehlen, bis der Nutzer sie wählt (Standard-Groove der Taktart, Komplexität 0,5)
   },
   scale: 'minorPentatonic',
   chordColor: 'triads', // Akkordfarbe: wie erzeugte Folgen gefärbt werden (triads, sevenths, extended, power); deriveBars wendet sie an
@@ -78,7 +80,8 @@ export const state = {
 
 // Die aus Tonart und Variante erzeugte Folge in einer Akkordfarbe, ohne den Zustand zu ändern
 export const derivedBars = (color = state.chordColor) => {
-  const bars = progressionFor(state.track.key, state.track.seed).map((chord) => ({ chord, beats: 4 }));
+  const beats = METERS[meterKey(state.track.meter)].beats; // Schläge der Taktart
+  const bars = progressionFor(state.track.key, state.track.seed).map((chord) => ({ chord, beats }));
   return colorProgression(bars, color, state.track.key);
 };
 
@@ -109,4 +112,16 @@ export function applyStyle(id) {
   state.track.bpm = p.bpm;
   state.track.tags = structuredClone(p.tags);
   state.track.timbre = {}; // neue Vorlage, neuer Ausgangspunkt für die Regler
+}
+
+// Taktart wechseln: der Standard-Groove der Taktart gilt, das Tempo wird umgerechnet (convertTempo), die Takte der Folge bekommen die
+// Schläge der Taktart (die Akkorde bleiben). Liefert false, wenn es dieselbe oder keine unterstützte Taktart ist.
+export function setMeter(key) {
+  const prev = meterKey(state.track.meter);
+  if (!Object.hasOwn(METERS, key) || key === prev) return false;
+  state.track.meter = key.split('/').map(Number);
+  delete state.track.groove;
+  state.track.bpm = convertTempo(state.track.bpm, prev, key);
+  state.track.bars = state.track.bars.map((bar) => ({ ...bar, beats: METERS[key].beats }));
+  return true;
 }

@@ -2,6 +2,7 @@
 // Tonart, dann eine Akkordart, Tastatur-Gegenstück zum Rad) fügt an (höchstens MAX_CHORDS). Eigene Folge gilt bis Tonart, Skala oder Variante.
 import { chordOptions } from '../core/music.js';
 import { CHORDS, CHORD_GROUPS, chordName } from '../core/chords.js';
+import { METERS, meterKey } from '../core/grooves.js';
 import { t } from '../index.js';
 import { $, state, setText, setAttr, pressed, MAX_CHORDS } from './state.js';
 
@@ -13,7 +14,7 @@ export function addChord(chord) {
     refusals++;
     return false;
   }
-  state.track.bars.push({ chord: { ...chord }, beats: 4 });
+  state.track.bars.push({ chord: { ...chord }, beats: METERS[meterKey(state.track.meter)].beats });
   state.notice = null;
   return true;
 }

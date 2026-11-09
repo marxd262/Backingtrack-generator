@@ -1,7 +1,7 @@
 // Groove-Register: Konsistenz über alle Grooves (neue Einträge werden automatisch erfasst), Stufenwahl und Groove-Auswahl.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { GROOVES, DEFAULT_GROOVE, METERS, grooveFor, groovesFor, levelOf, meterKey } from '../../src/core/grooves.js';
+import { GROOVES, DEFAULT_GROOVE, METERS, grooveFor, grooveIdFor, groovesFor, levelOf, meterKey, convertTempo } from '../../src/core/grooves.js';
 import { DRUM_NAMES } from '../../src/core/events.js';
 
 const IDS = Object.keys(GROOVES);
@@ -86,4 +86,24 @@ test('groovesFor und grooveFor: Auswahl nach Taktart, Rückfall auf den Standard
     assert.equal(meterKey(meter), key);
     assert.ok(g && Object.hasOwn(GROOVES, DEFAULT_GROOVE[key] ?? 'straight'), key);
   }
+});
+
+test('grooveIdFor: die ID des gewählten Grooves, sonst der Standard der Taktart; grooveFor liefert dazu den Datensatz', () => {
+  assert.equal(grooveIdFor({ meter: [4, 4] }), 'straight');
+  assert.equal(grooveIdFor({}), 'straight');
+  assert.equal(grooveIdFor({ meter: [6, 8], groove: 'rock68' }), 'rock68');
+  assert.equal(grooveIdFor({ meter: [6, 8], groove: 'waltz' }), DEFAULT_GROOVE['6/8']);
+  assert.equal(grooveIdFor({ meter: [4, 4], groove: 'nope' }), 'straight');
+  for (const id of Object.keys(GROOVES)) assert.equal(grooveFor({ meter: GROOVES[id].meter.split('/').map(Number), groove: id }), GROOVES[id]);
+});
+
+test('convertTempo: einfach zu zusammengesetzt mal 2/3, zurück mal 3/2, gleiche Art bleibt, begrenzt auf 40 bis 200', () => {
+  assert.equal(convertTempo(100, '4/4', '6/8'), 67);
+  assert.equal(convertTempo(150, '3/4', '12/8'), 100);
+  assert.equal(convertTempo(66, '6/8', '4/4'), 99);
+  assert.equal(convertTempo(120, '12/8', '5/4'), 180);
+  for (const [from, to] of [['4/4', '3/4'], ['3/4', '5/4'], ['6/8', '12/8'], ['4/4', '4/4']]) assert.equal(convertTempo(133, from, to), 133, `${from} nach ${to}`);
+  assert.equal(convertTempo(200, '6/8', '4/4'), 200, 'oben begrenzt');
+  assert.equal(convertTempo(40, '4/4', '6/8'), 40, 'unten begrenzt');
+  assert.equal(convertTempo(100, 'x', '6/8'), 100, 'Unbekanntes lässt das Tempo');
 });

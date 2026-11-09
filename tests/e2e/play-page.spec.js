@@ -349,7 +349,7 @@ test('1280 px: Leisten neben den Blöcken; 360 px: eine Leiste als Schublade im 
 // --- Einklappbare Seitenleisten (Task 4); ohne Bewegung, damit Maße nicht in eine Einblendung fallen ---
 test.describe('Seitenleisten', () => {
   test.use({ reducedMotion: 'reduce' });
-  const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view|group|timbre|chord|chordGroup|chordColor)\.[A-Za-z.]+$/;
+  const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view|group|timbre|chord|chordGroup|chordColor|groove|meter)\.[A-Za-z.]+$/;
 
   test('erster Besuch: Los öffnet die Spielseite mit beiden Leisten zu; Auslöser in der Kopfzeile', async ({ page }) => {
     await openWithGo(page);

@@ -6,7 +6,7 @@ import { test, expect } from '@playwright/test';
 import { addChordByName } from './chord-helpers.js';
 
 const BAR_TIMEOUT = 10_000; // ein Takt bei 200 bpm dauert 1,2 s; unter Last großzügig
-const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view|group|timbre|chord|chordGroup|chordColor)\.[A-Za-z.]+$/;
+const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view|group|timbre|chord|chordGroup|chordColor|groove|meter)\.[A-Za-z.]+$/;
 const PROGRESSION = ['Am', 'Am', 'Dm', 'E'];
 
 const TEXT = {

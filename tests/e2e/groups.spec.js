@@ -30,7 +30,7 @@ const group = (page, id) => page.locator(`details[data-group="${id}"]`);
 const summary = (page, id) => group(page, id).locator('> summary');
 
 test('Standard: Stil, Tempo, Tonart, Akkordfolge und Ansichten offen', async ({ page }) => {
-  for (const id of ['style', 'tempo', 'key', 'progression', 'triad', 'views']) await expect(group(page, id), id).toHaveJSProperty('open', true);
+  for (const id of ['style', 'tempo', 'rhythm', 'key', 'progression', 'triad', 'views']) await expect(group(page, id), id).toHaveJSProperty('open', true);
   for (const id of ['seventh', 'extended']) await expect(group(page, id), id).toHaveJSProperty('open', false);
 });
 

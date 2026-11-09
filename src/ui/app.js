@@ -11,6 +11,7 @@ import { initSidebar } from './sidebar.js';
 import { initGroups } from './groups.js';
 import { resolveTrackTimbre } from '../core/timbre.js';
 import { initTimbrePanel } from './timbre-panel.js';
+import { initRhythm } from './rhythm.js';
 import { initViews } from './blocks.js';
 
 // Dekoratives 16tel-Bild je Stil, 1 = Schlag
@@ -205,6 +206,7 @@ for (const button of document.querySelectorAll('[popovertarget]')) {
 
 const renderTuning = initTuning({ render: () => render(), restartIfPlaying, toggleLayer, applyLive });
 const renderMixer = initMixer({ render: () => render(), player: () => player, toggleLayer });
+const renderRhythm = initRhythm({ render: () => render(), restartIfPlaying, applyLive });
 const renderTimbre = initTimbrePanel({ render: () => render(), player: () => player }); // vor initGroups: baut die Klang-Gruppen
 
 // Leisten "Klang" (links) und "Akkorde" (rechts): offen/zu steht im gemerkten Layout
@@ -294,6 +296,7 @@ function render() {
   renderTuning();
   renderMixer();
   renderTimbre();
+  renderRhythm();
 }
 
 deriveBars();

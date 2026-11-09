@@ -74,8 +74,8 @@ export function initTuning({ render, restartIfPlaying, toggleLayer, applyLive })
   // fehlen im Schlüssel: die x-Achse sind Takte, stumme Spuren werden nur gedimmt gezeichnet.
   let memo = { id: '', events: [] };
   function laneEvents() {
-    const { key, bars, tags, seed, length } = state.track;
-    const id = JSON.stringify([key, bars, tags, seed, length]);
+    const { key, bars, tags, seed, length, meter, groove, complexity } = state.track;
+    const id = JSON.stringify([key, bars, tags, seed, length, meter, groove, complexity]);
     if (id !== memo.id) {
       let events = [];
       try { events = buildEvents({ ...state.track, layers: ALL_LAYERS }); } catch { /* ungültiger Track: leerer Verlauf */ }

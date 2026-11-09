@@ -4,7 +4,7 @@ import { allowedChords, chordOptions } from '../../src/core/music.js';
 import { progressionFor } from '../../src/core/progressions.js';
 import { STYLE_PRESETS } from '../../src/core/tags.js';
 
-const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view|group|timbre|chord|chordGroup|chordColor)\.[A-Za-z.]+$/;
+const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view|group|timbre|chord|chordGroup|chordColor|groove|meter)\.[A-Za-z.]+$/;
 const SYMBOLS = { maj: '', min: 'm', dim: 'dim' };
 const namesIn = (root, mode) => allowedChords({ root, mode }).map((c) => c.root + SYMBOLS[c.quality]);
 const BAR_TIMEOUT = 10_000; // ein Takt bei 100 bpm dauert 2,4 s; unter Last großzügig

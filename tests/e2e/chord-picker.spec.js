@@ -4,7 +4,7 @@ import { chordOptions } from '../../src/core/music.js';
 import { CHORDS } from '../../src/core/chords.js';
 import { addChordByName, openQualityGroup } from './chord-helpers.js';
 
-const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view|group|timbre|chord|chordGroup|chordColor)\.[A-Za-z.]+$/;
+const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view|group|timbre|chord|chordGroup|chordColor|groove|meter)\.[A-Za-z.]+$/;
 
 let problems;
 

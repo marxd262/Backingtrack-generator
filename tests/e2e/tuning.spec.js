@@ -4,7 +4,7 @@ import { addChordByName } from './chord-helpers.js';
 import { layoutWheel } from '../../src/ui/wheel-geometry.js';
 import { STYLE_PRESETS, TAG_CATEGORIES } from '../../src/core/tags.js';
 
-const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view|group|timbre|chord|chordGroup|chordColor)\.[A-Za-z.]+$/;
+const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view|group|timbre|chord|chordGroup|chordColor|groove|meter)\.[A-Za-z.]+$/;
 const BAR_TIMEOUT = 10_000; // ein Takt bei 100 bpm dauert 2,4 s; unter Last großzügig
 const SYMBOLS = { maj: '', min: 'm', dim: 'dim' };
 const AM = { root: 'A', mode: 'minor' };
