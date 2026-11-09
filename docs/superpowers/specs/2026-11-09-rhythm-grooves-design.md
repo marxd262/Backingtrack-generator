@@ -22,7 +22,7 @@ Heute ist alles auf 4/4 mit 16 Sechzehnteln je Takt geschrieben: `STEPS = 16` un
 - **Zeichen-Raster** (Schlagzeugmuster selbst zeichnen) und ein sichtbares Format dafür: nur der Aufbau soll offen sein (ein Groove ist ein Datensatz).
 - Komplexitätsregler **je Instrument** (das Format lässt es zu; erst ein Regler für alle).
 - Ungerade Gruppierungen wie `7/8` mit wechselnden Zählzeitgruppen, wechselnde Taktarten innerhalb eines Stücks, Polyrhythmen über mehrere Taktarten.
-- Neue Instrumente, neue Klänge, Änderung der Stile (die drei bestehenden und die sechs Gitarren-Stile behalten ihre Schlagworte und bleiben in `4/4` `straight`).
+- Neue Instrumente, neue Klänge, Änderung der Stile: die neun Stil-Vorlagen behalten ihre Schlagworte, ihr Tempo und ihre Akkordfarbe und enthalten **keine** Taktart, keinen Groove und keine Komplexität. Ein Klick auf einen Stil ändert die gewählte Taktart, den Groove und die Komplexität **nicht**.
 - Live-Umschalten der Taktart (ein Wechsel startet die Wiedergabe neu); Groove und Komplexität innerhalb derselben Taktart wirken live (siehe unten).
 
 ## Anti-Ziele (das wäre ein Misserfolg, auch wenn alles "funktioniert")
@@ -48,6 +48,7 @@ Ein eingefrorenes Objekt `GROOVES`, Schlüssel = Groove-ID (bleibt der String im
 | --- | --- |
 | `meter` | Taktart `'4/4'`, `'3/4'`, `'6/8'`, `'12/8'` oder `'5/4'` |
 | `drums`, `bass`, `chords`, `pad` | Muster je Instrument; `drums`: Stufen (einfach bis komplex) mit Kick-Varianten, Snare- und Geisternoten-Schritten und Hi-Hat-Lautstärken je Schlag (so viele Werte wie das Raster Schritte je Schlag hat); `bass`: Stufen mit Schritt-Listen `[Schritt, Grad, Länge]`; `chords`: Stab-Listen und Arpeggio-Schrittweite; Fills; zusätzliche Muster für `variety` |
+| `fillBeats` | Länge der Fills am Abschnittsende in Schlägen (Standard 2; 1 bis zur Schlagzahl der Taktart) |
 | `thresholds` | je Instrument die Schwellen, die den Parameter auf die Stufe abbilden (Standard `[0.35, 0.7]` für drei Stufen wie heute; mehr Stufen sind möglich) |
 | `group` | Gruppe für die Auswahl (z. B. nach Taktart) |
 
@@ -73,13 +74,17 @@ Bei 0,5 ist die Verschiebung null, die Parameter und damit der Strom bleiben bit
 - `groove` (neu, optional): Groove-ID; fehlt es oder passt es nicht zur Taktart, gilt der Standard der Taktart (`straight`, `waltz`, ...). Eine unbekannte ID meldet `badGroove` **(Annahme)**.
 - `complexity` (neu, optional): Zahl 0 bis 1, sonst `badComplexity`; fehlend gleich 0,5.
 - `bars[].beats`: unverändert; die Oberfläche legt Takte mit den Schlägen der Taktart an (Folge aus Vorlage, hinzugefügte Akkorde).
-- `play`-Handle: Groove und Komplexität innerhalb derselben Taktart ändern nur den Ereignisstrom und laufen über das vorhandene `setTrack` live; eine neue Taktart ändert die Taktdauer, `setTrack` meldet `false`, die Oberfläche startet neu.
+- `play`-Handle: Groove und Komplexität innerhalb derselben Taktart ändern nur den Ereignisstrom und laufen über das vorhandene `setTrack` live. `setTrack` vergleicht künftig auch **Schlagzahl und Raster der Taktart** (nicht nur die Dauer eines Durchlaufs): bei einer anderen Taktart, auch wenn die Dauer gleich bleibt (4/4 zu 12/8), meldet es `false` ohne Änderung, und die Oberfläche startet neu. `setTrack` ist neu (nicht Teil der Schnittstelle, die Interactive Scales heute nutzt); die zusätzliche Bedingung kommt in `docs/interface.md`.
+
+## Tempo bei Taktartwechsel
+
+`bpm` zählt Schläge der Taktart (siehe Raster). Beim Wechsel zwischen einfachen (Viertel-Puls: 4/4, 3/4, 5/4) und zusammengesetzten Taktarten (punktierter Puls: 6/8, 12/8) in der Oberfläche bleibt die **Achtelgeschwindigkeit** gleich **(Annahme)**: einfach zu zusammengesetzt `bpm' = round(bpm * 2 / 3)`, zusammengesetzt zu einfach `round(bpm * 3 / 2)`, jeweils auf 40 bis 200 begrenzt. Innerhalb derselben Art (zum Beispiel 4/4 zu 3/4) bleibt `bpm`. Das Tempo im Track-Format wird nicht umgerechnet, nur die Oberfläche tut es beim Wechsel; Gruppen mit eigenem Vorschlag je Groove gibt es nicht.
 
 ## Oberfläche
 
 Neue Gruppe **Rhythmus** (`data-group="rhythm"`, zu Beginn offen) in der linken Leiste, über den Klangreglern:
 
-- **Taktart**: Chips `4/4 3/4 6/8 12/8 5/4`, einer gedrückt (`aria-pressed`). Ein Wechsel setzt den Standard-Groove der Taktart, legt die Takte der Akkordfolge mit den Schlägen der Taktart an (die Folge selbst bleibt) und startet eine laufende Wiedergabe neu.
+- **Taktart**: Chips `4/4 3/4 6/8 12/8 5/4`, einer gedrückt (`aria-pressed`). Ein Wechsel setzt den Standard-Groove der Taktart, rechnet das Tempo um (siehe oben), legt die Takte der Akkordfolge mit den Schlägen der Taktart an (die Folge selbst bleibt) und startet eine laufende Wiedergabe neu. Ein Klick auf einen Stil ändert Taktart, Groove und Komplexität nicht.
 - **Groove**: Chips der Grooves der gewählten Taktart, einer gedrückt. Wirkt live.
 - **Komplexität**: Regler 0 bis 100 % (Standard 50 %), `aria-valuetext`, wirkt live (beim Ziehen höchstens einmal je Bild neu berechnen).
 - Texte `groove.<id>` und `meter.<id>` in `de.js` und `en.js`; ohne rohe Schlüssel.
@@ -87,14 +92,14 @@ Neue Gruppe **Rhythmus** (`data-group="rhythm"`, zu Beginn offen) in der linken 
 
 ## Verhalten des Generators
 
-- Schlagzeug, Bass, Akkord-Stabs/Arpeggio, Pad, Fills und der Anlauf `ap` des Basses rechnen mit `b.steps` und dem Zyklus des Grooves (statt der festen 16). Fills belegen die letzten zwei Schläge eines Takts (mindestens die Taktlänge, wenn kürzer).
+- Schlagzeug, Bass, Akkord-Stabs/Arpeggio, Pad, Fills und der Anlauf `ap` des Basses rechnen mit `b.steps` und dem Zyklus des Grooves (statt der festen 16). Fills belegen die letzten `fillBeats` Schläge eines Takts (Registerfeld je Groove, Standard 2, mindestens 1 und höchstens die Schlagzahl der Taktart; bei 6/8 also höchstens ein Puls, damit im Fill-Takt ein Teil des Grooves bleibt).
 - Hi-Hat-Lautstärken sind je Schlag angegeben und passen sich an `sub` an (4 Werte bei Sechzehnteln, 3 bei Triolen).
 - Die Reihenfolge der Zufallsziehungen für `straight` in `4/4` bleibt exakt wie heute; neue Grooves dürfen eigene Reihenfolgen haben, sind aber ebenfalls deterministisch je Seed.
 - Aufbau (`buildArrangement`), Takt-Marker und Fills in Abschnitten bleiben; sie hängen nicht an der Taktart.
 
 ## Akzeptanz
 
-1. `npm test` und `npx playwright test` grün; **Golden-Hashes unverändert**, auch Tracks mit `variety`.
+1. `npm test` und `npx playwright test` grün; **Golden-Hashes unverändert**. Die Golden-Tests haben heute **keine Hashes für Tracks mit `variety`**; sie werden **vor dem Umbau** aus dem heutigen Code aufgenommen (drei Stile und `legacy` mit `variety: true`), damit "auch mit `variety` unverändert" prüfbar ist.
 2. **Register-Konsistenztest** über alle Grooves: Taktart unterstützt; alle Schritte im Raster; je Instrument mindestens eine Stufe; `thresholds` aufsteigend in [0,1] und passend zur Zahl der Stufen; Hi-Hat-Werte so viele wie Schritte je Schlag; Namen `groove.<id>` und `meter.<id>` in beiden Sprachen.
 3. **Generatortest** über alle Grooves × `complexity` (0, 0,25, 0,5, 0,75, 1) × `variety` an/aus × mehrere Seeds × einige Tonarten: Ereignisse sortiert, endlich, jedes Ereignis im Takt (`t` zwischen Taktanfang und Taktende), Töne im Bereich, Bass 28 bis 52, Fills enden im Takt, jeder Takt hat Ereignisse der erwarteten Schichten; `chordTimeline` und `buildEvents` stimmen über Taktdauer überein.
 4. **Rasterprüfung:** Die Zeit jedes Schlagzeug- und Bass-Ereignisses liegt bei `Taktanfang + Schritt * stepSec` bis auf Jitter (höchstens 0,02 s) und Swing (nur `sub = 4`).
@@ -111,3 +116,11 @@ Neue Gruppe **Rhythmus** (`data-group="rhythm"`, zu Beginn offen) in der linken 
 ## Dem Bauenden überlassen
 
 Dateizuschnitt (`grooves.js` darf in Muster-Tabellen und Logik geteilt werden), genaue Feldnamen im Register, die konkreten Muster der neuen Grooves (Kicks, Snares, Hi-Hats, Bass- und Akkordmuster, Fills), die Namen und Hinweistexte der Grooves, die Reihenfolge der Chips, die Drosselung des Reglers, Testdateinamen.
+
+## Festgelegt beim Prüfen des Dokuments (meine Wahl, bitte gegenlesen)
+
+1. Ein Stil-Klick lässt Taktart, Groove und Komplexität unberührt (Blues über den 12/8-Shuffle ist möglich); damit bleibt der Live-Pfad der Stilkarten (`applyLive`) unverändert.
+2. `setTrack` meldet bei geänderter Taktart `false`, auch bei gleicher Dauer (4/4 zu 12/8).
+3. Ein nicht unterstütztes `meter` meldet `badMeter`. Die Schnittstellen-Doku nannte `meter` bisher "ignoriert, angeboten wird nur 4/4", Interactive Scales sendet es nach dem alten Format nicht; Tracks ohne `meter` oder mit `[4, 4]` verhalten sich wie bisher.
+4. Beim Taktartwechsel in der Oberfläche bleibt die Achtelgeschwindigkeit gleich (Umrechnung des Tempos), innerhalb einer Art bleibt `bpm`.
+5. Fills haben je Groove ein Feld `fillBeats` (Standard 2, höchstens die Schlagzahl).
