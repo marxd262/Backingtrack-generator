@@ -5,7 +5,7 @@ import { LAYOUT_KEY, DEFAULT_LAYOUT, loadLayout, saveLayout } from '../../src/ui
 
 // Standardzustand der einklappbaren Gruppen (Seitenleisten); Klang-Gruppen starten zu
 const GROUPS = {
-  style: true, tempo: true, drums: false, bass: false, chords: false, pad: false, master: false,
+  style: true, tempo: true, triad: true, seventh: false, extended: false, drums: false, bass: false, chords: false, pad: false, master: false,
   key: true, progression: true, views: true,
 };
 

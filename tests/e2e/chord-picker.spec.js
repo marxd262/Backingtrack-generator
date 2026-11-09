@@ -2,7 +2,7 @@
 import { test, expect } from '@playwright/test';
 import { chordOptions } from '../../src/core/music.js';
 import { CHORDS } from '../../src/core/chords.js';
-import { addChordByName } from './chord-helpers.js';
+import { addChordByName, openQualityGroup } from './chord-helpers.js';
 
 const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view|group|timbre|chord|chordGroup|chordColor)\.[A-Za-z.]+$/;
 
@@ -54,10 +54,24 @@ test('deaktivierte Akkordarten sehen anders aus als aktive und bieten keinen Kli
   expect(off.border).not.toBe(on.border);
 });
 
-test('Gruppen der Akkordarten sind beschriftet, jede Art des Registers hat einen Chip', async ({ page }) => {
+test('Akkordarten stehen in einklappbaren Gruppen: Dreiklänge offen, Septakkorde und Erweiterungen zu, jede Art hat einen Chip', async ({ page }) => {
   await expect(page.locator('#add-qualities button')).toHaveCount(Object.keys(CHORDS).length);
-  const labels = await page.locator('#add-qualities .sub-label').allTextContents();
-  expect(labels).toEqual(['Dreiklänge', 'Septakkorde', 'Erweiterungen']);
+  const summaries = page.locator('#add-qualities details > summary');
+  expect(await summaries.allTextContents()).toEqual(['Dreiklänge', 'Septakkorde', 'Erweiterungen']);
+  const open = () => page.locator('#add-qualities details').evaluateAll((els) => els.map((el) => el.open));
+  expect(await open()).toEqual([true, false, false]);
+  // zu: nur die Chips der Dreiklänge sind zu sehen, die Leiste bleibt kurz
+  const triads = Object.values(CHORDS).filter((c) => c.group === 'triad').length;
+  await expect(page.locator('#add-qualities button:visible')).toHaveCount(triads);
+  await summaries.nth(1).click();
+  expect(await open()).toEqual([true, true, false]);
+  await expect(page.locator('#add-qualities button:visible')).toHaveCount(triads + Object.values(CHORDS).filter((c) => c.group === 'seventh').length);
+  // der Zustand wird gemerkt (das toggle-Ereignis speichert asynchron: erst warten, bis er im Speicher steht)
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('backingtrack.layout')).groups.seventh)).toBe(true);
+  await page.reload();
+  await expect(page.locator('#go')).toHaveText(/\S/);
+  await page.locator('#tune-btn').click();
+  expect(await open()).toEqual([true, true, false]);
 });
 
 test('E in A-Moll vereint Moll- und Dur-Arten; Klick auf eine Art hängt den Akkord an', async ({ page }) => {
@@ -66,6 +80,7 @@ test('E in A-Moll vereint Moll- und Dur-Arten; Klick auf eine Art hängt den Akk
   const on = await enabled(page);
   for (const name of ['E', 'Em', 'E7', 'E9', 'Emaj7', 'Em7', 'Esus4', 'E5']) expect(on, name).toContain(name);
   const before = await shown(page);
+  await openQualityGroup(page, 'min7');
   await quality(page, 'Em7').click();
   expect(await shown(page)).toEqual([...before, 'Em7']);
   await expect(page.locator('#tuning-message')).toHaveText('');
@@ -81,6 +96,7 @@ test('Tastatur: Enter wählt den Grundton und fügt eine Art an, der Fokus bleib
   await page.keyboard.press('Enter');
   await expect(root(page, 'E')).toHaveAttribute('aria-pressed', 'true');
   const before = await shown(page);
+  await openQualityGroup(page, 'dom7');
   await quality(page, 'E7').focus();
   await page.keyboard.press('Enter');
   expect(await shown(page)).toEqual([...before, 'E7']);
@@ -102,10 +118,10 @@ test('anderer Modus: die Grundtöne folgen chordOptions, die Auswahl springt auf
 });
 
 test('kein roher Schlüssel in beiden Sprachen, englische Gruppennamen', async ({ page }) => {
-  const texts = () => page.locator('#add-chords').evaluate((el) => [...el.querySelectorAll('button, .sub-label')].map((n) => n.textContent.trim()));
+  const texts = () => page.locator('#add-chords').evaluate((el) => [...el.querySelectorAll('button, .sub-label, summary')].map((n) => n.textContent.trim()));
   for (const text of await texts()) expect(RAW_KEY.test(text), text).toBe(false);
   await page.locator('[data-lang="en"]').click();
-  await expect(page.locator('#add-qualities .sub-label').first()).toHaveText('Triads');
+  await expect(page.locator('#add-qualities summary').first()).toHaveText('Triads');
   for (const text of await texts()) expect(RAW_KEY.test(text), text).toBe(false);
 });
 
@@ -126,6 +142,7 @@ test('360 px: kein waagerechtes Scrollen, alle Chips mindestens 44 px hoch', asy
   await expect(page.locator('#side-right')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   expect(await page.locator('#side-right').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  for (const quality of ['dom7', 'maj6']) await openQualityGroup(page, quality); // zugeklappte Chips haben keine Höhe
   const heights = await page.locator('#add-chords button').evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height));
   expect(heights.length).toBe(7 + Object.keys(CHORDS).length);
   for (const h of heights) expect(h).toBeGreaterThanOrEqual(43.5);

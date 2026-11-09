@@ -30,14 +30,15 @@ const group = (page, id) => page.locator(`details[data-group="${id}"]`);
 const summary = (page, id) => group(page, id).locator('> summary');
 
 test('Standard: Stil, Tempo, Tonart, Akkordfolge und Ansichten offen', async ({ page }) => {
-  for (const id of ['style', 'tempo', 'key', 'progression', 'views']) await expect(group(page, id), id).toHaveJSProperty('open', true);
+  for (const id of ['style', 'tempo', 'key', 'progression', 'triad', 'views']) await expect(group(page, id), id).toHaveJSProperty('open', true);
+  for (const id of ['seventh', 'extended']) await expect(group(page, id), id).toHaveJSProperty('open', false);
 });
 
 test('Gruppen liegen in der richtigen Leiste und Reihenfolge', async ({ page }) => {
   const ids = (side) => page.locator(`#${side} details[data-group]`).evaluateAll((els) => els.map((el) => el.dataset.group));
   expect(await ids('side-left')).toEqual(expect.arrayContaining(['style', 'tempo']));
   expect((await ids('side-left')).indexOf('style')).toBeLessThan((await ids('side-left')).indexOf('tempo'));
-  expect(await ids('side-right')).toEqual(['key', 'progression', 'views']);
+  expect(await ids('side-right')).toEqual(['key', 'progression', 'triad', 'seventh', 'extended', 'views']);
 });
 
 test('Inhalte stehen in ihren Gruppen', async ({ page }) => {

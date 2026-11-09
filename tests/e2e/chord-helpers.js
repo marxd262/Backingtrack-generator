@@ -14,5 +14,12 @@ export async function addChordByName(page, name, scope = '') {
   const { root } = parseChord(name);
   const area = page.locator(`${scope} #add-chords`.trim());
   await area.locator('#add-roots button', { hasText: new RegExp(`^${root}$`) }).click();
+  await openQualityGroup(page, parseChord(name).quality, scope);
   await area.locator('#add-qualities button', { hasText: new RegExp(`^${name}$`) }).click();
+}
+
+/** Klappt die einklappbare Gruppe (Dreiklänge, Septakkorde, Erweiterungen) auf, in der die Akkordart steht, falls sie zu ist. */
+export async function openQualityGroup(page, quality, scope = '') {
+  const group = page.locator(`${scope} #add-qualities details[data-group="${CHORDS[quality].group}"]`.trim());
+  if (!(await group.evaluate((el) => el.open))) await group.locator('> summary').click();
 }

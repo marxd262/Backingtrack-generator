@@ -7,9 +7,10 @@ export const LAYOUT_KEY = 'backingtrack.layout';
 export const DEFAULT_LAYOUT = Object.freeze({
   sidebars: Object.freeze({ left: false, right: false }),
   views: Object.freeze(Object.fromEntries(VIEWS.filter((v) => v.hideable).map((v) => [v.id, true]))),
-  // einklappbare Gruppen der Seitenleisten (true = offen); die Klang-Gruppen (Schlagzeug bis Gesamt) starten zu
+  // einklappbare Gruppen der Seitenleisten (true = offen); die Klang-Gruppen (Schlagzeug bis Gesamt) und die Akkordarten
+  // Septakkorde und Erweiterungen starten zu, damit die rechte Leiste kurz bleibt
   groups: Object.freeze({
-    style: true, tempo: true, drums: false, bass: false, chords: false, pad: false, master: false,
+    style: true, tempo: true, triad: true, seventh: false, extended: false, drums: false, bass: false, chords: false, pad: false, master: false,
     key: true, progression: true, views: true,
   }),
   labels: 'names',

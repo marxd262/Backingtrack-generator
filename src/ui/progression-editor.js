@@ -39,11 +39,14 @@ export function initProgressionEditor(changed, render) {
   let addKey = '';
   let options = []; // chordOptions der gewählten Tonart
   let picked = ''; // gewählter Grundton
-  // Chips der Akkordarten einmal bauen (alle des Registers, je Gruppe eine Reihe); beim Rendern wechseln nur Text und Aktivierung
+  // Chips der Akkordarten einmal bauen (alle des Registers, je Gruppe eine einklappbare Reihe; der Offen-Zustand steht im Layout,
+  // app.js bindet ihn über initGroups); beim Rendern wechseln nur Text und Aktivierung
   const qualityChips = [];
   for (const group of CHORD_GROUPS) {
-    const label = Object.assign(document.createElement('p'), { className: 'sub-label' });
-    label.dataset.i18n = `chordGroup.${group}`;
+    const details = Object.assign(document.createElement('details'), { className: 'group' });
+    details.dataset.group = group;
+    const summary = document.createElement('summary');
+    summary.dataset.i18n = `chordGroup.${group}`;
     const chips = Object.assign(document.createElement('div'), { className: 'chips' });
     for (const quality of Object.keys(CHORDS).filter((id) => CHORDS[id].group === group)) {
       const b = button(() => (addChord({ root: picked, quality }) ? changed() : render()));
@@ -51,7 +54,8 @@ export function initProgressionEditor(changed, render) {
       chips.append(b);
       qualityChips.push(b);
     }
-    $('add-qualities').append(label, chips);
+    details.append(summary, chips);
+    $('add-qualities').append(details);
   }
   let shown = { text: '', refusals: 0 };
 
