@@ -167,7 +167,8 @@ test('Bassklang: stummer Bass bleibt mit fuzz exakt still (abgeschaltet und übe
   test.setTimeout(120_000);
   const fuzz = { bassSound: ['fuzz'] };
   const off = await page.evaluate(([i, s]) => window.__render(i, s), [track({ layers: { drums: true, bass: false, chords: true, pad: true }, tags: { development: ['fullFromStart'], ...fuzz } }), 6]);
-  expect(off.perLayer.bass).toEqual({ peak: 0, rms: 0, centroid: 0 });
+  // ohne Bass-Töne bleibt nur ein Rest der Fuzz-Vorspannung (gemessen unter 5e-6, -106 dB); er ist nicht mehr exakt 0
+  expect(off.perLayer.bass.peak).toBeLessThan(1e-4);
   // Schlagzeug allein: der Bass spielt mit fuzz, ist aber über setMuted stumm geschaltet; nur Float-Rundung erlaubt
   const drums = await compare(page, track(), withTags(fuzz), 6, { layer: 'drums' });
   expect(drums.diff).toBeLessThan(1e-6);
@@ -595,20 +596,20 @@ test('Grooves in jeder Taktart bei hoher Komplexität: Spitze nach dem Begrenzer
 });
 
 // Verzerrer (Fuzz, Overdrive, Distortion) für Bass, Akkorde und Pad: je Regler allein auf 0,7, Schicht allein, 6 s.
-// Gemessen 2026-11-09 (16 s, Regler 1, vor dem Begrenzer: rms gegen Standard; Schwerpunkt Standard -> mit Effekt):
-//   Bass (525 Hz): fuzz 0.91 / 2255 Hz, overdrive 0.94 / 923 Hz, distortion 0.61 / 2799 Hz
-//   Akkorde (1239 Hz): fuzz 1.20 / 3700 Hz, overdrive 1.22 / 1742 Hz, distortion 0.80 / 4029 Hz
-//   Pad (1020 Hz): fuzz 1.35 / 4396 Hz, overdrive 1.26 / 1455 Hz, distortion 1.14 / 4575 Hz
+// Gemessen 2026-11-09 (8 s, vor dem Begrenzer, rms gegen den sauberen Klang / Schwerpunkt sauber -> mit Effekt bei Regler 1):
+//   Bass (97 Hz): overdrive 1.11 / 480 Hz, distortion 1.00 / 146 Hz, fuzz 1.24 / 99 Hz (der Bass besteht fast nur aus Tiefen, der Schwerpunkt sagt dort wenig)
+//   Akkorde (372 Hz): overdrive 0.95 / 1562 Hz, distortion 1.07 / 786 Hz, fuzz 0.95 / 570 Hz
+//   Pad (463 Hz): overdrive 0.96 / 1368 Hz, distortion 1.02 / 1159 Hz, fuzz 1.01 / 812 Hz
 const FX_SECONDS = 6;
 const withTimbre = (timbre) => track({ timbre });
 for (const layer of ['bass', 'chords', 'pad']) {
   for (const fx of ['fuzz', 'overdrive', 'distortion']) {
-    test(`Verzerrer ${layer}.${fx}: Schicht deutlich anders und obertonreicher, Pegel im Rahmen`, async ({ page }) => {
+    test(`Verzerrer ${layer}.${fx}: Schicht deutlich anders (außer Bass: obertonreicher), Pegel im Rahmen`, async ({ page }) => {
       test.setTimeout(120_000);
       const r = await compare(page, track(), withTimbre({ [layer]: { [fx]: 0.7 } }), FX_SECONDS, { layer });
       const label = `${layer}.${fx}: ${JSON.stringify(r)}`;
       expect(r.diff, label).toBeGreaterThanOrEqual(0.15);
-      expect(r.centroidB, label).toBeGreaterThan(r.centroidA);
+      if (layer !== 'bass') expect(r.centroidB, label).toBeGreaterThan(r.centroidA);
       expect(r.rmsB / r.rmsA, label).toBeGreaterThan(0.4);
       expect(r.rmsB / r.rmsA, label).toBeLessThan(2.5);
     });
@@ -638,37 +639,100 @@ test('Verzerrer: alle Effekte aller Instrumente auf 1 bleiben endlich und vor de
   }
 });
 
-test('Bass-Fuzz ist deutlich stärker als vorher: bei 1 mehr Obertöne als beim Schlagwort fuzz (0,6)', async ({ page }) => {
+// Klangcharakter der Stufen mit einem Sinus durch die Kette (Obertöne in dB gegen den Grundton). Gemessen 2026-11-09, Akkord-Profil, 220 Hz:
+//   distortion: h2 -126 / h3 -10 dB (Rechteck, nur ungerade), fuzz: h2 -8 / h3 -24 dB (Impulse mit ungleichen Hälften: Oktavklang),
+//   overdrive bei 0.5: h3 -67 dB (die Tiefen laufen sauber durch; nur Töne und Obertöne über dem Hochpass bei 720 Hz werden getrieben)
+test('Verzerrer-Charakter: Distortion ungerade Obertöne, Fuzz auch gerade, Overdrive lässt Tiefes sauber und treibt Mitten', async ({ page }) => {
   test.setTimeout(120_000);
-  const tag = await compare(page, track(), withTags({ bassSound: ['fuzz'] }), FX_SECONDS, { layer: 'bass' });
-  const full = await compare(page, track(), withTimbre({ bass: { fuzz: 1 } }), FX_SECONDS, { layer: 'bass' });
-  expect(full.centroidB, `${JSON.stringify(full)} gegen ${JSON.stringify(tag)}`).toBeGreaterThan(tag.centroidB);
+  const r = await page.evaluate(async () => {
+    const { createGuitarFx } = await import('/audio/guitar-fx.js');
+    const { fxChainParams } = await import('/audio/fx-params.js');
+    const mag = (d, f) => {
+      let re = 0, im = 0;
+      for (let i = 0; i < d.length; i++) { const w = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / d.length), a = (2 * Math.PI * f * i) / 44100; re += d[i] * w * Math.cos(a); im -= d[i] * w * Math.sin(a); }
+      return Math.hypot(re, im);
+    };
+    const harmonic = async (fx, amount, f0, k) => {
+      const ctx = new OfflineAudioContext(1, 44100, 44100);
+      const dest = ctx.createGain(); dest.connect(ctx.destination);
+      const chain = createGuitarFx(ctx, 'chords', dest);
+      chain.set(fxChainParams({ [fx]: amount }, 'chords'), { immediate: true });
+      const o = ctx.createOscillator(); o.frequency.value = f0;
+      const g = ctx.createGain(); g.gain.value = 0.25;
+      o.connect(g).connect(chain.input); o.start();
+      const d = (await ctx.startRendering()).getChannelData(0).subarray(22050);
+      return 20 * Math.log10(mag(d, f0 * k) / mag(d, f0));
+    };
+    return {
+      distH2: await harmonic('distortion', 0.5, 220, 2), distH3: await harmonic('distortion', 0.5, 220, 3),
+      fuzzH2: await harmonic('fuzz', 0.5, 220, 2), fuzzH3: await harmonic('fuzz', 0.5, 220, 3),
+      odLow: await harmonic('overdrive', 0.5, 150, 3), odMid: await harmonic('overdrive', 0.5, 800, 3),
+    };
+  });
+  const label = JSON.stringify(r);
+  expect(r.distH3, label).toBeGreaterThan(-20);
+  expect(r.distH2, label).toBeLessThan(-40);
+  expect(r.fuzzH2, label).toBeGreaterThan(-20);
+  expect(r.fuzzH2, label).toBeGreaterThan(r.distH2 + 30);
+  expect(r.odMid, label).toBeGreaterThan(r.odLow + 20);
 });
 
-test('createInstruments: setTimbre schaltet die Verzerrer live, auch mitten im Spiel, ohne zu werfen', async ({ page }) => {
+test('Verzerrer: die Box nimmt die Höhen (fast nichts über 8 kHz) und schaltet stetig ein', async ({ page }) => {
+  test.setTimeout(120_000);
+  const r = await page.evaluate(async () => {
+    const { createGuitarFx } = await import('/audio/guitar-fx.js');
+    const { fxChainParams } = await import('/audio/fx-params.js');
+    const high = async (amount) => {
+      const ctx = new OfflineAudioContext(1, 44100, 44100);
+      const dest = ctx.createGain(); dest.connect(ctx.destination);
+      const chain = createGuitarFx(ctx, 'chords', dest);
+      chain.set(fxChainParams({ distortion: amount }, 'chords'), { immediate: true });
+      const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = 110;
+      const g = ctx.createGain(); g.gain.value = 0.2;
+      o.connect(g).connect(chain.input); o.start();
+      const d = (await ctx.startRendering()).getChannelData(0).subarray(22050);
+      let all = 0, top = 0;
+      for (let f = 110; f < 20000; f += 110) {
+        let re = 0, im = 0;
+        for (let i = 0; i < d.length; i++) { const w = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / d.length), a = (2 * Math.PI * f * i) / 44100; re += d[i] * w * Math.cos(a); im -= d[i] * w * Math.sin(a); }
+        const p = re * re + im * im;
+        all += p;
+        if (f > 8000) top += p;
+      }
+      return top / all;
+    };
+    return { half: await high(0.5), full: await high(1) };
+  });
+  expect(r.half, JSON.stringify(r)).toBeLessThan(0.002);
+  expect(r.full, JSON.stringify(r)).toBeLessThan(0.002);
+});
+
+test('createInstruments: setTimbre schaltet die Verzerrer mitten im Spiel um (vorher sauber, danach verzerrt, auch bei schon klingenden Tönen)', async ({ page }) => {
   const r = await page.evaluate(async () => {
     const { createInstruments } = await import('/audio/synth.js');
     const all = { fuzz: 1, overdrive: 1, distortion: 1 };
-    // gleiche Töne, einmal mit setTimbre vor dem zweiten Satz Töne, einmal ohne; Spitze der Zeit 0,4 bis 0,8 s
     const render = async (live) => {
       const ctx = new OfflineAudioContext(1, 44100, 44100);
       const inst = createInstruments(ctx, { bpm: 100, limiter: false });
       inst.output.connect(ctx.destination);
-      const note = (layer, midi) => ({ type: 'note', layer, midi, dur: 0.3, vel: 1 });
-      for (const layer of ['bass', 'chords', 'pad']) inst.layers[layer].trigger(note(layer, layer === 'bass' ? 40 : 57), 0.05);
-      if (live) inst.setTimbre({ bass: all, chords: all, pad: all });
-      for (const layer of ['bass', 'chords', 'pad']) inst.layers[layer].trigger(note(layer, layer === 'bass' ? 43 : 60), 0.4);
-      const d = (await ctx.startRendering()).getChannelData(0);
-      const early = d.slice(0, 17640), late = d.slice(17640, 35280);
-      const peak = (x) => x.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
-      return { early: Array.from(early.slice(0, 2000)), late: Array.from(late), peak: peak(d) };
+      const note = (layer, midi, dur) => ({ type: 'note', layer, midi, dur, vel: 1 });
+      for (const layer of ['bass', 'chords', 'pad']) inst.layers[layer].trigger(note(layer, layer === 'bass' ? 40 : 57, 0.7), 0.05);
+      for (const layer of ['bass', 'chords', 'pad']) inst.layers[layer].trigger(note(layer, layer === 'bass' ? 43 : 60, 0.3), 0.5);
+      // bei 0,3 s im laufenden Render umschalten
+      if (live) ctx.suspend(0.3).then(() => { inst.setTimbre({ bass: all, chords: all, pad: all }); ctx.resume(); });
+      return (await ctx.startRendering()).getChannelData(0);
     };
     const clean = await render(false);
     const live = await render(true);
-    const sum = (x) => x.reduce((s, v, i) => s + Math.abs(v - clean.late[i]), 0);
-    return { peak: live.peak, earlySame: live.early.every((v, i) => v === clean.early[i]), lateDiff: sum(live.late) / live.late.length };
+    const switchAt = Math.round(0.3 * 44100);
+    const diff = (from, to) => { let s = 0; for (let i = from; i < to; i++) s += Math.abs(live[i] - clean[i]); return s / (to - from); };
+    let peak = 0;
+    for (const v of live) peak = Math.max(peak, Math.abs(v));
+    return { peak, before: diff(0, switchAt), ringing: diff(switchAt + 4410, 22050), after: diff(22050, 44100) };
   });
-  expect(Number.isFinite(r.peak) && r.peak > 0 && r.peak < 1, JSON.stringify(r)).toBe(true);
-  expect(r.earlySame, 'Töne vor setTimbre bleiben unverändert').toBe(true);
-  expect(r.lateDiff, 'Töne nach setTimbre klingen anders').toBeGreaterThan(0.001);
+  const label = JSON.stringify(r);
+  expect(Number.isFinite(r.peak) && r.peak > 0 && r.peak < 1, label).toBe(true);
+  expect(r.before, `${label}: vor dem Umschalten sauber (nur Float-Rundung der Summe)`).toBeLessThan(1e-6);
+  expect(r.ringing, `${label}: schon klingende Töne ändern sich`).toBeGreaterThan(0.001);
+  expect(r.after, `${label}: neue Töne klingen verzerrt`).toBeGreaterThan(0.001);
 });

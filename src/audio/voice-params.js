@@ -4,28 +4,8 @@
 // Stetig und monoton: x = 0 -> lo, 0.5 -> mid, 1 -> hi, dazwischen exponentiell (mid exakt bei 0.5)
 const span = (x, lo, mid, hi) => (x < 0.5 ? mid * (lo / mid) ** (1 - 2 * x) : mid * (hi / mid) ** (2 * x - 1));
 
-/**
- * Verzerrerkette (Pedalboard-Reihenfolge Overdrive -> Distortion -> Fuzz) aus drei Reglern 0..1. Gilt für Bass, Akkorde und Pad.
- * Alle Werte sind 1 bzw. 4 (kein Knoten, keine Wirkung), solange der Regler auf 0 steht.
- *  - odDrive: Verstärkung vor der weichen tanh-Kappung (Overdrive), 1..6
- *  - distDrive, distClip: Verstärkung und Kappungspegel der harten Kappung (Distortion), 1..30 und 4..2.4 (4 = Rand des Eingangsbereichs)
- *  - drive: Verstärkung der unsymmetrischen, fast quadratischen Kappung (Fuzz), 1..60; vorher reichte der Bass-Fuzz nur bis 20
- *  - comp: Faktor auf die Hüllkurvenspitze; verzerrt hebt den Pegel schon bei wenig Regler (beim Bass-Fuzz unverändert zu vorher)
- */
-export function fxParams({ fuzz = 0, overdrive = 0, distortion = 0 }) {
-  return {
-    odDrive: 1 + 5 * overdrive,
-    distDrive: 1 + 29 * distortion,
-    distClip: 4 - 1.6 * distortion,
-    drive: 1 + 59 * fuzz,
-    // je Effekt aus Messungen des Pegels (rms vor dem Begrenzer) angeglichen; der stärkste Effekt bestimmt den Ausgleich
-    comp: Math.min(1 / (1 + 1.2 * Math.tanh(6 * fuzz)), 1 / (1 + 1.4 * overdrive), 1 / (1 + 1.5 * Math.tanh(6 * distortion))),
-  };
-}
-
 /** Bass: Timbre['bass'] (Felder 0..1) -> Parameter für bassNote in synth.js (neues Objekt je Aufruf). */
-export function bassParams({ sub, fuzz, overdrive, distortion, pluck, cutoff, resonance, roundness }) {
-  const { comp, ...fx } = fxParams({ fuzz, overdrive, distortion });
+export function bassParams({ sub, pluck, cutoff, resonance, roundness }) {
   // Grenzfrequenz: cutoff 0.35x..3x, sub senkt sie bis auf die Hälfte
   const tone = span(cutoff, 0.35, 1, 3) * (1 - 0.5 * sub);
   // sub nimmt den Obertonanteil zurück zugunsten des Sinus-Fundaments
@@ -39,8 +19,7 @@ export function bassParams({ sub, fuzz, overdrive, distortion, pluck, cutoff, re
     sawMix: harmonics * (1 - roundness), // roundness blendet Sägezahn in Dreieck über
     triMix: harmonics * roundness,
     sineGain: (1 + 2 * sub) * span(resonance, 1.3, 1, 0.4), // resonanter: weniger Fundament, die Filterspitze tritt hervor
-    ...fx, // Verzerrerkette
-    peak: 0.5 * comp, // Hüllkurvenspitze je Anschlagstärke; der Verzerrer hebt den Pegel schon bei wenig Regler
+    peak: 0.5, // Hüllkurvenspitze je Anschlagstärke
     sustain: pluck > 0.5 ? 0.2 ** (2 * pluck - 1) : 1, // Pegel am Ende der Haltezeit relativ zur Spitze; zupfender klingt ab
     attack: 0.004,
     release: 0.05,
@@ -77,8 +56,7 @@ export function drumParams({ kickPunch, kickLength, snareTone, snareSnap, hatBri
 const lin = (x, lo, mid, hi) => (x < 0.5 ? lo + (mid - lo) * 2 * x : mid + (hi - mid) * (2 * x - 1));
 
 /** Akkorde: Timbre['chords'] (Felder 0..1) -> Parameter für chordNote in synth.js (neues Objekt je Aufruf). */
-export function chordParams({ brightness, length, chorus, tremolo, fuzz, overdrive, distortion }) {
-  const { comp, ...fx } = fxParams({ fuzz, overdrive, distortion });
+export function chordParams({ brightness, length, chorus, tremolo }) {
   const bright = span(brightness, 0.2, 1, 2.5); // Faktor auf den Start des Filterabfalls
   // Ende: nach unten flacher (0.5x statt 0.2x), also nie unter 450 Hz, denn die Grundtöne der Akkorde liegen bei 220-330 Hz;
   // der Start bleibt dabei mindestens 1.6x über dem Ende. Statt einer harten Grenze, damit das Ende streng monoton bleibt.
@@ -94,26 +72,24 @@ export function chordParams({ brightness, length, chorus, tremolo, fuzz, overdri
     holdScale: span(length, 0.5, 1, 3), // Faktor auf die Haltezeit
     release: 0.2 * long,
     // Chorus und Tremolo gleichen ihre Zusatzenergie über die Spitze aus (Tremolo-Mittel 1 - Tiefe / 2, Leistung + Tiefe² / 8)
-    peak: (0.16 * comp) / (Math.sqrt(1 + chorusMix ** 2) * Math.sqrt(tremBase ** 2 + tremDepth ** 2 / 8)),
+    peak: 0.16 / (Math.sqrt(1 + chorusMix ** 2) * Math.sqrt(tremBase ** 2 + tremDepth ** 2 / 8)),
     attack: 0.003,
     chorusMix, // 0 = ohne zusätzliche Oszillatoren
     chorusDetune: 12, // Cent
     tremRate: 6, // Hz
     tremDepth, // 0 = ohne Tremolo-Knoten
     tremBase,
-    ...fx, // Verzerrerkette
   };
 }
 
 /** Pad: Timbre['pad'] (Felder 0..1) -> Parameter für padNote in synth.js (neues Objekt je Aufruf). */
-export function padParams({ attack, cutoff, lfoSpeed, lfoDepth, shimmer, thickness, fuzz, overdrive, distortion }) {
-  const { comp, ...fx } = fxParams({ fuzz, overdrive, distortion });
+export function padParams({ attack, cutoff, lfoSpeed, lfoDepth, shimmer, thickness }) {
   const extraMix = Math.max(0, 2 * thickness - 1); // zwei weitere Sägezähne erst oberhalb der Mitte
   const shimmerMix = 2 * shimmer; // Pegel der Oktav-Anteile (Sinus bei 2f und 4f)
   const lp = span(cutoff, 350, 1100, 3500) * span(thickness, 1.2, 1, 0.75); // dicker: etwas dunkler
   return {
     attack: span(attack, 0.05, 0.45, 1.6),
-    peak: (0.1 * comp) / (1 + 0.3 * extraMix) / (1 + 0.3 * shimmerMix), // gleicht die Zusatzenergie aus
+    peak: 0.1 / (1 + 0.3 * extraMix) / (1 + 0.3 * shimmerMix), // gleicht die Zusatzenergie aus
     holdMin: 0.1, // Haltezeit max(holdMin, dur - holdCut - max(0, attack - holdAttack))
     holdCut: 0.5,
     holdAttack: 0.45, // neutraler Einsatz: neutral gilt attack + Haltezeit = dur - 0,05 s, die Note klingt vor dem Taktstrich aus
@@ -125,7 +101,6 @@ export function padParams({ attack, cutoff, lfoSpeed, lfoDepth, shimmer, thickne
     spread: span(thickness, 3, 9, 25), // Cent, Sägezähne bei -/0/+
     extraMix, // 0 = ohne zusätzliche Oszillatoren
     shimmerMix, // 0 = ohne Oktav-Anteile
-    ...fx, // Verzerrerkette
   };
 }
 
