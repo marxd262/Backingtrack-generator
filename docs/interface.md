@@ -78,7 +78,7 @@ Die Grundart einer Stufe ist `maj`, `min` oder `dim` (Dur, Moll, vermindert). Di
 
 ### So ergänzt man eine Akkordart
 
-1. In `src/core/chords.js` einen Eintrag in `CHORDS` ergänzen: `intervals` (aufsteigend, beginnt mit 0), `symbol` (eindeutig), `base` (`maj`, `min`, `dim` oder `null`), `on` (Grundarten der Stufen, auf denen die Art stehen darf), `group` (`triad`, `seventh`, `extended`), `fifth` (Quinte für den Bass) und optional `short` und `seventh`.
+1. In `src/core/chords.js` einen Eintrag in `CHORDS` ergänzen: `intervals` (aufsteigend, beginnt mit 0), `symbol` (eindeutig), `base` (`maj`, `min`, `dim` oder `null`), `on` (Grundarten der Stufen, auf denen die Art stehen darf), `group` (`triad`, `seventh`, `extended`), `fifth` (Quinte für den Bass) und optional `short` und `seventh` (der Ton, den der Bass statt der kleinen Septime spielt: die Septime des Akkords, bei Sext-Akkorden die Sexte).
 2. Ihren Namen `chord.<id>` in `src/i18n/de.js` und `src/i18n/en.js` ergänzen.
 3. `npm test` ausführen: `tests/core/chords.test.js`, `chord-events.test.js` und `i18n.test.js` laufen über alle Arten und melden Unvollständiges; sie schreiben weder die Anzahl noch eine vollständige Liste fest. Prüfung, Muster, Rad, Griffbrett, Namen und die Auswahl in der Oberfläche brauchen keine Änderung. Nur `tests/e2e/chord-picker.spec.js` hält für A-Moll feste Listen der aktiven Chips; erlaubt die neue Art dort eine Stufe, trägt man sie in diesen Listen ein.
 

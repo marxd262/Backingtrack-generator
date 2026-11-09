@@ -13,6 +13,7 @@ export const CHORD_GROUPS = Object.freeze(['triad', 'seventh', 'extended']);
 // Eintrag: intervals (Halbtöne ab dem Grundton, aufsteigend, beginnt mit 0), symbol (Text hinter dem Grundton), base (Dreiklangs-
 // Grundart; null bei Arten, die auf mehreren Grundarten stehen), on (Grundarten der Stufen, auf denen die Art stehen darf),
 // group (Gruppe in der Auswahl), fifth (Quinte für den Bass), optional short (kürzere Schreibweise, z. B. '°') und seventh
+// (der Ton, den der Bass statt der kleinen Septime spielt: die Septime des Akkords, bei Sext-Akkorden die Sexte, an der die kleine stieße)
 const e = (intervals, symbol, base, on, group, fifth, extra = {}) => ({ intervals, symbol, base, on, group, fifth, ...extra });
 
 export const CHORDS = deepFreeze({
@@ -28,8 +29,8 @@ export const CHORDS = deepFreeze({
   min7: e([0, 3, 7, 10], 'm7', 'min', ['min'], 'seventh', 7, { seventh: 10 }),
   m7b5: e([0, 3, 6, 10], 'm7b5', 'dim', ['dim'], 'seventh', 6, { seventh: 10 }),
   dim7: e([0, 3, 6, 9], 'dim7', 'dim', ['dim'], 'seventh', 6, { seventh: 9 }),
-  maj6: e([0, 4, 7, 9], '6', 'maj', ['maj'], 'extended', 7),
-  min6: e([0, 3, 7, 9], 'm6', 'min', ['min'], 'extended', 7),
+  maj6: e([0, 4, 7, 9], '6', 'maj', ['maj'], 'extended', 7, { seventh: 9 }),
+  min6: e([0, 3, 7, 9], 'm6', 'min', ['min'], 'extended', 7, { seventh: 9 }),
   add9: e([0, 4, 7, 14], 'add9', 'maj', ['maj'], 'extended', 7),
   dom9: e([0, 4, 7, 10, 14], '9', 'maj', ['maj'], 'extended', 7, { seventh: 10 }),
   min9: e([0, 3, 7, 10, 14], 'm9', 'min', ['min'], 'extended', 7, { seventh: 10 }),

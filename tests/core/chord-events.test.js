@@ -90,6 +90,13 @@ test('Bass: Septime kommt aus dem Akkord (maj7 elf Halbtöne, 7 zehn, dim7 neun)
   assert.ok(!dim7.has(9), 'Bdim7: nie die kleine Septime (A)');
 });
 
+test('Bass: bei Sext-Akkorden spielt der b7-Grad die Sexte, die kleine Septime stieße an', () => {
+  const maj6 = bassPcs(C, ['C', 'maj6'], ['F', 'maj']);
+  assert.ok(maj6.has(9) && !maj6.has(10), 'C6: Sexte A statt Bb');
+  const min6 = bassPcs(C, ['D', 'min6'], ['G', 'maj']);
+  assert.ok(min6.has(11) && !min6.has(0), 'Dm6: Sexte H statt C');
+});
+
 test('Bass: Quinte aus dem Akkord (aug acht, power sieben, dim sechs Halbtöne)', () => {
   const aug = bassPcs(C, ['C', 'aug'], ['F', 'maj']);
   assert.ok(aug.has(8) && !aug.has(7), 'Caug: übermäßige Quinte (G#), nie die reine');
