@@ -405,6 +405,15 @@ main {
   #side-left { grid-area: left; margin-right: 24px; padding-right: 20px; }
   #side-right { grid-area: right; margin-left: 24px; padding-left: 20px; }
   .side-close { display: none; }
+
+  /* Spielseite breit: die Seite füllt genau das Fenster, die drei Spalten (Klang | Blöcke | Akkorde) scrollen jede für sich und
+     das Rad wandert am Ende einer Spalte nicht in die andere weiter; die Kopfzeile bleibt dabei stehen. Schmal (Schubladen)
+     scrollt weiter die Seite und die Schublade in sich. */
+  body:has(.play:not([hidden])) { height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+  body:has(.play:not([hidden])) main { flex: 1; min-height: 0; width: 100%; display: flex; flex-direction: column; padding-bottom: 16px; }
+  .play:not([hidden]) { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .play:not([hidden]) > .stage { flex: 1; min-height: 0; grid-template-rows: minmax(0, 1fr); }
+  .stage > #blocks, .stage > .side { min-height: 0; max-height: 100%; overflow-y: auto; overscroll-behavior: contain; }
 }
 /* schmal: offene Schublade dunkelt die Seite dahinter ab (dort ist alles inert, sidebar.js); nur Optik, ein Klick
    darauf bewirkt nichts. Unter der Schublade (z-index 10), über der Seite; Popover liegen in der obersten Ebene darüber */
