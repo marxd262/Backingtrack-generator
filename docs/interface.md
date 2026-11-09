@@ -35,7 +35,9 @@ import {
 | `bpm` | ja | - | 20 bis 400 |
 | `bars` | ja | - | nicht leer; je Eintrag `chord: {root, quality}` und `beats` (ganze Zahl 1 bis 16) |
 | `length` | nein | `24` | Anzahl Takte, 1 bis 512; `bars` läuft im Kreis darüber |
-| `meter` | nein | `[4, 4]` | im Format vorhanden, wird aber derzeit ignoriert: das Raster ergibt sich aus `beats`; angeboten wird nur 4/4 |
+| `meter` | nein | `[4, 4]` | Taktart `[Zähler, Nenner]`: `[4, 4]`, `[3, 4]`, `[6, 8]`, `[12, 8]` oder `[5, 4]` (Abschnitt "Taktarten, Raster und Grooves"); sie bestimmt das Raster und den Standard-Groove, eine andere Taktart meldet `badMeter`; fehlend oder `null` gilt `[4, 4]` wie bisher |
+| `groove` | nein | Standard der Taktart | Groove-ID aus `GROOVES`; ein Groove einer anderen Taktart wird durch den Standard der Taktart ersetzt, eine unbekannte ID meldet `badGroove` |
+| `complexity` | nein | `0.5` | Zahl von 0 bis 1 (sonst `badComplexity`); 0,5 und fehlend lassen alles wie es ist |
 | `tags` | nein | `{}` | `{Kategorie: [Schlagwort-IDs]}` (Objekt, je Kategorie ein Array), nur Kategorien und IDs aus `TAG_CATEGORIES`, sonst `badTags`; `null` gilt wie fehlend |
 | `timbre` | nein | `{}` | Klangregler: `{Gruppe: {Feld: Zahl 0 bis 1}}` mit den Gruppen und Feldern von `DEFAULT_TIMBRE` (`src/core/timbre.js`: `drums`, `bass`, `chords`, `pad`, `master`). Nur die gesetzten Felder zählen; sie liegen **über** dem, was die Schlagworte ergeben, und schlagen sie. Werte außerhalb von 0 bis 1 werden begrenzt; unbekannte Gruppen oder Felder, Nicht-Zahlen und ein Nicht-Objekt werden ohne Fehler ignoriert |
 | `variety` | nein | `false` | `true` lässt den Seed (die Variante) mehr verändern: er streut Synkopen, Bass-Bewegung und Swing leicht innerhalb der Schlagwort-Werte, schaltet zusätzliche Muster frei und verschiebt sieben Klangfelder um höchstens ±0,08 (unter `timbre`, das gewinnt). Ohne den Schalter ist der Ereignisstrom bitgleich wie ohne dieses Feld; die eigene Oberfläche setzt ihn auf `true`. Das Klangmodell mit Drift liefert `resolveTrackTimbre(track)`, es braucht dafür den `seed` im Track |
@@ -81,6 +83,44 @@ Die Grundart einer Stufe ist `maj`, `min` oder `dim` (Dur, Moll, vermindert). Di
 1. In `src/core/chords.js` einen Eintrag in `CHORDS` ergänzen: `intervals` (aufsteigend, beginnt mit 0), `symbol` (eindeutig), `base` (`maj`, `min`, `dim` oder `null`), `on` (Grundarten der Stufen, auf denen die Art stehen darf), `group` (`triad`, `seventh`, `extended`), `fifth` (Quinte für den Bass) und optional `short` und `seventh` (der Ton, den der Bass statt der kleinen Septime spielt: die Septime des Akkords, bei Sext-Akkorden die Sexte).
 2. Ihren Namen `chord.<id>` in `src/i18n/de.js` und `src/i18n/en.js` ergänzen.
 3. `npm test` ausführen: `tests/core/chords.test.js`, `chord-events.test.js` und `i18n.test.js` laufen über alle Arten und melden Unvollständiges; sie schreiben weder die Anzahl noch eine vollständige Liste fest. Prüfung, Muster, Rad, Griffbrett, Namen und die Auswahl in der Oberfläche brauchen keine Änderung. Nur `tests/e2e/chord-picker.spec.js` hält für A-Moll feste Listen der aktiven Chips; erlaubt die neue Art dort eine Stufe, trägt man sie in diesen Listen ein.
+
+## Taktarten, Raster und Grooves
+
+`METERS` und `GROOVES` stehen in `src/core/grooves.js` und werden aus `src/index.js` ausgeführt. **`bpm` zählt die Schläge (den Puls) der Taktart**: bei 4/4, 3/4 und 5/4 Viertel, bei 6/8 und 12/8 punktierte Viertel. Je Takt gilt `Schritte = Schläge * Schritte je Schlag`.
+
+| Taktart | Schläge je Takt | Schritte je Schlag | Raster |
+| --- | --- | --- | --- |
+| `4/4` | 4 | 4 | Sechzehntel |
+| `3/4` | 3 | 4 | Sechzehntel |
+| `5/4` | 5 | 4 | Sechzehntel |
+| `6/8` | 2 | 3 | Achteltriolen |
+| `12/8` | 4 | 3 | Achteltriolen |
+
+`beats` je Takt (1 bis 16) bleibt erlaubt; Takte mit anderer Schlagzahl als die Taktart schneiden die Muster ab oder wiederholen sie. `swing` verschiebt nur im Sechzehntel-Raster; im Triolen-Raster trägt das Raster das Shuffle-Gefühl selbst. Zeiten und `chordTimeline` bleiben `Schläge * 60 / bpm`.
+
+Ein Groove ist ein Datensatz mit Taktart, Fill-Länge (`fillBeats`, Schläge am Abschnittsende) und Mustern je Instrument in Stufen von einfach bis komplex:
+
+| Groove | Name | Taktart | `fillBeats` |
+| --- | --- | --- | --- |
+| `straight` | Gerade | 4/4 | 2 |
+| `latin` | Latin | 4/4 | 2 |
+| `waltz` | Walzer | 3/4 | 1 |
+| `waltzRock` | Rock-Walzer | 3/4 | 1 |
+| `ballad68` | Ballade (6/8) | 6/8 | 1 |
+| `rock68` | Rock (6/8) | 6/8 | 1 |
+| `shuffle` | Shuffle | 12/8 | 2 |
+| `slowBlues` | Langsamer Blues | 12/8 | 2 |
+| `fiveFour` | Fünfviertel | 5/4 | 2 |
+
+`straight` ist der bisherige Generator und bitgleich wie vorher. Standard je Taktart: `straight` (4/4), `waltz` (3/4), `ballad68` (6/8), `shuffle` (12/8), `fiveFour` (5/4).
+
+**Komplexität** (`complexity`, 0 bis 1, Standard 0,5) verschiebt die Parameter, die die Stufen der Grooves wählen: `drive` und `bassMovement` um `complexity - 0.5`, `syncopation` um `0.6 * (complexity - 0.5)`, jeweils auf 0 bis 1 begrenzt. Die Schlagworte wirken weiter, der Regler liegt darüber; mehr Komplexität heißt mehr Geisternoten, dichtere Hi-Hat, mehr synkopierte Kicks und mehr Bass-Bewegung.
+
+### So ergänzt man einen Groove
+
+1. In `src/core/grooves.js` einen Eintrag in `GROOVES` ergänzen: `meter`, `fillBeats` und `drums`, `bass`, `chords` nach dem Aufbau des Kommentars dort (Stufen, `thresholds`, Muster im Raster der Taktart, Fills mit `fillBeats * Schritte je Schlag` Einträgen).
+2. Seinen Namen `groove.<id>` in `src/i18n/de.js` und `src/i18n/en.js` ergänzen.
+3. `npm test` ausführen: `tests/core/grooves.test.js` und `groove-events.test.js` laufen über alle Grooves (Schritte im Zyklus, Hi-Hat-Werte je Schlag, Ereignisse im Takt, Raster, Fills, Namen) und melden Unvollständiges. Die Oberfläche zeigt neue Grooves ihrer Taktart von selbst; nur die Pegelprüfung in `tests/e2e/sound.spec.js` läuft ebenfalls automatisch über alle Grooves.
 
 ## Schlagworte und Stile
 
@@ -177,12 +217,12 @@ const h = play(ctx, track, { loops: 1, levels: { bass: 0.5 }, master: 1, onBar: 
 - `setLevel(name, value)` und `setMaster(value)`: stellen den Pegel einer Schicht bzw. die Gesamtlautstärke live (ohne Neustart, mit etwa 20 ms Rampe gegen Knacken). `value` ist die Reglerstellung 0 bis 1 (sonst `RangeError`, unbekannte Schicht `Error`); die Verstärkung ist `value * value`, also 1 exakt unverändert und nie lauter als der Standard, 0 still. Der Schichtpegel wirkt vor den Echo- und Hallwegen: sie folgen der Schicht (schon laufende Fahnen klingen nach). Die Gesamtlautstärke liegt hinter dem Begrenzer am Ausgang und ändert dessen Verhalten nicht. Der Pegel ist unabhängig vom Stummschalten mit `setLayer`.
 - `setTempo(bpm)`: ändert das Tempo live (20 bis 400, sonst `RangeError`); schon geplante Ereignisse behalten ihre Zeit. Die Echo-Verzögerung folgt dem neuen Tempo.
 - `setTimbre(timbre)`: stellt den Klang live um (ohne Neustart), `timbre` im Format des Klangmodells (`resolveTrackTimbre(track)` aus `src/core/timbre.js`, nicht aus `src/index.js` exportiert, liefert es aus Schlagworten und `track.timbre`; unvollständig oder ungültig wird mit dem Standard aufgefüllt). Neue Töne klingen sofort neu; Hall, Echo, Helligkeit, Raum-Anteil und Summenpegel folgen über kurze Rampen. Schon klingende Töne behalten ihren Klang, beim Pad (Töne liegen einen Takt) hört man die Änderung deshalb ab dem nächsten Akkord. Nach `stop()` ohne Wirkung.
-- `setTrack(track)`: tauscht den Ereignisstrom live aus, etwa nach einem Schlagwort mit Mustereffekt: ab dem nächsten noch nicht geplanten Ereignis spielt der neue Strom, schon geplante Töne laufen weiter und gleichzeitig geplante Ereignisse werden nie doppelt gespielt. Die Liedzeit bezieht sich auf das Starttempo von `play`; das `bpm` des übergebenen Tracks zählt nicht (Tempowechsel macht `setTempo`). Rückgabe `true` bei Erfolg, `false` ohne jede Änderung, wenn der Player gestoppt ist oder sich `length` oder die Taktlängen (`beats`) und damit die Dauer eines Durchlaufs ändern; der Aufrufer startet dann neu. Ein ungültiger Track wirft wie `play` und ändert nichts. Klang ändert `setTrack` nicht, dafür `setTimbre`.
+- `setTrack(track)`: tauscht den Ereignisstrom live aus, etwa nach einem Schlagwort mit Mustereffekt: ab dem nächsten noch nicht geplanten Ereignis spielt der neue Strom, schon geplante Töne laufen weiter und gleichzeitig geplante Ereignisse werden nie doppelt gespielt. Die Liedzeit bezieht sich auf das Starttempo von `play`; das `bpm` des übergebenen Tracks zählt nicht (Tempowechsel macht `setTempo`). Rückgabe `true` bei Erfolg, `false` ohne jede Änderung, wenn der Player gestoppt ist oder sich `length`, die Taktlängen (`beats`) und damit die Dauer eines Durchlaufs oder die **Taktart** ändern (auch bei gleicher Dauer, etwa 4/4 zu 12/8); der Aufrufer startet dann neu. Groove und Komplexität bei gleicher Taktart tauscht `setTrack` live. Ein ungültiger Track wirft wie `play` und ändert nichts. Klang ändert `setTrack` nicht, dafür `setTimbre`.
 - `stop()`: blendet in etwa 50 ms aus, bricht alle Rückrufe ab, ist wiederholbar und schließt den `AudioContext` nie.
 
 ## Prüfung
 
-`validateTrack(track)` liefert `{ code, params }[]` (leer heißt gültig) und wirft für JSON-artige Daten nie (auch nicht bei `null`, Zahlen, Strings oder kaputten Feldern). Nicht klonbare Daten, etwa eine Funktion als Feld, lassen das interne `structuredClone` einen `DataCloneError` werfen, genau wie bei `buildEvents`. Die öffentliche Funktion wendet vorher die Standardwerte an (`length`, `meter`, `tags`, `layers`, `seed`), akzeptiert also auch Teil-Tracks wie das alte Format von Interactive Scales und meldet genau die Codes, die `buildEvents` und `chordTimeline` als `err.errors` werfen würden. Codes (`VALIDATION_CODES` aus `src/index.js`): `emptyBars`, `chordNotInKey`, `badBpm`, `unknownQuality`, `badBeats`, `badLength`, `badKey`, `badBar`, `badTags`. `badTags` trägt `params.category` und `params.tag`, soweit bekannt (kein Objekt: leere `params`). Text in der Sprache der App: `t('err.' + code, params)`.
+`validateTrack(track)` liefert `{ code, params }[]` (leer heißt gültig) und wirft für JSON-artige Daten nie (auch nicht bei `null`, Zahlen, Strings oder kaputten Feldern). Nicht klonbare Daten, etwa eine Funktion als Feld, lassen das interne `structuredClone` einen `DataCloneError` werfen, genau wie bei `buildEvents`. Die öffentliche Funktion wendet vorher die Standardwerte an (`length`, `meter`, `tags`, `layers`, `seed`), akzeptiert also auch Teil-Tracks wie das alte Format von Interactive Scales und meldet genau die Codes, die `buildEvents` und `chordTimeline` als `err.errors` werfen würden. Codes (`VALIDATION_CODES` aus `src/index.js`): `emptyBars`, `chordNotInKey`, `badBpm`, `unknownQuality`, `badBeats`, `badLength`, `badKey`, `badBar`, `badTags`, `badMeter`, `badComplexity`, `badGroove` (die letzten drei tragen den Wert als `params.meter`, `params.complexity`, `params.groove`). `badTags` trägt `params.category` und `params.tag`, soweit bekannt (kein Objekt: leere `params`). Text in der Sprache der App: `t('err.' + code, params)`.
 
 ```js
 const errors = validateTrack(track);

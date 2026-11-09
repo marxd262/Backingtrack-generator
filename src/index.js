@@ -8,6 +8,7 @@ export { VALIDATION_CODES } from './core/track.js';
 export { allowedChords } from './core/music.js';
 export { CHORDS, chordName } from './core/chords.js';
 export { chordOptions } from './core/music.js';
+export { METERS, GROOVES } from './core/grooves.js';
 /** Öffentliche Prüfung: wendet erst die Standardwerte an, meldet also dieselben Codes, die buildEvents werfen würde. */
 export const validateTrack = (track) => coreValidateTrack(normalizeTrack(track));
 export { t, setLanguage, getLanguage } from './i18n/index.js';
