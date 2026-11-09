@@ -99,6 +99,7 @@ export default {
   'err.unknownQuality': 'The chord {chord} in bar {bar} has an unknown chord type.',
   'err.badBeats': 'Bar {bar} has an invalid number of beats: {beats}. Allowed are 1 to 16 beats.',
   'err.badTags': 'The tags are invalid.',
+  'err.badMeter': 'The time signature {meter} is not supported. Allowed are 4/4, 3/4, 6/8, 12/8 and 5/4.',
   'err.playFailed': 'Playback could not start.',
 
   'ui.tonight': 'Tonight:',

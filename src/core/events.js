@@ -79,7 +79,7 @@ const ARPS = [[0, 1, 2, 3, 2, 1, 2, 3], [0, 2, 1, 3, 0, 2, 1, 3], [3, 2, 1, 0, 1
 
 // Zeit eines Rasterschritts mit Swing und Jitter, bleibt in [Taktstart, Taktende)
 function at(b, step, rng, swing) {
-  const shift = step % 2 ? (swing * b.stepSec) / 3 : 0; // swing 1 = Triolen-Gefühl
+  const shift = b.sub === 4 && step % 2 ? (swing * b.stepSec) / 3 : 0; // swing 1 = Triolen-Gefühl; im Triolen-Raster trägt das Raster es selbst
   const t = b.start + step * b.stepSec + shift + (rng.next() * 2 - 1) * JITTER;
   return r6(clamp(t, b.start, b.end - END_GAP));
 }
@@ -87,7 +87,7 @@ function at(b, step, rng, swing) {
 const humanVel = (base, rng) => r3(clamp(base * (0.94 + rng.next() * 0.12), 0.05, 1));
 
 const note = (b, layer, step, t, midi, vel, dur) =>
-  ({ t, bar: b.index, beat: step / 4, type: 'note', layer, midi, vel, dur: r6(Math.min(dur, b.end - t)) });
+  ({ t, bar: b.index, beat: step / b.sub, type: 'note', layer, midi, vel, dur: r6(Math.min(dur, b.end - t)) });
 
 const drumSection = (params, rng) => {
   const step = level(params.drive);
@@ -97,13 +97,13 @@ const drumSection = (params, rng) => {
 };
 
 function playDrums(b, v, rng, params, fill) {
-  const fillStart = fill ? b.steps - 4 * Math.min(2, b.beats) : b.steps;
+  const fillStart = fill ? b.steps - b.sub * Math.min(2, b.beats) : b.steps;
   const kicks = new Set(v.kicks[b.index % 2]);
   if (rng.next() < 0.6 * params.syncopation) kicks.add(rng.pick(OFFBEAT_KICKS));
   const hits = [];
   for (let s = 0; s < b.steps; s++) {
     const p = s % STEPS;
-    const hat = v.tier.hat[s % 4];
+    const hat = v.tier.hat[s % b.sub];
     if (s >= fillStart) { // unter dem Fill hält die geschlossene Hi-Hat das Tempo
       if (hat > 0) hits.push([s, 'hat', hat]);
       continue;
@@ -120,7 +120,7 @@ function playDrums(b, v, rng, params, fill) {
   }
   return hits.map(([s, name, vel]) => {
     const t = at(b, s, rng, params.swing);
-    return { t, bar: b.index, beat: s / 4, type: 'hit', layer: 'drums', name, vel: humanVel(vel, rng) };
+    return { t, bar: b.index, beat: s / b.sub, type: 'hit', layer: 'drums', name, vel: humanVel(vel, rng) };
   });
 }
 
