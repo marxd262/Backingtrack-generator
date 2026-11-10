@@ -303,6 +303,14 @@ main {
 .timbre-row input { width: 100%; min-width: 0; height: var(--target); margin: 0; accent-color: var(--ink); }
 .timbre-row output { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .timbre-reset { margin-top: 4px; }
+/* Stimmenwahl: Beschriftung oben, Auswahl darunter über die ganze Breite (die Leiste ist an der Breitengrenze nur ~224 px breit) */
+.voice-row { display: grid; grid-template-columns: minmax(0, 1fr); row-gap: 2px; padding: 4px 0 8px; }
+.voice-row select { width: 100%; min-width: 0; min-height: var(--target); font: inherit; }
+.voice-row label { margin-top: 4px; }
+.voice-status { min-height: 1.2em; color: var(--ink-soft); font-size: 0.85rem; }
+.voice-row .hint { margin: 0; color: var(--ink-soft); font-size: 0.85rem; }
+.timbre-row input:disabled { opacity: 0.4; }
+.timbre-row:has(input:disabled) label { color: var(--ink-soft); }
 
 /* Leisten-Auslöser am Ende der Kopfzeile, rechtsbündig: die linke Schublade verdeckt sie bei mittlerer Breite nicht */
 .play-toggles { display: flex; gap: 8px; margin-inline-start: auto; }

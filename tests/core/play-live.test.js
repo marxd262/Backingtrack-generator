@@ -14,13 +14,14 @@ const makeCtx = () => ({ currentTime: 0, destination: node(), createGain: node }
 
 // Spion-Instrumente: merken sich Aufrufe von trigger und setTimbre
 function spy() {
-  const calls = { trigger: [], timbre: [] };
-  const create = () => {
+  const calls = { trigger: [], timbre: [], voices: [], created: [] };
+  const create = (_ctx, options) => {
+    calls.created.push(options);
     const layers = {};
     for (const name of ['drums', 'bass', 'chords', 'pad']) {
       layers[name] = { trigger: (e, when) => calls.trigger.push({ layer: name, e, when }), setMuted() {} };
     }
-    return { output: node(), layers, setTimbre: (x) => calls.timbre.push(x) };
+    return { output: node(), layers, setTimbre: (x) => calls.timbre.push(x), setVoices: (x) => calls.voices.push(x) };
   };
   return { calls, create };
 }
@@ -207,5 +208,43 @@ test('setTrack: anderer Groove oder andere Komplexität bei gleicher Taktart tau
     assert.deepEqual(s.keysOf(late), streamKeys(B, late));
   } finally {
     s.h.stop();
+  }
+});
+
+test('setVoices reicht die Eingabe genau einmal an die Instrumente weiter, nach stop() nicht mehr', async () => {
+  const { calls, create } = spy();
+  const h = play(makeCtx(), track(), { loops: Infinity, createInstruments: create });
+  const voices = { bass: { id: 'string', variant: 'finger' } };
+  h.setVoices(voices);
+  assert.deepEqual(calls.voices, [voices]);
+  h.stop();
+  h.setVoices({ bass: { id: 'synth' } });
+  assert.deepEqual(calls.voices, [voices]);
+  await tick();
+});
+
+test('play gibt die aufgefüllte Stimmenwahl des Tracks an die Instrumente (Standard, wenn fehlend); Ungültiges wirft wie bei den anderen Feldern', async () => {
+  for (const [voices, expected] of [
+    [undefined, 'synth/classic'], [null, 'synth/classic'], [{}, 'synth/classic'], [{ bass: 'string' }, 'string/finger'], [{ bass: { id: 'string', variant: 'finger' } }, 'string/finger'],
+  ]) {
+    const { calls, create } = spy();
+    const h = play(makeCtx(), track(voices === undefined ? {} : { voices }), { loops: Infinity, createInstruments: create });
+    h.stop();
+    const bass = calls.created[0].voices.bass;
+    assert.equal(`${bass.id}/${bass.variant}`, expected, JSON.stringify(voices));
+  }
+  for (const bad of ['x', [], { bass: { id: 'nope' } }, { drums: {} }]) {
+    const { create } = spy();
+    assert.throws(() => play(makeCtx(), track({ voices: bad }), { createInstruments: create }), /badVoice/, JSON.stringify(bad));
+  }
+});
+
+test('Instrumente ohne setVoices bleiben gültig', async () => {
+  const create = () => ({ output: node(), layers: Object.fromEntries(['drums', 'bass', 'chords', 'pad'].map((n) => [n, { trigger() {}, setMuted() {} }])) });
+  const h = play(makeCtx(), track(), { loops: Infinity, createInstruments: create });
+  try {
+    assert.doesNotThrow(() => h.setVoices({}));
+  } finally {
+    h.stop();
   }
 });

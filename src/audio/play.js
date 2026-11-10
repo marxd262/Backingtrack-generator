@@ -2,6 +2,7 @@
 // Der Aufrufer besitzt den AudioContext; stop() schließt ihn nie.
 import { buildEvents } from '../core/events.js';
 import { resolveTrackTimbre } from '../core/timbre.js';
+import { resolveVoices } from '../core/voices.js';
 import { normalizeTrack } from '../core/track.js';
 import { meterKey } from '../core/grooves.js';
 import { createInstruments as synthInstruments } from './synth.js';
@@ -41,7 +42,7 @@ export function play(ctx, trackInput, { loops = 1, startBar = 0, levels, master,
   }
 
   // Schlagworte sind durch buildEvents geprüft, resolveTimbre wirft hier nicht
-  const instruments = createInstruments(ctx, { bpm, timbre: resolveTrackTimbre(track), levels, master });
+  const instruments = createInstruments(ctx, { bpm, timbre: resolveTrackTimbre(track), voices: resolveVoices(track), levels, master });
   for (const e of events) {
     if (e.layer && !Object.hasOwn(instruments.layers, e.layer)) throw new Error(`Instruments lack layer: ${e.layer}`);
   }
@@ -170,6 +171,10 @@ export function play(ctx, trackInput, { loops = 1, startBar = 0, levels, master,
     // Klang live umstellen (siehe createInstruments in synth.js); nach stop() ohne Wirkung
     setTimbre(timbre) {
       if (!stopped) instruments.setTimbre?.(timbre);
+    },
+    // Stimmen live wechseln (siehe createInstruments in synth.js): neue Töne klingen in der neuen Stimme; nach stop() ohne Wirkung
+    setVoices(voices) {
+      if (!stopped) instruments.setVoices?.(voices);
     },
     setTempo(newBpm) {
       if (!(Number.isFinite(newBpm) && newBpm >= 20 && newBpm <= 400)) throw new RangeError(`bpm must be in [20, 400], got ${newBpm}`);

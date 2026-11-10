@@ -4,6 +4,7 @@
 import { t } from '../index.js';
 import { $, state, setText, setAttr } from './state.js';
 import { DEFAULT_TIMBRE, resolveTrackTimbre } from '../core/timbre.js';
+import { usesTimbreField } from '../core/voices.js';
 
 const el = (tag, props) => Object.assign(document.createElement(tag), props);
 
@@ -42,7 +43,8 @@ export function initTimbrePanel({ render, player }) {
       push();
       render();
       // der Knopf ist jetzt deaktiviert und verlöre den Fokus an body: in der Gruppe bleiben
-      rows.find((r) => r.group === group).input.focus();
+      // der erste Regler kann bei der gewählten Stimme ausgegraut sein (focus() wirkt dort nicht): den ersten bedienbaren nehmen
+      rows.find((r) => r.group === group && !r.input.disabled)?.input.focus();
     });
     resets[group] = reset;
     details.append(reset);
@@ -55,6 +57,9 @@ export function initTimbrePanel({ render, player }) {
       const percent = String(Math.round(effective[group][field] * 100));
       // nur bei Änderung: ein gerade gezogener Regler soll nicht neu gesetzt werden
       if (input.value !== percent) input.value = percent;
+      // Regler, die die gewählte Stimme nicht benutzt, sind ausgegraut (die Verzerrer gelten für jede Stimme)
+      const off = !usesTimbreField(state.track.voices, `${group}.${field}`);
+      if (input.disabled !== off) input.disabled = off;
       const shown = t('ui.percent', { n: percent });
       setText(out, shown);
       setAttr(input, 'aria-valuetext', shown);

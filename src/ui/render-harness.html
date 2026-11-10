@@ -4,9 +4,17 @@
 <meta charset="utf-8">
 <title>Render-Harness</title>
 <link rel="icon" href="data:,">
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 12px; max-width: 900px; }
+  fieldset { margin: 10px 0; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 4px 0; }
+  .tune { display: grid; grid-template-columns: 170px 1fr 70px; gap: 6px; align-items: center; margin: 2px 0; }
+  #export-text { width: 100%; height: 130px; font: 12px monospace; }
+</style>
 </head>
 <body>
-<!-- Entwicklerseite (nicht Teil der Oberfläche): window.__render/__compare für Pegel- und Klangtests und Hörprobe der drei Stile -->
+<!-- Entwicklerseite (nicht Teil der Oberfläche): window.__render/__compare/__renderNote für Pegel- und Klangtests, Hörprobe der Stile und
+     der wählbaren Stimmen (Auswahl je Instrument, Feinwerte live verstellen, Werte exportieren). Spektrogramm: ui/spectrogram.html -->
 <h1>Hörprobe</h1>
 <p>
   <button data-style="funk">Funk</button>
@@ -20,21 +28,49 @@
   <button data-style="poppunk">Pop-Punk</button>
   <button id="stop">Stopp</button>
 </p>
+
+<fieldset>
+  <legend>Stimmen (wirken live, auch während des Spiels)</legend>
+  <div id="voices"></div>
+</fieldset>
+
+<fieldset>
+  <legend>Feinwerte der gewählten Stimmen (wirken auf neue Töne)</legend>
+  <div id="tuning"></div>
+  <div class="row">
+    <button id="export" type="button">Werte exportieren</button>
+    <span>Den Text kopieren und mir geben; ich trage ihn als neue Standardwerte in <code>voices/tunables.js</code> ein.</span>
+  </div>
+  <textarea id="export-text" readonly aria-label="Exportierte Feinwerte"></textarea>
+</fieldset>
+
 <script type="module">
-import { compareRenders, renderOffline } from '../audio/render.js';
+import { compareRenders, renderOffline, renderNote } from '../audio/render.js';
+import { createInstruments } from '../audio/synth.js';
 import { play } from '../audio/play.js';
 import { STYLE_PRESETS } from '../core/tags.js';
+import { VOICES, VOICE_LAYERS, completeVoices } from '../core/voices.js';
+import { TUNABLES } from '../audio/voices/tunables.js';
+import { loadPack } from '../audio/voices/sampler.js';
+import de from '../i18n/de.js';
 
 window.__render = renderOffline;
 window.__compare = compareRenders;
+window.__renderNote = renderNote;
 
 let ctx = null;
 let playback = null;
+let instruments = null;
+let noteCtx = null;
+
+const state = { voices: completeVoices(), tuning: {} };
+const NOTE = { bass: 40, chords: 57, pad: 60 };
+const name = (key, fallback) => de[key] ?? fallback;
 
 function stop() {
   playback?.stop();
   ctx?.close();
-  playback = ctx = null;
+  playback = ctx = instruments = null;
 }
 
 function start(id) {
@@ -47,11 +83,133 @@ function start(id) {
     bars: [['A', 'min'], ['A', 'min'], ['D', 'min'], ['E', 'maj']].map(([root, quality]) => ({ chord: { root, quality }, beats: 4 })),
     tags: preset.tags,
     seed: 1,
-  }, { loops: Infinity });
+    voices: state.voices,
+  }, {
+    loops: Infinity,
+    // die Instrumente festhalten, damit Feinwerte live wirken; die gewählten Stimmen kommen schon aus dem Track
+    createInstruments: (c, options) => (instruments = createInstruments(c, { ...options, tuning: state.tuning })),
+  });
 }
 
 for (const b of document.querySelectorAll('[data-style]')) b.addEventListener('click', () => start(b.dataset.style));
 document.getElementById('stop').addEventListener('click', stop);
+
+// ---- Stimmenauswahl ----
+const el = (tag, props = {}) => Object.assign(document.createElement(tag), props);
+const statuses = {};
+const tuneKey = (layer) => `${layer}/${state.voices[layer].id}/${state.voices[layer].variant}`;
+
+// Sample-Stimmen laden ihr Pack beim Wählen vor (der Player lädt es ohnehin; so sieht man den Zustand auch ohne Wiedergabe)
+function showStatus(layer) {
+  const { id, variant } = state.voices[layer];
+  const el = statuses[layer];
+  if (id !== 'sample') { el.textContent = ''; return; }
+  el.textContent = 'lädt …';
+  const asked = `${id}/${variant}`;
+  loadPack(`${layer}-${variant}`).then(
+    () => { if (`${state.voices[layer].id}/${state.voices[layer].variant}` === asked) el.textContent = 'bereit'; },
+    () => { if (`${state.voices[layer].id}/${state.voices[layer].variant}` === asked) el.textContent = 'nicht verfügbar'; },
+  );
+}
+
+function fillVariants(layer, select) {
+  const voice = VOICES[layer][state.voices[layer].id];
+  select.replaceChildren(...voice.variants.map((v) => el('option', { value: v, textContent: name(`variant.${layer}.${state.voices[layer].id}.${v}`, v) })));
+  select.value = state.voices[layer].variant;
+}
+
+for (const layer of VOICE_LAYERS) {
+  const row = el('div', { className: 'row' });
+  const voiceSelect = el('select', { id: `voice-${layer}`, ariaLabel: `Stimme ${layer}` });
+  const variantSelect = el('select', { id: `variant-${layer}`, ariaLabel: `Variante ${layer}` });
+  // nach Art gruppiert (Synthese, Saitenmodell, Samples)
+  for (const kind of ['synth', 'model', 'sample']) {
+    const ids = Object.keys(VOICES[layer]).filter((id) => VOICES[layer][id].kind === kind);
+    if (!ids.length) continue;
+    const group = el('optgroup', { label: name(`voice.kind.${kind}`, kind) });
+    for (const id of ids) group.append(el('option', { value: id, textContent: name(`voice.${layer}.${id}`, id) }));
+    voiceSelect.append(group);
+  }
+  voiceSelect.value = state.voices[layer].id;
+  fillVariants(layer, variantSelect);
+  const apply = () => {
+    state.voices = completeVoices({ ...state.voices, [layer]: { id: voiceSelect.value, variant: variantSelect.value } });
+    instruments?.setVoices(state.voices);
+    showStatus(layer);
+    renderTuning();
+  };
+  voiceSelect.addEventListener('change', () => {
+    state.voices = completeVoices({ ...state.voices, [layer]: { id: voiceSelect.value } }); // erste Variante der neuen Stimme
+    fillVariants(layer, variantSelect);
+    instruments?.setVoices(state.voices);
+    showStatus(layer);
+    renderTuning();
+  });
+  variantSelect.addEventListener('change', apply);
+  const statusEl = el('span', { id: `status-${layer}`, ariaLive: 'polite' });
+  statuses[layer] = statusEl;
+  const note = el('button', { id: `note-${layer}`, type: 'button', textContent: 'Ton anspielen' });
+  note.addEventListener('click', async () => {
+    note.disabled = true;
+    try {
+      const data = await renderNote(layer, { midi: NOTE[layer], dur: 1.2, vel: 0.8, seconds: 2.2, voices: state.voices, tuning: state.tuning });
+      noteCtx ??= new AudioContext();
+      const buffer = noteCtx.createBuffer(1, data.length, 44100);
+      buffer.copyToChannel(data, 0);
+      const src = noteCtx.createBufferSource();
+      src.buffer = buffer;
+      src.connect(noteCtx.destination);
+      src.start();
+    } finally {
+      note.disabled = false;
+    }
+  });
+  row.append(el('strong', { textContent: name(`category.${layer}`, layer), style: 'width:90px' }), voiceSelect, variantSelect, statusEl, note);
+  document.getElementById('voices').append(row);
+}
+
+// ---- Tuning-Panel ----
+function renderTuning() {
+  const box = document.getElementById('tuning');
+  box.replaceChildren();
+  for (const layer of VOICE_LAYERS) {
+    const key = tuneKey(layer);
+    const table = TUNABLES[key];
+    if (!table) continue;
+    box.append(el('h4', { textContent: key }));
+    for (const [tname, spec] of Object.entries(table)) {
+      const current = state.tuning[key]?.[tname] ?? spec.value;
+      const row = el('div', { className: 'tune' });
+      const input = el('input', { type: 'range', min: spec.min, max: spec.max, step: spec.step, value: current, id: `tune-${key.replaceAll('/', '-')}-${tname}`, ariaLabel: `${key} ${tname}` });
+      input.dataset.key = key;
+      input.dataset.name = tname;
+      const out = el('output', { textContent: String(current) });
+      input.addEventListener('input', () => {
+        state.tuning = { ...state.tuning, [key]: { ...state.tuning[key], [tname]: Number(input.value) } };
+        out.textContent = input.value;
+        instruments?.setTuning(state.tuning);
+      });
+      row.append(el('label', { htmlFor: input.id, textContent: tname }), input, out);
+      box.append(row);
+    }
+  }
+}
+renderTuning();
+
+document.getElementById('export').addEventListener('click', () => {
+  const out = {};
+  for (const layer of VOICE_LAYERS) {
+    const key = tuneKey(layer);
+    if (!TUNABLES[key]) continue;
+    out[key] = Object.fromEntries(Object.entries(TUNABLES[key]).map(([n, spec]) => [n, state.tuning[key]?.[n] ?? spec.value]));
+  }
+  const text = JSON.stringify(out, null, 2);
+  const area = document.getElementById('export-text');
+  area.value = text;
+  area.focus();
+  area.select();
+  navigator.clipboard?.writeText(text).catch(() => {}); // wo erlaubt; sonst genügt das markierte Textfeld
+});
 </script>
 </body>
 </html>

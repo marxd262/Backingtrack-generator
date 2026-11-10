@@ -6,6 +6,9 @@ import { bassParams, drumParams, chordParams, padParams, masterParams } from './
 import { sliderGain } from './mix.js';
 import { createGuitarFx } from './guitar-fx.js';
 import { fxChainParams } from './fx-params.js';
+import { noiseBuffer, adsr, osc, gain } from './nodes.js';
+import { createVoice } from './voices/index.js';
+import { completeVoices, VOICE_LAYERS } from '../core/voices.js';
 
 // Schichtpegel und Summe, aus Messungen mit tests/e2e/levels.spec.js angeglichen (Messwerte dort im Kommentar)
 const TRIM = { drums: 0.65, bass: 0.24, chords: 1, pad: 0.8 };
@@ -13,36 +16,6 @@ const MASTER = 0.6;
 const TOMS = { tomHigh: 200, tomMid: 150, tomLow: 110 };
 
 const LEVEL_TC = 0.02; // Zeitkonstante der Pegelrampe (s), gegen Knacken
-
-const hz = (m) => 440 * 2 ** ((m - 69) / 12);
-
-function noiseBuffer(ctx, rng, seconds, channels = 1, decay = 0) {
-  const length = Math.ceil(ctx.sampleRate * seconds);
-  const buf = ctx.createBuffer(channels, length, ctx.sampleRate);
-  for (let c = 0; c < channels; c++) {
-    const d = buf.getChannelData(c);
-    for (let i = 0; i < length; i++) d[i] = (rng.next() * 2 - 1) * Math.exp((-decay * i) / ctx.sampleRate);
-  }
-  return buf;
-}
-
-const adsr = (g, t, a, peak, hold, rel) => {
-  g.gain.setValueAtTime(0.0001, t);
-  g.gain.linearRampToValueAtTime(peak, t + a);
-  g.gain.setValueAtTime(peak, t + a + hold);
-  g.gain.exponentialRampToValueAtTime(0.0001, t + a + hold + rel);
-};
-
-function osc(ctx, type, freq, detune, dest, t, end) {
-  const o = ctx.createOscillator();
-  o.type = type;
-  o.frequency.value = freq;
-  o.detune.value = detune;
-  o.connect(dest);
-  o.start(t);
-  o.stop(end);
-  return o;
-}
 
 // Schlagzeugstimmen; p aus drumParams (beim neutralen Klang die bisherigen Konstanten). Toms folgen dem Klangmodell nicht.
 function drumVoices(ctx, noise, p) {
@@ -90,82 +63,6 @@ function drumVoices(ctx, noise, p) {
   return voices;
 }
 
-function gain(ctx, value, dest) {
-  const g = ctx.createGain();
-  g.gain.value = value;
-  g.connect(dest);
-  return g;
-}
-
-// Bass: zwei leicht verstimmte Sägezähne (oder Dreiecke) mit Tiefpass-Zupfhüllkurve, Sinus als Fundament,
-// Verzerrer (Fuzz, Overdrive, Distortion) liegen hinter den Stimmen auf der ganzen Schicht (guitar-fx.js). p aus bassParams.
-function bassNote(ctx, out, t, e, p) {
-  const f = hz(e.midi), end = t + e.dur + 0.1;
-  const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.Q.value = p.q;
-  lp.frequency.setValueAtTime(p.lpStart, t); lp.frequency.exponentialRampToValueAtTime(p.lpEnd, t + p.lpTime);
-  const hold = Math.max(p.holdMin, e.dur - p.holdCut);
-  const a = ctx.createGain(); adsr(a, t, p.attack, e.vel * p.peak, hold, p.release);
-  // zupfend: Abklingen während der Haltezeit; sustain 1 = flach wie bisher, dann ohne zusätzlichen Knoten
-  if (p.sustain < 1) {
-    const decay = gain(ctx, 1, out);
-    decay.gain.setValueAtTime(1, t + p.attack);
-    decay.gain.exponentialRampToValueAtTime(p.sustain, t + p.attack + hold);
-    a.connect(decay);
-  } else a.connect(out);
-  for (const [type, mix] of [['sawtooth', p.sawMix], ['triangle', p.triMix]]) {
-    if (mix === 0) continue;
-    const bus = gain(ctx, mix, lp);
-    for (const det of [-p.sawDetune, p.sawDetune]) osc(ctx, type, f, det, bus, t, end);
-  }
-  osc(ctx, 'sine', f, 0, gain(ctx, p.sineGain, a), t, end);
-  lp.connect(a);
-}
-
-// Akkorde: kurzer Zupf/Stab je Ton (der Strom enthält Stabs oder Arpeggio-Töne). p aus chordParams (beim neutralen Klang die
-// bisherigen Konstanten); Chorus-Oszillatoren und Tremolo-LFO nur, wenn der Klang sie verlangt.
-function chordNote(ctx, out, t, e, p) {
-  const f = hz(e.midi), hold = Math.max(0.01, e.dur * 0.5 * p.holdScale);
-  const end = t + Math.max(e.dur + 0.3, p.attack + hold + p.release + 0.05);
-  const lp = ctx.createBiquadFilter(); lp.type = 'lowpass';
-  lp.frequency.setValueAtTime(p.lpStart, t); lp.frequency.exponentialRampToValueAtTime(p.lpEnd, t + p.lpTime);
-  const a = ctx.createGain(); adsr(a, t, p.attack, e.vel * p.peak, hold, p.release);
-  osc(ctx, 'sawtooth', f, 0, lp, t, end);
-  osc(ctx, 'square', f, 7, lp, t, end);
-  if (p.chorusMix > 0) {
-    for (const side of [-1, 1]) { // je ein verstimmter Sägezahn links und rechts; Breite und Chorus-Klang kommen aus Verstimmung (+/- Cent) und Panning, der um einige ms spätere Start staffelt nur den Einsatz (kein Delay-Knoten)
-      const pan = ctx.createStereoPanner(); pan.pan.value = 0.6 * side; pan.connect(lp);
-      osc(ctx, 'sawtooth', f, side * p.chorusDetune, gain(ctx, p.chorusMix, pan), t + (side < 0 ? 0.011 : 0.017), end);
-    }
-  }
-  lp.connect(a);
-  if (p.tremDepth > 0) {
-    const trem = gain(ctx, p.tremBase, out);
-    osc(ctx, 'sine', p.tremRate, 0, gain(ctx, p.tremDepth / 2, trem.gain), t, end);
-    a.connect(trem);
-  } else a.connect(out);
-}
-
-// Pad: langsamer Einsatz, verstimmte Sägezähne durch Tiefpass mit langsamem LFO, optional mehr Oszillatoren und Oktav-Anteile
-function padNote(ctx, out, t, e, p) {
-  // Einsatz länger als holdAttack: die Haltezeit schrumpft um das Mehr, damit der Akkord wie beim neutralen Klang kurz vor dem
-  // Taktstrich ausklingt; passt der Einsatz nicht in die Note, wird er gekürzt (nie unter holdAttack, neutral also unverändert)
-  const attack = Math.min(p.attack, Math.max(p.holdAttack, e.dur - p.holdCut - p.holdMin + p.holdAttack));
-  const f = hz(e.midi), hold = Math.max(p.holdMin, e.dur - p.holdCut - Math.max(0, attack - p.holdAttack));
-  const end = t + Math.max(e.dur + 1, attack + hold + p.release + 0.1);
-  const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.Q.value = p.q; lp.frequency.value = p.cutoff;
-  osc(ctx, 'sine', p.lfoSpeed, 0, gain(ctx, p.lfoDepth, lp.frequency), t, end);
-  const a = ctx.createGain(); adsr(a, t, attack, e.vel * p.peak, hold, p.release);
-  for (const det of [-p.spread, 0, p.spread]) osc(ctx, 'sawtooth', f, det, lp, t, end);
-  if (p.extraMix > 0) {
-    const bus = gain(ctx, p.extraMix, lp);
-    for (const det of [-p.spread / 2, p.spread / 2]) osc(ctx, 'sawtooth', f, det, bus, t, end);
-  }
-  if (p.shimmerMix > 0) { // Oktav-Anteile (2f, 4f) am Tiefpass vorbei, leicht verstimmt gegeneinander
-    for (const [mult, level, det] of [[2, 0.8, -4], [2, 0.8, 4], [4, 0.4, 0]]) osc(ctx, 'sine', f * mult, det, gain(ctx, p.shimmerMix * level, a), t, end);
-  }
-  lp.connect(a).connect(out);
-}
-
 /**
  * Baut die Instrumente und die Summenkette (Trims, Master, Echo auf Akkorde/Pad, Hall, Begrenzer).
  * `output` verbindet der Aufrufer mit ctx.destination. `trigger(event, when)` mit when in ctx-Zeit.
@@ -175,7 +72,7 @@ function padNote(ctx, out, t, e, p) {
  * `levels` ({drums, bass, chords, pad}, je 0..1) und `master` (0..1) sind Reglerstellungen des Mischpults (mix.js), Standard 1;
  * setLevel/setMaster ändern sie live. Der Gesamtpegel liegt hinter dem Begrenzer und ändert dessen Verhalten nicht.
  */
-export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, timbre = DEFAULT_TIMBRE, levels = {}, master: masterLevel = 1 } = {}) {
+export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, timbre = DEFAULT_TIMBRE, levels = {}, master: masterLevel = 1, voices, tuning } = {}) {
   let sound = completeTimbre(timbre);
   // Parameterobjekte bleiben dieselben, setTimbre überschreibt nur ihre Felder (die Stimmen halten sie als Referenz)
   const mix = {}, drum = {}, bass = {}, chord = {}, pad = {};
@@ -221,11 +118,43 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
 
   const drums = drumVoices(ctx, noise, drum);
   const roomSend = gain(ctx, drum.roomSend, reverb); // Raum-Sendeweg der Schlagzeugsumme in den Hall, immer vorhanden (0 = aus)
+  // Wählbare Stimmen (core/voices.js): je Instrument eine Umsetzung, die setVoices austauscht; neue Töne klingen sofort in der neuen Stimme,
+  // schon laufende Töne klingen in der alten aus. Feinwerte (Tuning) liest die Stimme beim Anschlag.
+  const isRecord = (x) => typeof x === 'object' && x !== null && !Array.isArray(x);
+  const layerParams = { bass, chords: chord, pad };
+  let chosen = completeVoices(voices);
+  let tuningState = isRecord(tuning) ? tuning : {};
+  const impl = {}, built = {};
+  // Ladezustand der Stimmen (Samples laden ihr Pack beim Anlegen): 'none' (nichts zu laden), 'loading', 'ready', 'error'. Jede gebaute
+  // Stimme hat eine eigene Nummer, damit eine überholte (schon gewechselte) Stimme den Zustand der neuen nicht überschreibt.
+  const status = { bass: 'none', chords: 'none', pad: 'none' }, generation = { bass: 0, chords: 0, pad: 0 };
+  const pending = new Set();
+  // nur Instrumente neu bauen, deren Stimme sich geändert hat (der Zwischenspeicher und der Strum der anderen bleiben erhalten);
+  // eine Stimme im Fehlerzustand wird beim erneuten Wählen neu gebaut, das versucht das Laden noch einmal
+  const buildVoices = () => {
+    for (const layer of VOICE_LAYERS) {
+      const same = built[layer]?.id === chosen[layer].id && built[layer]?.variant === chosen[layer].variant;
+      if (same && status[layer] !== 'error') continue;
+      built[layer] = chosen[layer];
+      status[layer] = 'none';
+      const mine = ++generation[layer];
+      impl[layer] = createVoice(layer, chosen[layer], ctx, {
+        params: layerParams[layer], getTimbre: () => sound[layer], rng: rng.fork(`voice-${layer}`), getTuning: () => tuningState,
+        setStatus: (value) => { if (generation[layer] === mine) status[layer] = value; },
+        track: (promise) => {
+          const settled = promise.then(() => {}, () => {}); // nie abgelehnt: whenReady wartet nur, der Fehler gehört der Stimme
+          pending.add(settled);
+          settled.then(() => pending.delete(settled));
+        },
+      });
+    }
+  };
+  buildVoices();
   const play = {
     drums: (out, t, e) => e.type === 'hit' && drums[e.name]?.(out, t, e.vel),
-    bass: (out, t, e) => e.type === 'note' && bassNote(ctx, out, t, e, bass),
-    chords: (out, t, e) => e.type === 'note' && chordNote(ctx, out, t, e, chord),
-    pad: (out, t, e) => e.type === 'note' && padNote(ctx, out, t, e, pad),
+    bass: (out, t, e) => impl.bass(out, t, e),
+    chords: (out, t, e) => impl.chords(out, t, e),
+    pad: (out, t, e) => impl.pad(out, t, e),
   };
 
   // Lautstärke weich nachführen und am Ende exakt setzen (setTargetAtTime nähert sich nur an)
@@ -282,6 +211,21 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
       ramp(volume.gain, sliderGain(v));
     },
     // timbre: wie die Option gleichen Namens (unvollständig oder ungültig wird aufgefüllt)
+    // Wartet, bis alle Packs der gewählten Stimmen geladen sind (oder gescheitert; wirft nie). Bis dahin spielt der klassische Synth.
+    async whenReady() {
+      while (pending.size) await Promise.allSettled([...pending]);
+    },
+    // Ladezustand je Instrument: 'none' | 'loading' | 'ready' | 'error'
+    voiceStatus: () => ({ ...status }),
+    // Stimmen wechseln (wie die Option `voices`; unvollständig oder ungültig wird mit dem Standard aufgefüllt); wirkt auf neue Töne
+    setVoices(next) {
+      chosen = completeVoices(next);
+      buildVoices();
+    },
+    // Feinwerte der Stimmen überschreiben ({ 'bass/string/finger': { name: Wert } }, siehe voices/tunables.js); wirkt auf neue Töne
+    setTuning(next) {
+      tuningState = isRecord(next) ? next : {};
+    },
     setTimbre(next) {
       sound = completeTimbre(next);
       applyTimbre();

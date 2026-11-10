@@ -11,6 +11,7 @@ import { initSidebar } from './sidebar.js';
 import { initGroups } from './groups.js';
 import { resolveTrackTimbre } from '../core/timbre.js';
 import { initTimbrePanel } from './timbre-panel.js';
+import { initVoices } from './voices-panel.js';
 import { initRhythm } from './rhythm.js';
 import { initViews } from './blocks.js';
 
@@ -208,6 +209,7 @@ const renderTuning = initTuning({ render: () => render(), restartIfPlaying, togg
 const renderMixer = initMixer({ render: () => render(), player: () => player, toggleLayer });
 const renderRhythm = initRhythm({ render: () => render(), restartIfPlaying, applyLive });
 const renderTimbre = initTimbrePanel({ render: () => render(), player: () => player }); // vor initGroups: baut die Klang-Gruppen
+const renderVoices = initVoices({ render: () => render(), player: () => player }); // nach dem Klangpanel: setzt seine Zeilen in dessen Gruppen
 
 // Leisten "Klang" (links) und "Akkorde" (rechts): offen/zu steht im gemerkten Layout
 const sidebars = ['left', 'right'].map((side) => initSidebar({
@@ -295,6 +297,7 @@ function render() {
   views.render(); // vor renderTuning: das Akkordrad zeichnet nur, wenn sein Block sichtbar ist
   renderTuning();
   renderMixer();
+  renderVoices();
   renderTimbre();
   renderRhythm();
 }

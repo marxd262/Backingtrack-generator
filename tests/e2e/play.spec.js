@@ -136,7 +136,7 @@ test('nach stop() mitten im Track keine Aufrufe mehr, kein onEnd, doppeltes stop
     await ctx.close();
     return { atStop, later, factory: spy.factory };
   }, track());
-  expect(r.factory).toEqual([{ bpm: 240, timbre: resolveTimbre(track().tags) }]);
+  expect(r.factory).toEqual([{ bpm: 240, timbre: resolveTimbre(track().tags), voices: STANDARD_VOICES }]);
   expect(r.atStop.bar).toBe(2);
   expect(r.atStop.event).toBeGreaterThan(0);
   expect(r.atStop.trigger).toBeGreaterThan(0);
@@ -270,6 +270,8 @@ test('setTempo erreicht setTempo der Instrumente (Echo), fehlende Methode ist ha
 });
 
 // Standard-Klangmodell als Literal (nicht aus src/core gelesen), damit der Test DEFAULT_TIMBRE mitprüft
+// Stimmenwahl, die play ohne Angabe im Track an die Instrumente gibt (heutiger Klang)
+const STANDARD_VOICES = { bass: { id: 'synth', variant: 'classic' }, chords: { id: 'synth', variant: 'classic' }, pad: { id: 'synth', variant: 'classic' } };
 const DEFAULT_SOUND = {
   drums: { kickPunch: 0.5, kickLength: 0.5, snareTone: 0.5, snareSnap: 0.5, hatBright: 0.5, hatLength: 0.5, room: 0 },
   bass: { sub: 0, fuzz: 0, overdrive: 0, distortion: 0, pluck: 0.5, cutoff: 0.5, resonance: 0.5, roundness: 0 },
@@ -290,8 +292,8 @@ test('createInstruments erhält { bpm, timbre } aus den Schlagworten; Fabriken o
     return { factory: spy.factory, trigger: spy.trigger.length };
   }, [track({ tags: { bassSound: ['fuzz'] } }), track({ tags: {} })]);
   expect(r.factory).toEqual([
-    { bpm: 240, timbre: { ...DEFAULT_SOUND, bass: { ...DEFAULT_SOUND.bass, fuzz: 0.6 } } },
-    { bpm: 240, timbre: DEFAULT_SOUND },
+    { bpm: 240, timbre: { ...DEFAULT_SOUND, bass: { ...DEFAULT_SOUND.bass, fuzz: 0.6 } }, voices: STANDARD_VOICES },
+    { bpm: 240, timbre: DEFAULT_SOUND, voices: STANDARD_VOICES },
   ]);
   // der Spion wertet timbre nicht aus und wird trotzdem bespielt
   expect(r.trigger).toBeGreaterThan(0);

@@ -1,6 +1,7 @@
 // Offline-Render mit Pegelmessung (läuft im Browser). Misst den linken Kanal wie __render in backing-demo.html.
 import { buildEvents } from '../core/events.js';
 import { resolveTrackTimbre } from '../core/timbre.js';
+import { resolveVoices } from '../core/voices.js';
 import { createInstruments } from './synth.js';
 import { spectralCentroid } from './spectrum.js';
 
@@ -15,7 +16,8 @@ const FIRST = Math.round(SAMPLE_RATE * OFFSET); // Abtastwert des ersten Ereigni
 async function renderLeft(trackInput, seconds, solo, limiter, mix) {
   const events = buildEvents(trackInput); // prüft den Track samt Schlagworten
   const ctx = new OfflineAudioContext(2, Math.ceil(SAMPLE_RATE * (OFFSET + seconds + TAIL)), SAMPLE_RATE);
-  const { output, layers } = createInstruments(ctx, { bpm: trackInput.bpm, limiter, timbre: resolveTrackTimbre(trackInput), ...mix });
+  const { output, layers, whenReady } = createInstruments(ctx, { bpm: trackInput.bpm, limiter, timbre: resolveTrackTimbre(trackInput), voices: resolveVoices(trackInput), ...mix });
+  await whenReady(); // Sample-Stimmen: erst laden, sonst klänge der Rückfall-Synth
   output.connect(ctx.destination);
   if (solo) for (const name of LAYERS) layers[name].setMuted(name !== solo);
   for (const e of events) if (e.t < seconds && e.layer) layers[e.layer].trigger(e, OFFSET + e.t);
@@ -63,4 +65,23 @@ export async function compareRenders(trackA, trackB, seconds, { layer, limiter =
     centroidA: spectralCentroid(a, SAMPLE_RATE),
     centroidB: spectralCentroid(b, SAMPLE_RATE),
   };
+}
+
+/**
+ * Rendert eine einzelne Note eines Instruments (linker Kanal, nur diese Schicht hörbar, ohne Begrenzer) für Analyse und Tests.
+ * `voices` (wie track.voices), `tuning` (Feinwerte der Stimmen) und `timbre` (Klangregler) sind optional; fehlend gilt der Standard,
+ * nur Echo und Hall stehen auf 0.
+ * Die Note beginnt bei 0,05 s, `seconds` ist die Länge des Ergebnisses ab 0.
+ */
+export async function renderNote(layer, { midi, dur = 0.6, vel = 0.8, seconds = 1.5, voices, tuning, timbre, sampleRate = SAMPLE_RATE } = {}) {
+  if (!LAYERS.includes(layer) || layer === 'drums') throw new RangeError(`Unknown layer: ${JSON.stringify(layer)}`);
+  const ctx = new OfflineAudioContext(1, Math.ceil(sampleRate * seconds), sampleRate);
+  // ohne Echo und Hall, damit die Aufnahme nur die Note enthält (Analyse); ein übergebenes timbre kann sie wieder einschalten
+  const sound = { ...timbre, master: { echo: 0, reverb: 0, ...timbre?.master } };
+  const { output, layers, whenReady } = createInstruments(ctx, { limiter: false, timbre: sound, voices, tuning });
+  await whenReady();
+  output.connect(ctx.destination);
+  for (const name of LAYERS) layers[name].setMuted(name !== layer);
+  layers[layer].trigger({ type: 'note', layer, midi, dur, vel }, 0.05);
+  return (await ctx.startRendering()).getChannelData(0);
 }

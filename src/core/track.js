@@ -3,14 +3,14 @@ import { noteToPc, isNoteName, isValidKey, allowedChords } from './music.js';
 import { CHORDS, isChordQuality, chordName } from './chords.js';
 import { isMeter, GROOVES } from './grooves.js';
 import { TAG_CATEGORIES } from './tags.js';
-
+import { VOICE_LAYERS, isVoice } from './voices.js';
 
 /**
  * Alle Codes, die validateTrack melden kann; die Oberfläche übersetzt sie über `err.<code>`.
- * @type {readonly ('emptyBars'|'chordNotInKey'|'badBpm'|'unknownQuality'|'badBeats'|'badLength'|'badKey'|'badBar'|'badTags'|'badMeter'|'badComplexity'|'badGroove')[]}
+ * @type {readonly ('emptyBars'|'chordNotInKey'|'badBpm'|'unknownQuality'|'badBeats'|'badLength'|'badKey'|'badBar'|'badTags'|'badMeter'|'badComplexity'|'badGroove'|'badVoice')[]}
  */
 export const VALIDATION_CODES = Object.freeze([
-  'emptyBars', 'chordNotInKey', 'badBpm', 'unknownQuality', 'badBeats', 'badLength', 'badKey', 'badBar', 'badTags', 'badMeter', 'badComplexity', 'badGroove',
+  'emptyBars', 'chordNotInKey', 'badBpm', 'unknownQuality', 'badBeats', 'badLength', 'badKey', 'badBar', 'badTags', 'badMeter', 'badComplexity', 'badGroove', 'badVoice',
 ]);
 
 /** Obergrenze für `length` (Takte); schützt Arrangement und Audio vor riesigen Eingaben. */
@@ -51,10 +51,28 @@ function checkTags(tags, add) {
   }
 }
 
+// voices: fehlend/null oder { bass|chords|pad: fehlend/null | Stimmen-ID | { id?, variant? } }; meldet Instrument und Stimme (id oder id/variant)
+function checkVoices(voices, add) {
+  if (voices == null) return;
+  if (!isObject(voices) || Array.isArray(voices)) {
+    add('badVoice', { layer: '?', voice: show(voices) });
+    return;
+  }
+  for (const [layer, given] of Object.entries(voices)) {
+    if (!VOICE_LAYERS.includes(layer)) { add('badVoice', { layer, voice: given == null ? '?' : show(isObject(given) ? given.id : given) }); continue; }
+    if (given == null) continue;
+    const rec = isObject(given) && !Array.isArray(given) ? given : null;
+    const id = rec ? rec.id : given;
+    const variant = rec ? rec.variant : undefined;
+    const ok = rec ? (id === undefined ? variant === undefined : isVoice(layer, id) && (variant === undefined || isVoice(layer, id, variant))) : isVoice(layer, id);
+    if (!ok) add('badVoice', { layer, voice: variant === undefined ? show(id) : `${show(id)}/${show(variant)}` });
+  }
+}
+
 /**
  * Sammelt Meldungen, wirft nie (leer = gültig). bpm muss in [20, 400] liegen, length in [1, MAX_LENGTH],
  * beats in [1, MAX_BEATS].
- * @returns {{ code: 'emptyBars'|'chordNotInKey'|'badBpm'|'unknownQuality'|'badBeats'|'badLength'|'badKey'|'badBar'|'badTags'|'badMeter'|'badComplexity'|'badGroove',
+ * @returns {{ code: 'emptyBars'|'chordNotInKey'|'badBpm'|'unknownQuality'|'badBeats'|'badLength'|'badKey'|'badBar'|'badTags'|'badMeter'|'badComplexity'|'badGroove'|'badVoice',
  *             params: Record<string, string|number> }[]}
  */
 export function validateTrack(track) {
@@ -70,6 +88,7 @@ export function validateTrack(track) {
   if (t.groove != null && !(typeof t.groove === 'string' && Object.hasOwn(GROOVES, t.groove))) add('badGroove', { groove: show(t.groove) });
   // Komplexität: fehlend oder null gilt 0,5; sonst eine endliche Zahl von 0 bis 1
   if (t.complexity != null && !(Number.isFinite(t.complexity) && t.complexity >= 0 && t.complexity <= 1)) add('badComplexity', { complexity: show(t.complexity) });
+  checkVoices(t.voices, add);
   const keyOk = isValidKey(t.key);
   if (!keyOk) add('badKey');
   checkTags(t.tags, add);

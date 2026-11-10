@@ -4,7 +4,7 @@ const WINDOW = 2 ** 15;
 const HOP = 2 ** 14; // halbe Überlappung: Hann-Fenster summieren sich überall zu 1
 
 // Radix-2-FFT an Ort und Stelle (Länge Zweierpotenz); cos/sin als Tabelle der Länge n/2
-function fft(re, im, cos, sin) {
+export function fft(re, im, cos, sin) {
   const n = re.length;
   for (let i = 1, j = 0; i < n; i++) {
     let bit = n >> 1;
