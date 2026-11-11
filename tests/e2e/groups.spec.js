@@ -42,7 +42,6 @@ test('Gruppen liegen in der richtigen Leiste und Reihenfolge', async ({ page }) 
 });
 
 test('Inhalte stehen in ihren Gruppen', async ({ page }) => {
-  await expect(group(page, 'style').locator('#quick-pick')).toBeAttached();
   await expect(group(page, 'style').locator('#tags')).toBeAttached();
   await expect(group(page, 'tempo').locator('#tuning-tempo')).toBeAttached();
   await expect(group(page, 'tempo').locator('#length')).toBeAttached();

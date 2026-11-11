@@ -92,7 +92,7 @@ async function expectKeepsCounting(page, before, label) {
   for (const bar of shown) expect(bar, `${label}: ${shown}`).toBeGreaterThanOrEqual(before);
 }
 
-test('Mischpult-Knopf öffnet das Popover: 5 Regler, 4 Tasten, Namen deutsch und englisch, per Tastatur bedienbar', async ({ page }) => {
+test('Mischpult-Knopf öffnet das Popover: 7 Regler, 6 Tasten, Namen deutsch und englisch, per Tastatur bedienbar', async ({ page }) => {
   await openPlayPage(page);
   await expect(mixerBtn(page)).toHaveAccessibleName('Mischpult');
   await expect(mixerBtn(page)).toHaveAttribute('aria-expanded', 'false');
@@ -100,15 +100,15 @@ test('Mischpult-Knopf öffnet das Popover: 5 Regler, 4 Tasten, Namen deutsch und
   await mixerBtn(page).click();
   await expect(pop(page)).toBeVisible();
   await expect(mixerBtn(page)).toHaveAttribute('aria-expanded', 'true');
-  await expect(pop(page).locator('input[type="range"]')).toHaveCount(5);
-  await expect(pop(page).locator('button')).toHaveCount(4);
-  for (const [name, label] of [['master', 'Gesamt'], ['drums', 'Schlagzeug'], ['bass', 'Bass'], ['chords', 'Akkorde'], ['pad', 'Pad']]) {
+  await expect(pop(page).locator('input[type="range"]')).toHaveCount(7);
+  await expect(pop(page).locator('button')).toHaveCount(6);
+  for (const [name, label] of [['master', 'Gesamt'], ['drums', 'Schlagzeug'], ['bass', 'Bass'], ['chords', 'Akkorde'], ['pad', 'Pad'], ['lead', 'Lead'], ['percussion', 'Percussion']]) {
     await expect(pop(page).getByRole('slider', { name: label, exact: true })).toHaveValue('100');
     await expect(slider(page, name)).toHaveAttribute('min', '0');
     await expect(slider(page, name)).toHaveAttribute('max', '100');
   }
   await expect(pop(page).getByRole('button', { name: 'Bass stumm', exact: true })).toHaveAttribute('aria-pressed', 'false');
-  await expect(page.locator('#mixer output')).toHaveText(['100 %', '100 %', '100 %', '100 %', '100 %']);
+  await expect(page.locator('#mixer output')).toHaveText(Array(7).fill('100 %'));
 
   // Fokus beim Öffnen im Popover, Pfeiltasten ändern den Wert, Escape schließt und gibt den Fokus an den Knopf zurück
   await expect(slider(page, 'master')).toBeFocused();
@@ -184,7 +184,7 @@ test('Mix überlebt das Neuladen, Stummschaltungen nicht; kaputter Speicher wird
   await slider(page, 'bass').fill('40');
   await slider(page, 'master').fill('70');
   await mixMute(page, 'chords').click();
-  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('backingtrack.mix')))).toEqual({ drums: 1, bass: 0.4, chords: 1, pad: 1, master: 0.7 });
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('backingtrack.mix')))).toEqual({ drums: 1, bass: 0.4, chords: 1, pad: 1, lead: 1, percussion: 1, master: 0.7 });
   await page.reload();
   await expect(page.locator('#go')).toHaveText(/\S/);
   await openPlayPage(page);

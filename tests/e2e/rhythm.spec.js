@@ -1,6 +1,7 @@
 // Rhythmus-Gruppe der Spielseite (echte Seite /ui/index.html): Taktart, Groove und Komplexität.
 import { test, expect } from '@playwright/test';
 import { METERS, GROOVES, DEFAULT_GROOVE, groovesFor } from '../../src/core/grooves.js';
+import { chooseStyle, currentStyle } from './style-helpers.js';
 
 const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view|group|timbre|chord|chordGroup|chordColor|groove|meter)\.[A-Za-z.]+$/;
 const KEYS = Object.keys(METERS);
@@ -97,17 +98,17 @@ test('Rückwechsel gibt das alte Tempo nur zurück, wenn das Tempo nicht veränd
   await expect(tempo(page)).toHaveValue('105');
 });
 
-test('ein Stil in 6/8 oder 12/8 bringt sein Tempo in Achtelgeschwindigkeit mit, der Stil bleibt gedrückt', async ({ page }) => {
+test('ein Stil in 6/8 oder 12/8 bringt sein Tempo in Achtelgeschwindigkeit mit, der Stil bleibt gewählt', async ({ page }) => {
   await meter(page, '6/8').click();
-  await page.locator('#quick-pick [data-style="blues"]').click();
+  await chooseStyle(page, 'blues');
   await expect(tempo(page)).toHaveValue('59'); // 88 * 2/3
-  await expect(page.locator('#quick-pick [data-style="blues"]')).toHaveAttribute('aria-pressed', 'true');
+  expect(await currentStyle(page)).toBe('blues');
   await meter(page, '12/8').click();
-  await page.locator('#quick-pick [data-style="funk"]').click();
+  await chooseStyle(page, 'funk');
   await expect(tempo(page)).toHaveValue('67');
-  await expect(page.locator('#quick-pick [data-style="funk"]')).toHaveAttribute('aria-pressed', 'true');
+  expect(await currentStyle(page)).toBe('funk');
   await meter(page, '3/4').click(); // einfache Taktart: Stiltempo unverändert
-  await page.locator('#quick-pick [data-style="blues"]').click();
+  await chooseStyle(page, 'blues');
   await expect(tempo(page)).toHaveValue('88');
 });
 
@@ -174,7 +175,7 @@ test('ein Stil-Klick lässt Taktart, Groove und Komplexität stehen', async ({ p
   await meter(page, '12/8').click();
   await groove(page, 'slowBlues').click();
   await complexity(page).fill('80');
-  await page.locator('#quick-pick [data-style="blues"]').click();
+  await chooseStyle(page, 'blues');
   expect(await pressedMeter(page)).toBe('12/8');
   expect(await pressedGroove(page)).toBe('slowBlues');
   await expect(complexity(page)).toHaveValue('80');

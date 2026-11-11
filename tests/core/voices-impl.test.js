@@ -1,9 +1,13 @@
 // Stimmen-Register und Klangerzeugung gehören zusammen: jeder Eintrag hat eine Umsetzung, jede Feinwert-Tabelle einen Eintrag.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { VOICES, VOICE_LAYERS } from '../../src/core/voices.js';
-import { hasVoice } from '../../src/audio/voices/index.js';
+import { readFileSync } from 'node:fs';
+import { VOICES, VOICE_LAYERS, isVoice } from '../../src/core/voices.js';
+import { DRUM_NAMES, PERCUSSION_NAMES } from '../../src/core/events.js';
+import { hasVoice, createVoice, packIdFor, hitKeysFor } from '../../src/audio/voices/index.js';
+import { HIT_KEYS } from '../../src/audio/voices/sample-hits.js';
 import { TUNABLES, tunedValue } from '../../src/audio/voices/tunables.js';
+import { PACKS as SCRIPT_PACKS } from '../../scripts/extract-samples.mjs';
 
 test('jeder Eintrag des Registers (Instrument, Stimme, Variante) hat eine Umsetzung', () => {
   for (const layer of VOICE_LAYERS) {
@@ -11,7 +15,8 @@ test('jeder Eintrag des Registers (Instrument, Stimme, Variante) hat eine Umsetz
       for (const variant of voice.variants) assert.ok(hasVoice(layer, id, variant), `${layer}/${id}/${variant}`);
     }
   }
-  assert.ok(!hasVoice('bass', 'nope', 'x') && !hasVoice('drums', 'synth', 'classic'));
+  assert.ok(!hasVoice('bass', 'nope', 'x') && !hasVoice('drums', 'nope', 'classic'));
+  assert.ok(hasVoice('drums', 'synth', 'classic'));
 });
 
 test('Feinwert-Tabellen gehören zu Registereinträgen und sind in sich stimmig', () => {
@@ -34,4 +39,73 @@ test('tunedValue: Überschreibung begrenzt, Ungültiges zählt nicht, Unbekannte
   assert.equal(tunedValue(key, 'index', { [key]: { index: spec.min - 100 } }), spec.min);
   for (const bad of [null, undefined, 3, 'x', [], { [key]: null }, { [key]: { index: NaN } }, { [key]: { index: 'x' } }]) assert.equal(tunedValue(key, 'index', bad), spec.value, JSON.stringify(bad));
   assert.ok(Number.isNaN(tunedValue('nope', 'index', {})) && Number.isNaN(tunedValue(key, 'nope', {})));
+});
+
+// Task 10: Sample-Varianten für Bass, Akkorde, Lead, Schlagzeug und Percussion
+const NEW_SAMPLES = [['bass', 'upright'], ['chords', 'organ'], ['chords', 'muted'], ['chords', 'jazz'], ['chords', 'funk'], ['chords', 'steel'], ['chords', 'nylon'], ['chords', 'twelve'], ['lead', 'flute'], ['lead', 'sax'], ['lead', 'synth'],
+  ...['standard', 'brushes', 'rimshot', 'jazz', 'electronic', '808'].map((v) => ['drums', v]), ['percussion', 'studio']];
+
+test('neue Sample-Varianten: im Register, mit Umsetzung, gültig für isVoice', () => {
+  for (const [layer, variant] of NEW_SAMPLES) {
+    assert.ok(VOICES[layer].sample?.variants.includes(variant), `${layer}/sample/${variant}: Register`);
+    assert.ok(hasVoice(layer, 'sample', variant), `${layer}/sample/${variant}: Umsetzung`);
+    assert.ok(isVoice(layer, 'sample', variant), `${layer}/sample/${variant}: isVoice`);
+  }
+});
+
+test('jede Sample-Stimme hat einen gemessenen Pegel (level) und ein vorhandenes Pack; Rimshot nutzt das Standard-Kit', () => {
+  for (const layer of VOICE_LAYERS) {
+    for (const variant of VOICES[layer].sample?.variants ?? []) {
+      const key = `${layer}/sample/${variant}`;
+      assert.ok(TUNABLES[key]?.level, `${key}: level`);
+      assert.ok(Object.hasOwn(SCRIPT_PACKS, packIdFor(layer, variant)), `${key}: Pack ${packIdFor(layer, variant)}`);
+    }
+  }
+  assert.equal(packIdFor('drums', 'rimshot'), 'drums-standard');
+  assert.equal(packIdFor('drums', '808'), 'drums-808');
+  for (const key of ['bass/sample/upright', 'chords/sample/muted']) assert.ok(TUNABLES[key].decay, `${key}: decay`);
+});
+
+test('Tastenbelegung der Schläge: jeder Name hat eine Taste, jede Taste eine Zone in jedem Kit', () => {
+  assert.deepEqual(Object.keys(HIT_KEYS.drums).sort(), [...DRUM_NAMES].sort());
+  assert.deepEqual(Object.keys(HIT_KEYS.percussion).sort(), [...PERCUSSION_NAMES].sort());
+  for (const [layer, variant] of NEW_SAMPLES.filter(([l]) => l === 'drums' || l === 'percussion')) {
+    const id = packIdFor(layer, variant);
+    const { zones } = JSON.parse(readFileSync(new URL(`../../src/assets/samples/${id}.json`, import.meta.url), 'utf8'));
+    for (const [name, key] of Object.entries(hitKeysFor(layer, variant))) {
+      assert.ok(zones.some((z) => z.keyLo <= key && key <= z.keyHi), `${layer}/${variant} ${name}: Taste ${key} in ${id}`);
+    }
+  }
+  assert.equal(hitKeysFor('drums', 'rimshot').snare, 37);
+  assert.equal(hitKeysFor('drums', 'standard').snare, 38);
+});
+
+test('Sample-Kits vor dem Laden: der Rückfall ist der Synth des Instruments (Schläge klingen), Status loading', () => {
+  const deep = () => new Proxy(function () {}, { get: () => deep(), set: () => true, apply: () => deep() });
+  for (const [layer, variant, name] of [['drums', '808', 'snare'], ['percussion', 'studio', 'claves']]) {
+    const calls = [], status = [];
+    const ctx = new Proxy({}, { get: (_, k) => () => { calls.push(k); return deep(); } });
+    const play = createVoice(layer, { id: 'sample', variant }, ctx, {
+      params: new Proxy({}, { get: () => 0.1 }), getTimbre: () => ({}), rng: {}, getTuning: () => ({}), setStatus: (s) => status.push(s), track: (p) => p.catch(() => {}), noise: {},
+    });
+    play({}, 0, { type: 'hit', name, vel: 0.5 });
+    assert.ok(calls.length > 0, `${layer}: Synth-Rückfall spielt`);
+    assert.equal(status[0], 'loading', layer);
+  }
+});
+
+test('lead hat eine Umsetzung für synth/classic', () => {
+  assert.ok(hasVoice('lead', 'synth', 'classic'));
+});
+
+test('percussion hat eine echte Umsetzung für synth/classic (nicht mehr die stumme)', () => {
+  assert.ok(hasVoice('percussion', 'synth', 'classic'));
+  // die stumme Platzhalterstimme hätte keinen Aufruf von ctx; die echte baut für einen Schlag Knoten
+  const calls = [];
+  // beliebig tief verschachtelte Attrappe: jeder Aufruf und jede Eigenschaft liefert wieder eine Attrappe
+  const deep = () => new Proxy(function () {}, { get: () => deep(), set: () => true, apply: () => deep() });
+  const ctx = new Proxy({}, { get: (_, k) => () => { calls.push(k); return deep(); } });
+  const play = createVoice('percussion', { id: 'synth', variant: 'classic' }, ctx, { params: {}, getTimbre: () => ({}), rng: {}, getTuning: () => ({}), setStatus() {}, track() {}, noise: {} });
+  play({}, 0, { type: 'hit', name: 'claves', vel: 0.5 });
+  assert.ok(calls.length > 0);
 });

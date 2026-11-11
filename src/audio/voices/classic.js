@@ -1,4 +1,4 @@
-// Klassischer Synth (der bisherige Klang): Bass, Akkorde und Pad aus Oszillatoren, Tiefpass und Hüllkurve. Die Noten-Graphen sind
+// Klassischer Synth (der bisherige Klang): Bass, Akkorde, Pad und Lead aus Oszillatoren, Tiefpass und Hüllkurve. Die Noten-Graphen sind
 // unverändert aus synth.js hierher gezogen; der Standardklang bleibt bitgleich.
 import { hz, adsr, osc, gain } from '../nodes.js';
 
@@ -71,7 +71,20 @@ function padNote(ctx, out, t, e, p) {
   lp.connect(a).connect(out);
 }
 
-const NOTE = { bass: bassNote, chords: chordNote, pad: padNote };
+// Lead: einstimmig (die Ereignisse überlappen nicht), Sägezahn plus leicht verstimmtes Dreieck durch einen Tiefpass, der kurz öffnet und sich
+// schließt; kurzer Einsatz, Ausklang endet spätestens 0,2 s nach der Note. Feste Werte (layerParams.lead ist leer).
+function leadNote(ctx, out, t, e) {
+  const f = hz(e.midi), attack = 0.015, release = 0.12, hold = Math.max(0.02, e.dur - 0.03);
+  const end = t + attack + hold + release + 0.05;
+  const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.Q.value = 2;
+  lp.frequency.setValueAtTime(3200, t); lp.frequency.exponentialRampToValueAtTime(1600, t + attack + hold);
+  const a = ctx.createGain(); adsr(a, t, attack, e.vel * 0.5, hold, release);
+  osc(ctx, 'sawtooth', f, 0, gain(ctx, 0.6, lp), t, end);
+  osc(ctx, 'triangle', f, 9, gain(ctx, 0.6, lp), t, end);
+  lp.connect(a).connect(out);
+}
+
+const NOTE = { bass: bassNote, chords: chordNote, pad: padNote, lead: leadNote };
 
 /** Stimme `synth/classic`: (out, t, e) spielt eine Note mit den live aktualisierten Parametern des Instruments (deps.params). */
 export function classicVoice(layer, ctx, { params }) {

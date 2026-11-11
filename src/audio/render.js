@@ -2,13 +2,16 @@
 import { buildEvents } from '../core/events.js';
 import { resolveTrackTimbre } from '../core/timbre.js';
 import { resolveVoices } from '../core/voices.js';
+import { LAYER_IDS } from '../core/layers.js';
 import { createInstruments } from './synth.js';
 import { spectralCentroid } from './spectrum.js';
 
 const SAMPLE_RATE = 44100;
 const OFFSET = 0.1; // erste Ereignisse bei 0,1 s
 const TAIL = 1; // Ausklang nach dem letzten Ereignis
-const LAYERS = ['drums', 'bass', 'chords', 'pad'];
+const LAYERS = LAYER_IDS;
+/** Schichten mit Tönen (renderNote); Schlagzeug und Percussion spielen Schläge. */
+export const NOTE_LAYERS = LAYERS.filter((l) => l !== 'drums' && l !== 'percussion');
 const FIRST = Math.round(SAMPLE_RATE * OFFSET); // Abtastwert des ersten Ereignisses
 
 // Rendert die ersten `seconds` Sekunden eines Tracks (Klang aus seinen Schlagworten), linker Kanal.
@@ -69,12 +72,13 @@ export async function compareRenders(trackA, trackB, seconds, { layer, limiter =
 
 /**
  * Rendert eine einzelne Note eines Instruments (linker Kanal, nur diese Schicht hörbar, ohne Begrenzer) für Analyse und Tests.
+ * Schlagzeug und Percussion spielen Schläge statt Töne und sind hier nicht erlaubt (RangeError).
  * `voices` (wie track.voices), `tuning` (Feinwerte der Stimmen) und `timbre` (Klangregler) sind optional; fehlend gilt der Standard,
  * nur Echo und Hall stehen auf 0.
  * Die Note beginnt bei 0,05 s, `seconds` ist die Länge des Ergebnisses ab 0.
  */
 export async function renderNote(layer, { midi, dur = 0.6, vel = 0.8, seconds = 1.5, voices, tuning, timbre, sampleRate = SAMPLE_RATE } = {}) {
-  if (!LAYERS.includes(layer) || layer === 'drums') throw new RangeError(`Unknown layer: ${JSON.stringify(layer)}`);
+  if (!NOTE_LAYERS.includes(layer)) throw new RangeError(`Unknown layer: ${JSON.stringify(layer)}`);
   const ctx = new OfflineAudioContext(1, Math.ceil(sampleRate * seconds), sampleRate);
   // ohne Echo und Hall, damit die Aufnahme nur die Note enthält (Analyse); ein übergebenes timbre kann sie wieder einschalten
   const sound = { ...timbre, master: { echo: 0, reverb: 0, ...timbre?.master } };

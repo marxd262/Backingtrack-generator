@@ -1,4 +1,4 @@
-// Verzerrerkette für Bass, Akkorde und Pad: Werte aus den Reglern Overdrive, Distortion und Fuzz (je 0..1). Reine Rechnung ohne
+// Verzerrerkette für Bass, Akkorde, Pad und Lead: Werte aus den Reglern Overdrive, Distortion und Fuzz (je 0..1). Reine Rechnung ohne
 // Audio-Objekte, damit in Node testbar; die Knoten baut guitar-fx.js.
 //
 // Vorbilder (siehe docs/superpowers/specs/2026-11-09-guitar-effects-design.md):
@@ -17,7 +17,7 @@ export const NOMINAL = 0.15;
 const OD_MAKEUP = 0.19, DIST_MAKEUP = 0.055, FUZZ_MAKEUP = 0.113;
 const mix = (a) => Math.min(1, 8 * a); // schon bei einem Achtel des Reglers ganz in der Stufe, darunter blendet sie stetig ein
 
-// Schichtprofile. ref: Faktor am Eingang der Kette, bringt die Spitze der Stimmen (gemessen: Bass 0.88, Akkorde 0.43, Pad 0.22) auf
+// Schichtprofile. ref: Faktor am Eingang der Kette, bringt die Spitze der Stimmen (gemessen: Bass 0.88, Akkorde 0.43, Pad 0.22, Lead 0.52) auf
 // NOMINAL = 0.15, damit die Kappungsstufen Spielraum zum Treiben haben; am Ausgang gleicht 1 / ref das wieder aus. trim: Pegelausgleich
 // je Stufe für diese Schicht (die Wellenformen haben verschiedene Scheitelfaktoren), gemessen als rms gegen den unverzerrten Klang;
 // odSlope: wie stark der Overdrive-Ausgleich mit der Verstärkung fällt (beim Bass 0, seine Tiefen laufen sauber durch). Frequenzen in Hz.
@@ -25,6 +25,7 @@ export const LAYER_FX = Object.freeze({
   bass: Object.freeze({ ref: 0.17, trim: Object.freeze({ od: 1.43, dist: 1.4, fuzz: 1.12 }), odSlope: 0, distHp: 60, toneHz: 800, cabHp: 40, cabLp: 3200, cabPeakHz: 90, cabPeakDb: 3 }),
   chords: Object.freeze({ ref: 0.35, trim: Object.freeze({ od: 1, dist: 1, fuzz: 1 }), odSlope: 0.45, distHp: 150, toneHz: 1500, cabHp: 90, cabLp: 5000, cabPeakHz: 2500, cabPeakDb: 4 }),
   pad: Object.freeze({ ref: 0.68, trim: Object.freeze({ od: 0.7, dist: 0.78, fuzz: 0.86 }), odSlope: 0.45, distHp: 150, toneHz: 1500, cabHp: 90, cabLp: 5000, cabPeakHz: 2500, cabPeakDb: 4 }),
+  lead: Object.freeze({ ref: 0.29, trim: Object.freeze({ od: 0.5, dist: 0.6, fuzz: 0.9 }), odSlope: 0.45, distHp: 150, toneHz: 1500, cabHp: 90, cabLp: 5000, cabPeakHz: 2500, cabPeakDb: 4 }),
 });
 
 /**

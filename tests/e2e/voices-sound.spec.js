@@ -88,3 +88,78 @@ test('setVoices mitten im Render: kein Fehler, vor dem Wechsel gleich dem Standa
   });
   expect(r.same).toBe(true);
 });
+
+test('renderNote lehnt Schlagzeug und Percussion ab (sie spielen Schläge, keine Töne)', async ({ page }) => {
+  const r = await page.evaluate(async () => {
+    const out = {};
+    for (const layer of ['drums', 'percussion']) out[layer] = await window.__renderNote(layer, { midi: 40 }).catch((err) => `${err.name}: ${err.message}`);
+    return out;
+  });
+  expect(r).toEqual({ drums: 'RangeError: Unknown layer: "drums"', percussion: 'RangeError: Unknown layer: "percussion"' });
+});
+
+// Percussion (synth/classic): ein Schlag je Name über createInstruments, ohne Begrenzer, nur die Schicht (Hall der Raumsumme aus)
+test('Percussion: jeder Name klingt (nicht stumm, Spitze unter 1); Unbekanntes und Nicht-Schläge bleiben stumm', async ({ page }) => {
+  const r = await page.evaluate(async () => {
+    const { createInstruments } = await import('/audio/synth.js');
+    const { PERCUSSION_NAMES } = await import('/core/events.js');
+    const { spectralCentroid } = await import('/audio/spectrum.js');
+    const render = async (event) => {
+      const ctx = new OfflineAudioContext(1, 44100, 44100);
+      const { output, layers } = createInstruments(ctx, { limiter: false, timbre: { master: { echo: 0, reverb: 0 } } });
+      output.connect(ctx.destination);
+      layers.percussion.trigger({ layer: 'percussion', ...event }, 0.05);
+      return (await ctx.startRendering()).getChannelData(0);
+    };
+    const stats = (d) => {
+      let peak = 0, sum = 0;
+      for (const v of d) { peak = Math.max(peak, Math.abs(v)); sum += v * v; }
+      return { peak, rms: Math.sqrt(sum / d.length), centroid: spectralCentroid(d, 44100) };
+    };
+    const out = { names: {}, quiet: {} };
+    for (const name of PERCUSSION_NAMES) out.names[name] = stats(await render({ type: 'hit', name, vel: 0.6 }));
+    const soft = stats(await render({ type: 'hit', name: 'congaHigh', vel: 0.2 })), loud = stats(await render({ type: 'hit', name: 'congaHigh', vel: 0.8 }));
+    out.velocity = { soft: soft.peak, loud: loud.peak };
+    for (const [key, event] of Object.entries({ unknown: { type: 'hit', name: 'gong', vel: 0.6 }, note: { type: 'note', midi: 60, dur: 0.3, vel: 0.6 }, nameless: { type: 'hit', vel: 0.6 } })) {
+      out.quiet[key] = stats(await render(event)).peak;
+    }
+    return out;
+  });
+  const label = JSON.stringify(r, null, 1);
+  expect(Object.keys(r.names).length, label).toBe(8);
+  for (const [name, s] of Object.entries(r.names)) {
+    expect(s.peak, `${name} ${label}`).toBeGreaterThan(0.01);
+    expect(s.peak, `${name} ${label}`).toBeLessThan(1);
+  }
+  expect(r.velocity.loud, label).toBeGreaterThan(r.velocity.soft * 2);
+  expect(r.quiet, label).toEqual({ unknown: 0, note: 0, nameless: 0 });
+});
+
+// Schlagzeug als Stimme der Registry: Klang unverändert gegenüber dem Stand vor dem Umzug (gemessen mit Standardklang, limiter: false,
+// ein Schlag bei vel 0.8 an 0.05 s, 1 s mono: Spitze und Summe der Quadrate). Die Werte halten damit auch LAYER_AUDIO.drums.trim, MASTER und
+// den Standardklang (Timbre) fest: ändert sich einer davon, ändern sich diese Zahlen)
+test('Schlagzeug: jeder Schlag klingt wie vor dem Umzug in die Registry; Unbekanntes bleibt stumm', async ({ page }) => {
+  const expected = {
+    kick: [0.278121, 53.1729], snare: [0.191694, 4.2092], hat: [0.125049, 1.4005], openHat: [0.14075, 8.2259],
+    tomHigh: [0.216292, 31.4266], tomMid: [0.216292, 31.5652], tomLow: [0.216292, 31.4567], nope: [0, 0],
+  };
+  const got = await page.evaluate(async (names) => {
+    const { createInstruments } = await import('/audio/synth.js');
+    const out = {};
+    for (const name of names) {
+      const ctx = new OfflineAudioContext(1, 44100, 44100);
+      const { output, layers, whenReady } = createInstruments(ctx, { limiter: false });
+      await whenReady();
+      output.connect(ctx.destination);
+      layers.drums.trigger({ type: 'hit', layer: 'drums', name, vel: 0.8 }, 0.05);
+      let peak = 0, sq = 0;
+      for (const v of (await ctx.startRendering()).getChannelData(0)) { peak = Math.max(peak, Math.abs(v)); sq += v * v; }
+      out[name] = [peak, sq];
+    }
+    return out;
+  }, Object.keys(expected));
+  for (const [name, [peak, sq]] of Object.entries(expected)) {
+    expect(got[name][0], `${name} Spitze`).toBeCloseTo(peak, 5);
+    expect(Math.abs(got[name][1] - sq), `${name} Energie`).toBeLessThanOrEqual(1e-3 * Math.max(sq, 1));
+  }
+});

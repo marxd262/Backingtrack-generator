@@ -270,3 +270,22 @@ test('ungültiger Track wirft Error mit den Codes in errors', () => {
     },
   );
 });
+
+test('jobs: ohne Angabe wie die Standard-Aufgaben, Lead und Percussion spielen ihre Aufgabe', async () => {
+  const { STYLE_PRESETS } = await import('../../src/index.js');
+  const p = STYLE_PRESETS.find((x) => x.id === 'funk');
+  const base = { key: { root: 'A', mode: 'minor' }, bpm: p.bpm, tags: p.tags, seed: 1, length: 24,
+    bars: ['A', 'A', 'D', 'E'].map((root) => ({ chord: { root, quality: root === 'E' ? 'maj' : 'min' }, beats: 4 })) };
+  const plain = buildEvents(base);
+  const jobbed = buildEvents({ ...base, jobs: { lead: 'off', percussion: 'mixed' } });
+  assert.deepEqual(plain, jobbed);
+  const on = buildEvents({ ...base, layers: { percussion: true }, jobs: { lead: 'melody', percussion: 'congas' } });
+  assert.ok(on.filter((e) => e.layer === 'percussion').every((e) => e.name.startsWith('conga')) && on.some((e) => e.layer === 'percussion'));
+  assert.ok(on.some((e) => e.layer === 'lead'));
+  assert.deepEqual(on.filter((e) => e.layer !== 'lead' && e.layer !== 'percussion'), plain); // Lead und Percussion verschieben keine andere Schicht
+});
+
+test('buildEvents wirft bei einer ungültigen Aufgabe (nicht still der Standard)', () => {
+  const track = { key: { root: 'A', mode: 'minor' }, bpm: 90, seed: 1, length: 8, bars: [chordBar('A', 'min')], jobs: { lead: 'nope' } };
+  assert.throws(() => buildEvents(track), /badJob/);
+});

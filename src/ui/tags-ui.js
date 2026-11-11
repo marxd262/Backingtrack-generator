@@ -13,10 +13,6 @@ export function toggleTag(tags, category, tag) {
   return out;
 }
 
-// gleich, wenn jede Kategorie dieselben Schlagworte hat (fehlend = leer, Reihenfolge egal)
-export const sameTags = (a, b) => TAG_CATEGORIES.every(({ id }) =>
-  String([...(a[id] ?? [])].sort()) === String([...(b[id] ?? [])].sort()));
-
 // Texte setzt render() über data-i18n
 export function buildTags(container, onToggle) {
   for (const { id, tags } of TAG_CATEGORIES) {

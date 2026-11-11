@@ -3,14 +3,15 @@ import { noteToPc, isNoteName, isValidKey, allowedChords } from './music.js';
 import { CHORDS, isChordQuality, chordName } from './chords.js';
 import { isMeter, GROOVES } from './grooves.js';
 import { TAG_CATEGORIES } from './tags.js';
+import { layerDefaults, completeJobs, isJob } from './layers.js';
 import { VOICE_LAYERS, isVoice } from './voices.js';
 
 /**
  * Alle Codes, die validateTrack melden kann; die Oberfläche übersetzt sie über `err.<code>`.
- * @type {readonly ('emptyBars'|'chordNotInKey'|'badBpm'|'unknownQuality'|'badBeats'|'badLength'|'badKey'|'badBar'|'badTags'|'badMeter'|'badComplexity'|'badGroove'|'badVoice')[]}
+ * @type {readonly ('emptyBars'|'chordNotInKey'|'badBpm'|'unknownQuality'|'badBeats'|'badLength'|'badKey'|'badBar'|'badTags'|'badMeter'|'badComplexity'|'badGroove'|'badVoice'|'badJob')[]}
  */
 export const VALIDATION_CODES = Object.freeze([
-  'emptyBars', 'chordNotInKey', 'badBpm', 'unknownQuality', 'badBeats', 'badLength', 'badKey', 'badBar', 'badTags', 'badMeter', 'badComplexity', 'badGroove', 'badVoice',
+  'emptyBars', 'chordNotInKey', 'badBpm', 'unknownQuality', 'badBeats', 'badLength', 'badKey', 'badBar', 'badTags', 'badMeter', 'badComplexity', 'badGroove', 'badVoice', 'badJob',
 ]);
 
 /** Obergrenze für `length` (Takte); schützt Arrangement und Audio vor riesigen Eingaben. */
@@ -25,13 +26,21 @@ const isPosInt = (n) => Number.isInteger(n) && n > 0;
 // Parameterwert ohne String(): wirft auch bei Object.create(null) nicht
 const show = (v) => (typeof v === 'number' || typeof v === 'string' ? v : v === null ? 'null' : typeof v);
 
+// Standard-Aufgaben, darüber die gegebenen (null zählt als fehlend). Ungültiges bleibt stehen, damit validateTrack es meldet
+// (completeJobs allein würde es still durch den Standard ersetzen).
+function normalizeJobs(jobs) {
+  if (jobs != null && (!isObject(jobs) || Array.isArray(jobs))) return jobs;
+  return { ...completeJobs(), ...Object.fromEntries(Object.entries(jobs ?? {}).filter(([, v]) => v != null)) };
+}
+
 export function normalizeTrack(track) {
   const t = isObject(track) ? structuredClone(track) : {};
   return {
     ...t,
     meter: t.meter ?? [4, 4],
     length: t.length ?? 24,
-    layers: { drums: true, bass: true, chords: true, pad: true, ...t.layers },
+    layers: { ...layerDefaults(), ...t.layers },
+    jobs: normalizeJobs(t.jobs),
     tags: t.tags ?? {},
     seed: t.seed ?? 1,
   };
@@ -51,7 +60,7 @@ function checkTags(tags, add) {
   }
 }
 
-// voices: fehlend/null oder { bass|chords|pad: fehlend/null | Stimmen-ID | { id?, variant? } }; meldet Instrument und Stimme (id oder id/variant)
+// voices: fehlend/null oder { Schicht aus VOICE_LAYERS: fehlend/null | Stimmen-ID | { id?, variant? } }; meldet Schicht und Stimme (id oder id/variant)
 function checkVoices(voices, add) {
   if (voices == null) return;
   if (!isObject(voices) || Array.isArray(voices)) {
@@ -69,10 +78,20 @@ function checkVoices(voices, add) {
   }
 }
 
+// jobs: fehlend/null oder { Schicht: Aufgabe }; meldet Schicht und Aufgabe (null je Schicht zählt als fehlend und gibt die erste Aufgabe)
+function checkJobs(jobs, add) {
+  if (jobs == null) return;
+  if (!isObject(jobs) || Array.isArray(jobs)) {
+    add('badJob', { layer: '?', job: show(jobs) });
+    return;
+  }
+  for (const [layer, job] of Object.entries(jobs)) if (job != null && !isJob(layer, job)) add('badJob', { layer, job: show(job) });
+}
+
 /**
  * Sammelt Meldungen, wirft nie (leer = gültig). bpm muss in [20, 400] liegen, length in [1, MAX_LENGTH],
  * beats in [1, MAX_BEATS].
- * @returns {{ code: 'emptyBars'|'chordNotInKey'|'badBpm'|'unknownQuality'|'badBeats'|'badLength'|'badKey'|'badBar'|'badTags'|'badMeter'|'badComplexity'|'badGroove'|'badVoice',
+ * @returns {{ code: 'emptyBars'|'chordNotInKey'|'badBpm'|'unknownQuality'|'badBeats'|'badLength'|'badKey'|'badBar'|'badTags'|'badMeter'|'badComplexity'|'badGroove'|'badVoice'|'badJob',
  *             params: Record<string, string|number> }[]}
  */
 export function validateTrack(track) {
@@ -89,6 +108,7 @@ export function validateTrack(track) {
   // Komplexität: fehlend oder null gilt 0,5; sonst eine endliche Zahl von 0 bis 1
   if (t.complexity != null && !(Number.isFinite(t.complexity) && t.complexity >= 0 && t.complexity <= 1)) add('badComplexity', { complexity: show(t.complexity) });
   checkVoices(t.voices, add);
+  checkJobs(t.jobs, add);
   const keyOk = isValidKey(t.key);
   if (!keyOk) add('badKey');
   checkTags(t.tags, add);

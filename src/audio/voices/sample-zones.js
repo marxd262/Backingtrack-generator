@@ -28,6 +28,9 @@ export const playbackRate = (zone, midi) => 2 ** (((midi - zone.rootKey) * 100 +
 /** Linearer Faktor für eine Dämpfung in dB (positiv = leiser). */
 export const dbToGain = (db) => 10 ** (-db / 20);
 
+/** Faktor einer Zone aus ihrer Dämpfung: negative Dämpfung (einige Schlagzeug-Kits der SoundFont) zählt wie 0 dB, wie bei FluidSynth (SF2: 0 bis 144 dB). */
+export const zoneGain = (attenuationDb) => dbToGain(Math.max(0, attenuationDb));
+
 /** Tiefpass-Frequenz für den Helligkeitsregler: ab 0.5 durchsichtig (20 kHz), darunter exponentiell bis 400 Hz bei 0. */
 export function brightnessHz(value01) {
   const v = Number.isFinite(value01) ? clamp(value01, 0, 1) : 0.5;

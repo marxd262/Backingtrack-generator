@@ -5,6 +5,7 @@ import { $, LAYERS, ALL_LAYERS, state, layoutStorage, chordName, rollVariant, pr
 import { saveLayout } from './layout-state.js';
 import { initTuning } from './tuning.js';
 import { initMixer } from './mixer.js';
+import { initProfiles } from './profiles.js';
 import { stepVariant } from './variant.js';
 import { buildKeyScale } from './key-scale.js';
 import { initSidebar } from './sidebar.js';
@@ -12,6 +13,7 @@ import { initGroups } from './groups.js';
 import { resolveTrackTimbre } from '../core/timbre.js';
 import { initTimbrePanel } from './timbre-panel.js';
 import { initVoices } from './voices-panel.js';
+import { initJobs } from './jobs-panel.js';
 import { initRhythm } from './rhythm.js';
 import { initViews } from './blocks.js';
 
@@ -207,9 +209,11 @@ for (const button of document.querySelectorAll('[popovertarget]')) {
 
 const renderTuning = initTuning({ render: () => render(), restartIfPlaying, toggleLayer, applyLive });
 const renderMixer = initMixer({ render: () => render(), player: () => player, toggleLayer });
+const renderProfiles = initProfiles({ render: () => render(), restartIfPlaying, applyLive });
 const renderRhythm = initRhythm({ render: () => render(), restartIfPlaying, applyLive });
 const renderTimbre = initTimbrePanel({ render: () => render(), player: () => player }); // vor initGroups: baut die Klang-Gruppen
 const renderVoices = initVoices({ render: () => render(), player: () => player }); // nach dem Klangpanel: setzt seine Zeilen in dessen Gruppen
+const renderJobs = initJobs({ render: () => render(), changed: () => applyLive({ patterns: true }) }); // ebenso: Aufgaben-Dropdowns in den Gruppen
 
 // Leisten "Klang" (links) und "Akkorde" (rechts): offen/zu steht im gemerkten Layout
 const sidebars = ['left', 'right'].map((side) => initSidebar({
@@ -297,7 +301,9 @@ function render() {
   views.render(); // vor renderTuning: das Akkordrad zeichnet nur, wenn sein Block sichtbar ist
   renderTuning();
   renderMixer();
+  renderProfiles();
   renderVoices();
+  renderJobs();
   renderTimbre();
   renderRhythm();
 }

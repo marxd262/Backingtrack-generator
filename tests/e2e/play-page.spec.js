@@ -441,7 +441,7 @@ test.describe('Seitenleisten', () => {
     await page.keyboard.press('Escape');
     await toggle(page, 'right').click();
     await expectSides(page, false, true);
-    await expect(page.locator('[aria-expanded="true"]')).toHaveCount(1);
+    await expect(page.locator('button[aria-expanded="true"]')).toHaveCount(1); // nur Auslöser; offene Ordner im Profil-Baum zählen nicht
     expect((await savedLayout(page)).sidebars).toEqual({ left: false, right: true });
     const right = await box(page, '#side-right');
     expect(right.x + right.width).toBe(800);
@@ -558,7 +558,7 @@ test.describe('Seitenleisten', () => {
   test('Tastatur: Tab zum Auslöser, Enter und Leertaste, Inhalt der Schublade erreichbar (800 px)', async ({ page }) => {
     await page.setViewportSize({ width: 800, height: 740 });
     await openWithGo(page);
-    await page.locator('#mixer-btn').focus(); // Reihenfolge: Los, Variante, Mischpult, Klang
+    await page.locator('#profiles-btn').focus(); // Reihenfolge: Los, Variante, Mischpult, Profile, Klang
     await page.keyboard.press('Tab');
     await expect(toggle(page, 'left')).toBeFocused();
     await page.keyboard.press('Enter');

@@ -233,7 +233,7 @@ test('play gibt die aufgefüllte Stimmenwahl des Tracks an die Instrumente (Stan
     const bass = calls.created[0].voices.bass;
     assert.equal(`${bass.id}/${bass.variant}`, expected, JSON.stringify(voices));
   }
-  for (const bad of ['x', [], { bass: { id: 'nope' } }, { drums: {} }]) {
+  for (const bad of ['x', [], { bass: { id: 'nope' } }, { drums: { id: 'nope' } }, { kick: 'synth' }]) {
     const { create } = spy();
     assert.throws(() => play(makeCtx(), track({ voices: bad }), { createInstruments: create }), /badVoice/, JSON.stringify(bad));
   }

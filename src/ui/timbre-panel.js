@@ -4,7 +4,8 @@
 import { t } from '../index.js';
 import { $, state, setText, setAttr } from './state.js';
 import { DEFAULT_TIMBRE, resolveTrackTimbre } from '../core/timbre.js';
-import { usesTimbreField } from '../core/voices.js';
+import { usesTimbreField, VOICE_LAYERS } from '../core/voices.js';
+import { LAYER_IDS, jobsFor } from '../core/layers.js';
 
 const el = (tag, props) => Object.assign(document.createElement(tag), props);
 
@@ -13,7 +14,10 @@ export function initTimbrePanel({ render, player }) {
   const resets = {}; // Zurücksetzen-Knopf je Gruppe
   const push = () => player()?.setTimbre(resolveTrackTimbre(state.track)); // live, ohne Neustart
 
-  for (const [group, fields] of Object.entries(DEFAULT_TIMBRE)) {
+  // eine Gruppe je Schicht mit Klangreglern, Stimme oder Aufgabe (Percussion hat nur Aufgaben), dann die übrigen Gruppen (Gesamt)
+  const groups = LAYER_IDS.filter((id) => DEFAULT_TIMBRE[id] || VOICE_LAYERS.includes(id) || jobsFor(id).length);
+  for (const group of [...groups, ...Object.keys(DEFAULT_TIMBRE).filter((id) => !groups.includes(id))]) {
+    const fields = DEFAULT_TIMBRE[group] ?? {};
     const details = el('details', { className: 'group' });
     details.dataset.group = group;
     const summary = el('summary');
@@ -35,6 +39,7 @@ export function initTimbrePanel({ render, player }) {
       details.append(row);
       rows.push({ group, field, input, out });
     }
+    if (!Object.keys(fields).length) { $('timbre-groups').append(details); continue; } // ohne Regler kein Zurücksetzen
     const reset = el('button', { type: 'button', className: 'chip timbre-reset' });
     reset.dataset.i18n = 'ui.timbreReset';
     reset.addEventListener('click', () => {

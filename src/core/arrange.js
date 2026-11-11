@@ -1,5 +1,6 @@
 // Arrangement: Abschnitte à 8 Takte, welche Schichten wann spielen, Fills.
 import { MAX_LENGTH } from './track.js';
+import { LAYERS, LAYER_IDS } from './layers.js';
 
 const SECTION_BARS = 8;
 const DEFAULT_LENGTH = 24;
@@ -37,12 +38,7 @@ export function buildArrangement(track, params, rng) {
     return {
       start,
       bars: Math.min(SECTION_BARS, length - start),
-      layers: {
-        drums: on.includes('drums'),
-        bass: on.includes('bass'),
-        chords: on.includes('chords'),
-        pad: on.includes('pad'),
-      },
+      layers: Object.fromEntries(LAYER_IDS.map((id) => [id, on.includes(LAYERS[id].follows ?? id)])),
       fillAtEnd: !isLast,
     };
   });

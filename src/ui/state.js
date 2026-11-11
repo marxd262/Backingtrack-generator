@@ -4,15 +4,16 @@ import { detectLanguage } from '../i18n/index.js';
 import { progressionFor } from '../core/progressions.js';
 import { loadLayout } from './layout-state.js';
 import { loadMix } from './mix-state.js';
+import { LAYER_IDS, layerDefaults, completeJobs } from '../core/layers.js';
 import { chordName } from '../core/chords.js';
 import { colorProgression } from '../core/harmony.js';
 import { styleChordColor } from '../core/tags.js';
 import { METERS, meterKey, convertTempo } from '../core/grooves.js';
+import { SCALE_MODE } from '../core/music.js';
 
 export const ROOTS = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
-// Skala ist nur Oberflächen-Zustand; der Generator kennt nur den Modus
-export const SCALE_MODE = { minorPentatonic: 'minor', majorPentatonic: 'major', blues: 'minor', dorian: 'dorian' };
-export const LAYERS = ['drums', 'bass', 'chords', 'pad'];
+export { SCALE_MODE }; // wohnt in core/music.js, hier weiter erreichbar
+export const LAYERS = LAYER_IDS;
 export const ALL_LAYERS = Object.fromEntries(LAYERS.map((l) => [l, true]));
 export const LENGTHS = [24, 48, 96, 192];
 export const MAX_CHORDS = 8;
@@ -58,7 +59,8 @@ export const state = {
     bars: [],
     tags: structuredClone(funk.tags),
     timbre: {}, // Klangregler: nur die vom Nutzer gesetzten Felder { gruppe: { feld: 0..1 } }, über den Schlagworten
-    layers: { drums: true, bass: true, chords: true, pad: true },
+    layers: layerDefaults(),
+    jobs: completeJobs(), // Aufgabe je Schicht mit Aufgaben (Lead, Percussion)
     seed: rollVariant(), // Variantennummer
     variety: true, // reichere Varianten: der Seed streut Muster-Werte und Klang stärker (siehe docs/superpowers/specs/2026-11-09-variant-richness-design.md)
     length: 96,
@@ -72,7 +74,7 @@ export const state = {
   lang: readLang(),
   page: 'start', // 'start' | 'play'
   layout: loadLayout(layoutStorage), // Leisten, Ansichten, Beschriftung; Änderungen über saveLayout
-  mix: loadMix(layoutStorage), // Mischpult-Regler { drums, bass, chords, pad, master }, je 0..1; Änderungen über saveMix
+  mix: loadMix(layoutStorage), // Mischpult-Regler { <Schicht-ids>, master }, je 0..1; Änderungen über saveMix
   current: null, // { bar, chord } aus onBar
   errors: [], // [{ code, params }], übersetzt erst in render()
   notice: null, // Schlüssel einer Hinweis-Meldung der Akkordfolge, z. B. volle Folge

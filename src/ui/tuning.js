@@ -1,28 +1,20 @@
-// Bedienelemente der Spielseite: Schnellauswahl, Schlagworte, Tempo, Länge (Leiste "Klang"), Schichten mit Verlauf,
+// Bedienelemente der Spielseite: Schlagworte, Tempo, Länge (Leiste "Klang"), Schichten mit Verlauf,
 // Griffbrett und Akkordrad (Blöcke), Akkordfolge (Leiste "Akkorde"). Teilt den Zustand mit der Startseite; app.js ruft die
 // zurückgegebene Funktion in jedem render() auf.
-import { STYLE_PRESETS, buildEvents, t } from '../index.js';
-import { $, LAYERS, ALL_LAYERS, LENGTHS, state, layoutStorage, chordName, pressed, setText, preset, applyStyle } from './state.js';
+import { buildEvents, t } from '../index.js';
+import { $, LAYERS, ALL_LAYERS, LENGTHS, state, layoutStorage, chordName, pressed, setText } from './state.js';
 import { saveLayout } from './layout-state.js';
 import { nextDistinctChord } from '../core/fretboard.js';
 import { createFretboard, chordSentence } from './fretboard.js';
-import { buildTags, renderTags, toggleTag, sameTags } from './tags-ui.js';
+import { buildTags, renderTags, toggleTag } from './tags-ui.js';
 import { isSoundOnlyChange } from '../core/tags.js';
 import { initProgressionEditor, addChord } from './progression-editor.js';
 import { initChordColor } from './chord-color.js';
 import { drawLanes } from './lanes.js';
 import { createWheel } from './wheel.js';
-import { convertTempo, meterKey } from '../core/grooves.js';
 
 export function initTuning({ render, restartIfPlaying, toggleLayer, applyLive }) {
   const changed = () => { restartIfPlaying(); render(); };
-
-  for (const { id } of STYLE_PRESETS) {
-    const b = Object.assign(document.createElement('button'), { type: 'button', className: 'chip' });
-    Object.assign(b.dataset, { style: id, i18n: `style.${id}` });
-    b.addEventListener('click', () => { applyStyle(id); applyLive({ patterns: true, tempo: true }); render(); });
-    $('quick-pick').append(b);
-  }
 
   for (const n of LENGTHS) $('length').append(new Option('', String(n)));
   $('length').addEventListener('change', (e) => { state.track.length = Number(e.target.value); changed(); });
@@ -33,6 +25,7 @@ export function initTuning({ render, restartIfPlaying, toggleLayer, applyLive })
     b.addEventListener('click', () => { toggleLayer(name); render(); });
     $('lane-buttons').append(b);
   }
+  $('lane-buttons').parentElement.style.setProperty('--lanes', LAYERS.length); // Verlaufshöhe folgt der Schichtzahl
 
   buildTags($('tags'), (category, tag) => {
     const before = state.track.tags;
@@ -101,10 +94,6 @@ export function initTuning({ render, restartIfPlaying, toggleLayer, applyLive })
   return function renderTuning() {
     if (state.page !== 'play') return;
     const { track } = state;
-    for (const b of $('quick-pick').children) {
-      const p = preset(b.dataset.style);
-      pressed(b, convertTempo(p.bpm, '4/4', meterKey(track.meter)) === track.bpm && sameTags(p.tags, track.tags));
-    }
     renderTags($('tags'), track.tags);
     // nur bei Änderung: <output>.value ersetzt den Textknoten, die offene Längen-Auswahl bleibt unberührt
     for (const [id, v] of [['tuning-tempo', track.bpm], ['tuning-tempo-out', track.bpm], ['length', track.length]]) {

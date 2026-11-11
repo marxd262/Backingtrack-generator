@@ -55,8 +55,8 @@ test('Ungültige Eingaben (NaN, negativ, über 1, Text) wirken wie begrenzte Zah
   }
 });
 
-test('Schichtprofile: Bass, Akkorde und Pad haben Eingangspegel und Box, der Bass hat eine tiefere Box', () => {
-  assert.deepEqual(Object.keys(LAYER_FX).sort(), ['bass', 'chords', 'pad']);
+test('Schichtprofile: Bass, Akkorde, Pad und Lead haben Eingangspegel und Box, der Bass hat eine tiefere Box', () => {
+  assert.deepEqual(Object.keys(LAYER_FX).sort(), ['bass', 'chords', 'lead', 'pad']);
   for (const [name, l] of Object.entries(LAYER_FX)) {
     for (const key of ['ref', 'cabHp', 'cabLp', 'cabPeakHz', 'cabPeakDb', 'distHp', 'toneHz']) assert.ok(Number.isFinite(l[key]) && l[key] > 0, `${name}.${key}`);
     assert.ok(l.cabHp < l.cabLp, name);
@@ -81,4 +81,9 @@ test('Einblenden ist stetig: unterhalb eines Achtels des Reglers liegen Mischung
     assert.ok(p[stage].mix > 0 && p[stage].mix < 1, `${stage}: ${p[stage].mix}`);
     assert.ok(p.cab > 0 && p.cab < 1, `${stage}: Box ${p.cab}`);
   }
+});
+
+test('lead: Kette mit allen Reglern auf 1 wirft nicht, Pegelausgleich endlich und positiv', () => {
+  const p = fxChainParams({ fuzz: 1, overdrive: 1, distortion: 1 }, 'lead');
+  for (const stage of STAGES) assert.ok(Number.isFinite(p[stage].makeup) && p[stage].makeup > 0, stage);
 });

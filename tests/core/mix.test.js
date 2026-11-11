@@ -20,8 +20,8 @@ test('sliderGain: NaN, negativ, über 1, kein Zahlentyp wirft RangeError', () =>
 
 test('Mix: Schlüssel, Namen, Standard alles 1', () => {
   assert.equal(MIX_KEY, 'backingtrack.mix');
-  assert.deepEqual(MIX_NAMES, ['drums', 'bass', 'chords', 'pad', 'master']);
-  assert.deepEqual(DEFAULT_MIX, { drums: 1, bass: 1, chords: 1, pad: 1, master: 1 });
+  assert.deepEqual(MIX_NAMES, ['drums', 'bass', 'chords', 'pad', 'lead', 'percussion', 'master']);
+  assert.deepEqual(DEFAULT_MIX, { drums: 1, bass: 1, chords: 1, pad: 1, lead: 1, percussion: 1, master: 1 });
   assert.ok(Object.isFrozen(DEFAULT_MIX));
 });
 
@@ -36,14 +36,14 @@ test('loadMix: leer, kaputtes JSON, Nicht-Objekt und gesperrter Speicher ergeben
 
 test('loadMix: gültige Werte bleiben, ungültige einzeln auf 1, unbekannte Schlüssel entfallen', () => {
   const raw = JSON.stringify({ drums: 0.5, bass: 0, chords: 1.5, pad: 'laut', master: -1, extra: 0.2 });
-  assert.deepEqual(loadMix(storageWith(raw)), { drums: 0.5, bass: 0, chords: 1, pad: 1, master: 1 });
+  assert.deepEqual(loadMix(storageWith(raw)), { drums: 0.5, bass: 0, chords: 1, pad: 1, lead: 1, percussion: 1, master: 1 });
   assert.deepEqual(loadMix(storageWith('{"master":0.3}')), { ...DEFAULT_MIX, master: 0.3 });
 });
 
 test('saveMix -> loadMix Rundreise; gesperrter Speicher wirft nicht', () => {
   const map = new Map();
   const storage = { getItem: (k) => map.get(k) ?? null, setItem: (k, v) => map.set(k, v) };
-  const mix = { drums: 0.2, bass: 0.7, chords: 1, pad: 0, master: 0.9 };
+  const mix = { drums: 0.2, bass: 0.7, chords: 1, pad: 0, lead: 0.4, percussion: 1, master: 0.9 };
   saveMix(storage, mix);
   assert.ok(map.has(MIX_KEY));
   assert.deepEqual(loadMix(storage), mix);

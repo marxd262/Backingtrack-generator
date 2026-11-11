@@ -4,6 +4,9 @@
 // abgepasst: Takte kommen aus #play-position.
 import { test, expect } from '@playwright/test';
 import { addChordByName } from './chord-helpers.js';
+import { chooseStyle, currentStyle } from './style-helpers.js';
+import de from '../../src/i18n/de.js';
+import en from '../../src/i18n/en.js';
 
 const BAR_TIMEOUT = 10_000; // ein Takt bei 200 bpm dauert 1,2 s; unter Last großzügig
 const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view|group|timbre|chord|chordGroup|chordColor|groove|meter)\.[A-Za-z.]+$/;
@@ -279,9 +282,9 @@ for (const [locale, L] of Object.entries(TEXT)) {
       for (const style of ['funk', 'psych', 'dreamy']) {
         for (const scale of ['minorPentatonic', 'majorPentatonic', 'blues', 'dorian']) {
           const label = `${style} + ${scale}`;
-          await page.locator(`#quick-pick [data-style="${style}"]`).click();
+          await chooseStyle(page, style);
           await page.locator(`#side-scale-chips [data-scale="${scale}"]`).click();
-          await expect(page.locator(`#quick-pick [data-style="${style}"]`), label).toHaveAttribute('aria-pressed', 'true');
+          expect(await currentStyle(page), label).toBe(style);
           await expect(page.locator(`#side-scale-chips [data-scale="${scale}"]`), label).toHaveAttribute('aria-pressed', 'true');
 
           // je Saite mindestens ein sichtbarer Leiterton
@@ -298,7 +301,7 @@ for (const [locale, L] of Object.entries(TEXT)) {
           const expected = {
             key: await pressedText('#side-key-chips'),
             scale: await pressedText('#side-scale-chips'),
-            style: await pressedText('#quick-pick'),
+            style: ({ de, en })[L.lang][`style.${await currentStyle(page)}`],
             tempo: await page.locator('#tuning-tempo-out').textContent(),
           };
           await page.locator('#play-back').click();

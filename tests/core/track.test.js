@@ -15,7 +15,8 @@ test('normalizeTrack setzt Standardwerte', () => {
   const t = normalizeTrack({ key: { root: 'A', mode: 'minor' }, bpm: 90, bars: [] });
   assert.deepEqual(t.meter, [4, 4]);
   assert.equal(t.length, 24);
-  assert.deepEqual(t.layers, { drums: true, bass: true, chords: true, pad: true });
+  assert.deepEqual(t.layers, { drums: true, bass: true, chords: true, pad: true, lead: true, percussion: false });
+  assert.deepEqual(t.jobs, { lead: 'off', percussion: 'mixed' });
   assert.deepEqual(t.tags, {});
   assert.equal(t.seed, 1);
 });
@@ -28,7 +29,7 @@ test('normalizeTrack behält Angaben und Progression, verändert die Eingabe nic
   assert.deepEqual(input, frozen);
   assert.equal(t.length, 8);
   assert.equal(t.seed, 7);
-  assert.deepEqual(t.layers, { drums: false, bass: true, chords: true, pad: true });
+  assert.deepEqual(t.layers, { drums: false, bass: true, chords: true, pad: true, lead: true, percussion: false });
   assert.deepEqual(t.bars, input.bars);
   t.layers.bass = false;
   t.bars[0].beats = 9;
@@ -107,10 +108,10 @@ test('validateTrack: unbekannter Akkord-Grundton ergibt chordNotInKey, ohne zu w
   assert.deepEqual(errs, [{ code: 'chordNotInKey', params: { bar: 1, chord: 'Hm' } }]);
 });
 
-test('VALIDATION_CODES listet alle dreizehn Codes', () => {
+test('VALIDATION_CODES listet alle vierzehn Codes', () => {
   assert.deepEqual([...VALIDATION_CODES].sort(),
-    ['badBar', 'badBeats', 'badBpm', 'badComplexity', 'badGroove', 'badKey', 'badLength', 'badMeter', 'badTags', 'badVoice', 'chordNotInKey', 'emptyBars', 'unknownQuality'].sort());
-  assert.equal(VALIDATION_CODES.length, 13);
+    ['badBar', 'badBeats', 'badBpm', 'badComplexity', 'badGroove', 'badJob', 'badKey', 'badLength', 'badMeter', 'badTags', 'badVoice', 'chordNotInKey', 'emptyBars', 'unknownQuality'].sort());
+  assert.equal(VALIDATION_CODES.length, 14);
 });
 
 test('validateTrack: beats höchstens MAX_BEATS (16)', () => {
@@ -220,4 +221,14 @@ test('validateTrack: unbekannte Art meldet nur unknownQuality, auch bei Prototyp
   for (const quality of ['dom11', 'toString', '__proto__', 'constructor', 5, null]) {
     assert.deepEqual(codes(withBars({}, ['A', quality])), ['unknownQuality'], String(quality));
   }
+});
+
+test('jobs: ungültige Angaben melden badJob mit Schicht und Aufgabe', () => {
+  const bad = (jobs) => validateTrack({ ...good(), jobs }).filter((e) => e.code === 'badJob');
+  assert.deepEqual(bad({ lead: 'x' }), [{ code: 'badJob', params: { layer: 'lead', job: 'x' } }]);
+  assert.deepEqual(bad({ nope: 'x' }), [{ code: 'badJob', params: { layer: 'nope', job: 'x' } }]);
+  assert.deepEqual(bad({ drums: 'x' }), [{ code: 'badJob', params: { layer: 'drums', job: 'x' } }]);
+  assert.equal(bad(5)[0].params.layer, '?');
+  assert.equal(bad([]).length, 1);
+  for (const ok of [null, undefined, {}, { lead: 'fills' }, { lead: null, percussion: 'congas' }]) assert.deepEqual(bad(ok), [], JSON.stringify(ok));
 });

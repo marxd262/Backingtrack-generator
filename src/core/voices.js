@@ -1,5 +1,5 @@
-// Stimmen-Register: welche Klangerzeuger ein Instrument (Bass, Akkorde, Pad) zur Wahl hat. Reine Daten und Auflösung, keine Audio-Importe,
-// damit validateTrack sie lesen kann; die Klangerzeugung steht in src/audio/voices/. Das Schlagzeug hat keine wählbaren Stimmen.
+// Stimmen-Register: welche Klangerzeuger eine Schicht (Schlagzeug, Bass, Akkorde, Pad, Lead, Percussion) zur Wahl hat. Reine Daten und Auflösung, keine Audio-Importe,
+// damit validateTrack sie lesen kann; die Klangerzeugung steht in src/audio/voices/.
 // Eine Stimme zu ergänzen heißt: Eintrag hier, Klangerzeugung dazu, Namen in beiden Sprachdateien (docs/interface.md).
 
 const deepFreeze = (o) => {
@@ -12,20 +12,33 @@ const deepFreeze = (o) => {
 // jede Stimme (Verzerrerkette hinter den Stimmen) und stehen darum nicht in uses. hidden: true nimmt die Stimme aus dem Dropdown der
 // Hauptoberfläche (Track-Feld, setVoices, Validierung und die Hörprobe-Seite kennen sie weiter): so bleibt sie ohne Auswahl erhalten.
 export const VOICES = deepFreeze({
+  drums: {
+    synth: { kind: 'synth', variants: ['classic'], uses: ['drums.kickPunch', 'drums.kickLength', 'drums.snareTone', 'drums.snareSnap', 'drums.hatBright', 'drums.hatLength', 'drums.room'] },
+    // Raum wirkt über den Hall-Sendeweg der Schicht, also auch auf Sample-Kits
+    sample: { kind: 'sample', variants: ['standard', 'brushes', 'rimshot', 'jazz', 'electronic', '808'], uses: ['drums.room'] },
+  },
   bass: {
     synth: { kind: 'synth', variants: ['classic'], uses: ['bass.sub', 'bass.pluck', 'bass.cutoff', 'bass.resonance', 'bass.roundness'] },
     string: { kind: 'model', hidden: true, variants: ['finger'], uses: ['bass.sub', 'bass.pluck', 'bass.cutoff', 'bass.roundness'] },
-    sample: { kind: 'sample', variants: ['finger', 'pick'], uses: ['bass.cutoff'] },
+    sample: { kind: 'sample', variants: ['finger', 'pick', 'upright'], uses: ['bass.cutoff'] },
   },
   chords: {
     synth: { kind: 'synth', variants: ['classic'], uses: ['chords.brightness', 'chords.length', 'chords.chorus', 'chords.tremolo'] },
     string: { kind: 'model', hidden: true, variants: ['electric'], uses: ['chords.brightness', 'chords.length'] },
     epiano: { kind: 'synth', variants: ['rhodes'], uses: ['chords.brightness', 'chords.length', 'chords.tremolo'] },
-    sample: { kind: 'sample', variants: ['guitar', 'epiano'], uses: ['chords.brightness', 'chords.length'] },
+    sample: { kind: 'sample', variants: ['guitar', 'epiano', 'organ', 'muted', 'jazz', 'funk', 'steel', 'nylon', 'twelve'], uses: ['chords.brightness', 'chords.length'] },
   },
   pad: {
     synth: { kind: 'synth', variants: ['classic'], uses: ['pad.attack', 'pad.cutoff', 'pad.lfoSpeed', 'pad.lfoDepth', 'pad.shimmer', 'pad.thickness'] },
     sample: { kind: 'sample', variants: ['strings', 'warm'], uses: ['pad.attack', 'pad.cutoff'] },
+  },
+  lead: {
+    synth: { kind: 'synth', variants: ['classic'], uses: [] },
+    sample: { kind: 'sample', variants: ['flute', 'sax', 'synth'], uses: [] },
+  },
+  percussion: {
+    synth: { kind: 'synth', variants: ['classic'], uses: [] },
+    sample: { kind: 'sample', variants: ['studio'], uses: [] },
   },
 });
 
@@ -40,7 +53,7 @@ export function isVoice(layer, id, variant) {
   return variant === undefined || (typeof variant === 'string' && VOICES[layer][id].variants.includes(variant));
 }
 
-/** Stimmen-IDs eines Instruments in Registerreihenfolge (leer für Unbekanntes und das Schlagzeug). */
+/** Stimmen-IDs eines Instruments in Registerreihenfolge (leer für Unbekanntes). */
 export const voicesFor = (layer) => (VOICE_LAYERS.includes(layer) ? Object.keys(VOICES[layer]) : []);
 
 /**
@@ -63,8 +76,8 @@ export function completeVoices(voices) {
 const ALWAYS_ON = ['fuzz', 'overdrive', 'distortion']; // die Verzerrerkette liegt hinter jeder Stimme
 
 /**
- * Ob die gewählte Stimme den Klangregler `path` ('gruppe.feld') benutzt. Verzerrer, alle Regler außerhalb von Bass, Akkorden und Pad
- * (Schlagzeug, Summe) und Unbekanntes gelten als benutzt: ein Regler wird nie wegen eines Tippfehlers gesperrt.
+ * Ob die gewählte Stimme den Klangregler `path` ('gruppe.feld') benutzt. Verzerrer, alle Regler außerhalb der Instrumente
+ * (Summe) und Unbekanntes gelten als benutzt: ein Regler wird nie wegen eines Tippfehlers gesperrt.
  */
 export function usesTimbreField(voices, path) {
   const [layer, field] = String(path).split('.');

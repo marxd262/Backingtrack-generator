@@ -1,4 +1,4 @@
-// Stimmenwahl in den Klanggruppen Bass, Akkorde und Pad (linke Leiste): Dropdown Stimme (nach Art gruppiert), Dropdown Variante (nur bei
+// Stimmenwahl in den Klanggruppen der Instrumente (linke Leiste): Dropdown Stimme (nach Art gruppiert), Dropdown Variante (nur bei
 // mehreren Varianten), Ladezustand der Sample-Stimmen und ein Hinweis auf ausgegraute Regler. Die Wahl steht in state.track.voices, wirkt live
 // über player.setVoices und bleibt bei einem Stilwechsel stehen. Welche Regler eine Stimme benutzt, steht im Register (usesTimbreField).
 import { t } from '../index.js';
@@ -6,8 +6,11 @@ import { $, state, setText } from './state.js';
 import { DEFAULT_TIMBRE } from '../core/timbre.js';
 import { VOICES, VOICE_LAYERS, completeVoices, usesTimbreField } from '../core/voices.js';
 import { loadPack, peekPack } from '../audio/voices/sampler.js';
+import { packIdFor } from '../audio/voices/pack-id.js';
 
 const KINDS = ['synth', 'model', 'sample'];
+// nur Instrumente mit echter Wahl (mehr als eine sichtbare Stimme)
+const CHOOSABLE = VOICE_LAYERS.filter((layer) => Object.values(VOICES[layer]).filter((v) => !v.hidden).length > 1);
 const el = (tag, props = {}) => Object.assign(document.createElement(tag), props);
 
 export function initVoices({ render, player }) {
@@ -19,11 +22,11 @@ export function initVoices({ render, player }) {
     const { id, variant } = completeVoices(state.track.voices)[layer];
     if (VOICES[layer][id].kind !== 'sample') { loadState[layer] = ''; return; }
     // schon geladen: sofort bereit, ohne 'lädt …' dazwischen (sonst flackert die Ansage)
-    if (peekPack(`${layer}-${variant}`)) { loadState[layer] = 'ready'; return; }
+    if (peekPack(packIdFor(layer, variant))) { loadState[layer] = 'ready'; return; }
     loadState[layer] = 'loading';
     const asked = `${id}/${variant}`;
     const current = () => `${completeVoices(state.track.voices)[layer].id}/${completeVoices(state.track.voices)[layer].variant}`;
-    loadPack(`${layer}-${variant}`).then(
+    loadPack(packIdFor(layer, variant)).then(
       () => { if (current() === asked) { loadState[layer] = 'ready'; render(); } },
       () => { if (current() === asked) { loadState[layer] = 'error'; render(); } },
     );
@@ -36,7 +39,7 @@ export function initVoices({ render, player }) {
     render();
   };
 
-  for (const layer of VOICE_LAYERS) {
+  for (const layer of CHOOSABLE) {
     const details = $('timbre-groups').querySelector(`details[data-group="${layer}"]`);
     const row = el('div', { className: 'voice-row' });
     const voiceLabel = el('label', { htmlFor: `voice-${layer}` });
@@ -65,7 +68,7 @@ export function initVoices({ render, player }) {
 
   return function renderVoices() {
     const voices = completeVoices(state.track.voices);
-    for (const layer of VOICE_LAYERS) {
+    for (const layer of CHOOSABLE) {
       const r = rows[layer], { id, variant } = voices[layer];
       setText(r.voiceLabel, t('ui.voice'));
       setText(r.variantLabel, t('ui.variant'));
@@ -85,7 +88,7 @@ export function initVoices({ render, player }) {
       if (r.variantLabel.hidden === many) r.variantLabel.hidden = !many;
       setText(r.status, loadState[layer] ? t(`voice.status.${loadState[layer]}`) : '');
       // Hinweis, solange die Stimme Regler ihres Instruments nicht benutzt (sie sind in der Gruppe ausgegraut)
-      const unused = Object.keys(DEFAULT_TIMBRE[layer]).some((field) => !usesTimbreField(state.track.voices, `${layer}.${field}`));
+      const unused = Object.keys(DEFAULT_TIMBRE[layer] ?? {}).some((field) => !usesTimbreField(state.track.voices, `${layer}.${field}`));
       if (r.hint.hidden === unused) r.hint.hidden = !unused;
       setText(r.hint, unused ? t('ui.voiceHint') : '');
     }

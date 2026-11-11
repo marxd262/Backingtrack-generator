@@ -1,6 +1,7 @@
 // Messwerkzeug für die Klangformung: compareRenders, Spektralschwerpunkt im Offline-Render, timbre-Option.
 import { test, expect } from '@playwright/test';
 import { STYLE_PRESETS } from '../../src/core/tags.js';
+import { LAYER_IDS } from '../../src/core/layers.js';
 
 const LAYERS = ['drums', 'bass', 'chords', 'pad'];
 // Basistrack wie in levels.spec.js: Am Am Dm E, 100 bpm, Seed 1, alle Schichten ab Takt 1
@@ -99,7 +100,7 @@ test('createInstruments verträgt unvollständiges oder ungültiges timbre', asy
     }
     return results;
   });
-  expect(r).toEqual(Array(8).fill(LAYERS.join()));
+  expect(r).toEqual(Array(8).fill(LAYER_IDS.join()));
 });
 
 // Bassklang: Basistrack (16 s) mit genau einem Schlagwort gegen den Standard, nur Bass-Schicht.
@@ -595,18 +596,21 @@ test('Grooves in jeder Taktart bei hoher Komplexität: Spitze nach dem Begrenzer
   }
 });
 
-// Verzerrer (Fuzz, Overdrive, Distortion) für Bass, Akkorde und Pad: je Regler allein auf 0,7, Schicht allein, 6 s.
+// Verzerrer (Fuzz, Overdrive, Distortion) für Bass, Akkorde, Pad und Lead: je Regler allein auf 0,7, Schicht allein, 6 s.
 // Gemessen 2026-11-09 (8 s, vor dem Begrenzer, rms gegen den sauberen Klang / Schwerpunkt sauber -> mit Effekt bei Regler 1):
 //   Bass (97 Hz): overdrive 1.11 / 480 Hz, distortion 1.00 / 146 Hz, fuzz 1.24 / 99 Hz (der Bass besteht fast nur aus Tiefen, der Schwerpunkt sagt dort wenig)
 //   Akkorde (372 Hz): overdrive 0.95 / 1562 Hz, distortion 1.07 / 786 Hz, fuzz 0.95 / 570 Hz
 //   Pad (463 Hz): overdrive 0.96 / 1368 Hz, distortion 1.02 / 1159 Hz, fuzz 1.01 / 812 Hz
+//   Lead: siehe unten (Messung vor dem Angleichen durch lead.trim, danach nicht neu erfasst)
 const FX_SECONDS = 6;
 const withTimbre = (timbre) => track({ timbre });
-for (const layer of ['bass', 'chords', 'pad']) {
+// Lead (Job melody): Messung 2026-11-10, rms mit Regler gegen sauber bei 0.3 / 0.7 / 1: fuzz 0.97 / 0.80 / 0.78, overdrive 1.9 / 2.1 / 1.6, distortion 1.3 / 1.5 / 1.5 vor dem Angleichen (Akkorde: 0.80 / 0.73 / 0.72, 0.89 / 1.0 / 0.87, 0.73 / 0.88 / 0.97); Stufenausgleich lead.trim darauf abgestimmt
+for (const layer of ['bass', 'chords', 'pad', 'lead']) {
   for (const fx of ['fuzz', 'overdrive', 'distortion']) {
     test(`Verzerrer ${layer}.${fx}: Schicht deutlich anders (außer Bass: obertonreicher), Pegel im Rahmen`, async ({ page }) => {
       test.setTimeout(120_000);
-      const r = await compare(page, track(), withTimbre({ [layer]: { [fx]: 0.7 } }), FX_SECONDS, { layer });
+      const base = track({ jobs: { lead: 'melody' } });
+      const r = await compare(page, base, { ...base, timbre: { [layer]: { [fx]: 0.7 } } }, FX_SECONDS, { layer });
       const label = `${layer}.${fx}: ${JSON.stringify(r)}`;
       expect(r.diff, label).toBeGreaterThanOrEqual(0.15);
       if (layer !== 'bass') expect(r.centroidB, label).toBeGreaterThan(r.centroidA);
@@ -629,12 +633,13 @@ test('Verzerrer: Schlagzeug bleibt unverändert, auch wenn ihm ein Effekt-Feld m
 test('Verzerrer: alle Effekte aller Instrumente auf 1 bleiben endlich und vor dem Begrenzer unter 1 (kein Gleichanteil vor dem Anschlag)', async ({ page }) => {
   test.setTimeout(120_000);
   const all = { fuzz: 1, overdrive: 1, distortion: 1 };
-  const r = await page.evaluate(([t, s]) => window.__render(t, s, { limiter: false }), [withTimbre({ bass: all, chords: all, pad: all }), FX_SECONDS]);
+  const lead = { jobs: { lead: 'melody' } };
+  const r = await page.evaluate(([t, s]) => window.__render(t, s, { limiter: false }), [track({ ...lead, timbre: { bass: all, chords: all, pad: all, lead: all } }), FX_SECONDS]);
   expect([r.peak, r.rms].every(Number.isFinite), JSON.stringify(r)).toBe(true);
   expect(r.peak, JSON.stringify(r)).toBeLessThan(1);
   // jede Schicht für sich: ein Fuzz-Gleichanteil vor dem Anschlag hatte die Spitze auf über 16 getrieben
-  for (const layer of ['bass', 'chords', 'pad']) {
-    const solo = await page.evaluate(([t, s]) => window.__render(t, s, { limiter: false }), [withTimbre({ [layer]: all }), FX_SECONDS]);
+  for (const layer of ['bass', 'chords', 'pad', 'lead']) {
+    const solo = await page.evaluate(([t, s]) => window.__render(t, s, { limiter: false }), [track({ ...lead, timbre: { [layer]: all } }), FX_SECONDS]);
     expect(solo.perLayer[layer].peak, layer).toBeLessThan(1);
   }
 });

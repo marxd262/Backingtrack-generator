@@ -93,7 +93,7 @@ test('Ton anspielen: der Knopf je Instrument spielt eine Note der gewählten Sti
 
 test('Sample-Stimmen: Varianten, Ladezustand lädt, dann bereit; Ton anspielen wartet auf das Laden', async ({ page }) => {
   await page.locator('#voice-bass').selectOption('sample');
-  expect(await page.locator('#variant-bass option').evaluateAll((els) => els.map((e) => e.value))).toEqual(['finger', 'pick']);
+  expect(await page.locator('#variant-bass option').evaluateAll((els) => els.map((e) => e.value))).toEqual(['finger', 'pick', 'upright']);
   await expect(page.locator('#status-bass')).toHaveText('bereit', { timeout: 15_000 });
   await page.locator('#variant-bass').selectOption('pick');
   await expect(page.locator('#status-bass')).toHaveText(/lädt|bereit/);

@@ -2,6 +2,7 @@
 import { test, expect } from '@playwright/test';
 import { STYLE_PRESETS } from '../../src/core/tags.js';
 import { resolveTimbre } from '../../src/core/timbre.js';
+import { LAYER_IDS } from '../../src/core/layers.js';
 
 const CHORDS = [['A', 'min'], ['A', 'min'], ['D', 'min'], ['E', 'maj']];
 // Standardtrack Am Am Dm E, 4 Schläge je Takt; bei bpm 240 dauert ein Takt 1 s
@@ -25,7 +26,7 @@ test.beforeEach(async ({ page }) => {
   problems = [];
   page.on('console', (msg) => msg.type() === 'error' && problems.push(`console: ${msg.text()}`));
   page.on('pageerror', (err) => problems.push(`pageerror: ${err.message}`));
-  await page.addInitScript(() => {
+  await page.addInitScript((layerIds) => {
     window.__audioContexts = 0;
     window.__openContexts = 0;
     const Original = window.AudioContext;
@@ -46,7 +47,7 @@ test.beforeEach(async ({ page }) => {
       calls.create = (ctx, opts) => {
         calls.factory.push(opts);
         const layers = {};
-        for (const name of ['drums', 'bass', 'chords', 'pad']) {
+        for (const name of layerIds) {
           layers[name] = {
             trigger: (e, when) => calls.trigger.push({ name, t: e.t, type: e.type, dur: e.dur, when, now: ctx.currentTime }),
             setMuted: (muted) => calls.muted.push({ name, muted }),
@@ -56,7 +57,7 @@ test.beforeEach(async ({ page }) => {
       };
       return calls;
     };
-  });
+  }, LAYER_IDS);
   await page.goto('/ui/render-harness.html');
   await page.waitForFunction(() => typeof window.__render === 'function');
 });
@@ -271,12 +272,13 @@ test('setTempo erreicht setTempo der Instrumente (Echo), fehlende Methode ist ha
 
 // Standard-Klangmodell als Literal (nicht aus src/core gelesen), damit der Test DEFAULT_TIMBRE mitprüft
 // Stimmenwahl, die play ohne Angabe im Track an die Instrumente gibt (heutiger Klang)
-const STANDARD_VOICES = { bass: { id: 'synth', variant: 'classic' }, chords: { id: 'synth', variant: 'classic' }, pad: { id: 'synth', variant: 'classic' } };
+const STANDARD_VOICES = { drums: { id: 'synth', variant: 'classic' }, bass: { id: 'synth', variant: 'classic' }, chords: { id: 'synth', variant: 'classic' }, pad: { id: 'synth', variant: 'classic' }, lead: { id: 'synth', variant: 'classic' }, percussion: { id: 'synth', variant: 'classic' } };
 const DEFAULT_SOUND = {
   drums: { kickPunch: 0.5, kickLength: 0.5, snareTone: 0.5, snareSnap: 0.5, hatBright: 0.5, hatLength: 0.5, room: 0 },
   bass: { sub: 0, fuzz: 0, overdrive: 0, distortion: 0, pluck: 0.5, cutoff: 0.5, resonance: 0.5, roundness: 0 },
   chords: { brightness: 0.5, length: 0.5, chorus: 0, tremolo: 0, fuzz: 0, overdrive: 0, distortion: 0 },
   pad: { attack: 0.5, cutoff: 0.5, lfoSpeed: 0.5, lfoDepth: 0.5, shimmer: 0, thickness: 0.5, fuzz: 0, overdrive: 0, distortion: 0 },
+  lead: { fuzz: 0, overdrive: 0, distortion: 0 },
   master: { brightness: 0.5, echo: 0.5, reverb: 0.5 },
 };
 

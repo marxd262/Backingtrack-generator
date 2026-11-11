@@ -15,8 +15,8 @@ const paths = new Set(Object.entries(DEFAULT_TIMBRE).flatMap(([group, fields]) =
 const bars = [['A', 'min'], ['A', 'min'], ['D', 'min'], ['E', 'maj']].map(([root, quality]) => ({ chord: { root, quality }, beats: 4 }));
 const track = (voices) => ({ key: { root: 'A', mode: 'minor' }, bpm: 100, bars, length: 8, tags: {}, seed: 1, ...(voices === undefined ? {} : { voices }) });
 
-test('Register: nur Bass, Akkorde und Pad; jede Stimme hat Art, Varianten und Reglerliste; tief eingefroren', () => {
-  assert.deepEqual(VOICE_LAYERS, ['bass', 'chords', 'pad']);
+test('Register: Schlagzeug, Bass, Akkorde, Pad, dazu die stummen Lead und Percussion; jede Stimme hat Art, Varianten und Reglerliste; tief eingefroren', () => {
+  assert.deepEqual(VOICE_LAYERS, ['drums', 'bass', 'chords', 'pad', 'lead', 'percussion']);
   assert.deepEqual(Object.keys(VOICES), VOICE_LAYERS);
   assert.ok(deepFrozen(VOICES) && deepFrozen(DEFAULT_VOICE));
   for (const [layer, id, v] of entries()) {
@@ -48,15 +48,22 @@ test('Phase A: Saitenmodell für Bass und Akkorde, E-Piano für Akkorde', () => 
 
 test('isVoice und voicesFor: bekannte und unbekannte Eingaben', () => {
   assert.ok(isVoice('bass', 'string') && isVoice('bass', 'string', 'finger'));
-  assert.ok(!isVoice('bass', 'string', 'nope') && !isVoice('bass', 'nope') && !isVoice('drums', 'synth') && !isVoice('x', 'y'));
+  assert.ok(!isVoice('bass', 'string', 'nope') && !isVoice('bass', 'nope') && !isVoice('drums', 'nope') && !isVoice('x', 'y'));
   assert.ok(!isVoice('bass', 5) && !isVoice(undefined, undefined) && !isVoice('bass', 'synth', 5));
   assert.deepEqual(voicesFor('pad'), Object.keys(VOICES.pad));
-  assert.deepEqual(voicesFor('drums'), []);
+  assert.deepEqual(voicesFor('drums'), ['synth', 'sample']);
+  assert.deepEqual(voicesFor('lead'), ['synth', 'sample']);
+  assert.deepEqual(voicesFor('percussion'), ['synth', 'sample']);
+  assert.ok(isVoice('drums', 'sample', 'rimshot') && isVoice('drums', 'sample', '808') && isVoice('lead', 'sample', 'sax') && isVoice('percussion', 'sample', 'studio'));
+  assert.ok(isVoice('bass', 'sample', 'upright') && isVoice('chords', 'sample', 'organ') && isVoice('chords', 'sample', 'muted'));
+  assert.ok(!isVoice('percussion', 'sample', 'standard') && !isVoice('lead', 'sample', 'organ'));
+  assert.deepEqual(VOICES.drums.sample.uses, ['drums.room']);
+  assert.deepEqual(voicesFor('nope'), []);
 });
 
 test('completeVoices: ungültig oder fehlend ergibt den Standard, gültige Stimme ohne Variante die erste Variante, Eingabe bleibt unverändert', () => {
-  const standard = { bass: DEFAULT_VOICE, chords: DEFAULT_VOICE, pad: DEFAULT_VOICE };
-  for (const input of [undefined, null, [], 'x', 3, {}, { drums: { id: 'synth' } }, { bass: null }, { bass: 7 }, { bass: { id: 'nope' } }]) {
+  const standard = Object.fromEntries(VOICE_LAYERS.map((l) => [l, DEFAULT_VOICE]));
+  for (const input of [undefined, null, [], 'x', 3, {}, { drums: { id: 'nope' } }, { bass: null }, { bass: 7 }, { bass: { id: 'nope' } }]) {
     assert.deepEqual(completeVoices(input), standard, JSON.stringify(input));
   }
   assert.deepEqual(completeVoices({ bass: 'string' }).bass, { id: 'string', variant: 'finger' });
@@ -72,13 +79,13 @@ test('completeVoices: ungültig oder fehlend ergibt den Standard, gültige Stimm
 
 test('validateTrack: badVoice für Unbrauchbares, nichts für Gültiges, Fehlendes und null', () => {
   const codes = (voices) => validateTrack(track(voices)).filter((e) => e.code === 'badVoice');
-  for (const bad of [{ drums: { id: 'synth' } }, { bass: { id: 'nope' } }, { bass: { id: 'string', variant: 'nope' } }, { bass: 'nope' }, { bass: 5 }, 'x', [], 3, { bass: { variant: 'nope' } }]) {
+  for (const bad of [{ drums: { id: 'nope' } }, { drums: 'nope' }, { bass: { id: 'nope' } }, { bass: { id: 'string', variant: 'nope' } }, { bass: 'nope' }, { bass: 5 }, 'x', [], 3, { bass: { variant: 'nope' } }]) {
     assert.equal(codes(bad).length >= 1, true, JSON.stringify(bad));
   }
   assert.deepEqual(codes({ bass: { id: 'nope' } }), [{ code: 'badVoice', params: { layer: 'bass', voice: 'nope' } }]);
   assert.deepEqual(codes({ bass: { id: 'string', variant: 'nope' } }), [{ code: 'badVoice', params: { layer: 'bass', voice: 'string/nope' } }]);
-  assert.deepEqual(codes({ drums: { id: 'synth' } })[0].params.layer, 'drums');
-  for (const ok of [undefined, null, {}, { bass: null }, { bass: { id: 'string' } }, { bass: { id: 'string', variant: 'finger' } }, { chords: { id: 'epiano', variant: 'rhodes' } }, { pad: {} }]) {
+  assert.deepEqual(codes({ drums: { id: 'nope' } })[0].params.layer, 'drums');
+  for (const ok of [undefined, null, {}, { drums: 'synth' }, { drums: { id: 'synth', variant: 'classic' } }, { bass: null }, { bass: { id: 'string' } }, { bass: { id: 'string', variant: 'finger' } }, { chords: { id: 'epiano', variant: 'rhodes' } }, { pad: {} }]) {
     assert.deepEqual(codes(ok), [], JSON.stringify(ok));
   }
 });
@@ -123,6 +130,8 @@ test('usesTimbreField: Verzerrer und alles außerhalb von Bass, Akkorden und Pad
   assert.equal(usesTimbreField({ bass: { id: 'sample', variant: 'pick' } }, 'bass.resonance'), false);
   assert.equal(usesTimbreField({ bass: { id: 'sample', variant: 'pick' } }, 'bass.cutoff'), true);
   assert.equal(usesTimbreField({ pad: 'sample' }, 'pad.shimmer'), false);
+  assert.equal(usesTimbreField({ drums: 'sample' }, 'drums.kickPunch'), false);
+  assert.equal(usesTimbreField({ drums: 'sample' }, 'drums.room'), true);
   // ungültige Wahl gilt wie der Standard; Unbekanntes meldet true (nie ein Regler wegen eines Tippfehlers sperren)
   assert.equal(usesTimbreField({ chords: 'nope' }, 'chords.chorus'), true);
   assert.equal(usesTimbreField(undefined, 'nope.field'), true);
@@ -133,10 +142,30 @@ test('hidden: nur ein Wahrheitswert, der Standard ist sichtbar, jedes Instrument
   for (const [layer, id, v] of entries()) assert.ok(v.hidden === undefined || typeof v.hidden === 'boolean', `${layer}/${id}`);
   for (const layer of VOICE_LAYERS) {
     assert.ok(!VOICES[layer][DEFAULT_VOICE.id].hidden, `${layer}: Standard sichtbar`);
-    assert.ok(Object.values(VOICES[layer]).some((v) => v.kind === 'sample' && !v.hidden), `${layer}: sichtbare Sample-Stimme`);
+    if (Object.keys(VOICES[layer]).length > 1) assert.ok(Object.values(VOICES[layer]).some((v) => v.kind === 'sample' && !v.hidden), `${layer}: sichtbare Sample-Stimme`);
   }
   // die Saitenmodelle stehen nicht in der Auswahl, sind aber weiter gültig (Track-Feld, setVoices, Hörprobe)
   assert.equal(VOICES.bass.string.hidden, true);
   assert.equal(VOICES.chords.string.hidden, true);
   assert.deepEqual(validateTrack(track({ bass: { id: 'string' }, chords: { id: 'string' } })).filter((e) => e.code === 'badVoice'), []);
+});
+
+test('lead: Stimme synth/classic als Standard, Verzerrerregler gelten immer, keine Klangregler in uses', () => {
+  assert.deepEqual(completeVoices({}).lead, { id: 'synth', variant: 'classic' });
+  assert.deepEqual(VOICES.lead.synth.uses, []);
+  assert.equal(usesTimbreField(undefined, 'lead.fuzz'), true);
+});
+
+test('percussion: Stimme synth/classic als Standard, keine Klangregler in uses, Verzerrerregler gelten immer', () => {
+  assert.deepEqual(completeVoices({}).percussion, { id: 'synth', variant: 'classic' });
+  assert.deepEqual(VOICES.percussion.synth.uses, []);
+  assert.equal(usesTimbreField(undefined, 'percussion.fuzz'), true);
+});
+
+test('drums: Stimme synth/classic als Standard, alle Schlagzeugregler in uses, alter Track ohne voices.drums gilt unverändert', () => {
+  assert.deepEqual(completeVoices({}).drums, { id: 'synth', variant: 'classic' });
+  assert.deepEqual(completeVoices({ bass: 'string' }).drums, { id: 'synth', variant: 'classic' });
+  assert.deepEqual(VOICES.drums.synth.uses, Object.keys(DEFAULT_TIMBRE.drums).map((f) => `drums.${f}`));
+  assert.equal(usesTimbreField(undefined, 'drums.kickPunch'), true);
+  assert.deepEqual(validateTrack(track({ bass: 'string' })).filter((e) => e.code === 'badVoice'), [], 'gespeicherter Track ohne voices.drums');
 });

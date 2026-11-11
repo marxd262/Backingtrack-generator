@@ -9,7 +9,7 @@ import { SCALE_NAMES, MODE_NAMES } from '../../src/core/music.js';
 import { CHORDS, CHORD_GROUPS } from '../../src/core/chords.js';
 import { GROOVES } from '../../src/core/grooves.js';
 
-const LAYERS = ['drums', 'bass', 'chords', 'pad'];
+import { LAYER_IDS as LAYERS, jobsFor } from '../../src/core/layers.js';
 const placeholders = (s) => [...new Set(s.match(/\{\w+\}/g) ?? [])].sort();
 
 // Sprache vor jedem Test und am Ende zurücksetzen, damit die Reihenfolge egal ist
@@ -30,7 +30,8 @@ test('jede Kategorie, jedes Schlagwort, Stil, Schicht, Skala, Modus und Fehlerco
     for (const tag of c.tags) keys.push(`tag.${c.id}.${tag}`);
   }
   for (const s of STYLE_PRESETS) keys.push(`style.${s.id}`, `style.${s.id}.hint`);
-  for (const l of LAYERS) keys.push(`layer.${l}`);
+  for (const l of LAYERS) keys.push(`layer.${l}`, `group.${l}`);
+  for (const l of LAYERS) for (const j of jobsFor(l)) keys.push(`job.${l}.${j}`, `ui.job.${l}`);
   for (const s of SCALE_NAMES) keys.push(`scale.${s}`);
   for (const m of MODE_NAMES) keys.push(`mode.${m}`);
   for (const c of VALIDATION_CODES) keys.push(`err.${c}`);

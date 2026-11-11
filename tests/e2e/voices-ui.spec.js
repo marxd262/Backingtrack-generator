@@ -1,6 +1,7 @@
 // Stimmenwahl in der Hauptoberfläche (echte Seite /ui/index.html): Dropdowns je Instrument, Varianten, Ladezustand, deaktivierte Regler,
 // live ohne Neustart, Stilwechsel lässt die Wahl stehen, Sprachen, Tastatur, 360 px.
 import { test, expect } from '@playwright/test';
+import { chooseStyle } from './style-helpers.js';
 
 const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view|group|timbre|voice|variant|chord|groove|meter)\.[A-Za-z.]+$/;
 const LAYERS = ['bass', 'chords', 'pad'];
@@ -70,7 +71,7 @@ test('je Instrument ein Dropdown Stimme, nach Art gruppiert; Standard ist Synth;
 test('Sample-Stimme wählen: Variantenfeld erscheint, Ladezustand bereit; zurück zu Synth blendet beides aus', async ({ page }) => {
   await voice(page, 'bass').selectOption('sample');
   await expect(variant(page, 'bass')).toBeVisible();
-  expect(await variant(page, 'bass').locator('option').evaluateAll((els) => els.map((e) => e.value))).toEqual(['finger', 'pick']);
+  expect(await variant(page, 'bass').locator('option').evaluateAll((els) => els.map((e) => e.value))).toEqual(['finger', 'pick', 'upright']);
   await expect(status(page, 'bass')).toHaveText('bereit', { timeout: 20_000 });
   await variant(page, 'bass').selectOption('pick');
   await expect(status(page, 'bass')).toHaveText('bereit', { timeout: 20_000 });
@@ -115,10 +116,43 @@ test('während der Wiedergabe wechseln: ohne Fehler, ohne neuen AudioContext, di
   await page.locator('#play-go').click();
 });
 
+test('Schlagzeug, Lead und Percussion: Dropdown Stimme (Synth, Samples), bei Samples das Variantenfeld mit allen Varianten', async ({ page }) => {
+  const VARIANTS = { drums: ['standard', 'brushes', 'rimshot', 'jazz', 'electronic', '808'], lead: ['flute', 'sax', 'synth'], percussion: ['studio'] };
+  for (const [layer, list] of Object.entries(VARIANTS)) {
+    await openGroup(page, layer);
+    expect(await voice(page, layer).locator('optgroup').evaluateAll((els) => els.map((e) => e.label))).toEqual(['Synthese', 'Samples']);
+    await expect(voice(page, layer)).toHaveValue('synth');
+    await voice(page, layer).selectOption('sample');
+    expect(await variant(page, layer).locator('option').evaluateAll((els) => els.map((e) => e.value))).toEqual(list);
+    // eine Variante (Percussion): kein Variantenfeld
+    if (list.length > 1) await expect(variant(page, layer)).toBeVisible();
+    else await expect(variant(page, layer)).toBeHidden();
+    await expect(status(page, layer)).toHaveText('bereit', { timeout: 20_000 });
+  }
+  // Sample-Kits benutzen nur den Raum; die übrigen Schlagzeugregler sind ausgegraut
+  await expect(slider(page, 'drums', 'kickPunch')).toBeDisabled();
+  await expect(slider(page, 'drums', 'room')).toBeEnabled();
+  await variant(page, 'drums').selectOption('rimshot'); // Rimshot lädt das Standard-Kit
+  await expect(status(page, 'drums')).toHaveText('bereit', { timeout: 20_000 });
+});
+
+test('während der Wiedergabe Schlagzeug auf Samples, Kit TR-808: läuft weiter, ein AudioContext, keine Fehler', async ({ page }) => {
+  await openGroup(page, 'drums');
+  await page.locator('#play-go').click();
+  await expect(page.locator('#play-go')).toHaveText('Stopp');
+  await voice(page, 'drums').selectOption('sample');
+  await variant(page, 'drums').selectOption('808');
+  await expect(status(page, 'drums')).toHaveText('bereit', { timeout: 20_000 });
+  await page.waitForTimeout(800);
+  await expect(page.locator('#play-go')).toHaveText('Stopp');
+  expect(await contexts(page)).toBe(1);
+  await page.locator('#play-go').click();
+});
+
 test('ein Stilwechsel lässt die gewählten Stimmen stehen', async ({ page }) => {
   await voice(page, 'bass').selectOption('sample');
   await voice(page, 'chords').selectOption('epiano');
-  await page.locator('#quick-pick [data-style="blues"]').click();
+  await chooseStyle(page, 'blues');
   await expect(voice(page, 'bass')).toHaveValue('sample');
   await expect(voice(page, 'chords')).toHaveValue('epiano');
 });

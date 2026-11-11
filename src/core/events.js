@@ -1,4 +1,4 @@
-// Ereignisstrom: Track -> zeitlich sortierte Ereignisse (Akkorde, Marker, Schlagzeug, Bass, Akkorde, Pad).
+// Ereignisstrom: Track -> zeitlich sortierte Ereignisse (Akkorde, Marker und die Schichten aus layers.js: Schlagzeug, Bass, Akkorde, Pad, Lead, Percussion).
 // Reine Logik ohne Audio: gleicher Track mit gleichem Seed ergibt denselben Strom.
 import { createRng } from './rng.js';
 import { chordTones, noteToPc } from './music.js';
@@ -6,34 +6,24 @@ import { CHORDS } from './chords.js';
 import { checkedTrack, barTimeline, r6 } from './timeline.js';
 import { resolveTags, driftParams } from './tags.js';
 import { buildArrangement } from './arrange.js';
+import { LAYER_IDS } from './layers.js';
 import { grooveFor, grooveCycle, levelOf, applyComplexity } from './grooves.js';
+import { at, note, humanVel } from './event-helpers.js';
+import { leadPlayer } from './lead.js';
+import { percussionPlayer } from './percussion.js';
 
 /** Schlagzeug-Vokabular (Task 6 ordnet jedem Namen eine Stimme zu); Geisternoten sind `snare` mit vel < 0.3. */
 export const DRUM_NAMES = ['kick', 'snare', 'hat', 'openHat', 'tomHigh', 'tomMid', 'tomLow'];
 
-const LAYERS = ['drums', 'bass', 'chords', 'pad'];
-const JITTER = 0.007; // typische Timing-Abweichung in s, Vertrag erlaubt höchstens 0.02
-const END_GAP = 0.001; // Abstand zum Taktende, damit auch gerundete Zeiten im Takt bleiben
+/** Percussion-Vokabular (Treffer der Schicht `percussion`). */
+export const PERCUSSION_NAMES = ['shaker', 'tambourine', 'congaHigh', 'congaLow', 'bongoHigh', 'bongoLow', 'claves', 'cowbell'];
+
 const BASS_MIN = 28;
 const BASS_MAX = 52;
 
-const r3 = (x) => Math.round(x * 1e3) / 1e3;
-const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
 // Mit dem Track-Schalter `variety` (params.variety) kommen die zusätzlichen Muster des Grooves in die Listen; die bisherigen Einträge
 // bleiben die ersten, ohne den Schalter ändert sich nichts (auch nicht, welche Zufallszahl welches Muster wählt)
 const pool = (base, extra, params) => (params.variety ? [...base, ...extra] : base);
-
-// Zeit eines Rasterschritts mit Swing und Jitter, bleibt in [Taktstart, Taktende)
-function at(b, step, rng, swing) {
-  const shift = b.sub === 4 && step % 2 ? (swing * b.stepSec) / 3 : 0; // swing 1 = Triolen-Gefühl; im Triolen-Raster trägt das Raster es selbst
-  const t = b.start + step * b.stepSec + shift + (rng.next() * 2 - 1) * JITTER;
-  return r6(clamp(t, b.start, b.end - END_GAP));
-}
-
-const humanVel = (base, rng) => r3(clamp(base * (0.94 + rng.next() * 0.12), 0.05, 1));
-
-const note = (b, layer, step, t, midi, vel, dur) =>
-  ({ t, bar: b.index, beat: step / b.sub, type: 'note', layer, midi, vel, dur: r6(Math.min(dur, b.end - t)) });
 
 const drumSection = (params, rng, g) => {
   const step = levelOf(params.drive, g.drums.thresholds);
@@ -150,6 +140,8 @@ const PLAYERS = {
   },
   chords: { section: chordsSection, play: playChords },
   pad: { section: () => null, play: playPad },
+  lead: leadPlayer,
+  percussion: percussionPlayer,
 };
 
 const RANK = { chord: 0, marker: 1 };
@@ -172,15 +164,15 @@ export function buildEvents(input) {
     const last = sec.start + sec.bars - 1;
     if (sec.fillAtEnd) events.push({ t: r6(bars[last].start), bar: last, type: 'marker', name: 'fill' });
   }
-  for (const layer of LAYERS) {
-    if (!track.layers[layer]) continue;
+  for (const layer of LAYER_IDS) {
+    if (!track.layers[layer] || !PLAYERS[layer]) continue; // ohne Spieler keine Ereignisse
     const rng = master.fork(layer); // eigener Zufall je Schicht, damit Schichten sich nicht verschieben
     const { section, play } = PLAYERS[layer];
     for (const sec of sections) {
       if (!sec.layers[layer]) continue;
-      const v = section(params, rng, g);
+      const v = section(params, rng, g, sec); // der Abschnitt selbst nur für Spieler, die ihre Lage darin brauchen (Lead-Fills)
       const last = sec.start + sec.bars - 1;
-      for (let i = sec.start; i <= last; i++) for (const e of play(bars[i], v, rng, params, sec.fillAtEnd && i === last, g)) events.push(e);
+      for (let i = sec.start; i <= last; i++) for (const e of play(bars[i], v, rng, params, sec.fillAtEnd && i === last, g, track.jobs[layer], track)) events.push(e);
     }
   }
   return events.sort((x, y) => x.t - y.t || (RANK[x.type] ?? 2) - (RANK[y.type] ?? 2));

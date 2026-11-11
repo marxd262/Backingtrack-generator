@@ -1,6 +1,7 @@
 // Griffbrett-Block der Spielseite: Rollen je Bund, Namen/Stufen, folgender Akkord, Textfassung, Breiten.
 import { test, expect } from '@playwright/test';
 import { addChordByName } from './chord-helpers.js';
+import { chooseStyle } from './style-helpers.js';
 
 const BAR_TIMEOUT = 10_000; // ein Takt bei 200 bpm dauert 1,2 s; unter Last großzügig
 const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view)\.[A-Za-z.]+$/;
@@ -43,7 +44,7 @@ async function setProgression(page, names) {
 }
 
 async function playFast(page) {
-  await page.locator('#quick-pick [data-style="funk"]').click();
+  await chooseStyle(page, 'funk');
   await page.locator('#tuning-tempo').fill('200');
   await playGo(page).click();
   await expect(position(page)).toHaveText(/^Takt 1 von \d+$/, { timeout: BAR_TIMEOUT });
@@ -213,7 +214,7 @@ test('Sprachwechsel: Legende, Schalter, Textfassung und Kopfzeile auf Englisch, 
 test('keine DOM-Schreibvorgänge im Griffbrett-Block über Takte ohne Akkordwechsel (Am Am Dm E, Takt 1 auf 2)', async ({ page }) => {
   await openPlayPage(page);
   await setProgression(page, ['Am', 'Am', 'Dm', 'E']);
-  await page.locator('#quick-pick [data-style="funk"]').click();
+  await chooseStyle(page, 'funk');
   await page.locator('#tuning-tempo').fill('200');
   // Stand, Takt 1 und Takt 2 zeigen alle Am mit folgendem Dm. Jede Mutation wird mit dem Takt markiert, der beim
   // Schreiben in der Kopfzeile steht (Beobachter laufen direkt nach dem render() dieses Takts): so ist das Fenster durch

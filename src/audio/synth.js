@@ -6,70 +6,33 @@ import { bassParams, drumParams, chordParams, padParams, masterParams } from './
 import { sliderGain } from './mix.js';
 import { createGuitarFx } from './guitar-fx.js';
 import { fxChainParams } from './fx-params.js';
-import { noiseBuffer, adsr, osc, gain } from './nodes.js';
+import { noiseBuffer, gain } from './nodes.js';
 import { createVoice } from './voices/index.js';
 import { completeVoices, VOICE_LAYERS } from '../core/voices.js';
+import { LAYERS, LAYER_IDS } from '../core/layers.js';
 
 // Schichtpegel und Summe, aus Messungen mit tests/e2e/levels.spec.js angeglichen (Messwerte dort im Kommentar)
-const TRIM = { drums: 0.65, bass: 0.24, chords: 1, pad: 0.8 };
+// trim: Pegel der Schicht; room: Teil der Summe in den Hall; echo: Echo (punktierte Achtel)
+// lead: gemessen mit tests/e2e/levels.spec.js (Job melody); percussion: ebenda (Job mixed), rms etwa ein Drittel des Schlagzeugs
+export const LAYER_AUDIO = Object.freeze(Object.fromEntries(Object.entries({
+  drums: { trim: 0.65, room: true },
+  bass: { trim: 0.24 },
+  chords: { trim: 1, echo: true },
+  pad: { trim: 0.8, echo: true },
+  lead: { trim: 0.5, echo: true },
+  percussion: { trim: 0.33, room: true },
+}).map(([k, v]) => [k, Object.freeze(v)])));
 const MASTER = 0.6;
-const TOMS = { tomHigh: 200, tomMid: 150, tomLow: 110 };
 
 const LEVEL_TC = 0.02; // Zeitkonstante der Pegelrampe (s), gegen Knacken
 
-// Schlagzeugstimmen; p aus drumParams (beim neutralen Klang die bisherigen Konstanten). Toms folgen dem Klangmodell nicht.
-function drumVoices(ctx, noise, p) {
-  const kick = (out, t, v) => {
-    const o = ctx.createOscillator(), a = ctx.createGain();
-    o.frequency.setValueAtTime(p.kickStart, t); o.frequency.exponentialRampToValueAtTime(p.kickEnd, t + p.kickDrop);
-    a.gain.setValueAtTime(v * p.kickPeak, t); a.gain.exponentialRampToValueAtTime(0.001, t + p.kickDecay);
-    o.connect(a).connect(out); o.start(t); o.stop(t + p.kickDecay + 0.05);
-    if (p.kickClick > 0) { // kurzer Anschlagklick aus Rauschen, nur wenn der Kick es verlangt
-      const n = ctx.createBufferSource(); n.buffer = noise;
-      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 3500;
-      const c = ctx.createGain(); adsr(c, t, 0.001, v * p.kickClick, 0, 0.012);
-      n.connect(lp).connect(c).connect(out); n.start(t); n.stop(t + 0.05);
-    }
-  };
-  const snare = (out, t, v) => {
-    const n = ctx.createBufferSource(); n.buffer = noise;
-    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = p.snareFreq; bp.Q.value = p.snareQ;
-    const a = ctx.createGain(); adsr(a, t, 0.001, v * p.snareNoise, 0.02, p.snareDecay);
-    n.connect(bp).connect(a).connect(out); n.start(t); n.stop(t + p.snareDecay + 0.09);
-    if (p.snareClick > 0) { // heller Anschlagklick, nur wenn die Snare es verlangt
-      const c = ctx.createBufferSource(); c.buffer = noise;
-      const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 5000;
-      const g = ctx.createGain(); adsr(g, t, 0.001, v * p.snareClick, 0, 0.025);
-      c.connect(hp).connect(g).connect(out); c.start(t); c.stop(t + 0.05);
-    }
-    const b = ctx.createGain(); adsr(b, t, 0.001, v * p.snareTone, 0.01, 0.1);
-    osc(ctx, 'triangle', 185, 0, b, t, t + 0.15); b.connect(out);
-  };
-  const hat = (open) => (out, t, v) => {
-    const hold = open ? 0.06 : 0.01, decay = open ? p.hatOpenDecay : p.hatClosedDecay;
-    const n = ctx.createBufferSource(); n.buffer = noise;
-    const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = p.hatFreq;
-    const a = ctx.createGain(); adsr(a, t, 0.001, v * p.hatPeak, hold, decay);
-    n.connect(hp).connect(a).connect(out); n.start(t); n.stop(t + Math.max(0.35, hold + decay + 0.05));
-  };
-  const tom = (f) => (out, t, v) => {
-    const o = ctx.createOscillator(), a = ctx.createGain();
-    o.frequency.setValueAtTime(f * 1.35, t); o.frequency.exponentialRampToValueAtTime(f, t + 0.14);
-    a.gain.setValueAtTime(v * 0.7, t); a.gain.exponentialRampToValueAtTime(0.001, t + 0.38);
-    o.connect(a).connect(out); o.start(t); o.stop(t + 0.42);
-  };
-  const voices = { kick, snare, hat: hat(false), openHat: hat(true) };
-  for (const [name, f] of Object.entries(TOMS)) voices[name] = tom(f);
-  return voices;
-}
-
 /**
- * Baut die Instrumente und die Summenkette (Trims, Master, Echo auf Akkorde/Pad, Hall, Begrenzer).
+ * Baut die Instrumente und die Summenkette (Trims, Master, Echo auf Akkorde, Pad und Lead, Hall, Begrenzer).
  * `output` verbindet der Aufrufer mit ctx.destination. `trigger(event, when)` mit when in ctx-Zeit.
  * `timbre` (Klangmodell, siehe core/timbre.js) wird mit DEFAULT_TIMBRE aufgefüllt; ungültig zählt wie fehlend.
  * setTimbre(timbre) stellt den Klang live um: neue Töne klingen sofort neu (die Stimmen lesen ihre Parameter beim Anschlag),
  * die festen Knoten (Hall, Echo, Helligkeit, Raum-Sendeweg, Summenpegel) folgen über Rampen; schon laufende Töne bleiben.
- * `levels` ({drums, bass, chords, pad}, je 0..1) und `master` (0..1) sind Reglerstellungen des Mischpults (mix.js), Standard 1;
+ * `levels` (je Schicht aus LAYER_IDS, je 0..1) und `master` (0..1) sind Reglerstellungen des Mischpults (mix.js), Standard 1;
  * setLevel/setMaster ändern sie live. Der Gesamtpegel liegt hinter dem Begrenzer und ändert dessen Verhalten nicht.
  */
 export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, timbre = DEFAULT_TIMBRE, levels = {}, master: masterLevel = 1, voices, tuning } = {}) {
@@ -87,7 +50,7 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
   const rng = createRng(1);
   const noise = noiseBuffer(ctx, rng.fork('noise'), 1);
 
-  for (const name of Object.keys(levels)) if (!Object.hasOwn(TRIM, name)) throw new Error(`Unknown layer: ${name}`);
+  for (const name of Object.keys(levels)) if (!Object.hasOwn(LAYER_AUDIO, name)) throw new Error(`Unknown layer: ${name}`);
 
   const master = ctx.createGain(); master.gain.value = MASTER * mix.level;
   // Hall: Rauschen aus dem Seed, exponentiell abklingend (2 s), als Impulsantwort
@@ -107,7 +70,7 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
   master.connect(bus);
   master.connect(reverb).connect(reverbWet).connect(bus);
 
-  // Echo (punktierte Achtel) nur für Akkorde und Pad, nach der Stummschaltung abgegriffen; 3 s reichen bis 20 bpm
+  // Echo (punktierte Achtel) nur für Akkorde, Pad und Lead (LAYER_AUDIO.echo), nach der Stummschaltung abgegriffen; 3 s reichen bis 20 bpm
   const echoTime = (b) => (60 / b) * 0.75;
   const delay = ctx.createDelay(3); delay.delayTime.value = echoTime(bpm);
   const fb = ctx.createGain(); fb.gain.value = mix.echoFeedback;
@@ -116,18 +79,17 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
   delay.connect(tone).connect(fb).connect(delay);
   tone.connect(echoWet).connect(master);
 
-  const drums = drumVoices(ctx, noise, drum);
   const roomSend = gain(ctx, drum.roomSend, reverb); // Raum-Sendeweg der Schlagzeugsumme in den Hall, immer vorhanden (0 = aus)
   // Wählbare Stimmen (core/voices.js): je Instrument eine Umsetzung, die setVoices austauscht; neue Töne klingen sofort in der neuen Stimme,
   // schon laufende Töne klingen in der alten aus. Feinwerte (Tuning) liest die Stimme beim Anschlag.
   const isRecord = (x) => typeof x === 'object' && x !== null && !Array.isArray(x);
-  const layerParams = { bass, chords: chord, pad };
+  const layerParams = { drums: drum, bass, chords: chord, pad, lead: {} };
   let chosen = completeVoices(voices);
   let tuningState = isRecord(tuning) ? tuning : {};
   const impl = {}, built = {};
   // Ladezustand der Stimmen (Samples laden ihr Pack beim Anlegen): 'none' (nichts zu laden), 'loading', 'ready', 'error'. Jede gebaute
   // Stimme hat eine eigene Nummer, damit eine überholte (schon gewechselte) Stimme den Zustand der neuen nicht überschreibt.
-  const status = { bass: 'none', chords: 'none', pad: 'none' }, generation = { bass: 0, chords: 0, pad: 0 };
+  const status = Object.fromEntries(VOICE_LAYERS.map((l) => [l, 'none'])), generation = Object.fromEntries(VOICE_LAYERS.map((l) => [l, 0]));
   const pending = new Set();
   // nur Instrumente neu bauen, deren Stimme sich geändert hat (der Zwischenspeicher und der Strum der anderen bleiben erhalten);
   // eine Stimme im Fehlerzustand wird beim erneuten Wählen neu gebaut, das versucht das Laden noch einmal
@@ -139,7 +101,7 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
       status[layer] = 'none';
       const mine = ++generation[layer];
       impl[layer] = createVoice(layer, chosen[layer], ctx, {
-        params: layerParams[layer], getTimbre: () => sound[layer], rng: rng.fork(`voice-${layer}`), getTuning: () => tuningState,
+        params: layerParams[layer], getTimbre: () => sound[layer], rng: rng.fork(`voice-${layer}`), noise, getTuning: () => tuningState,
         setStatus: (value) => { if (generation[layer] === mine) status[layer] = value; },
         track: (promise) => {
           const settled = promise.then(() => {}, () => {}); // nie abgelehnt: whenReady wartet nur, der Fehler gehört der Stimme
@@ -150,12 +112,8 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
     }
   };
   buildVoices();
-  const play = {
-    drums: (out, t, e) => e.type === 'hit' && drums[e.name]?.(out, t, e.vel),
-    bass: (out, t, e) => impl.bass(out, t, e),
-    chords: (out, t, e) => impl.chords(out, t, e),
-    pad: (out, t, e) => impl.pad(out, t, e),
-  };
+  // jede Schicht spielt die Ereignisse ihrer gewählten Stimme
+  const play = Object.fromEntries(LAYER_IDS.map((name) => [name, (out, t, e) => impl[name](out, t, e)]));
 
   // Lautstärke weich nachführen und am Ende exakt setzen (setTargetAtTime nähert sich nur an)
   const ramp = (g, value) => {
@@ -176,13 +134,13 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
     const mute = ctx.createGain();
     // Schichtpegel vor dem Trim: Hall-, Raum- und Echo-Sendewege hängen hinter dem Trim und folgen ihm
     const level = levelGains[name] = gainNode(levels[name] ?? 1);
-    const trim = ctx.createGain(); trim.gain.value = TRIM[name];
+    const trim = ctx.createGain(); trim.gain.value = LAYER_AUDIO[name].trim;
     mute.connect(level).connect(trim).connect(master);
     // room: Teil der Schlagzeugsumme in den Hall, hinter mute und trim abgegriffen (Stummschalten schaltet den Sendeweg mit stumm)
-    if (name === 'drums') trim.connect(roomSend);
-    if (name === 'chords' || name === 'pad') trim.connect(delay);
-    // Bass, Akkorde und Pad laufen durch ihre Verzerrerkette (Regler auf 0: unveränderter Durchgang); das Schlagzeug hat keine
-    const fx = name === 'drums' ? null : (guitarFx[name] = createGuitarFx(ctx, name, mute));
+    if (LAYER_AUDIO[name].room) trim.connect(roomSend);
+    if (LAYER_AUDIO[name].echo) trim.connect(delay);
+    // Schichten mit fx (Registry) laufen durch ihre Verzerrerkette (Regler auf 0: unveränderter Durchgang); Schlagzeug und Percussion haben keine
+    const fx = LAYERS[name].fx ? (guitarFx[name] = createGuitarFx(ctx, name, mute)) : null;
     layers[name] = {
       trigger(event, when) {
         if (event.layer === name) voice(fx ? fx.input : mute, when, event);

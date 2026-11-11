@@ -1,4 +1,4 @@
-// Verzerrerkette einer Schicht (Bass, Akkorde oder Pad) als feste Knotenkette hinter den Stimmen: Overdrive -> Distortion -> Fuzz -> Box.
+// Verzerrerkette einer Schicht (Bass, Akkorde, Pad oder Lead) als feste Knotenkette hinter den Stimmen: Overdrive -> Distortion -> Fuzz -> Box.
 // Verzerrt wird die Summe aller klingenden Töne (nicht jeder Ton für sich): Akkordtöne mischen sich in der Kappung, und der Pegel der
 // Hüllkurve steuert die Kappung, so wie die Gitarre den Verstärker. Die Kette entsteht erst beim ersten Regler über 0 und bleibt dann bis
 // dispose() bestehen; davor (und bei 0) geht das Signal unverändert durch einen Verstärkungsknoten mit 1. Werte und Vorbilder: fx-params.js.

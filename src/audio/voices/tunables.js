@@ -34,6 +34,32 @@ export const TUNABLES = deepFreeze({
   'chords/sample/epiano': { level: spec(0.05, 8, 0.05, 2.25), decay: spec(0.2, 10, 0.1, 3) },
   'pad/sample/strings': { level: spec(0.05, 8, 0.05, 1.95) },
   'pad/sample/warm': { level: spec(0.05, 8, 0.05, 1.15) },
+  // Neue Varianten, gleiches Verfahren (gemessen 2026-11-10, Track aus voices-sample-sound.spec.js, 8 s, Schicht allein, ohne Begrenzer; Lead mit Job
+  // melody, Percussion mit Job mixed): rms Sample / Synth bei level 1 (decay auf dem Maximum 10): upright 0.422, organ 1.096, muted 0.989, flute 0.413,
+  // sax 0.776, synth 0.232, Kits standard 0.832, brushes 0.850, rimshot 0.755, jazz 0.854, electronic 0.948, 808 1.400, percussion studio 0.518;
+  // mit decay 2.5 (upright) und 1.5 (muted) bei level 1: 0.334 und 0.839; level = 1 / Verhältnis, mit den ausgelieferten Werten 0.98 bis 1.02.
+  // Kits: die Balance der Schläge folgt der SoundFont, einzeln (rms je Schlag gegen den Synth-Schlag gleichen Namens, mit level) z. B. Snare 1.4
+  // bis 2.9, Hi-Hat 0.5 bis 1.7, Shaker 2.3, Tamburin 2.9, Kuhglocke 0.55
+  'bass/sample/upright': { level: spec(0.05, 8, 0.05, 3), decay: spec(0.2, 10, 0.1, 2.5) },
+  'chords/sample/organ': { level: spec(0.05, 8, 0.05, 0.9) },
+  'chords/sample/muted': { level: spec(0.05, 8, 0.05, 1.2), decay: spec(0.2, 10, 0.1, 1.5) },
+  // Jazz- und Funk-Gitarre (gemessen 2026-11-11, Track wie oben, rms Sample / Synth bei level 1.7 und decay 3: jazz 0.398, funk 1.930, steel 0.341, nylon 0.907, twelve 0.262; level = 1.7 / Verhältnis; mit den ausgelieferten Werten 0.91 bis 1.02);
+  // strum wie bei der Clean Guitar, ohne Entzerrer (Klang unbeurteilt, nicht gehört)
+  'chords/sample/jazz': { level: spec(0.05, 8, 0.05, 4.25), decay: spec(0.2, 10, 0.1, 3), strum: spec(0, 0.05, 0.002, 0.012) },
+  'chords/sample/steel': { level: spec(0.05, 8, 0.05, 5), decay: spec(0.2, 10, 0.1, 3), strum: spec(0, 0.05, 0.002, 0.012) },
+  'chords/sample/nylon': { level: spec(0.05, 8, 0.05, 1.85), decay: spec(0.2, 10, 0.1, 3), strum: spec(0, 0.05, 0.002, 0.012) },
+  'chords/sample/twelve': { level: spec(0.05, 8, 0.05, 6.5), decay: spec(0.2, 10, 0.1, 3), strum: spec(0, 0.05, 0.002, 0.012) },
+  'chords/sample/funk': { level: spec(0.05, 8, 0.05, 0.9), decay: spec(0.2, 10, 0.1, 3), strum: spec(0, 0.05, 0.002, 0.012) },
+  'lead/sample/flute': { level: spec(0.05, 8, 0.05, 2.4) },
+  'lead/sample/sax': { level: spec(0.05, 8, 0.05, 1.3) },
+  'lead/sample/synth': { level: spec(0.05, 8, 0.05, 4.3) },
+  'drums/sample/standard': { level: spec(0.05, 8, 0.05, 1.2) },
+  'drums/sample/brushes': { level: spec(0.05, 8, 0.05, 1.2) },
+  'drums/sample/rimshot': { level: spec(0.05, 8, 0.05, 1.3) },
+  'drums/sample/jazz': { level: spec(0.05, 8, 0.05, 1.15) },
+  'drums/sample/electronic': { level: spec(0.05, 8, 0.05, 1.05) },
+  'drums/sample/808': { level: spec(0.05, 8, 0.05, 0.7) },
+  'percussion/sample/studio': { level: spec(0.05, 8, 0.05, 1.95) },
   'chords/epiano/rhodes': {
     ratio: spec(0.5, 4, 0.01, 1), index: spec(0, 8, 0.05, 2.2), indexDecay: spec(0.05, 2, 0.01, 0.35), bell: spec(0, 1, 0.01, 0.2),
     bellRatio: spec(4, 20, 0.5, 14), decay: spec(0.2, 8, 0.1, 2.5), level: spec(0.1, 6, 0.05, 1.1),

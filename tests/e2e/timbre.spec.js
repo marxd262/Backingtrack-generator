@@ -3,6 +3,7 @@ import { test, expect } from '@playwright/test';
 import { STYLE_PRESETS } from '../../src/core/tags.js';
 import { DEFAULT_TIMBRE, resolveTimbre, resolveTrackTimbre } from '../../src/core/timbre.js';
 import { masterParams } from '../../src/audio/voice-params.js';
+import { chooseStyle, currentStyle } from './style-helpers.js';
 
 const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view|group|timbre)\.[A-Za-z.]+$/;
 const BAR_TIMEOUT = 10_000;
@@ -74,8 +75,8 @@ const currentTags = (page) => page.locator('#tags button[aria-pressed="true"]').
   return tags;
 });
 
-test('34 Regler in 5 Gruppen, alle beschriftet ohne rohen Schlüsselnamen', async ({ page }) => {
-  expect(FIELDS).toHaveLength(34);
+test('37 Regler in 6 Gruppen, alle beschriftet ohne rohen Schlüsselnamen', async ({ page }) => {
+  expect(FIELDS).toHaveLength(37);
   for (const [g, fields] of Object.entries(DEFAULT_TIMBRE)) {
     await expect(group(page, g), g).toHaveCount(1);
     await expect(group(page, g).locator('input[type="range"]'), g).toHaveCount(Object.keys(fields).length);
@@ -145,12 +146,12 @@ test('Zurücksetzen ist nur aktiv, wenn die Gruppe Überschreibungen hat', async
   await expect(reset).toBeDisabled();
 });
 
-test('Schnellauswahl leert die Überschreibungen', async ({ page }) => {
+test('Stilwahl (Werksprofil) leert die Überschreibungen', async ({ page }) => {
   await openGroup(page, 'bass');
   await slider(page, 'bass', 'fuzz').fill('80');
   const psych = STYLE_PRESETS.find((p) => p.id === 'psych');
-  await page.locator('#quick-pick [data-style="psych"]').click();
-  await expect(page.locator('#quick-pick [data-style="psych"]')).toHaveAttribute('aria-pressed', 'true');
+  await chooseStyle(page, 'psych');
+  expect(await currentStyle(page)).toBe('psych');
   await expect(slider(page, 'bass', 'fuzz')).toHaveValue(percent(resolveTimbre(psych.tags).bass.fuzz));
 });
 

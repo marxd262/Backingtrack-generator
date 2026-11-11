@@ -1,7 +1,8 @@
-// Verlauf: vier Spuren über alle Takte, ohne Text (Beschriftung sind die Schicht-Knöpfe daneben).
+// Verlauf: eine Spur je Schicht über alle Takte, ohne Text (Beschriftung sind die Schicht-Knöpfe daneben).
 import { fitCanvas, cssColors } from './canvas.js';
+import { LAYER_IDS } from '../core/layers.js';
 
-const LANES = ['drums', 'bass', 'chords', 'pad'];
+const LANES = LAYER_IDS;
 const SECTION = 8; // Abschnittsgrenze alle 8 Takte
 const summaries = new WeakMap();
 

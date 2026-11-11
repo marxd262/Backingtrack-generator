@@ -45,7 +45,7 @@
 </fieldset>
 
 <script type="module">
-import { compareRenders, renderOffline, renderNote } from '../audio/render.js';
+import { compareRenders, renderOffline, renderNote, NOTE_LAYERS } from '../audio/render.js';
 import { createInstruments } from '../audio/synth.js';
 import { play } from '../audio/play.js';
 import { STYLE_PRESETS } from '../core/tags.js';
@@ -64,7 +64,7 @@ let instruments = null;
 let noteCtx = null;
 
 const state = { voices: completeVoices(), tuning: {} };
-const NOTE = { bass: 40, chords: 57, pad: 60 };
+const NOTE = { bass: 40, chords: 57, pad: 60, lead: 72 };
 const name = (key, fallback) => de[key] ?? fallback;
 
 function stop() {
@@ -148,7 +148,7 @@ for (const layer of VOICE_LAYERS) {
   variantSelect.addEventListener('change', apply);
   const statusEl = el('span', { id: `status-${layer}`, ariaLive: 'polite' });
   statuses[layer] = statusEl;
-  const note = el('button', { id: `note-${layer}`, type: 'button', textContent: 'Ton anspielen' });
+  const note = el('button', { id: `note-${layer}`, type: 'button', textContent: 'Ton anspielen', hidden: !NOTE_LAYERS.includes(layer) }); // Schlagzeug und Percussion haben keine Töne
   note.addEventListener('click', async () => {
     note.disabled = true;
     try {

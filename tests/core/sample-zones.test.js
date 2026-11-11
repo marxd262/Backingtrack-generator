@@ -1,7 +1,7 @@
 // Zonenwahl und Umrechnungen des Samplers (rein): Ränder, Lücken, Überlappungen, Tonhöhe, Pegel, Helligkeit.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { pickZone, playbackRate, dbToGain, brightnessHz } from '../../src/audio/voices/sample-zones.js';
+import { pickZone, playbackRate, dbToGain, zoneGain, brightnessHz } from '../../src/audio/voices/sample-zones.js';
 
 const zone = (keyLo, keyHi, velLo = 0, velHi = 127, extra = {}) => ({ keyLo, keyHi, velLo, velHi, rootKey: 60, tuneCents: 0, ...extra });
 
@@ -63,4 +63,10 @@ test('brightnessHz: ab 0,5 durchsichtig (20 kHz), darunter streng fallend bis 40
   let last = Infinity;
   for (const v of [0.5, 0.4, 0.3, 0.2, 0.1, 0]) { const f = brightnessHz(v); assert.ok(f < last || v === 0.5, String(v)); last = f; }
   for (const bad of [NaN, undefined, -3, 9]) assert.ok(Number.isFinite(brightnessHz(bad)) && brightnessHz(bad) >= 400 && brightnessHz(bad) <= 20000);
+});
+
+test('zoneGain: negative Dämpfung zählt wie 0 dB (nie lauter als 1), positive dämpft wie dbToGain', () => {
+  assert.equal(zoneGain(-6), 1);
+  assert.equal(zoneGain(0), 1);
+  assert.equal(zoneGain(6), dbToGain(6));
 });

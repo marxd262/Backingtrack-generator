@@ -1,6 +1,7 @@
-// Spielseite (über Feintuning geöffnet): Schnellauswahl, Schlagworte, Tempo, Länge, Schichten, Verlauf, Akkordfolge, Akkordrad.
+// Spielseite (über Feintuning geöffnet): Schlagworte, Tempo, Länge, Schichten, Verlauf, Akkordfolge, Akkordrad.
 import { test, expect } from '@playwright/test';
 import { addChordByName } from './chord-helpers.js';
+import { chooseStyle, currentStyle } from './style-helpers.js';
 import { layoutWheel } from '../../src/ui/wheel-geometry.js';
 import { STYLE_PRESETS, TAG_CATEGORIES } from '../../src/core/tags.js';
 
@@ -114,12 +115,10 @@ test('Feintuning öffnet die Spielseite, zurück zur Startseite: Navigation ohne
   await expect(tuneBtn(page)).toBeFocused();
 });
 
-test('Schnellauswahl Träumerisch belegt Schlagworte und 80 bpm vor', async ({ page }) => {
+test('Werksprofil Träumerisch belegt Schlagworte und 80 bpm vor', async ({ page }) => {
   await openPlayPage(page);
-  const pick = page.locator('#quick-pick button');
-  await expect(pick).toHaveCount(STYLE_PRESETS.length);
-  await expect(page.locator('#quick-pick [data-style="funk"]')).toHaveAttribute('aria-pressed', 'true');
-  await page.locator('#quick-pick').getByRole('button', { name: /Träumerisch/ }).click();
+  expect(await currentStyle(page)).toBe('funk');
+  await chooseStyle(page, 'dreamy');
   // Klang-Schlagworte des Stils (drumSound, bassSound, chordSound, padSound) gehören seit der Klangformung zur Vorlage
   expect(await pressedTags(page)).toEqual([
     'bass.calm', 'bassSound.round', 'chordSound.mellow', 'development.buildsSlowly', 'drumSound.roomy', 'drums.halftime', 'drums.loose',
@@ -127,16 +126,7 @@ test('Schnellauswahl Träumerisch belegt Schlagworte und 80 bpm vor', async ({ p
   ]);
   await expect(page.locator('#tuning-tempo-out')).toHaveText('80');
   await expect(page.locator('#tempo-btn')).toHaveText('80 bpm');
-  await expect(page.locator('#quick-pick [data-style="dreamy"]')).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.locator('#quick-pick [aria-pressed="true"]')).toHaveCount(1);
-  // eigene Änderung: keine Vorlage passt mehr
-  await page.locator('#tags [data-tag="bright"]').click();
-  await expect(page.locator('#quick-pick [aria-pressed="true"]')).toHaveCount(0);
-  await page.locator('#tags [data-tag="bright"]').click();
-  await expect(page.locator('#quick-pick [data-style="dreamy"]')).toHaveAttribute('aria-pressed', 'true');
-  // Tempo weicht ab: ebenfalls keine Vorlage
-  await page.locator('#tuning-tempo').fill('81');
-  await expect(page.locator('#quick-pick [aria-pressed="true"]')).toHaveCount(0);
+  expect(await currentStyle(page)).toBe('dreamy');
 });
 
 test('Schlagworte nach Kategorien, mehrere pro Kategorie wählbar', async ({ page }) => {
@@ -219,9 +209,10 @@ test('Länge ändert die Gesamtzahl in der Taktzeile, auch während der Wiederga
 test('Schichten: Knöpfe schalten live, alle aus läuft weiter', async ({ page }) => {
   await openPlayPage(page);
   const layers = page.locator('#lane-buttons button');
-  await expect(layers).toHaveCount(4);
-  expect(await layers.allTextContents()).toEqual(['Schlagzeug', 'Bass', 'Akkorde', 'Pad']);
-  for (const b of await layers.all()) await expect(b).toHaveAttribute('aria-pressed', 'true');
+  await expect(layers).toHaveCount(6);
+  expect(await layers.allTextContents()).toEqual(['Schlagzeug', 'Bass', 'Akkorde', 'Pad', 'Lead', 'Percussion']);
+  // Percussion startet aus, alle anderen an
+  for (const [i, b] of (await layers.all()).entries()) await expect(b).toHaveAttribute('aria-pressed', String(i !== 5));
   await playFast(page);
   await expect(position(page)).toHaveText('Takt 2 von 96', { timeout: BAR_TIMEOUT });
   await layers.nth(0).click();
@@ -233,7 +224,7 @@ test('Schichten: Knöpfe schalten live, alle aus läuft weiter', async ({ page }
   await expect(layers.nth(0)).toHaveAttribute('aria-pressed', 'true');
   await playGo(page).click();
 
-  for (const b of await layers.all()) await b.click();
+  for (const b of (await layers.all()).slice(0, 5)) await b.click();
   for (const b of await layers.all()) await expect(b).toHaveAttribute('aria-pressed', 'false');
   await playGo(page).click();
   await expect(playGo(page)).toHaveText('Stopp');
@@ -363,7 +354,7 @@ test('Live-Region: Hinweis bleibt bei Taktwechseln still, zweite Ablehnung melde
       .observe(document.querySelector('#tuning-message'), { childList: true, characterData: true, subtree: true });
     // Bedienelemente, die sich beim Taktwechsel nicht ändern: nichts neu schreiben
     const quiet = new MutationObserver((list) => { window.__controls += list.length; });
-    for (const id of ['#tags', '#quick-pick', '#lane-buttons', '#length', '#add-chords', '#play-title', '#play-back',
+    for (const id of ['#tags', '#lane-buttons', '#length', '#add-chords', '#play-title', '#play-back',
       '#play-variant', '#side-key-chips', '#side-scale-chips', '#side-left-title', '#side-right-title']) {
       quiet.observe(document.querySelector(id), { childList: true, characterData: true, subtree: true, attributes: true });
     }
@@ -387,7 +378,7 @@ test('eigene Folge übersteht Stilwahl, Variante und Tonart leiten neu ab', asyn
   await addChordByName(page, 'C');
   const edited = await shownChords(page);
   expect(edited).toHaveLength(6);
-  await page.locator('#quick-pick [data-style="psych"]').click();
+  await chooseStyle(page, 'psych');
   await expect(page.locator('#style-btn')).toHaveText('Psychedelischer Indie');
   expect(await shownChords(page)).toEqual(edited);
   // Variante und Tonart im Startsatz wählen: zurück zur Startseite und wieder hin
@@ -481,25 +472,12 @@ test('Schlagworte: die vier Klang-Gruppen stehen in beiden Sprachen übersetzt i
   }
 });
 
-test('Schnellauswahl: jeder Stil wählt genau seine Schlagworte in allen zehn Gruppen, eine Klang-Änderung löst die Markierung', async ({ page }) => {
+test('Werksprofile: jeder Stil wählt genau seine Schlagworte in allen zehn Gruppen', async ({ page }) => {
   await openPlayPage(page);
   for (const preset of STYLE_PRESETS) {
-    const button = page.locator(`#quick-pick [data-style="${preset.id}"]`);
-    await button.click();
-    await expect(button, preset.id).toHaveAttribute('aria-pressed', 'true');
-    await expect(page.locator('#quick-pick [aria-pressed="true"]')).toHaveCount(1);
+    await chooseStyle(page, preset.id);
+    expect(await currentStyle(page), preset.id).toBe(preset.id);
     expect(await pressedTags(page), preset.id).toEqual(presetPressed(preset));
-    // ein Klang-Schlagwort außerhalb des Stils: keine Vorlage passt mehr, zurück: wieder gedrückt
-    const extra = page.locator('#tags [data-category="padSound"][data-tag="thick"]');
-    await extra.click();
-    await expect(page.locator('#quick-pick [aria-pressed="true"]'), `${preset.id} + thick`).toHaveCount(0);
-    await extra.click();
-    await expect(button, `${preset.id} ohne thick`).toHaveAttribute('aria-pressed', 'true');
-    // ein Klang-Schlagwort des Stils abwählen löst ebenfalls
-    const own = (TAG_CATEGORIES.map(({ id }) => [id, preset.tags[id] ?? []]).find(([id, list]) => id.endsWith('Sound') && list.length));
-    const chip = page.locator(`#tags [data-category="${own[0]}"][data-tag="${own[1][0]}"]`);
-    await chip.click();
-    await expect(page.locator('#quick-pick [aria-pressed="true"]'), `${preset.id} ohne ${own[1][0]}`).toHaveCount(0);
   }
 });
 
@@ -576,7 +554,7 @@ test('Funk-Vorlage im zweiten Teil: Klang-Schlagwort, Muster-Schlagwort und Stil
   test.setTimeout(60_000);
   await countContexts(page);
   await openPlayPage(page);
-  await expect(page.locator('#quick-pick [data-style="funk"]')).toHaveAttribute('aria-pressed', 'true');
+  expect(await currentStyle(page)).toBe('funk');
   await playFast(page);
   // funk baut langsam auf: Akkorde oder Pad setzen erst ab Takt 9 ein (200 bpm: 1,2 s je Takt)
   await expect.poll(() => shownBar(page), { timeout: 20_000 }).toBeGreaterThanOrEqual(9);
@@ -599,11 +577,12 @@ test('Funk-Vorlage im zweiten Teil: Klang-Schlagwort, Muster-Schlagwort und Stil
   await expect(page.locator('#tags [data-category="drums"][data-tag="driving"]')).toHaveAttribute('aria-pressed', 'false');
   await expectContinuous(page, before, 'driving');
   expect(await sets(), 'driving: kein neuer Instrumentensatz').toBe(1);
-  // Stil aus der Schnellauswahl: Tempo, Schlagworte und Klang werden live übernommen
+  // Stil aus den Werksprofilen: Tempo, Schlagworte und Klang werden live übernommen
   before = await shownBar(page);
   await positionsSince(page);
-  await page.locator('#quick-pick [data-style="funk"]').click();
-  await expect(page.locator('#quick-pick [data-style="funk"]')).toHaveAttribute('aria-pressed', 'true');
+  await chooseStyle(page, 'funk');
+  // der Stil war schon funk: den Beweis tragen die Schlagworte (driving war abgewählt) und das Tempo (vorher 200)
+  expect(await pressedTags(page)).toEqual(presetPressed(STYLE_PRESETS.find((p) => p.id === 'funk')));
   await expectContinuous(page, before, 'funk');
   expect(await sets(), 'funk: kein neuer Instrumentensatz').toBe(1);
   await expect(page.locator('#tuning-tempo')).toHaveValue('100');

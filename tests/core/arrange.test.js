@@ -81,9 +81,18 @@ test('gleicher Seed ergibt gleiches Ergebnis, verschiedene Seeds variieren bei s
 test('slow: Bass und Schlagzeug ab Abschnitt 0, dann eines von Akkorden/Pad, ab Abschnitt 2 alles (Seeds 1..50)', () => {
   for (let seed = 1; seed <= 50; seed++) {
     const { sections } = build(40, 'slow', seed);
-    assert.deepEqual(sections[0].layers, { drums: true, bass: true, chords: false, pad: false }, `seed ${seed}`);
+    assert.deepEqual(sections[0].layers, { drums: true, bass: true, chords: false, pad: false, lead: false, percussion: true }, `seed ${seed}`);
     assert.equal(active(sections[1]), 3, `seed ${seed}`);
     for (const s of sections.slice(2)) assert.equal(active(s), 4, `seed ${seed}`);
+  }
+});
+
+test('lead spielt, wo die Akkorde spielen, percussion, wo das Schlagzeug spielt', () => {
+  for (const buildUp of ['slow', 'normal', 'instant']) {
+    for (const s of build(40, buildUp, 3).sections) {
+      assert.equal(s.layers.lead, s.layers.chords, buildUp);
+      assert.equal(s.layers.percussion, s.layers.drums, buildUp);
+    }
   }
 });
 

@@ -3,16 +3,17 @@
 //   Bass:    cutoff -> Tiefpass
 //   Akkorde: brightness -> Tiefpass, length -> Zeiten der Hüllkurve
 //   Pad:     cutoff -> Tiefpass, attack -> Einsatzzeit
-// Feinwerte (level; decay als zusätzliches Abklingen bei Bass, Gitarre und E-Piano; bei der Gitarre strum und ein Entzerrer lowDb, midDb,
+//   Lead:    keine (nur die Verzerrer hinter der Stimme)
+// Feinwerte (level; decay als zusätzliches Abklingen bei Bass (finger, pick, upright), Gitarre, E-Piano und gedämpfter Gitarre; bei der Gitarre strum und ein Entzerrer lowDb, midDb,
 // midHz, highDb, highHz gegen die nasale Mitte des Presets): tunables.js.
 import { loadPack, peekPack, playNote, buffersFor } from './sampler.js';
 import { brightnessHz } from './sample-zones.js';
 
 /**
- * deps: { getTimbre, tuned, classic (Rückfall-Stimme), setStatus('loading'|'ready'|'error'), track (Promise-Sammler: track(promise)) }.
- * Der Status gehört dem Aufrufer (createInstruments); diese Stimme meldet nur.
+ * Lädt das Pack für eine Stimme und meldet den Zustand ('loading'|'ready'|'error') über setStatus, den Ladevorgang über track (Promise-Sammler).
+ * Ergebnis: () => Pack oder null (noch nicht geladen oder gescheitert). Auch für die Schlag-Stimmen (sample-hits.js).
  */
-export function sampleVoice(packId, layer, ctx, { getTimbre, tuned, classic, setStatus, track }) {
+export function watchPack(packId, ctx, { setStatus, track }) {
   let pack = peekPack(packId) ?? null;
   if (pack) {
     buffersFor(ctx, pack); // einmal je Kontext in AudioBuffer umrechnen, nicht erst bei der ersten Note im Planerlauf
@@ -24,10 +25,20 @@ export function sampleVoice(packId, layer, ctx, { getTimbre, tuned, classic, set
       () => { setStatus('error'); },
     ));
   }
+  return () => pack;
+}
+
+/**
+ * deps: { getTimbre, tuned, classic (Rückfall-Stimme), setStatus('loading'|'ready'|'error'), track (Promise-Sammler: track(promise)) }.
+ * Der Status gehört dem Aufrufer (createInstruments); diese Stimme meldet nur.
+ */
+export function sampleVoice(packId, layer, ctx, { getTimbre, tuned, classic, setStatus, track }) {
+  const current = watchPack(packId, ctx, { setStatus, track });
   let lastSong = -Infinity, strumIndex = 0;
 
   return (out, t, e) => {
     if (e.type !== 'note') return;
+    const pack = current();
     if (!pack) { classic(out, t, e); return; }
     const timbre = getTimbre();
     let timeScale = 1, filter = 20000, when = t;
@@ -41,7 +52,7 @@ export function sampleVoice(packId, layer, ctx, { getTimbre, tuned, classic, set
         lastSong = song;
         when = t + strumIndex * tuned('strum');
       }
-    } else {
+    } else if (layer === 'pad') {
       filter = brightnessHz(timbre.cutoff);
       timeScale = 3 ** ((timbre.attack - 0.5) * 2);
     }

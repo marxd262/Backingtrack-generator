@@ -1,6 +1,6 @@
 // Sampler: lädt Sample-Packs (siehe scripts/extract-samples.mjs) und spielt Noten daraus. Kein eigener Zustand außer den Zwischenspeichern;
 // die Stimme (sample.js) entscheidet, wann geladen wird und was bis dahin spielt.
-import { pickZone, playbackRate, dbToGain } from './sample-zones.js';
+import { pickZone, playbackRate, dbToGain, zoneGain } from './sample-zones.js';
 
 const LOAD_TIMEOUT_MS = 30_000;
 const loading = new Map(); // id -> Promise<Pack> (laufende und fertige Ladevorgänge, je Seite einmal)
@@ -62,10 +62,10 @@ const MAX_RELEASE = 2; // s, die Presets haben bis zu 4,5 s (Pads würden in den
  * `gain` ist der Pegel der Stimme, `filter` (Hz) ein Tiefpass danach (>= 20000: kein Filterknoten), `naturalDecay` (s bis -60 dB, 0 = aus) ein
  * zusätzliches Abklingen für gezupfte Instrumente: die Presets halten ihren Schleifenton fast ohne Abfall, das klänge bei langen Noten wie eine Orgel.
  * `eq` ({ lowDb, midDb, midHz, highDb, highHz }, oder null) entzerrt den Klang: Tiefenregal bei 200 Hz, Glocke bei midHz, Höhenregal ab highHz; Stufen
- * mit weniger als 0,05 dB entfallen; davor ein Hochpass bei 50 Hz. Nach dem Ausklingen stoppt die Quelle.
+ * mit weniger als 0,05 dB entfallen; davor ein Hochpass bei 50 Hz. Nach dem Ausklingen stoppt die Quelle. `zone` (optional) spielt diese Zone statt
+ * der nach Ton und Anschlag gewählten (Schläge: sample-hits.js).
  */
-export function playNote(ctx, out, t, { pack, midi, dur, vel, gain = 1, timeScale = 1, filter = 20000, naturalDecay = 0, eq = null }) {
-  const zone = pickZone(pack.meta.zones, midi, vel);
+export function playNote(ctx, out, t, { pack, midi, dur, vel, zone = pickZone(pack.meta.zones, midi, vel), gain = 1, timeScale = 1, filter = 20000, naturalDecay = 0, eq = null }) {
   if (!zone) return;
   const sample = pack.meta.samples[zone.sample];
   const src = ctx.createBufferSource();
@@ -74,7 +74,7 @@ export function playNote(ctx, out, t, { pack, midi, dur, vel, gain = 1, timeScal
   if (zone.loop) { src.loop = true; src.loopStart = sample.loopStart / sample.rate; src.loopEnd = sample.loopEnd / sample.rate; }
 
   const velocity = Number.isFinite(vel) ? Math.min(1, Math.max(0, vel)) : 1; // ungültig zählt wie kräftig (wie bei der Zonenwahl)
-  const peak = Math.max(FLOOR, gain * dbToGain(zone.attenuationDb) * velocity);
+  const peak = Math.max(FLOOR, gain * zoneGain(zone.attenuationDb) * velocity);
   const sustain = Math.max(FLOOR, peak * dbToGain(zone.sustainDb));
   const attack = Math.max(0.003, zone.attack * timeScale), decay = Math.max(0.001, zone.decay * timeScale);
   const release = Math.min(MAX_RELEASE, Math.max(MIN_RELEASE, zone.release * timeScale));

@@ -83,12 +83,15 @@
       </div>
       <div class="play-toggles">
         <button type="button" class="chip" id="mixer-btn" popovertarget="mixer-pop" aria-haspopup="dialog" aria-expanded="false" aria-controls="mixer-pop" data-i18n="ui.mixer"></button>
+        <button type="button" class="chip" id="profiles-btn" popovertarget="profiles-pop" aria-haspopup="dialog" aria-expanded="false" aria-controls="profiles-pop" data-i18n="ui.profiles"></button>
         <button type="button" class="chip side-toggle" id="toggle-left" aria-expanded="false" aria-controls="side-left" data-i18n="ui.sidebarSound"></button>
         <button type="button" class="chip side-toggle" id="toggle-right" aria-expanded="false" aria-controls="side-right" data-i18n="ui.sidebarChords"></button>
       </div>
       <p class="message" id="play-message" aria-live="polite"></p>
       <!-- Mischpult: Regler und Stummtasten baut mixer.js; die Tasten teilen den Zustand mit den Schichtknöpfen über dem Verlauf -->
       <div class="pop" id="mixer-pop" popover role="dialog" aria-labelledby="mixer-btn"><div class="mixer" id="mixer"></div></div>
+      <!-- Profile: Baum (Aktuelle Sitzung, Werksprofile, Meine Profile) und Feld zur Auswahl; baut profiles.js -->
+      <div class="pop" id="profiles-pop" popover role="dialog" aria-labelledby="profiles-btn"><div class="profiles" id="profiles"></div></div>
     </div>
 
     <div class="stage">
@@ -135,8 +138,6 @@
         </div>
         <details class="group" data-group="style">
           <summary data-i18n="group.style"></summary>
-          <h4 class="label" id="quick-title" data-i18n="ui.quickPick"></h4>
-          <div class="chips" id="quick-pick" role="group" aria-labelledby="quick-title"></div>
           <h4 class="label" data-i18n="ui.tags"></h4>
           <div id="tags"></div>
         </details>

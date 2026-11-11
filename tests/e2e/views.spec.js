@@ -83,7 +83,7 @@ for (const [name, id] of [['Griffbrett', 'fretboard'], ['Akkordrad', 'wheel']]) 
     await expect(block(page, id)).toHaveAttribute('hidden', '');
     await expect(page.getByRole('heading', { name, exact: true })).toHaveCount(0);
     await expect(block(page, 'lanes')).toBeVisible();
-    await expect(page.locator('#lane-buttons button')).toHaveCount(4);
+    await expect(page.locator('#lane-buttons button')).toHaveCount(6);
     await expect(page.locator('#lane-buttons button').first()).toBeVisible();
     expect((await savedLayout(page)).views[id]).toBe(false);
     await switchOf(page, name).check();

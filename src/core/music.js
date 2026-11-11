@@ -23,6 +23,8 @@ const MODES = {
 // Namen für Beschriftungen (i18n) und deren Tests
 export const SCALE_NAMES = Object.keys(SCALES);
 export const MODE_NAMES = Object.keys(MODES);
+// Skala ist nur Oberflächen-Zustand; der Generator kennt nur den Modus
+export const SCALE_MODE = { minorPentatonic: 'minor', majorPentatonic: 'major', blues: 'minor', dorian: 'dorian' };
 
 const LETTER_PC = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
 const SHARP_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];

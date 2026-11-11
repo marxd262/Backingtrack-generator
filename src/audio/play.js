@@ -19,7 +19,7 @@ const FADE = 0.05;
  * Ereignisse an die Rückrufe tragen `bar` und `t` (Liedzeit beim Originaltempo) über alle Durchläufe.
  * startBar (ganze Zahl 0..length-1, Standard 0): beginnt mit diesem Takt; frühere Ereignisse entfallen, `bar` und `t` zählen ab
  * dort wie beim Durchspielen weiter, der angefangene Durchlauf zählt als erster. startPerf ist der Beginn des ersten gespielten Takts.
- * levels ({drums, bass, chords, pad}, je 0..1, fehlend 1) und master (0..1) sind die Reglerstellungen des Mischpults von Beginn an;
+ * levels (je Schicht aus LAYER_IDS, je 0..1, fehlend 1) und master (0..1) sind die Reglerstellungen des Mischpults von Beginn an;
  * ungültig wirft RangeError (unbekannte Schicht Error) noch vor dem ersten Ton.
  */
 export function play(ctx, trackInput, { loops = 1, startBar = 0, levels, master, onEvent, onBar, onEnd, createInstruments = synthInstruments } = {}) {

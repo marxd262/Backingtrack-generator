@@ -3,6 +3,7 @@
 // gebauten Dateien liegen im Repository, zur Laufzeit wird weder dieses Skript noch ffmpeg gebraucht.
 //
 // Aufruf: node scripts/extract-samples.mjs <MuseScore_General.sf3> [ausgabeordner]
+// Packs: siehe PACKS unten (Bass, Akkorde, Pads, Leads, fünf Schlagzeug-Kits, Percussion; Schlagzeug und Percussion nur mit den benutzten Tasten).
 // Quelle: https://ftp.osuosl.org/pub/musescore/soundfont/MuseScore_General/MuseScore_General.sf3 (MIT, Lizenztext: src/assets/samples/LICENSE-MuseScore_General.md)
 // Voraussetzung: ffmpeg im Pfad (dekodiert die Ogg-Vorbis-Samples der .sf3).
 import { execFileSync } from 'node:child_process';
@@ -10,14 +11,32 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { readSoundFont } from './soundfont.mjs';
 
-// Pack-ID -> General-MIDI-Programm (Bank 0)
+// Pack-ID -> Preset der SoundFont (Bank, Programm) und optional die Tasten, die behalten werden (Schlagzeug: nur die benutzten Hits)
+const DRUM_KEYS = [35, 36, 37, 38, 41, 42, 43, 44, 46, 47, 50];
 export const PACKS = {
-  'bass-finger': 33, // Fingered Bass
-  'bass-pick': 34, // Picked Bass
-  'chords-guitar': 27, // Clean Guitar
-  'chords-epiano': 4, // Tine Electric Piano
-  'pad-strings': 48, // Strings Fast
-  'pad-warm': 89, // Warm Pad
+  'bass-finger': { bank: 0, program: 33 }, // Fingered Bass
+  'bass-pick': { bank: 0, program: 34 }, // Picked Bass
+  'bass-upright': { bank: 0, program: 32 }, // Acoustic Bass
+  'chords-guitar': { bank: 0, program: 27 }, // Clean Guitar
+  'chords-epiano': { bank: 0, program: 4 }, // Tine Electric Piano
+  'chords-organ': { bank: 0, program: 16 }, // Drawbar Organ
+  'chords-muted': { bank: 0, program: 28 }, // Palm Muted Guitar
+  'chords-jazz': { bank: 0, program: 26 }, // Jazz Guitar
+  'chords-funk': { bank: 8, program: 28 }, // Funk Guitar
+  'chords-steel': { bank: 0, program: 25 }, // Steel String Guitar
+  'chords-nylon': { bank: 0, program: 24 }, // Nylon String Guitar
+  'chords-twelve': { bank: 8, program: 25 }, // 12-String Guitar
+  'pad-strings': { bank: 0, program: 48 }, // Strings Fast
+  'pad-warm': { bank: 0, program: 89 }, // Warm Pad
+  'lead-flute': { bank: 0, program: 73 }, // Flute
+  'lead-sax': { bank: 0, program: 65 }, // Alto Sax
+  'lead-synth': { bank: 0, program: 81 }, // Saw Lead
+  'drums-standard': { bank: 128, program: 0, keys: DRUM_KEYS }, // Standard
+  'drums-brushes': { bank: 128, program: 40, keys: DRUM_KEYS }, // Brush
+  'drums-jazz': { bank: 128, program: 32, keys: DRUM_KEYS }, // Jazz
+  'drums-electronic': { bank: 128, program: 24, keys: DRUM_KEYS }, // Electronic
+  'drums-808': { bank: 128, program: 25, keys: DRUM_KEYS }, // TR-808
+  'percussion-studio': { bank: 128, program: 0, keys: [54, 56, 60, 61, 63, 64, 75, 82] }, // Standard: Tamburin, Kuhglocke, Bongos, Congas, Claves
 };
 
 // Timecents in Sekunden; der Standardwert -12000 (und alles darunter) bedeutet "sofort"
@@ -28,13 +47,14 @@ function decode(ogg) {
   return execFileSync('ffmpeg', ['-v', 'error', '-i', 'pipe:0', '-f', 's16le', '-ac', '1', 'pipe:1'], { input: ogg, maxBuffer: 256 * 1024 * 1024 });
 }
 
-export function buildPack(sf, id, program) {
-  const preset = sf.presets.find((p) => p.bank === 0 && p.program === program);
-  if (!preset) throw new Error(`Kein Preset für Programm ${program}`);
+export function buildPack(sf, id, { bank, program, keys }) {
+  const preset = sf.presets.find((p) => p.bank === bank && p.program === program);
+  if (!preset) throw new Error(`Kein Preset für Bank ${bank}, Programm ${program}`);
   // Stereo-Paare (links und rechts mit gleichem Tasten- und Anschlagbereich) liefern zwei Zonen; die Wahl nimmt immer die erste, die
   // zweite wäre nur Ballast im Download (pad-strings: halbe Größe)
   const seen = new Set();
-  const zones = sf.resolve(preset).filter((z) => {
+  // keys: nur Zonen behalten, deren Tastenbereich eine der Tasten enthält; nicht benutzte Samples fallen mit weg (order kommt aus den Zonen)
+  const zones = sf.resolve(preset).filter((z) => !keys || keys.some((k) => z.key[0] <= k && k <= z.key[1])).filter((z) => {
     const range = `${z.key}|${z.vel}`;
     if (seen.has(range)) return false;
     seen.add(range);
@@ -81,8 +101,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const dir = outArg ?? fileURLToPath(new URL('../src/assets/samples/', import.meta.url));
   mkdirSync(dir, { recursive: true });
   const sf = readSoundFont(sfPath);
-  for (const [id, program] of Object.entries(PACKS)) {
-    const { meta, pcm } = buildPack(sf, id, program);
+  for (const [id, spec] of Object.entries(PACKS)) {
+    const { meta, pcm } = buildPack(sf, id, spec);
     writeFileSync(`${dir}/${id}.json`, `${JSON.stringify(meta)}\n`);
     writeFileSync(`${dir}/${id}.pcm`, pcm);
     console.log(`${id}: ${meta.name}, ${meta.samples.length} Samples, ${meta.zones.length} Zonen, ${(pcm.length / 1048576).toFixed(2)} MB`);

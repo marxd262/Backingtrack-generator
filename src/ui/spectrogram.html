@@ -23,10 +23,10 @@
 <canvas id="plot" width="1000" height="520"></canvas>
 <pre id="metrics"></pre>
 <script type="module">
-import { renderNote } from '../audio/render.js';
+import { renderNote, NOTE_LAYERS } from '../audio/render.js';
 import { stft, harmonicTracks, attackTime, pitchCents } from '../audio/analysis.js';
 import { spectralCentroid } from '../audio/spectrum.js';
-import { VOICE_LAYERS, isVoice, VOICES } from '../core/voices.js';
+import { isVoice, VOICES } from '../core/voices.js';
 
 const SR = 44100;
 const q = new URLSearchParams(location.search);
@@ -35,7 +35,7 @@ const num = (name, fallback, lo, hi) => {
   const v = raw === null || raw === '' ? NaN : Number(raw);
   return Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : fallback;
 };
-const layerOk = VOICE_LAYERS.includes(q.get('layer'));
+const layerOk = NOTE_LAYERS.includes(q.get('layer')); // Schlagzeug und Percussion haben keine Töne: Standard und Hinweis im Titel
 const layer = layerOk ? q.get('layer') : 'chords';
 const midi = num('midi', 57, 12, 120);
 const id = q.get('id') ?? 'synth';
