@@ -1,7 +1,7 @@
 // Songform-Oberfläche, reine Helfer ohne DOM: Geometrie der Blöcke, Beschriftungen und die Bearbeitungen der Teile (Form rein, Form raus).
 // Jede Bearbeitung liefert { form, index } (index = neue Auswahl) oder null, wenn sie nicht erlaubt ist. Der Aufrufer setzt Länge und Zustand.
 import { t } from '../i18n/index.js';
-import { PART_TYPES, FORM_LIMITS, resolveSection } from '../core/form-types.js';
+import { PART_TYPES, TRANSITIONS, FORM_LIMITS, resolveSection } from '../core/form-types.js';
 import { formLength, isValidForm } from '../core/form.js';
 
 const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
@@ -75,17 +75,34 @@ const patched = (section, patch) => {
   return next;
 };
 
-/** Felder eines Teils ändern und den Teil sperren. Typ muss aus der festen Liste sein, Takte 1..64 und die Summe höchstens 512. */
+const EDITABLE = ['type', 'bars', 'level', 'density', 'transition', 'crash'];
+
+/**
+ * Felder eines Teils ändern und den Teil sperren. Nur die bekannten Felder; Typ und Übergang aus den festen Listen, Takte 1..64 ganzzahlig und
+ * die Summe höchstens 512, Pegel und Dichte werden auf ihre Grenzen geklemmt, `undefined` entfernt das Feld (Zurücksetzen).
+ * Die Form muss danach gültig sein, sonst null.
+ */
 export function editPart(form, index, patch) {
   const s = form.sections[index];
-  if (!s) return null;
-  if ('type' in patch && !PART_TYPES.includes(patch.type)) return null;
-  if ('bars' in patch) {
-    const bars = Math.round(patch.bars);
+  if (!s || Object.keys(patch).some((k) => !EDITABLE.includes(k))) return null;
+  const next = { ...patch };
+  const num = (k, lo, hi) => {
+    if (next[k] === undefined) return true;
+    if (!Number.isFinite(next[k])) return false;
+    next[k] = clamp(next[k], lo, hi);
+    return true;
+  };
+  if ('type' in next && !PART_TYPES.includes(next.type)) return null;
+  if ('transition' in next && next.transition !== undefined && !TRANSITIONS.includes(next.transition)) return null;
+  if ('crash' in next && next.crash !== undefined && typeof next.crash !== 'boolean') return null;
+  if (!num('level', FORM_LIMITS.levelMin, FORM_LIMITS.levelMax) || !num('density', FORM_LIMITS.densityMin, FORM_LIMITS.densityMax)) return null;
+  if ('bars' in next) {
+    const bars = Math.round(next.bars);
     if (!(bars >= 1 && bars <= FORM_LIMITS.bars) || formLength(form) - s.bars + bars > FORM_LIMITS.length) return null;
-    patch = { ...patch, bars };
+    next.bars = bars;
   }
-  return { form: replace(form, form.sections.map((x, i) => (i === index ? patched(x, patch) : x))), index };
+  const result = replace(form, form.sections.map((x, i) => (i === index ? patched(x, next) : x)));
+  return isValidForm(result) ? { form: result, index } : null;
 }
 
 /** Sperre umschalten; das ist keine Bearbeitung und sperrt nichts nebenbei. */
@@ -115,11 +132,11 @@ export function deletePart(form, index) {
   return { form: replace(form, form.sections.filter((_, i) => i !== index)), index: Math.min(index, form.sections.length - 2) };
 }
 
-/** Teil um einen Platz verschieben (dir -1 links, +1 rechts); die Auswahl folgt. */
+/** Teil um einen Platz verschieben (dir -1 links, +1 rechts); die Auswahl folgt, der verschobene Teil wird gesperrt (jede Bearbeitung sperrt). */
 export function movePart(form, index, dir) {
   const to = index + dir;
   if (!form.sections[index] || !form.sections[to]) return null;
   const sections = [...form.sections];
-  [sections[index], sections[to]] = [sections[to], sections[index]];
+  [sections[index], sections[to]] = [sections[to], { ...sections[index], locked: true }];
   return { form: replace(form, sections), index: to };
 }

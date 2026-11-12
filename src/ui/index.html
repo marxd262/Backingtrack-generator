@@ -144,20 +144,24 @@
                   </div>
                 </div>
                 <div class="field">
-                  <label class="label" for="part-level" data-i18n="form.insp.level"></label>
+                  <div class="label-row">
+                    <label class="label" for="part-level" data-i18n="form.insp.level"></label>
+                    <output id="part-level-out" for="part-level" aria-live="off"></output>
+                  </div>
                   <div class="tempo-row">
                     <input type="range" id="part-level" min="-24" max="0" step="1">
-                    <span><output id="part-level-out" for="part-level"></output></span>
+                    <button type="button" class="chip reset" id="part-level-reset" data-i18n="form.insp.reset" data-i18n-label="form.insp.resetLevel"></button>
                   </div>
-                  <button type="button" class="chip" id="part-level-reset" data-i18n="form.insp.reset" data-i18n-label="form.insp.resetLevel"></button>
                 </div>
                 <div class="field">
-                  <label class="label" for="part-density" data-i18n="form.insp.density"></label>
+                  <div class="label-row">
+                    <label class="label" for="part-density" data-i18n="form.insp.density"></label>
+                    <output id="part-density-out" for="part-density" aria-live="off"></output>
+                  </div>
                   <div class="tempo-row">
                     <input type="range" id="part-density" min="-100" max="100" step="1">
-                    <span><output id="part-density-out" for="part-density"></output></span>
+                    <button type="button" class="chip reset" id="part-density-reset" data-i18n="form.insp.reset" data-i18n-label="form.insp.resetDensity"></button>
                   </div>
-                  <button type="button" class="chip" id="part-density-reset" data-i18n="form.insp.reset" data-i18n-label="form.insp.resetDensity"></button>
                 </div>
                 <div class="field">
                   <label class="label" for="part-transition" data-i18n="form.insp.transition"></label>
@@ -165,16 +169,16 @@
                 </div>
                 <div class="field">
                   <label class="check"><input type="checkbox" id="part-crash"> <span data-i18n="form.insp.crash"></span></label>
-                  <button type="button" class="chip" id="part-lock" aria-pressed="false" aria-describedby="part-lock-hint" data-i18n="form.insp.lock"></button>
-                  <p class="sub-label" id="part-lock-hint" data-i18n="form.insp.lockHint"></p>
                 </div>
               </div>
               <div class="form-actions">
                 <button type="button" class="chip" id="part-left" data-i18n="form.insp.left"></button>
                 <button type="button" class="chip" id="part-right" data-i18n="form.insp.right"></button>
                 <button type="button" class="chip" id="part-copy" data-i18n="form.insp.copy" aria-describedby="form-note"></button>
+                <button type="button" class="chip" id="part-lock" aria-pressed="false" aria-describedby="part-lock-hint" data-i18n="form.insp.lock"></button>
                 <button type="button" class="chip" id="part-delete" data-i18n="form.insp.delete" aria-describedby="form-note"></button>
               </div>
+              <p class="sub-label" id="part-lock-hint" data-i18n="form.insp.lockHint"></p>
               <p class="sub-label" id="form-note"></p>
             </div>
             <div class="lane-buttons" id="lane-buttons" role="group" data-i18n-label="ui.layers"></div>

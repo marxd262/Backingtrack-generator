@@ -569,9 +569,9 @@ main {
 .form-part-name { font-weight: bold; }
 .form-part[aria-selected="true"] { outline: 3px solid var(--ink); outline-offset: -3px; z-index: 1; }
 .form-part[aria-selected="true"]:focus-visible { outline-color: var(--accent); }
-/* gesperrt: Ecke oben rechts; spielt gerade: Balken in der Akzentfarbe unten */
+/* gesperrt: Ecke oben rechts; spielt gerade: Balken in Tintenfarbe unten (Akzentrot hätte auf dem Refrain unter 3:1) */
 .form-part.locked::before { content: ""; position: absolute; top: 0; right: 0; border-style: solid; border-width: 0 12px 12px 0; border-color: transparent var(--ink) transparent transparent; }
-.form-part[aria-current="true"]::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 5px; background: var(--accent); }
+.form-part[aria-current="true"]::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 6px; background: var(--ink); box-shadow: 0 -1px 0 var(--paper); }
 
 .form-insp { grid-area: 4 / 1 / 5 / -1; margin-bottom: 16px; padding: 8px 12px 12px; border: 1px solid var(--ink-soft); border-radius: 6px; background: var(--paper); }
 .form-insp .label { margin: 0 0 4px; }
@@ -579,7 +579,13 @@ main {
 .form-insp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: 8px 16px; align-items: start; }
 .form-insp .field { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
 .form-insp .field select { width: 100%; max-width: 16rem; }
-.form-insp .tempo-row { width: 100%; }
+.form-insp .tempo-row { width: 100%; flex-wrap: wrap; gap: 4px 12px; }
+.form-insp .tempo-row input { flex: 1 1 5rem; }
+.form-insp .label-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 12px; }
+.form-insp .label-row output { color: var(--ink); font-variant-numeric: tabular-nums; }
+.form-insp .chip.reset { padding: 0 8px; font-size: 0.9rem; }
+/* nicht gesetzt (gilt der Standard des Typs): Regler blass, damit der gesetzte Wert auffällt */
+.form-insp input[type="range"].unset { opacity: 0.55; accent-color: var(--ink-soft); }
 .stepper { display: flex; align-items: center; gap: 8px; }
 .stepper output { min-width: 5.5ch; text-align: center; }
 .check { display: flex; align-items: center; gap: 8px; min-height: var(--target); }
@@ -595,6 +601,7 @@ main {
   /* schmal: jeder Takt mindestens 11 px (ein 4-Takt-Teil 44 px), der Streifen scrollt dann in seinem Kasten statt die Seite zu weiten;
      breit skaliert er auf die Breite der Leinwand und bleibt mit ihr ausgerichtet */
   .form-part { min-width: calc(var(--bars, 1) * 11px); }
+  .form-strip { grid-column: 1 / -1; } /* hier ohnehin nicht mehr an der Leinwand ausgerichtet: ganze Breite nutzen */
 }
 
 .settings {

@@ -3,6 +3,7 @@
 // Jede Bearbeitung sperrt den Teil (form-ui.js) und setzt die Länge; bleibt die Gesamtlänge gleich, wirkt sie live (applyLive), sonst Neustart.
 import { t } from '../index.js';
 import { PART_TYPES, TRANSITIONS, resolveSection } from '../core/form-types.js';
+import { TEMPLATE_IDS } from '../core/form-roll.js';
 import { formLength, isValidForm, sectionAt } from '../core/form.js';
 import { $, state, setText, setAttr, pressed, rollNewForm, setFormTemplate } from './state.js';
 import { stripBlocks, levelLabel, densityLabel, levelValue, densityValue, limits, barsText, editPart, setLocked, addPart, copyPart, deletePart, movePart } from './form-ui.js';
@@ -22,6 +23,7 @@ export function initFormStrip({ render, restartIfPlaying, applyLive }) {
 
   let selected = 0;
   let queued = false;
+  let rollNote = false; // "Neu würfeln" fand nur gesperrte Teile: Hinweis im #form-note, bis die nächste Aktion kommt
   const options = []; // { el, name, bars }
   const formNow = () => (isValidForm(state.track.form) ? state.track.form : null);
 
@@ -34,6 +36,7 @@ export function initFormStrip({ render, restartIfPlaying, applyLive }) {
 
   /** Ergebnis einer Bearbeitung übernehmen: Form und Länge setzen, live oder (andere Länge) Neustart an gleicher Stelle. */
   function commit(result) {
+    rollNote = false;
     if (result) {
       const before = state.track.length;
       state.track.form = result.form;
@@ -43,11 +46,13 @@ export function initFormStrip({ render, restartIfPlaying, applyLive }) {
       else restartIfPlaying({ inPlace: true });
     }
     render();
+    options[selected]?.el.scrollIntoView({ inline: 'nearest', block: 'nearest' }); // Verschieben, Löschen, Kopieren: der gewählte Teil bleibt sichtbar
   }
   const edit = (patch) => { const f = formNow(); if (f) commit(editPart(f, selected, patch)); };
   const act = (fn) => () => { const f = formNow(); if (f) commit(fn(f)); };
 
   function choose(i, focus) {
+    rollNote = false;
     selected = i;
     render();
     if (focus) options[i]?.el.focus();
@@ -59,7 +64,7 @@ export function initFormStrip({ render, restartIfPlaying, applyLive }) {
   });
   strip.addEventListener('keydown', (e) => {
     const i = options.findIndex((o) => o.el === e.target);
-    if (i < 0) return;
+    if (i < 0 || e.altKey || e.ctrlKey || e.metaKey) return; // Alt+Pfeil (Zurück im Browser) und Co. bleiben dem Browser
     const last = options.length - 1;
     const to = { ArrowRight: Math.min(i + 1, last), ArrowDown: Math.min(i + 1, last), ArrowLeft: Math.max(i - 1, 0), ArrowUp: Math.max(i - 1, 0), Home: 0, End: last, Enter: i, ' ': i }[e.key];
     if (to === undefined) return;
@@ -84,9 +89,19 @@ export function initFormStrip({ render, restartIfPlaying, applyLive }) {
   $('part-copy').addEventListener('click', act((f) => copyPart(f, selected)));
   $('form-add').addEventListener('click', act(addPart));
   $('form-roll').addEventListener('click', () => {
+    const f = formNow();
+    if (f?.sections.every((s) => s.locked)) {
+      rollNote = true; // nichts zu würfeln: Hinweis statt stillem Nichts
+      return render();
+    }
+    rollNote = false;
     const before = state.track.length;
-    if (formNow()) rollNewForm({ reroll: true });
-    else setFormTemplate('auto'); // defekte Form: neu anlegen
+    if (f) rollNewForm({ reroll: true });
+    else {
+      // defekte Form: neu anlegen, mit der gewählten Vorlage (Auto, wenn keine erkennbar ist)
+      const raw = state.track.form;
+      setFormTemplate(TEMPLATE_IDS.includes(raw?.template) && raw?.auto !== true ? raw.template : 'auto');
+    }
     if (state.track.length === before) liveSoon();
     else restartIfPlaying({ inPlace: true });
     render();
@@ -115,7 +130,9 @@ export function initFormStrip({ render, restartIfPlaying, applyLive }) {
       setStyle(el, '--bars', String(b.bars));
       setStyle(el, 'flex-grow', String(b.bars));
       setStyle(el, 'height', `${(b.height * 100).toFixed(1)}%`);
-      setAttr(el, 'aria-label', `${t('form.partLabel', { name: label, bars: barsText(b.bars), from: b.from, to: b.to })}${b.locked ? `, ${t('form.locked')}` : ''}`);
+      const full = `${t('form.partLabel', { name: label, bars: barsText(b.bars), from: b.from, to: b.to })}${b.locked ? `, ${t('form.locked')}` : ''}`;
+      setAttr(el, 'aria-label', full);
+      setAttr(el, 'title', full); // schmale Blöcke kürzen den Namen: der Tooltip nennt ihn ganz
       setAttr(el, 'aria-selected', String(i === selected));
       setAttr(el, 'tabindex', i === selected ? '0' : '-1');
       setFlag(el, 'aria-current', i === playing);
@@ -145,6 +162,7 @@ export function initFormStrip({ render, restartIfPlaying, applyLive }) {
       setText($(`part-${id}-out`), text);
       setAttr($(`part-${id}`), 'aria-valuetext', text);
       setDisabled($(`part-${id}-reset`), unset);
+      $(`part-${id}`).classList.toggle('unset', unset);
     }
     pressed($('part-lock'), s.locked === true);
     setDisabled($('part-left'), !lim.canLeft);
@@ -152,13 +170,22 @@ export function initFormStrip({ render, restartIfPlaying, applyLive }) {
     setDisabled($('part-copy'), !lim.canCopy);
     setDisabled($('part-delete'), !lim.canDelete);
     setDisabled($('form-add'), !lim.canAdd);
-    setText($('form-note'), lim.reasons.map((k) => t(k)).join(' '));
+    setText($('form-note'), [...(rollNote ? ['form.note.allLocked'] : []), ...lim.reasons].map((k) => t(k)).join(' '));
+  }
+
+  // Hatte der Fokus eines unserer Elemente und ist es weg (entfernt, versteckt, eben gesperrt): auf den gewählten Teil, ohne Streifen auf "Neu würfeln"
+  function rescueFocus(mine, focused, option) {
+    if (!mine || (focused.isConnected && focused.checkVisibility() && !focused.disabled)) return;
+    const target = option ?? ($('form-bar').hidden ? $('form-template') : $('form-roll'));
+    if (target.checkVisibility()) target.focus();
   }
 
   return function renderStrip() {
     if (state.page !== 'play') return;
     const raw = state.track.form;
     const form = formNow();
+    const focused = document.activeElement;
+    const mine = strip.contains(focused) || insp.contains(focused) || $('form-bar').contains(focused);
     const blocks = form ? stripBlocks(form) : [];
     const ok = blocks.length > 0;
     show($('form-bar'), raw != null);
@@ -166,14 +193,12 @@ export function initFormStrip({ render, restartIfPlaying, applyLive }) {
     setText($('form-hint'), ok ? '' : t(raw == null ? 'form.hint.off' : 'form.hint.bad'));
     show(strip, ok);
     show(insp, ok);
-    if (!ok) return;
+    if (!ok) return rescueFocus(mine, focused, null);
     selected = Math.min(Math.max(selected, 0), blocks.length - 1);
     const total = formLength(form);
     const hit = state.playing && state.current && total > 0 ? sectionAt(form, state.current.bar % total) : null;
-    const focused = document.activeElement;
     syncOptions(blocks, hit ? hit.index : -1);
     syncInspector(form, blocks[selected]);
-    // ein eben gesperrter Knopf (z. B. "Nach rechts" am Ende) hatte den Fokus: auf den gewählten Teil, nicht ins Leere
-    if (focused?.disabled && document.activeElement === focused) options[selected].el.focus();
+    rescueFocus(mine, focused, options[selected].el);
   };
 }

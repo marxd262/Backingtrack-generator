@@ -106,6 +106,27 @@ test('editPart: undefined entfernt das Feld (Zurücksetzen) und sperrt trotzdem'
   assert.deepEqual(r.form.sections[0], { type: 'verse', bars: 8, density: 0.2, locked: true });
 });
 
+test('editPart: Pegel und Dichte werden geklemmt, Unsinn abgelehnt, Übergang und Crash geprüft, unbekannte Felder abgelehnt', () => {
+  const f = demo();
+  assert.equal(editPart(f, 1, { level: -50 }).form.sections[1].level, -24);
+  assert.equal(editPart(f, 1, { level: 5 }).form.sections[1].level, 0);
+  assert.equal(editPart(f, 1, { density: 3 }).form.sections[1].density, 1);
+  assert.equal(editPart(f, 1, { density: -3 }).form.sections[1].density, -1);
+  for (const bad of [NaN, Infinity, '3', null, {}]) {
+    assert.equal(editPart(f, 1, { level: bad }), null, `level ${String(bad)}`);
+    assert.equal(editPart(f, 1, { density: bad }), null, `density ${String(bad)}`);
+  }
+  assert.equal(editPart(f, 1, { transition: 'boom' }), null);
+  assert.equal(editPart(f, 1, { transition: 'roll' }).form.sections[1].transition, 'roll');
+  assert.equal(editPart(f, 1, { crash: 'yes' }), null);
+  assert.equal(editPart(f, 1, { crash: true }).form.sections[1].crash, true);
+  assert.equal(editPart(f, 1, { locked: false }), null, 'Sperre nur über setLocked');
+  assert.equal(editPart(f, 1, { evil: 1 }), null);
+  for (const r of [editPart(f, 1, { level: -50, density: 9 }), editPart(f, 0, { bars: 64 })]) assert.ok(isValidForm(r.form));
+  // eine schon kaputte Form bleibt kaputt: nichts wird "repariert" ausgegeben
+  assert.equal(editPart({ ...f, sections: [{ type: 'verse', bars: 0 }, ...f.sections] }, 1, { level: -3 }), null);
+});
+
 test('setLocked schaltet nur die Sperre', () => {
   const f = demo();
   const r = setLocked(f, 2, true);
@@ -142,6 +163,7 @@ test('movePart: tauscht mit dem Nachbarn, die Auswahl folgt, an den Rändern nic
   const r = movePart(demo(), 1, -1);
   assert.deepEqual(r.form.sections.slice(0, 2).map((s) => s.type), ['verse', 'intro']);
   assert.equal(r.index, 0);
+  assert.deepEqual(r.form.sections.map((s) => s.locked), [true, undefined, undefined, undefined, undefined, undefined], 'nur der verschobene Teil wird gesperrt');
   assert.equal(movePart(demo(), 0, -1), null);
   assert.equal(movePart(demo(), 5, 1), null);
   assert.equal(movePart(demo(), 2, 1).index, 3);

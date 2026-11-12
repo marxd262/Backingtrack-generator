@@ -326,7 +326,7 @@ test('Nach links und nach rechts: Teil und Auswahl wandern, an den Rändern gesp
   await page.locator('#part-left').click();
   expect(types(await form(page))).toEqual(['verse', 'intro', 'chorus']);
   await expect(parts(page).nth(0)).toHaveAttribute('aria-selected', 'true');
-  expect((await form(page)).sections[0].locked ?? false).toBe(false);
+  expect((await form(page)).sections.map((x) => x.locked ?? false), 'der verschobene Teil ist gesperrt, die anderen nicht').toEqual([true, false, false]);
   await expect(page.locator('#part-left')).toBeDisabled();
   await page.locator('#part-right').click();
   await page.locator('#part-right').click();
@@ -527,4 +527,153 @@ test('360 px: kein waagerechtes Scrollen der Seite, Streifen scrollt in seinem K
   await parts(page).first().focus();
   await page.keyboard.press('End');
   await expect(parts(page).last()).toBeInViewport();
+});
+
+const selectedIndexes = (page) => parts(page).evaluateAll((els) => ({
+  selected: els.flatMap((el, i) => (el.getAttribute('aria-selected') === 'true' ? [i] : [])),
+  tab: els.flatMap((el, i) => (el.tabIndex === 0 ? [i] : [])),
+}));
+
+test('Auswahl bleibt gültig: nach Würfeln, kürzerer Form und Ohne Form genau ein gewählter Teil, Einstellungen passen dazu', async ({ page }) => {
+  await setForm(page, FORM96);
+  await pick(page, 7);
+  await page.locator('#form-roll').click();
+  const after = await selectedIndexes(page);
+  const count = await parts(page).count();
+  expect(after.selected).toHaveLength(1);
+  expect(after.tab).toEqual(after.selected);
+  expect(after.selected[0]).toBeLessThan(count);
+  // kürzere Form im Zustand: die Auswahl klemmt auf den letzten Teil
+  await pick(page, count - 1);
+  await setForm(page, [['intro', 4], ['verse', 8], ['chorus', 8]]);
+  expect(await selectedIndexes(page)).toEqual({ selected: [2], tab: [2] });
+  await expect(page.locator('#form-insp-title')).toHaveText('Refrain, Takte 13 bis 20');
+  // Länge ändern ändert die Auswahl nicht
+  await page.locator('#part-longer').click();
+  expect(await selectedIndexes(page)).toEqual({ selected: [2], tab: [2] });
+  // Ohne Form und zurück
+  await page.locator('#form-template').selectOption('off');
+  await page.locator('#form-template').selectOption('pop');
+  const back = await selectedIndexes(page);
+  expect(back.selected).toHaveLength(1);
+  expect(back.tab).toEqual(back.selected);
+  await expect(page.locator('#form-insp-title')).toContainText('Takte');
+});
+
+test('Ausrichtung auch bei einer schiefen Form (1/1/1/64/1/3/25 Takte) bei 1280 und 601 px', async ({ page }) => {
+  const odd = [['intro', 1], ['verse', 1], ['build', 1], ['chorus', 64], ['break', 1], ['verse', 3], ['outro', 25]];
+  const bars = odd.map(([, n]) => n);
+  for (const width of [1280, 601]) {
+    await page.setViewportSize({ width, height: 900 });
+    while (await page.locator('.side-close:visible').count()) await page.locator('.side-close:visible').first().click();
+    await setForm(page, odd);
+    const m = await page.evaluate(() => {
+      const c = document.querySelector('#lanes').getBoundingClientRect();
+      const strip = document.querySelector('#form-strip');
+      const s = strip.getBoundingClientRect();
+      const boxes = [...document.querySelectorAll('#form-strip [role="option"]')].map((el) => el.getBoundingClientRect());
+      return { cl: c.left, cr: c.right, sl: s.left, sr: s.right, boxes: boxes.map((b) => ({ x: b.x, w: b.width })), scroll: strip.scrollWidth - strip.clientWidth };
+    });
+    expect(Math.abs(m.sl - m.cl), `${width}: links`).toBeLessThanOrEqual(1);
+    expect(Math.abs(m.sr - m.cr), `${width}: rechts`).toBeLessThanOrEqual(1);
+    expect(m.scroll, `${width}: kein Scrollen im Streifen`).toBeLessThanOrEqual(0);
+    const total = m.boxes.reduce((n, b) => n + b.w, 0);
+    m.boxes.forEach((b, i) => expect(Math.abs(b.w - (bars[i] / 96) * total), `${width}: Teil ${i}`).toBeLessThanOrEqual(2));
+  }
+});
+
+test('Tastatur: Alt, Strg und Meta mit Pfeilen und Pos1 werden nicht verschluckt, ohne Taste schon', async ({ page }) => {
+  await setForm(page, FORM96);
+  await pick(page, 3);
+  const results = await parts(page).nth(3).evaluate((el) => {
+    const send = (key, mods) => el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...mods }));
+    const selected = () => [...document.querySelectorAll('#form-strip [role="option"]')].findIndex((o) => o.getAttribute('aria-selected') === 'true');
+    const out = { free: [], selected: [] };
+    for (const mods of [{ altKey: true }, { ctrlKey: true }, { metaKey: true }]) {
+      out.free.push(send('ArrowLeft', mods), send('Home', mods));
+      out.selected.push(selected());
+    }
+    out.plain = send('ArrowLeft', {}); // false: der Streifen hat die Taste behandelt
+    return out;
+  });
+  expect(results.free).toEqual(Array(6).fill(true));
+  expect(results.selected).toEqual([3, 3, 3]);
+  expect(results.plain).toBe(false);
+  expect((await selectedIndexes(page)).selected).toEqual([2]);
+});
+
+test('Fokus: wird der fokussierte Teil entfernt oder der Knopf gesperrt, geht er auf den gewählten Teil; verschwinden die Einstellungen, auf Neu würfeln', async ({ page }) => {
+  await setForm(page, [['intro', 4], ['verse', 8], ['chorus', 8]]);
+  await pick(page, 2);
+  // Fokus liegt auf dem letzten Teil, der Teil wird gelöscht (Auslösen ohne Fokuswechsel)
+  await parts(page).nth(2).focus();
+  await page.evaluate(() => document.getElementById('part-delete').click());
+  await expect(parts(page)).toHaveCount(2);
+  await expect(parts(page).nth(1)).toBeFocused();
+  // per Tastatur bis zum letzten Teil löschen: der gesperrte Löschen-Knopf gibt den Fokus ab
+  await page.locator('#part-delete').focus();
+  await page.keyboard.press('Enter');
+  await expect(parts(page)).toHaveCount(1);
+  await expect(page.locator('#part-delete')).toBeDisabled();
+  await expect(parts(page).first()).toBeFocused();
+  // Einstellungen verschwinden (defekte Form), während der Fokus darin liegt
+  await page.locator('#part-type').focus();
+  await page.evaluate(async () => {
+    (await import('/ui/state.js')).state.track.form = { template: 'pop', feel: {}, sections: [{ type: 'oops', bars: 4 }] };
+    document.querySelector('[data-lang="de"]').click(); // ohne Fokuswechsel neu zeichnen
+  });
+  await expect(page.locator('#form-insp')).toBeHidden();
+  await expect(page.locator('#form-roll')).toBeFocused();
+});
+
+test('Neu würfeln: sind alle Teile gesperrt, steht ein Hinweis da und nichts ändert sich; er verschwindet mit der nächsten Aktion', async ({ page }) => {
+  await setForm(page, [['verse', 8, { locked: true }], ['chorus', 8, { locked: true }]]);
+  const before = await form(page);
+  await page.locator('#form-roll').click();
+  await expect(page.locator('#form-note')).toHaveText('Alle Teile sind gesperrt, es gibt nichts zu würfeln.');
+  expect(await form(page)).toEqual(before);
+  await pick(page, 1);
+  await expect(page.locator('#form-note')).toHaveText('');
+});
+
+test('Neu würfeln bei defekter Form behält die gewählte Vorlage', async ({ page }) => {
+  await page.evaluate(async () => {
+    (await import('/ui/state.js')).state.track.form = { template: 'blues', auto: false, feel: {}, sections: [{ type: 'oops', bars: 4 }] };
+  });
+  await rerender(page);
+  await page.locator('#form-roll').click();
+  const f = await form(page);
+  expect(f.template).toBe('blues');
+  expect(f.sections.every((x) => x.bars === 12)).toBe(true);
+});
+
+test('Streifen und Einstellungen: Tooltip gleich Beschriftung, Pegel- und Dichte-Ausgabe sprechen nicht mit, ungesetzte Regler blass, Reihen kompakt', async ({ page }) => {
+  await setForm(page, FORM96);
+  await pick(page, 1);
+  expect(await parts(page).evaluateAll((els) => els.every((el) => el.title && el.title === el.getAttribute('aria-label')))).toBe(true);
+  await expect(page.locator('#part-level-out')).toHaveAttribute('aria-live', 'off');
+  await expect(page.locator('#part-density-out')).toHaveAttribute('aria-live', 'off');
+  await expect(page.locator('#part-len-out')).not.toHaveAttribute('aria-live', 'off');
+  await expect(page.locator('#part-level')).toHaveClass(/\bunset\b/);
+  await page.locator('#part-level').fill('-9');
+  await expect(page.locator('#part-level')).not.toHaveClass(/\bunset\b/);
+  await expect(page.locator('#part-level')).toHaveCSS('opacity', '1');
+  // Zurücksetzen steht in der Reihe des Reglers, Sperren in der Reihe der Aktionen
+  const rows = await page.evaluate(() => {
+    const y = (id) => Math.round(document.getElementById(id).getBoundingClientRect().top);
+    return { level: y('part-level'), reset: y('part-level-reset'), lock: y('part-lock'), del: y('part-delete'), copy: y('part-copy') };
+  });
+  expect(Math.abs(rows.reset - rows.level)).toBeLessThanOrEqual(30);
+  expect(rows.lock).toBe(rows.del);
+  expect(rows.lock).toBe(rows.copy);
+});
+
+test('Streifen: der spielende Teil trägt einen Balken in Tintenfarbe (genug Kontrast auf jedem Teil)', async ({ page }) => {
+  await setForm(page, [['verse', 3], ['chorus', 50]]);
+  await page.locator('#tuning-tempo').fill('200');
+  await page.locator('#play-go').click();
+  await expect(page.locator('#form-strip [aria-current="true"]')).toHaveCount(1, { timeout: BAR_TIMEOUT });
+  const bar = await page.locator('#form-strip [aria-current="true"]').evaluate((el) => getComputedStyle(el, '::after').backgroundColor);
+  expect(bar).toBe('rgb(42, 38, 34)');
+  await page.locator('#play-go').click();
 });
