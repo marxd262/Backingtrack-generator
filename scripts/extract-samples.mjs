@@ -20,7 +20,9 @@ export const SOURCES = { msg: 'MuseScore_General', 'fsbs-clean': 'Freepats FSBS 
 
 // Pack-ID -> Preset der SoundFont (Bank, Programm) und optional die Tasten, die behalten werden (Schlagzeug: nur die benutzten Hits), die
 // Quelle (Standard msg) und das GM-Programm, das die Stimme vertritt (Standard: das Programm des Presets)
-const DRUM_KEYS = [35, 36, 37, 38, 41, 42, 43, 44, 46, 47, 50];
+// Crash (Taste 49): die Kits liefern 8,5 s (je 0,75 MB, fünfmal); gekürzt auf CRASH_SECONDS mit weichem Ausklang (letzte CRASH_FADE Sekunden)
+const CRASH_KEY = 49, CRASH_SECONDS = 2.5, CRASH_FADE = 0.8;
+const DRUM_KEYS = [35, 36, 37, 38, 41, 42, 43, 44, 46, 47, 49, 50];
 export const PACKS = {
   'bass-finger': { bank: 0, program: 33 }, // Fingered Bass
   'bass-pick': { bank: 0, program: 34 }, // Picked Bass
@@ -70,6 +72,8 @@ export function buildPack(sf, id, { bank, program, keys, source = 'msg', gm = pr
     seen.add(range);
     return true;
   });
+  // fehlt eine verlangte Taste (z. B. Crash 49), wäre der Schlag im Pack still stumm: lieber abbrechen
+  for (const k of keys ?? []) if (!zones.some((z) => z.key[0] <= k && k <= z.key[1])) throw new Error(`Preset ${preset.name} (Bank ${bank}, Programm ${program}): keine Zone für Taste ${k}`);
   const order = [...new Set(zones.map((z) => z.sampleID))];
   const samples = [];
   const chunks = [];
@@ -79,8 +83,15 @@ export function buildPack(sf, id, { bank, program, keys, source = 'msg', gm = pr
     // .sf3: Ogg Vorbis (Anfang und Ende in Bytes, Schleifenpunkte in Abtastwerten relativ zum Sampleanfang). .sf2: 16-Bit-PCM, alle Punkte in
     // Abtastwerten ab dem Anfang des smpl-Chunks; ein 24-Bit-Zusatz (sm24) bleibt unbenutzt
     const compressed = head.type & 0x10;
-    const pcm = compressed ? decode(sf.buf.subarray(sf.smplAt + head.start, sf.smplAt + head.end)) : Buffer.from(sf.buf.subarray(sf.smplAt + 2 * head.start, sf.smplAt + 2 * head.end));
-    const frames = pcm.length / 2;
+    let pcm = compressed ? decode(sf.buf.subarray(sf.smplAt + head.start, sf.smplAt + head.end)) : Buffer.from(sf.buf.subarray(sf.smplAt + 2 * head.start, sf.smplAt + 2 * head.end));
+    let frames = pcm.length / 2;
+    // nur Samples, die allein die Crash-Taste spielen, werden gekürzt (alle anderen Tasten bleiben unberührt)
+    if (zones.filter((z) => z.sampleID === sampleId).every((z) => z.key[0] === CRASH_KEY && z.key[1] === CRASH_KEY) && frames > CRASH_SECONDS * head.sampleRate) {
+      frames = Math.round(CRASH_SECONDS * head.sampleRate);
+      pcm = pcm.subarray(0, 2 * frames);
+      const fade = Math.round(CRASH_FADE * head.sampleRate);
+      for (let i = 0; i < fade; i++) pcm.writeInt16LE(Math.round(pcm.readInt16LE(2 * (frames - fade + i)) * Math.cos((i / fade) * Math.PI / 2) ** 2), 2 * (frames - fade + i));
+    }
     // ungültige Schleifen gelten als keine
     let loopStart = head.loopStart - (compressed ? 0 : head.start), loopEnd = head.loopEnd - (compressed ? 0 : head.start);
     if (!(loopStart >= 0 && loopStart < loopEnd && loopEnd <= frames)) loopStart = loopEnd = 0;

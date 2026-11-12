@@ -462,7 +462,9 @@ for (const [layer, variant] of KITS) {
       if (r.status !== 'ready' || !r.finite || !(r.rms > 0.001) || !(r.peak < 0.95)) bad.push(`${name}: ${JSON.stringify({ ...r, data: undefined })}`);
     }
     expect(bad).toEqual([]);
-    const synth = await renderHits(page, layer, null, names), sample = await renderHits(page, layer, voice, names);
+    // der Crash gehört nicht zur Messfolge des Pegels (level gilt für die bisherigen Schläge), wird oben aber einzeln geprüft
+    const measured = names.filter((n) => n !== 'crash');
+    const synth = await renderHits(page, layer, null, measured), sample = await renderHits(page, layer, voice, measured);
     const ratio = sample.rms / synth.rms;
     expect(ratio, `${synth.rms} ${sample.rms}`).toBeGreaterThan(0.5);
     expect(ratio, `${synth.rms} ${sample.rms}`).toBeLessThan(2);

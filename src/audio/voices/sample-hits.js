@@ -8,7 +8,7 @@ import { watchPack } from './sample.js';
 
 // Name -> GM-Taste (Kit Rimshot: Snare auf 37, Seitenschlag; siehe index.js)
 export const HIT_KEYS = Object.freeze({
-  drums: Object.freeze({ kick: 36, snare: 38, hat: 42, openHat: 46, tomHigh: 50, tomMid: 47, tomLow: 43 }),
+  drums: Object.freeze({ kick: 36, snare: 38, hat: 42, openHat: 46, tomHigh: 50, tomMid: 47, tomLow: 43, crash: 49 }),
   percussion: Object.freeze({ shaker: 82, tambourine: 54, congaHigh: 63, congaLow: 64, bongoHigh: 60, bongoLow: 61, claves: 75, cowbell: 56 }),
 });
 

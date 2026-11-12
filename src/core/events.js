@@ -13,7 +13,7 @@ import { leadPlayer } from './lead.js';
 import { percussionPlayer } from './percussion.js';
 
 /** Schlagzeug-Vokabular (Task 6 ordnet jedem Namen eine Stimme zu); Geisternoten sind `snare` mit vel < 0.3. */
-export const DRUM_NAMES = ['kick', 'snare', 'hat', 'openHat', 'tomHigh', 'tomMid', 'tomLow'];
+export const DRUM_NAMES = ['kick', 'snare', 'hat', 'openHat', 'tomHigh', 'tomMid', 'tomLow', 'crash'];
 
 /** Percussion-Vokabular (Treffer der Schicht `percussion`). */
 export const PERCUSSION_NAMES = ['shaker', 'tambourine', 'congaHigh', 'congaLow', 'bongoHigh', 'bongoLow', 'claves', 'cowbell'];

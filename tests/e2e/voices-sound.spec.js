@@ -135,6 +135,31 @@ test('Percussion: jeder Name klingt (nicht stumm, Spitze unter 1); Unbekanntes u
   expect(r.quiet, label).toEqual({ unknown: 0, note: 0, nameless: 0 });
 });
 
+// Crash (Synth): hörbar, endlich, Spitze unter 1, klingt länger aus als die offene Hi-Hat (rms von 0,5 bis 1 s nach dem Anschlag)
+test('Schlagzeug: der Crash klingt, ist endlich, übersteuert nicht und hallt länger nach als die offene Hi-Hat', async ({ page }) => {
+  const r = await page.evaluate(async () => {
+    const { createInstruments } = await import('/audio/synth.js');
+    const out = {};
+    for (const name of ['crash', 'openHat']) {
+      const ctx = new OfflineAudioContext(1, 88200, 44100);
+      const { output, layers } = createInstruments(ctx, { limiter: false, timbre: { master: { echo: 0, reverb: 0 } } });
+      output.connect(ctx.destination);
+      layers.drums.trigger({ type: 'hit', layer: 'drums', name, vel: 0.8 }, 0.05);
+      const d = (await ctx.startRendering()).getChannelData(0);
+      let peak = 0, tail = 0, finite = true;
+      d.forEach((v, i) => { if (!Number.isFinite(v)) finite = false; peak = Math.max(peak, Math.abs(v)); if (i >= 24255 && i < 46305) tail += v * v; });
+      out[name] = { peak, tail: Math.sqrt(tail / 22050), finite };
+    }
+    return out;
+  });
+  const label = JSON.stringify(r);
+  expect(r.crash.finite, label).toBe(true);
+  expect(r.crash.peak, label).toBeGreaterThan(0.05);
+  expect(r.crash.peak, label).toBeLessThan(1);
+  expect(r.crash.tail, label).toBeGreaterThan(r.openHat.tail * 3);
+  expect(r.crash.tail, label).toBeGreaterThan(0.001);
+});
+
 // Schlagzeug als Stimme der Registry: Klang unverändert gegenüber dem Stand vor dem Umzug (gemessen mit Standardklang, limiter: false,
 // ein Schlag bei vel 0.8 an 0.05 s, 1 s mono: Spitze und Summe der Quadrate). Die Werte halten damit auch LAYER_AUDIO.drums.trim, MASTER und
 // den Standardklang (Timbre) fest: ändert sich einer davon, ändern sich diese Zahlen)

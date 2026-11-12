@@ -1,6 +1,7 @@
 // Sample-Packs (src/assets/samples): Dateien, Zonen, Sample-Verweise, Schleifen, Tastenabdeckung, Größe und Lizenzvermerk.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFileSync, statSync, existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -29,7 +30,7 @@ const PACKS = {
   'lead-synth': ['lead', 81, 55, 90],
 };
 // Schlagzeug- und Percussion-Packs: GM-Programm in Bank 128 und die Tasten, für die je eine Zone da sein muss
-const DRUM_KEYS = [35, 36, 37, 38, 41, 42, 43, 44, 46, 47, 50];
+const DRUM_KEYS = [35, 36, 37, 38, 41, 42, 43, 44, 46, 47, 49, 50]; // 49 = Crash (Schlag crash)
 const DRUMS = {
   'drums-standard': [0, DRUM_KEYS], 'drums-brushes': [40, DRUM_KEYS], 'drums-jazz': [32, DRUM_KEYS], 'drums-electronic': [24, DRUM_KEYS], 'drums-808': [25, DRUM_KEYS],
   'percussion-studio': [0, [54, 56, 60, 61, 63, 64, 75, 82]],
@@ -102,6 +103,42 @@ test('Extraktor liest unkomprimierte SF2: 16-Bit-PCM unverändert, Rate erhalten
     assert.deepEqual([meta.zones[0].keyLo, meta.zones[0].keyHi, meta.zones[0].rootKey, meta.zones[0].loop, meta.zones[0].sample], [40, 80, 64, true, 0]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Extraktor bricht ab, wenn eine verlangte Taste keine Zone hat (Crash 49 fehlt im Kit)', () => {
+  const pcm = Int16Array.from({ length: 100 }, (_, i) => i);
+  const dir = mkdtempSync(join(tmpdir(), 'sf2-'));
+  try {
+    const path = join(dir, 'tiny.sf2');
+    writeFileSync(path, tinySf2({ pcm, loopStart: 10, loopEnd: 90 }));
+    const sf = readSoundFont(path);
+    assert.doesNotThrow(() => buildPack(sf, 't', { bank: 0, program: 0, keys: [40, 49] }));
+    assert.throws(() => buildPack(sf, 't', { bank: 0, program: 0, keys: [40, 90] }), /90/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Referenz von vor dem Crash (Packs neu extrahiert): je Kit und bisheriger Taste die Zonen mit Frames, Rate, Schleife und SHA-1 der PCM-Bytes.
+// Das Neu-Extrahieren darf die Bytes der Packs ändern (Sample-Reihenfolge), nicht den Klang der bisherigen Tasten.
+test('Schlagzeug-Packs: bisherige Tasten klingen wie vor dem Crash (dekodierte Samples gleich), Taste 49 hat in jedem Kit eine Zone', () => {
+  const ref = JSON.parse(readFileSync(new URL('fixtures/drum-pack-reference.json', import.meta.url), 'utf8'));
+  for (const [id, keys] of Object.entries(ref)) {
+    const meta = JSON.parse(readFileSync(new URL(`${id}.json`, DIR), 'utf8')), pcm = readFileSync(new URL(`${id}.pcm`, DIR));
+    for (const [key, zones] of Object.entries(keys)) {
+      const got = meta.zones.filter((z) => z.keyLo <= key && key <= z.keyHi).map(({ sample, ...zone }) => {
+        const s = meta.samples[sample];
+        return { ...zone, frames: s.frames, rate: s.rate, loopStart: s.loopStart, loopEnd: s.loopEnd, sha1: createHash('sha1').update(pcm.subarray(s.offset, s.offset + 2 * s.frames)).digest('hex') };
+      });
+      assert.deepEqual(got, zones, `${id} Taste ${key}`);
+    }
+    const crash = meta.zones.find((z) => z.keyLo <= 49 && 49 <= z.keyHi);
+    assert.ok(crash, `${id}: Taste 49`);
+    // Crash gekürzt (Größe) und mit weichem Ausklang
+    const s = meta.samples[crash.sample], tail = new Int16Array(pcm.buffer.slice(pcm.byteOffset + s.offset + 2 * s.frames - 64, pcm.byteOffset + s.offset + 2 * s.frames));
+    assert.ok(s.frames <= 2.5 * s.rate && s.frames > 1.5 * s.rate, `${id}: Crash ${s.frames} Frames`);
+    assert.ok(Math.max(...tail.map(Math.abs)) < 100, `${id}: Crash endet leise`);
   }
 });
 

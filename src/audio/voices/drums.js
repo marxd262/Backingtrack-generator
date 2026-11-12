@@ -44,7 +44,14 @@ export function drumKitVoice(ctx, { params: p, noise }) {
     a.gain.setValueAtTime(v * 0.7, t); a.gain.exponentialRampToValueAtTime(0.001, t + 0.38);
     o.connect(a).connect(out); o.start(t); o.stop(t + 0.42);
   };
-  const kit = { kick, snare, hat: hat(false), openHat: hat(true) };
+  // Crash: helles Rauschen durch Hochpass, langes Ausklingen (~1,5 s); Spitze liegt unter dem Kick
+  const crash = (out, t, v) => {
+    const n = ctx.createBufferSource(); n.buffer = noise; n.loop = true; // Puffer ist 1 s lang
+    const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 3000;
+    const a = ctx.createGain(); adsr(a, t, 0.002, v * 0.3, 0.05, 1.5);
+    n.connect(hp).connect(a).connect(out); n.start(t); n.stop(t + 1.7);
+  };
+  const kit = { kick, snare, hat: hat(false), openHat: hat(true), crash };
   for (const [name, f] of Object.entries(TOMS)) kit[name] = tom(f);
   return (out, t, e) => e.type === 'hit' && kit[e.name]?.(out, t, e.vel);
 }

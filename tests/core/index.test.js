@@ -14,5 +14,5 @@ test('src/index.js lädt in Node und exportiert die Schnittstelle', async () => 
   assert.ok(api.METERS && Object.keys(api.METERS).length === 5 && api.METERS['6/8'].sub === 3);
   assert.ok(api.GROOVES && api.GROOVES.straight.meter === '4/4' && Object.keys(api.GROOVES).length >= 9);
   assert.ok(api.VOICES && api.VOICES.bass.synth.variants[0] === 'classic');
-  assert.deepEqual(api.DRUM_NAMES, ['kick', 'snare', 'hat', 'openHat', 'tomHigh', 'tomMid', 'tomLow']);
+  assert.deepEqual(api.DRUM_NAMES, ['kick', 'snare', 'hat', 'openHat', 'tomHigh', 'tomMid', 'tomLow', 'crash']);
 });
