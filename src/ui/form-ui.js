@@ -11,7 +11,7 @@ export const levelHeight = (db) => 0.4 + 0.6 * clamp(1 + db / 12, 0, 1);
 
 /** dB mit echtem Minuszeichen, ganzzahlig: -3 -> "−3 dB". */
 const num = (n) => String(Math.round(n)).replace('-', '−');
-export const dbText = (n) => `${num(n)} dB`;
+const dbText = (n) => `${num(n)} dB`;
 const range = ([a, b], unit) => (Math.round(a) === Math.round(b) ? `${num(a)}${unit}` : `${num(a)} … ${num(b)}${unit}`);
 
 /** Takte mit Einheit: "8 Takte", "1 Takt". */

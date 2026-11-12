@@ -37,7 +37,7 @@ const DEV_FACTORS = Object.freeze({
 // Plätze: { types: [...], bars: [Wahl...], p: Wahrscheinlichkeit (1 = immer), repeat?: [min, max] }; Vorlage: head, cycle (wird wiederholt, bis das Ziel erreicht ist), tail.
 const slot = (type, bars, p = 1, repeat) => ({ types: [].concat(type), bars, p, ...(repeat && { repeat }) });
 /** `unit`: alle Teile haben diese Länge (Blues), die Summe ist ein Vielfaches davon. `jam`: Regel 4 und 5 gelten nicht. */
-export const TEMPLATES = Object.freeze({
+const TEMPLATES = Object.freeze({
   jam: { jam: true, head: [slot('intro', [4, 8], 0.3)], cycle: [slot('verse', [8, 16], 1, [1, 3]), slot('chorus', [8, 16], 0.6), slot('break', [4, 8], 0.12)], tail: [slot('chorus', [8, 16]), slot('outro', [4, 8], 0.35)] },
   pop: { head: [slot('intro', [4, 8], 0.65)], cycle: [slot('verse', [8, 16]), slot('build', [4], 0.35), slot('chorus', [8, 16]), slot('break', [4, 8], 0.2)], tail: [slot('chorus', [8, 16], 0.5), slot('outro', [4, 8], 0.6)] },
   buildDrop: { head: [slot(['intro', 'verse'], [8, 16])], cycle: [slot('verse', [8, 16], 0.3), slot('build', [4, 8], 0.9), slot('chorus', [8, 16]), slot('break', [8, 16], 0.45)], tail: [slot('chorus', [8, 16], 0.4), slot('outro', [8, 16], 0.6)] },
