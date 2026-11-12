@@ -32,6 +32,14 @@ export const TYPE_TABLE = Object.freeze({
   outro: freezeRow({ layers: ['bass', 'chords', 'pad', 'drums'], density: [-0.15, -0.3], level: [-4, -8], transition: 'none', crash: false }),
 });
 
+/**
+ * Fenster, in das `withSection` den Stilwert von drive und bassMovement legt, bevor die Dichte des Teils dazukommt. Ohne Fenster
+ * klemmen Stile mit hohem (oder sehr niedrigem) Wert alle Teile auf dieselbe Stufe der Grooves (Schwellen 0,35 und 0,7):
+ * Strophe, Aufbau und Refrain klängen gleich dicht. Mit Fenster liegt jeder Teil auch bei Extremwerten auf einer eigenen Stufe.
+ */
+export const DRIVE_WINDOW = Object.freeze([0.2, 0.75]);
+export const BASS_WINDOW = Object.freeze([0.25, 0.6]);
+
 const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
 const CHORUS = TYPE_TABLE.chorus;
 

@@ -1,10 +1,10 @@
 // Songform -> Abschnitte, Dichte und Phrasen für den Ereignisstrom (nur mit track.form; Tracks ohne Form nutzen arrange.js).
 // Reine Logik: kein Zufall, keine Ereignisse.
 import { LAYERS, LAYER_IDS } from './layers.js';
-import { resolveSection, densityAt, FEEL_DEFAULTS } from './form-types.js';
+import { resolveSection, densityAt, FEEL_DEFAULTS, DRIVE_WINDOW, BASS_WINDOW } from './form-types.js';
 
 const PHRASE_BARS = 4;
-const clamp01 = (x) => Math.min(1, Math.max(0, x));
+const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
 
 /**
  * Abschnitte aus den Teilen der (gültigen) Form: `{ start, bars, layers, fillAtEnd, kind, index, resolved }`.
@@ -32,18 +32,18 @@ export function buildFormArrangement(track) {
 }
 
 /**
- * Parameter für einen Takt des Teils: Dichte verschiebt drive voll, bassMovement und syncopation zu kleineren Anteilen,
- * syncopation zusätzlich um den Zufallsregler. Kopie, geklemmt auf 0 bis 1; ohne Verschiebung dieselben `params`.
+ * Parameter für einen Takt des Teils: drive und bassMovement werden erst in ihr Fenster (form-types.js) gelegt, damit die Dichte
+ * auch bei extremen Stilwerten wirkt, dann um die Dichte verschoben (drive voll, bassMovement zu 0,6); syncopation um 0,4 der Dichte
+ * und um den Zufallsregler. Immer eine Kopie, alles auf 0 bis 1 geklemmt.
  */
 export function withSection(params, resolved, barInSection, feel) {
   const d = densityAt(resolved, barInSection);
   const r = ((feel?.randomness ?? FEEL_DEFAULTS.randomness) - FEEL_DEFAULTS.randomness) * 0.4;
-  if (d === 0 && r === 0) return params;
   return {
     ...params,
-    drive: clamp01(params.drive + d),
-    bassMovement: clamp01(params.bassMovement + d * 0.6),
-    syncopation: clamp01(params.syncopation + d * 0.4 + r),
+    drive: clamp(clamp(params.drive, ...DRIVE_WINDOW) + d, 0, 1),
+    bassMovement: clamp(clamp(params.bassMovement, ...BASS_WINDOW) + d * 0.6, 0, 1),
+    syncopation: clamp(params.syncopation + d * 0.4 + r, 0, 1),
   };
 }
 

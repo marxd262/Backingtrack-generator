@@ -8,6 +8,7 @@ import { resolveTags, driftParams } from './tags.js';
 import { buildArrangement } from './arrange.js';
 import { LAYER_IDS, LAYERS } from './layers.js';
 import { buildFormArrangement, withSection, phrasesOf } from './form-arrange.js';
+import { densityAt } from './form-types.js';
 import { grooveFor, grooveCycle, levelOf, applyComplexity } from './grooves.js';
 import { at, note, humanVel } from './event-helpers.js';
 import { leadPlayer } from './lead.js';
@@ -163,7 +164,7 @@ export function buildEvents(input) {
   params = applyComplexity(params, track.complexity);
   const g = grooveFor(track);
   // Songform: Abschnitte aus den Teilen; ohne Form der bisherige Pfad (buildArrangement, unverändert)
-  const form = track.form ? track.form : null;
+  const form = track.form ?? null;
   const { sections } = form ? buildFormArrangement(track) : buildArrangement(track, params, master.fork('arrangement'));
   const bars = barTimeline(track);
 
@@ -183,11 +184,15 @@ export function buildEvents(input) {
     for (const sec of sections) {
       if (!sec.layers[layer]) continue;
       const last = sec.start + sec.bars - 1;
+      const paramsAt = (i) => (form ? withSection(params, sec.resolved, i - sec.start, form.feel) : params);
       let v;
+      let prevDensity;
       for (const ph of form ? phrasesOf(sec) : [sec]) {
-        const first = ph.start === sec.start;
-        const paramsAt = (i) => (form ? withSection(params, sec.resolved, i - sec.start, form.feel) : params);
-        if (first || (coin && coin.next() < form.feel.randomness)) v = section(paramsAt(ph.start), rng, g, sec); // der Abschnitt selbst nur für Spieler, die ihre Lage darin brauchen (Lead-Fills)
+        const density = form ? densityAt(sec.resolved, ph.start - sec.start) : 0;
+        // die Münze fällt in jeder späteren Phrase (feste Zahl an Ziehungen); rampt die Dichte (Aufbau, Outro), gilt die Phrase als neu (nicht für Lead und Percussion)
+        const coinHit = ph.start !== sec.start && coin && coin.next() < form.feel.randomness;
+        if (ph.start === sec.start || coinHit || (coin && density !== prevDensity)) v = section(paramsAt(ph.start), rng, g, sec); // der Abschnitt selbst nur für Spieler, die ihre Lage darin brauchen (Lead-Fills)
+        prevDensity = density;
         for (let i = ph.start; i < ph.start + ph.bars; i++) for (const e of play(bars[i], v, rng, paramsAt(i), sec.fillAtEnd && i === last, g, track.jobs[layer], track)) events.push(e);
       }
     }
