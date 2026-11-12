@@ -124,6 +124,7 @@ test('Extraktor bricht ab, wenn eine verlangte Taste keine Zone hat (Crash 49 fe
 // Das Neu-Extrahieren darf die Bytes der Packs ändern (Sample-Reihenfolge), nicht den Klang der bisherigen Tasten.
 test('Schlagzeug-Packs: bisherige Tasten klingen wie vor dem Crash (dekodierte Samples gleich), Taste 49 hat in jedem Kit eine Zone', () => {
   const ref = JSON.parse(readFileSync(new URL('fixtures/drum-pack-reference.json', import.meta.url), 'utf8'));
+  assert.equal(Object.keys(ref).length, 5);
   for (const [id, keys] of Object.entries(ref)) {
     const meta = JSON.parse(readFileSync(new URL(`${id}.json`, DIR), 'utf8')), pcm = readFileSync(new URL(`${id}.pcm`, DIR));
     for (const [key, zones] of Object.entries(keys)) {
@@ -137,8 +138,8 @@ test('Schlagzeug-Packs: bisherige Tasten klingen wie vor dem Crash (dekodierte S
     assert.ok(crash, `${id}: Taste 49`);
     // Crash gekürzt (Größe) und mit weichem Ausklang
     const s = meta.samples[crash.sample], tail = new Int16Array(pcm.buffer.slice(pcm.byteOffset + s.offset + 2 * s.frames - 64, pcm.byteOffset + s.offset + 2 * s.frames));
-    assert.ok(s.frames <= 2.5 * s.rate && s.frames > 1.5 * s.rate, `${id}: Crash ${s.frames} Frames`);
-    assert.ok(Math.max(...tail.map(Math.abs)) < 100, `${id}: Crash endet leise`);
+    assert.equal(s.frames, 110250, `${id}: Crash auf 2,5 s gekürzt`);
+    assert.deepEqual([...tail], new Array(32).fill(0), `${id}: Crash endet auf Stille`);
   }
 });
 

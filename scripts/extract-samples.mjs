@@ -22,6 +22,10 @@ export const SOURCES = { msg: 'MuseScore_General', 'fsbs-clean': 'Freepats FSBS 
 // Quelle (Standard msg) und das GM-Programm, das die Stimme vertritt (Standard: das Programm des Presets)
 // Crash (Taste 49): die Kits liefern 8,5 s (je 0,75 MB, fünfmal); gekürzt auf CRASH_SECONDS mit weichem Ausklang (letzte CRASH_FADE Sekunden)
 const CRASH_KEY = 49, CRASH_SECONDS = 2.5, CRASH_FADE = 0.8;
+// Die Crash-Zonen der Kits liegen laut SoundFont bis zu 18 dB auseinander (Standard dämpft 18 dB, Brushes und Jazz -7 dB, das der Sampler
+// auf 0 begrenzt). Hier steht die Dämpfung je Kit, bei der der Crash überall etwa gleich laut klingt (rms über die erste Sekunde bei vel 0.8,
+// gemessen 2026-11-12 mit dem level des Kits: etwa -28,5 dB; 808 ist schon ohne Dämpfung leiser, -29,6 dB). Der Sampler kann nicht anheben.
+const CRASH_ATTENUATION_DB = { 'drums-standard': 3.5, 'drums-brushes': 3.5, 'drums-jazz': 3.5, 'drums-electronic': 2.5, 'drums-808': 0 };
 const DRUM_KEYS = [35, 36, 37, 38, 41, 42, 43, 44, 46, 47, 49, 50];
 export const PACKS = {
   'bass-finger': { bank: 0, program: 33 }, // Fingered Bass
@@ -86,7 +90,7 @@ export function buildPack(sf, id, { bank, program, keys, source = 'msg', gm = pr
     let pcm = compressed ? decode(sf.buf.subarray(sf.smplAt + head.start, sf.smplAt + head.end)) : Buffer.from(sf.buf.subarray(sf.smplAt + 2 * head.start, sf.smplAt + 2 * head.end));
     let frames = pcm.length / 2;
     // nur Samples, die allein die Crash-Taste spielen, werden gekürzt (alle anderen Tasten bleiben unberührt)
-    if (zones.filter((z) => z.sampleID === sampleId).every((z) => z.key[0] === CRASH_KEY && z.key[1] === CRASH_KEY) && frames > CRASH_SECONDS * head.sampleRate) {
+    if (keys?.includes(CRASH_KEY) && zones.filter((z) => z.sampleID === sampleId).every((z) => z.key[0] === CRASH_KEY && z.key[1] === CRASH_KEY) && frames > CRASH_SECONDS * head.sampleRate) {
       frames = Math.round(CRASH_SECONDS * head.sampleRate);
       pcm = pcm.subarray(0, 2 * frames);
       const fade = Math.round(CRASH_FADE * head.sampleRate);
@@ -107,7 +111,7 @@ export function buildPack(sf, id, { bank, program, keys, source = 'msg', gm = pr
       rootKey: root >= 0 && root <= 127 ? root : 60,
       tuneCents: z.coarseTune * 100 + z.fineTune + head.correction,
       loop: (z.sampleModes & 1) === 1 && samples[index].loopEnd > 0,
-      attenuationDb: round(z.initialAttenuation / 10, 2),
+      attenuationDb: keys?.includes(CRASH_KEY) && z.key[0] === CRASH_KEY && z.key[1] === CRASH_KEY && id in CRASH_ATTENUATION_DB ? CRASH_ATTENUATION_DB[id] : round(z.initialAttenuation / 10, 2),
       attack: round(seconds(z.attackVolEnv), 4), hold: round(seconds(z.holdVolEnv), 4), decay: round(seconds(z.decayVolEnv), 4),
       release: round(seconds(z.releaseVolEnv), 4), sustainDb: round(z.sustainVolEnv / 10, 2),
     };

@@ -482,6 +482,17 @@ for (const [layer, variant] of KITS) {
   });
 }
 
+// Der Crash liegt in der SoundFont je Kit bis zu 18 dB auseinander; der Extraktor gleicht ihn über die Zonendämpfung an (CRASH_ATTENUATION_DB)
+test('Crash: in allen Sample-Kits etwa gleich laut (rms der ersten Sekunde bei vel 0.8 innerhalb von 3 dB)', async ({ page }) => {
+  const db = [];
+  for (const [layer, variant] of KITS.filter(([l]) => l === 'drums')) {
+    const r = await renderHits(page, layer, { id: 'sample', variant }, ['crash']);
+    db.push([variant, 20 * Math.log10(r.rms)]);
+  }
+  const values = db.map(([, v]) => v);
+  expect(Math.max(...values) - Math.min(...values), JSON.stringify(db)).toBeLessThan(3);
+});
+
 test('drums/sample/rimshot: die Snare ist der Seitenschlag (Taste 37), anders als die Snare des Standard-Kits; der Kick ist derselbe', async ({ page }) => {
   test.setTimeout(120_000);
   const diff = async (name) => {
