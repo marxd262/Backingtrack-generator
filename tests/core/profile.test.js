@@ -55,13 +55,13 @@ test('Rundlauf Ordner: verschachtelter Baum bleibt gleich, Ids werden nie geschr
   assert.deepEqual(r.node, folderNode('Meine Profile', [profileNode('A'), folderNode('Unter', [profileNode('B'), folderNode('Leer', [])])]));
 });
 
-test('Altformat (Commit 561bc10) wird als Profil mit allen 9 Teilen gelesen, Name "Importiert"', () => {
+test('Altformat (Commit 561bc10) wird als Profil mit allen 9 alten Teilen (ohne form) gelesen, Name "Importiert"', () => {
   for (const input of [JSON.stringify(OLD_FILE), structuredClone(OLD_FILE)]) {
     const r = parseFile(input);
     assert.ok(r.ok, JSON.stringify(r));
     assert.equal(r.node.type, 'profile');
     assert.equal(r.node.name, 'Importiert');
-    assert.deepEqual(Object.keys(r.node.parts), PART_IDS);
+    assert.deepEqual(Object.keys(r.node.parts), PART_IDS.filter((id) => id !== 'form'));
     assert.equal(r.node.parts.tempo.bpm, 96);
     assert.equal(r.node.parts.harmony.scale, 'blues');
     assert.equal(r.node.parts.style.style, 'funk');
@@ -276,4 +276,39 @@ test('parseFile verändert die Eingabe nicht (tief eingefroren)', () => {
     assert.ok(r.ok || input.items);
     assert.equal(JSON.stringify(input), snap);
   }
+});
+
+// ---------- Teil form (zehnter Teil) ----------
+
+const FORM = {
+  template: 'rock', auto: false, feel: { structure: 0.6, dynamics: 0.9, pauses: 0.4, randomness: 0.5 },
+  sections: [{ type: 'intro', bars: 8 }, { type: 'verse', bars: 16, level: -3, locked: true }, { type: 'chorus', bars: 24, crash: true, transition: 'stop' }],
+};
+
+test('Rundlauf Profil mit Teil form: Datei als Text ergibt dieselbe Form (10 Teile)', () => {
+  const node = { type: 'profile', name: 'Mit Form', parts: captureParts({ ...session(), track: track({ form: FORM, length: 48 }) }) };
+  assert.equal(Object.keys(node.parts).length, 10);
+  const r = parseFile(JSON.stringify(makeProfileFile(node)));
+  assert.deepEqual(r, { ok: true, node, skipped: 0 });
+  assert.deepEqual(r.node.parts.form, { form: FORM });
+});
+
+test('Dateien von früher (Version 1 und 2, 9 Teile) und unbekannte künftige Teile bleiben lesbar', () => {
+  const nine = captureParts(fullSession());
+  assert.equal(Object.keys(nine).length, 9);
+  for (const version of [1, 2, 9]) {
+    const r = parseFile(JSON.stringify({ format: FORMAT_PROFILE, version, name: 'Alt', parts: { ...nine, zukunft: { a: 1 } } }));
+    assert.ok(r.ok, `Version ${version}`);
+    assert.deepEqual(Object.keys(r.node.parts), PART_IDS.filter((id) => id !== 'form'));
+    assert.equal(r.skipped, 0);
+  }
+});
+
+test('Datei mit kaputtem Teil form: Rest des Profils bleibt, Zählung stimmt, nur Teil form allein und ungültig -> abgelehnt', () => {
+  const parts = { ...captureParts(fullSession()), form: { form: { ...FORM, sections: [{ type: 'verse', bars: 8 }, { type: 'nope', bars: 4 }] } } };
+  const r = parseFile({ format: FORMAT_PROFILE, version: 2, name: 'Halb', parts });
+  assert.ok(r.ok);
+  assert.deepEqual(r.node.parts.form.form.sections, [{ type: 'verse', bars: 8 }]);
+  assert.equal(r.skipped, 1);
+  bad(parseFile({ format: FORMAT_PROFILE, version: 2, name: 'Nur', parts: { form: { form: { ...FORM, sections: [] } } } }), 'leere Liste');
 });

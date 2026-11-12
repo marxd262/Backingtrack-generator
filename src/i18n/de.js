@@ -480,6 +480,8 @@ export default {
   'part.mixer.hint': 'Pegel je Schicht und Gesamt',
   'part.variant': 'Variante',
   'part.variant.hint': 'Variantennummer und „reichere Varianten“',
+  'part.form': 'Songform',
+  'part.form.hint': 'Teile des Songs mit ihren Einstellungen und die Regler (nicht bei „Ohne Form“)',
   'err.badProfile': 'Das ist kein gültiges Profil. Erwartet wird der Text oder die Datei aus „Als Datei“ oder „Kopieren“.',
   'ui.mixMaster': 'Gesamt',
   'ui.mixMute': 'Stumm',

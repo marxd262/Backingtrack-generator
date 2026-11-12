@@ -153,17 +153,17 @@ test('Sitzung speichern legt das Profil in „Meine Profile“ an und wählt es;
   await expect(items(page).last()).toHaveText('Test A');
 });
 
-test('Teile-Auswahl: eingeklappt, 9 Kästchen, „Nur Klang“ speichert nur die Klang-Teile, Laden lässt das Tempo unberührt', async ({ page }) => {
+test('Teile-Auswahl: eingeklappt, 10 Kästchen, „Nur Klang“ speichert nur die Klang-Teile, Laden lässt das Tempo unberührt', async ({ page }) => {
   const picker = page.locator('#profile-save-parts');
   await expect(picker).not.toHaveAttribute('open');
   await expect(picker.locator('summary')).toHaveText('Inhalt: Alles');
   await expect(picker.locator('input[type="checkbox"]').first()).toBeHidden();
   await picker.locator('summary').click();
-  await expect(picker.locator('input[type="checkbox"]')).toHaveCount(9);
+  await expect(picker.locator('input[type="checkbox"]')).toHaveCount(10);
   for (const box of await picker.locator('input[type="checkbox"]').all()) await expect(box).toBeVisible();
   await expect(page.getByRole('checkbox', { name: 'Tempo', exact: true })).toBeChecked();
   await picker.getByRole('button', { name: 'Nur Klang' }).click();
-  await expect(picker.locator('summary')).toHaveText('Inhalt: 3 von 9');
+  await expect(picker.locator('summary')).toHaveText('Inhalt: 3 von 10');
   await expect(page.getByRole('checkbox', { name: 'Tempo', exact: true })).not.toBeChecked();
   await expect(page.getByRole('checkbox', { name: 'Mischpult', exact: true })).toBeChecked();
   await page.getByLabel('Name des Profils').fill('Klang');
@@ -177,7 +177,7 @@ test('Teile-Auswahl: eingeklappt, 9 Kästchen, „Nur Klang“ speichert nur die
   // „Nichts“ speichert nichts
   await item(page, 'Aktuelle Sitzung').click();
   await picker.getByRole('button', { name: 'Nichts' }).click();
-  await expect(picker.locator('summary')).toHaveText('Inhalt: 0 von 9');
+  await expect(picker.locator('summary')).toHaveText('Inhalt: 0 von 10');
   await page.getByLabel('Name des Profils').fill('Leer');
   await page.locator('#profile-save').click();
   await expect(message(page)).toContainText('mindestens einen Teil');
@@ -185,8 +185,8 @@ test('Teile-Auswahl: eingeklappt, 9 Kästchen, „Nur Klang“ speichert nur die
 });
 
 test('„Nur Rhythmus“ in 4/4 gespeichert, in 6/8 geladen: das Tempo wird umgerechnet wie beim Taktartwechsel', async ({ page }) => {
-  await page.locator('#profile-save-parts summary').click();
-  await page.locator('#profile-save-parts').getByRole('button', { name: 'Nur Rhythmus' }).click();
+  await page.locator('#profile-save-parts').evaluate((el) => { el.open = true; });
+  await presetParts(page, 'Nur Rhythmus');
   await saveSession(page, 'Rh'); // 4/4, 100 bpm
   await page.locator('#profiles-pop').evaluate((el) => el.hidePopover());
   if (!(await page.locator('#side-left').isVisible())) await page.locator('#toggle-left').click();
@@ -282,7 +282,7 @@ test('Import: ein kopiertes Profil mit anderem Tempo wird in „Meine Profile“
   await page.locator('#profile-copy').click();
   const p = JSON.parse(await page.locator('#profile-text').inputValue());
   expect(p.format).toBe('backingtrack-profile');
-  expect(Object.keys(p.parts)).toHaveLength(9);
+  expect(Object.keys(p.parts)).toHaveLength(10);
   p.name = 'Von Freund';
   p.parts.tempo.bpm = 77;
   p.parts.extra = { zukunft: 1 };
@@ -390,7 +390,7 @@ test('360 px: kein waagerechtes Scrollen, Baum über dem Feld, Knöpfe und Zeile
   await page.locator('#go').click(); // über Los: Feintuning öffnet hier die Klang-Schublade
   await expect(page.locator('#play')).toBeVisible();
   await openWindow(page);
-  await page.locator('#profile-save-parts summary').click();
+  await page.locator('#profile-save-parts').evaluate((el) => { el.open = true; });
   await saveSession(page, 'Ein sehr langer Profilname der umbrechen muss weil er nicht passt');
   await item(page, 'Aktuelle Sitzung').click();
   const noScrollX = () => page.evaluate(() => {
@@ -498,8 +498,8 @@ test('gespeicherte Ids wie die festen Schlüssel (session, mine, factory, factor
 });
 
 test('Mit Sitzung überschreiben: Haken beginnen mit den Teilen des Profils, „Nur Rhythmus“ ändert nur diese, der Rest bleibt; Rückgängig', async ({ page }) => {
-  await page.locator('#profile-save-parts summary').click();
-  await page.locator('#profile-save-parts').getByRole('button', { name: 'Nur Klang' }).click();
+  await page.locator('#profile-save-parts').evaluate((el) => { el.open = true; });
+  await presetParts(page, 'Nur Klang');
   await saveSession(page, 'Teil');
   await expect(info(page)).toHaveText('Inhalt: Klangregler, Stimmen & Aufgaben, Mischpult');
   await expect(page.locator('#profile-overwrite-parts')).toBeHidden(); // erst auf Knopfdruck
@@ -508,7 +508,7 @@ test('Mit Sitzung überschreiben: Haken beginnen mit den Teilen des Profils, „
   await page.locator('#profile-overwrite').click();
   const picker = page.locator('#profile-overwrite-parts');
   await expect(picker).toHaveAttribute('open', '');
-  await expect(picker.locator('summary')).toHaveText('Inhalt: 3 von 9');
+  await expect(picker.locator('summary')).toHaveText('Inhalt: 3 von 10');
   await expect(picker.getByRole('checkbox', { name: 'Mischpult', exact: true })).toBeChecked();
   await expect(picker.getByRole('checkbox', { name: 'Tempo', exact: true })).not.toBeChecked();
   await picker.getByRole('button', { name: 'Nur Rhythmus' }).click();
@@ -575,7 +575,7 @@ test('Profil löschen: sofort weg, Auswahl beim Ordner; „Rückgängig“ stell
   await expect(item(page, 'Weg')).toBeFocused();
   await expect(message(page)).toHaveText('Rückgängig gemacht.');
   await expect(undo(page)).toBeHidden();
-  expect(await storedParts(page, 'Weg')).toHaveLength(9);
+  expect(await storedParts(page, 'Weg')).toHaveLength(10);
   await page.reload();
   await page.locator('#tune-btn').click();
   await openWindow(page);
@@ -702,16 +702,16 @@ test('Ordner: anlegen, bis Tiefe 8 verschachteln (9. Ebene abgelehnt), Löschen 
   await expect(item(page, 'Erste')).toHaveAttribute('aria-selected', 'true');
 });
 
-test('Export folgt der Auswahl: Sitzung mit 9 Teilen, Profil nur mit seinen Teilen, Ordner samt Unterordnern ohne Ids', async ({ page }) => {
+test('Export folgt der Auswahl: Sitzung mit 10 Teilen, Profil nur mit seinen Teilen, Ordner samt Unterordnern ohne Ids', async ({ page }) => {
   let file = await copied(page);
   expect(file.format).toBe('backingtrack-profile');
   expect(file.name).toBe('Aktuelle Sitzung');
-  expect(Object.keys(file.parts)).toHaveLength(9);
+  expect(Object.keys(file.parts)).toHaveLength(10);
   await newFolder(page, 'Meine Profile', 'Ordner');
   await newFolder(page, 'Ordner', 'Unter');
   await item(page, 'Aktuelle Sitzung').click();
-  await page.locator('#profile-save-parts summary').click();
-  await page.locator('#profile-save-parts').getByRole('button', { name: 'Nur Rhythmus' }).click();
+  await page.locator('#profile-save-parts').evaluate((el) => { el.open = true; });
+  await presetParts(page, 'Nur Rhythmus');
   await saveIn(page, 'Rh', 'Ordner');
   await expect(item(page, 'Rh')).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('#profile-file')).toHaveText('Als Datei');
@@ -757,7 +757,7 @@ test('„Alles sichern“ ist bei jeder Auswahl sichtbar und lädt „Meine Prof
   expect(file.name).toBe('Meine Profile');
   expect(file.items.map((n) => [n.type, n.name])).toEqual([['folder', 'F'], ['profile', 'A1']]);
   expect(file.items[0].items.map((n) => n.name)).toEqual(['B1']);
-  expect(Object.keys(file.items[1].parts)).toHaveLength(9);
+  expect(Object.keys(file.items[1].parts)).toHaveLength(10);
   await expect(item(page, 'B1')).toHaveAttribute('aria-selected', 'true');
 });
 
@@ -1275,4 +1275,240 @@ test('Touch: kurzes Tippen auf den Griff wählt nur die Zeile', async ({ browser
   expect(await stored(page)).toBe(before);
   expect(await page.evaluate(() => window.__types)).toEqual(['touch']);
   await context.close();
+});
+
+// ---------- Teil „Songform“ (zehnter Teil) ----------
+
+const hideWindow = (page) => page.locator('#profiles-pop').evaluate((el) => el.hidePopover());
+const leftOpen = async (page) => {
+  if (!(await page.locator('#side-left').isVisible())) await page.locator('#toggle-left').click();
+  await expect(page.locator('#form-template')).toBeVisible();
+};
+const formTemplate = (page) => page.locator('#form-template');
+const formTarget = (page) => page.locator('#length');
+const stripParts = (page) => page.locator('#form-strip [role="option"]');
+// Schnellwahl im eingeklappten Inhalt der Speichern-Zeile
+const presetParts = async (page, name) => {
+  await page.locator('#profile-save-parts').evaluate((el) => { el.open = true; });
+  await page.locator('#profile-save-parts').getByRole('button', { name }).click();
+};
+const sessionForm = (page) => page.evaluate(async () => {
+  const { state } = await import('/ui/state.js');
+  const f = state.track.form;
+  return structuredClone({ form: f ?? null, length: state.track.length, target: state.formTarget, feel: state.formFeel, sum: f ? f.sections.reduce((n, x) => n + x.bars, 0) : null });
+});
+// Form ändern wie ein Nutzer: Fenster zu, Zielgröße wählen (würfelt alles neu), Fenster wieder auf
+const changeTarget = async (page, bars) => {
+  await hideWindow(page);
+  await leftOpen(page);
+  await formTarget(page).selectOption(String(bars));
+  await openWindow(page);
+};
+// Teil 1 sperren und Dynamik setzen, damit Sperre und Regler im Profil stecken
+const lockFirstAndSetDynamics = async (page, value) => {
+  await hideWindow(page);
+  await leftOpen(page);
+  await stripParts(page).first().click();
+  await page.locator('#part-lock').click();
+  await page.locator('#form-dynamics').fill(String(value));
+  await openWindow(page);
+};
+
+test('Profil mit Songform: Teile, Regler und Sperren kommen beim Laden zurück; Streifen und Auswahl zeigen sie', async ({ page }) => {
+  await lockFirstAndSetDynamics(page, 90);
+  const saved = await sessionForm(page);
+  expect(saved.form.sections[0].locked).toBe(true);
+  expect(saved.form.feel.dynamics).toBe(0.9);
+  await saveSession(page, 'MitForm');
+  expect(await storedParts(page, 'MitForm')).toContain('form');
+  expect(await storedParts(page, 'MitForm')).toHaveLength(10);
+  await changeTarget(page, 24);
+  const changed = await sessionForm(page);
+  expect(changed.form.sections).not.toEqual(saved.form.sections);
+  await load(page, 'MitForm');
+  await expect(message(page)).toHaveText('Profil übernommen.');
+  const after = await sessionForm(page);
+  expect(after.form).toEqual(saved.form);
+  expect(after.length).toBe(after.sum);
+  expect(after.target).toBe(saved.target);
+  expect(after.feel.dynamics).toBe(0.9);
+  await hideWindow(page);
+  await expect(formTemplate(page)).toHaveValue('auto');
+  await expect(formTarget(page)).toHaveValue(String(saved.target));
+  await expect(page.locator('#form-dynamics')).toHaveValue('90');
+  await expect(stripParts(page)).toHaveCount(saved.form.sections.length);
+  await expect(stripParts(page).first()).toHaveClass(/\blocked\b/);
+});
+
+test('Profil mit kleinerer Form laden, während im Streifen ein hinterer Teil gewählt ist: Auswahl rückt zurück, nichts bricht', async ({ page }) => {
+  await changeTarget(page, 24);
+  await saveSession(page, 'Klein');
+  const small = await sessionForm(page);
+  await changeTarget(page, 192);
+  await hideWindow(page);
+  await leftOpen(page);
+  const count = await stripParts(page).count();
+  expect(count).toBeGreaterThan(small.form.sections.length);
+  await stripParts(page).last().click();
+  await expect(stripParts(page).last()).toHaveAttribute('aria-selected', 'true');
+  await openWindow(page);
+  await load(page, 'Klein');
+  await hideWindow(page);
+  await expect(stripParts(page)).toHaveCount(small.form.sections.length);
+  await expect(page.locator('#form-strip [role="option"][aria-selected="true"]')).toHaveCount(1);
+  await expect(formTarget(page)).toHaveValue('24');
+  expect((await sessionForm(page)).length).toBe(small.sum);
+});
+
+test('Profil ohne Teil Songform lässt die Form unberührt', async ({ page }) => {
+  await item(page, 'Aktuelle Sitzung').click();
+  await presetParts(page, 'Nur Klang');
+  await page.getByLabel('Name des Profils').fill('Klang');
+  await page.locator('#profile-save').click();
+  expect(await storedParts(page, 'Klang')).toEqual(['sound', 'voices', 'mixer']);
+  await hideWindow(page);
+  await leftOpen(page);
+  await formTemplate(page).selectOption('blues');
+  await lockFirstAndSetDynamics(page, 20);
+  const before = await sessionForm(page);
+  await load(page, 'Klang');
+  expect(await sessionForm(page)).toEqual(before);
+  await hideWindow(page);
+  await expect(formTemplate(page)).toHaveValue('blues');
+  await expect(page.locator('#form-dynamics')).toHaveValue('20');
+});
+
+test('geladenes rhythm.length ohne Teil Songform würfelt die Form für die nächste Zielgröße neu; Länge, Auswahl und Anzeige stimmen, auch beim Spielen', async ({ page }) => {
+  await changeTarget(page, 48);
+  await item(page, 'Aktuelle Sitzung').click();
+  await presetParts(page, 'Nur Rhythmus');
+  await page.getByLabel('Name des Profils').fill('Rhythmus48');
+  await page.locator('#profile-save').click();
+  expect(await storedParts(page, 'Rhythmus48')).toEqual(['tempo', 'rhythm']);
+  await changeTarget(page, 192);
+  await hideWindow(page);
+  await page.locator('#tuning-tempo').fill('200');
+  await page.locator('#play-go').click();
+  await expect(page.locator('#play-go')).toHaveText('Stopp');
+  await expect.poll(() => page.locator('#play-position').textContent(), { timeout: 10_000 }).toMatch(/^Takt \d+ von \d+$/);
+  await openWindow(page);
+  await load(page, 'Rhythmus48');
+  await hideWindow(page);
+  const after = await sessionForm(page);
+  expect(after.form).not.toBeNull();
+  expect(after.length).toBe(after.sum);
+  expect(Math.abs(after.sum - 48)).toBeLessThanOrEqual(8);
+  expect(after.target).toBe(48);
+  await expect(formTarget(page)).toHaveValue('48');
+  await expect(formTemplate(page)).toHaveValue('auto');
+  await expect(stripParts(page)).toHaveCount(after.form.sections.length);
+  await expect(page.locator('#play-go')).toHaveText('Stopp');
+  await expect(page.locator('#play-position')).toHaveText(new RegExp(`^Takt \\d+ von ${after.sum}$`), { timeout: 10_000 });
+  await page.locator('#play-go').click();
+});
+
+test('Ohne Form: der Teil Songform ist nicht wählbar und fehlt im Profil; ein Profil ohne ihn lässt die Form unberührt, ein Profil mit ihm bringt sie zurück; rhythm.length setzt nur die Länge', async ({ page }) => {
+  await saveSession(page, 'MitForm');
+  const withForm = await sessionForm(page);
+  await hideWindow(page);
+  await leftOpen(page);
+  await formTemplate(page).selectOption('off');
+  await openWindow(page);
+  await item(page, 'Aktuelle Sitzung').click();
+  const picker = page.locator('#profile-save-parts');
+  await expect(picker.locator('summary')).toHaveText('Inhalt: 9 von 10');
+  await picker.locator('summary').click();
+  await expect(page.getByRole('checkbox', { name: 'Songform', exact: true })).toBeDisabled();
+  await expect(page.getByRole('checkbox', { name: 'Songform', exact: true })).not.toBeChecked();
+  await page.getByLabel('Name des Profils').fill('OhneForm');
+  await page.locator('#profile-save').click();
+  expect(await storedParts(page, 'OhneForm')).not.toContain('form');
+  expect(await storedParts(page, 'OhneForm')).toHaveLength(9);
+  // „Alles“ wählt den nicht vorhandenen Teil nicht mit
+  await item(page, 'Aktuelle Sitzung').click();
+  await picker.getByRole('button', { name: 'Alles' }).click();
+  await expect(picker.locator('summary')).toHaveText('Inhalt: 9 von 10');
+  // Profil mit Form: zurück
+  await load(page, 'MitForm');
+  expect((await sessionForm(page)).form).toEqual(withForm.form);
+  await hideWindow(page);
+  await expect(formTemplate(page)).toHaveValue('auto');
+  await openWindow(page);
+  // Profil ohne Form-Teil (auch wenn es bei „Ohne Form“ entstand): Form bleibt
+  await load(page, 'OhneForm');
+  expect((await sessionForm(page)).form).toEqual(withForm.form);
+  // Ohne Form + nur Länge: Länge gesetzt, keine Form entsteht
+  await hideWindow(page);
+  await formTemplate(page).selectOption('off');
+  await openWindow(page);
+  await item(page, 'Aktuelle Sitzung').click();
+  await presetParts(page, 'Nur Rhythmus');
+  await page.getByLabel('Name des Profils').fill('NurLaenge');
+  await page.locator('#profile-save').click();
+  await hideWindow(page);
+  await formTarget(page).selectOption('48');
+  await openWindow(page);
+  await load(page, 'NurLaenge');
+  await hideWindow(page);
+  const off = await sessionForm(page);
+  expect(off.form).toBeNull();
+  expect(off.length).toBe(96);
+  await expect(formTemplate(page)).toHaveValue('off');
+  await expect(formTarget(page)).toHaveValue('96');
+});
+
+test('Dateien von früher (Version 1 mit track, Version 2 mit 9 Teilen) lassen sich importieren und laden die Form nicht an', async ({ page }) => {
+  await item(page, 'Aktuelle Sitzung').click();
+  const bars = [['A', 'min'], ['D', 'min']].map(([root, quality]) => ({ chord: { root, quality }, beats: 4 }));
+  const v1 = { format: 'backingtrack-profile', version: 1, track: { key: { root: 'A', mode: 'minor' }, bpm: 88, bars, tags: {}, timbre: {}, seed: 3, variety: true, meter: [4, 4], length: 24, layers: {}, voices: {}, jobs: {} }, scale: 'minorPentatonic', style: 'funk', chordColor: 'triads', chordColorFromStyle: true, mix: { master: 0.7 } };
+  await page.locator('#profile-text').fill(JSON.stringify(v1));
+  await page.locator('#profile-import-text').click();
+  await expect(item(page, 'Importiert')).toHaveAttribute('aria-selected', 'true');
+  expect(await storedParts(page, 'Importiert')).not.toContain('form');
+  expect(await storedParts(page, 'Importiert')).toContain('harmony');
+  await item(page, 'Aktuelle Sitzung').click();
+  const v2 = { format: 'backingtrack-profile', version: 2, name: 'Alt2', parts: { tempo: { bpm: 70, meter: [4, 4] }, mixer: { mix: { master: 0.6 } }, zukunft: { x: 1 } } };
+  await page.locator('#profile-text').fill(JSON.stringify(v2));
+  await page.locator('#profile-import-text').click();
+  await expect(item(page, 'Alt2')).toHaveAttribute('aria-selected', 'true');
+  expect(await storedParts(page, 'Alt2')).toEqual(['tempo', 'mixer']);
+  const before = await sessionForm(page);
+  await load(page, 'Alt2');
+  await expect(tempo(page)).toHaveText('70');
+  const after = await sessionForm(page);
+  expect(after.form).toEqual(before.form);
+  await load(page, 'Importiert');
+  await expect(tempo(page)).toHaveText('88');
+});
+
+test('Export und Import eines Profils mit Songform: Rundlauf; „Alles sichern“ enthält den Teil', async ({ page }) => {
+  await lockFirstAndSetDynamics(page, 75);
+  const saved = await sessionForm(page);
+  await saveSession(page, 'Form');
+  await item(page, 'Form').click();
+  const file = await copied(page);
+  expect(Object.keys(file.parts)).toHaveLength(10);
+  expect(file.parts.form.form.sections).toEqual(saved.form.sections);
+  expect(file.parts.form.form.feel.dynamics).toBe(0.75);
+  // zurück in „Meine Profile“ unter neuem Namen, Form dazwischen ändern, Kopie laden
+  await item(page, 'Aktuelle Sitzung').click();
+  file.name = 'Kopie';
+  await page.locator('#profile-text').fill(JSON.stringify(file));
+  await page.locator('#profile-import-text').click();
+  await expect(item(page, 'Kopie')).toHaveAttribute('aria-selected', 'true');
+  expect(await storedParts(page, 'Kopie')).toContain('form');
+  await changeTarget(page, 24);
+  await load(page, 'Kopie');
+  expect((await sessionForm(page)).form).toEqual(saved.form);
+  // alles sichern
+  await item(page, 'Meine Profile').click();
+  const { text } = await downloadJson(page, '#profile-backup');
+  const backup = JSON.parse(text);
+  expect(backup.items.map((n) => n.name)).toEqual(['Form', 'Kopie']);
+  for (const n of backup.items) expect(n.parts.form.form.sections).toEqual(saved.form.sections);
+  // und wieder einlesen
+  await item(page, 'Aktuelle Sitzung').click();
+  await page.locator('#profile-text').fill(text);
+  await page.locator('#profile-import-text').click();
+  await expect(message(page)).not.toContainText('ungültig');
 });

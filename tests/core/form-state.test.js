@@ -2,9 +2,10 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { state, formChoice, rollNewForm, setFormTemplate, setFormTarget, setFormFeel } from '../../src/ui/state.js';
-import { writeSession } from '../../src/ui/profile-session.js';
+import { readSession, writeSession } from '../../src/ui/profile-session.js';
 import { laneKey } from '../../src/ui/lanes.js';
 import { formLength, isValidForm } from '../../src/core/form.js';
+import { applyParts } from '../../src/core/profile-parts.js';
 import { FEEL_DEFAULTS } from '../../src/core/form-types.js';
 
 beforeEach(() => {
@@ -14,6 +15,7 @@ beforeEach(() => {
   state.track.seed = 7;
   delete state.track.form;
   state.track.length = 96;
+  state.track.bars = [{ chord: { root: 'A', quality: 'min' }, beats: 4 }]; // die App füllt die Folge beim Start
 });
 
 test('Vorlage Auto: gültige Form, Länge ist die Summe, Gewähltes bleibt "auto"', () => {
@@ -97,15 +99,49 @@ test('laneKey ändert sich mit Form, Aufgaben, Stimmen und Vielfalt, nicht mit T
   assert.notEqual(laneKey({ ...base, form }), laneKey({ ...base, form: { ...form, feel: { ...FEEL_DEFAULTS, pauses: 1 } } }));
 });
 
-test('writeSession: mit Form bestimmt die Summe die Länge, Zielgröße und Regler folgen der Form', () => {
+// Profile laden wie die App: applyParts, dann writeSession
+const load = (parts) => {
+  const r = applyParts(readSession(state), parts);
+  assert.ok(r.ok);
+  writeSession(state, r.session);
+};
+
+test('writeSession: Profil mit Form-Teil, Zielgröße und Regler folgen der geladenen Form, Länge ist die Summe', () => {
   setFormTemplate('auto');
   const form = structuredClone(state.track.form);
   form.feel = { ...form.feel, randomness: 0.9 };
-  // ein Profil von früher bringt nur rhythm.length mit
-  const session = { track: { ...structuredClone(state.track), form, length: 48 }, scale: state.scale, style: state.style, chordColor: state.chordColor, chordColorFromStyle: true, mix: state.mix };
-  state.formTarget = 48;
-  writeSession(state, session);
-  assert.equal(state.track.length, 96);
-  assert.equal(state.formTarget, 96);
+  const loaded = { ...form, sections: [{ type: 'verse', bars: 20 }, { type: 'chorus', bars: 20 }, { type: 'outro', bars: 8 }] };
+  state.formTarget = 96;
+  load({ form: { form: loaded }, rhythm: { length: 192 } });
+  assert.deepEqual(state.track.form.sections, loaded.sections);
+  assert.equal(state.track.length, 48);
+  assert.equal(state.formTarget, 48);
   assert.equal(state.formFeel.randomness, 0.9);
+});
+
+test('writeSession: Profil ohne Form-Teil lässt die Form und die Zielgröße unberührt', () => {
+  setFormTemplate('auto');
+  const before = structuredClone(state.track.form);
+  const target = state.formTarget;
+  load({ tempo: { bpm: 77 }, style: { style: 'rock' } });
+  assert.deepEqual(state.track.form, before);
+  assert.equal(state.formTarget, target);
+  assert.equal(state.track.length, formLength(before));
+});
+
+test('writeSession: rhythm.length ohne Form-Teil würfelt die Form für die nächste Zielgröße neu', () => {
+  setFormTemplate('auto');
+  load({ rhythm: { length: 50 } });
+  assert.ok(isValidForm(state.track.form));
+  assert.equal(state.track.length, formLength(state.track.form));
+  assert.ok(Math.abs(state.track.length - 48) <= 8, `Länge ${state.track.length}`);
+  assert.equal(state.formTarget, 48);
+  assert.equal(formChoice(), 'auto');
+});
+
+test('writeSession: Ohne Form setzt rhythm.length nur die Länge', () => {
+  load({ rhythm: { length: 48 } });
+  assert.equal(state.track.form, undefined);
+  assert.equal(state.track.length, 48);
+  assert.equal(state.formTarget, 48);
 });

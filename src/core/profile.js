@@ -1,7 +1,7 @@
 // Profil-Dateien: ein Profil (Teile, Name) oder ein Ordner (Baum aus Profilen und Ordnern) als JSON. Reine Logik ohne DOM und Audio.
 // Einlesen ist tolerant (Spec "Dateiformat"): unbekannte Felder fallen überall weg, Ungültiges fällt feldweise weg und wird gezählt (skipped),
 // abgelehnt wird nur Kaputtes (kein JSON/Objekt, unbekanntes format, zu groß, nach dem Bereinigen ohne Inhalt). Die Teile prüft sanitizeParts.
-import { captureParts, sanitizeParts } from './profile-parts.js';
+import { captureParts, sanitizeParts, PART_IDS } from './profile-parts.js';
 
 export const FORMAT_PROFILE = 'backingtrack-profile';
 export const FORMAT_FOLDER = 'backingtrack-folder';
@@ -40,14 +40,14 @@ export const makeFolderFile = (node) => ({
 
 // ---------- lesen ----------
 
-// Altdatei (Commit 561bc10: track, scale, style, chordColor, chordColorFromStyle, mix) -> alle 9 Teile. Brauchbar nur mit gültiger harmony:
+// Altdatei (Commit 561bc10: track, scale, style, chordColor, chordColorFromStyle, mix) -> alle Teile außer `form`. Brauchbar nur mit gültiger harmony:
 // ohne Tonart und Takte ließe sich die Datei nicht laden (die alte Prüfung lehnte sie ebenso ab).
 function legacyParts(raw, st) {
   const raw0 = own(raw, 'track');
   if (!isObject(raw0)) return null;
   const track = own(raw0, 'meter') === undefined ? { ...raw0, meter: [4, 4] } : raw0; // Altdateien ohne meter waren 4/4
   const session = { track, scale: own(raw, 'scale'), style: own(raw, 'style'), chordColor: own(raw, 'chordColor'), chordColorFromStyle: own(raw, 'chordColorFromStyle'), mix: own(raw, 'mix') };
-  const { parts, skipped } = sanitizeParts(JSON.parse(JSON.stringify(captureParts(session)))); // JSON: fehlende Felder statt undefined
+  const { parts, skipped } = sanitizeParts(JSON.parse(JSON.stringify(captureParts(session, PART_IDS.filter((id) => id !== 'form'))))); // JSON: fehlende Felder statt undefined
   st.skipped += skipped;
   return parts.harmony ? parts : null;
 }

@@ -1,4 +1,4 @@
-// Die 9 Teile eines Profils: aus der Sitzung festhalten (captureParts), aus fremden Daten bereinigen (sanitizeParts) und auf eine
+// Die 10 Teile eines Profils: aus der Sitzung festhalten (captureParts), aus fremden Daten bereinigen (sanitizeParts) und auf eine
 // Sitzung anwenden (applyParts). Reine Logik ohne DOM und Audio; die Sitzung hat die Form des Oberflächenzustands
 // { track, scale, style, chordColor, chordColorFromStyle, mix } (src/ui/state.js).
 import { normalizeTrack, validateTrack } from './track.js';
@@ -9,9 +9,12 @@ import { isJob, completeJobs, LAYER_IDS } from './layers.js';
 import { STYLE_PRESETS } from './tags.js';
 import { CHORD_COLORS } from './harmony.js';
 import { DEFAULT_TIMBRE } from './timbre.js';
+import { normalizeForm, isValidForm, formLength } from './form.js';
+import { FEEL_DEFAULTS, DYNAMICS_MAX, FORM_LIMITS } from './form-types.js';
+import { rollForm, resolveTemplate, TEMPLATE_IDS } from './form-roll.js';
 
 /** Teile in der Reihenfolge der Oberfläche. */
-export const PART_IDS = Object.freeze(['harmony', 'tempo', 'rhythm', 'style', 'sound', 'voices', 'layers', 'mixer', 'variant']);
+export const PART_IDS = Object.freeze(['harmony', 'tempo', 'rhythm', 'style', 'sound', 'voices', 'layers', 'mixer', 'variant', 'form']);
 export const PART_PRESETS = Object.freeze({
   all: PART_IDS,
   sound: Object.freeze(['sound', 'voices', 'mixer']),
@@ -37,11 +40,14 @@ const CAPTURE = {
   layers: ({ track: t }) => ({ layers: t.layers }),
   mixer: ({ mix }) => ({ mix }),
   variant: ({ track: t }) => ({ seed: t.seed, variety: t.variety }),
+  // ohne (gültige) Form gibt es keinen Teil: captureParts lässt ihn dann weg
+  form: ({ track: t }) => (isValidForm(t.form) ? { form: normalizeForm(t.form) } : undefined),
 };
 
-/** Sitzung -> Teile (tiefe Kopie, in PART_IDS-Reihenfolge). Nicht gesetzte groove/complexity werden null ("Standard"). */
+/** Sitzung -> Teile (tiefe Kopie, in PART_IDS-Reihenfolge). Nicht gesetzte groove/complexity werden null ("Standard"); ohne Form fehlt `form`. */
 export function captureParts(session, ids = PART_IDS) {
-  return structuredClone(Object.fromEntries(PART_IDS.filter((id) => ids.includes(id)).map((id) => [id, CAPTURE[id](session)])));
+  const entries = PART_IDS.filter((id) => ids.includes(id)).map((id) => [id, CAPTURE[id](session)]).filter(([, part]) => part !== undefined);
+  return structuredClone(Object.fromEntries(entries));
 }
 
 // ---------- bereinigen ----------
@@ -151,6 +157,34 @@ function sanitize(raw) {
       if ('seed' in f) { if (Number.isInteger(f.seed) && f.seed >= 0 && f.seed <= MAX_SEED) out.seed = f.seed; else bad(); }
       if ('variety' in f) { if (typeof f.variety === 'boolean') out.variety = f.variety; else bad(); }
     },
+    form(f, out) {
+      if (!('form' in f)) return;
+      if (!isPlain(f.form)) return bad();
+      const g = fields(f.form);
+      const sections = [];
+      let total = 0;
+      if (!Array.isArray(g.sections)) return bad();
+      // Teile einzeln wie checkForm prüfen; was über 64 Teile oder die Gesamtlänge hinausgeht, fällt weg (O(1) gezählt, auch bei riesigen Listen)
+      for (let i = 0; i < g.sections.length; i++) {
+        if (sections.length >= FORM_LIMITS.parts) { skipped += g.sections.length - i; break; }
+        const raw = g.sections[i];
+        const one = isPlain(raw) ? normalizeForm({ sections: [fields(raw)] }).sections[0] : null;
+        if (!one || !isValidForm({ sections: [one] }) || total + one.bars > FORM_LIMITS.length) { bad(); continue; }
+        sections.push(one);
+        total += one.bars;
+      }
+      if (!sections.length) return;
+      const feel = {};
+      if ('feel' in g) {
+        if (!isPlain(g.feel)) bad();
+        else for (const [k, v] of Object.entries(fields(g.feel))) if (k in FEEL_DEFAULTS) { if (typeof v === 'number' && v >= 0 && v <= (k === 'dynamics' ? DYNAMICS_MAX : 1)) feel[k] = v; else bad(); }
+      }
+      // Vorlage und Auto wie normalizeForm (Typ prüfen); unbekannte Vorlage fällt auf Pop zurück
+      if ('template' in g && !TEMPLATE_IDS.includes(g.template)) bad();
+      if ('auto' in g && typeof g.auto !== 'boolean') bad();
+      const { template, auto } = resolveTemplate(TEMPLATE_IDS.includes(g.template) ? g.template : undefined);
+      out.form = normalizeForm({ template, auto: typeof g.auto === 'boolean' ? g.auto : auto, feel, sections });
+    },
   };
 
   const parts = {};
@@ -180,7 +214,7 @@ export function applyParts(session, parts) {
   const p = structuredClone(parts ?? {});
   const t = s.track;
   const has = (o, k) => o[k] !== undefined;
-  const { harmony: h, tempo, rhythm: r, style, sound, voices, layers, mixer, variant } = p;
+  const { harmony: h, tempo, rhythm: r, style, sound, voices, layers, mixer, variant, form } = p;
 
   if (h) {
     if (h.key) {
@@ -209,9 +243,16 @@ export function applyParts(session, parts) {
   if (layers && has(layers, 'layers')) t.layers = { ...t.layers, ...layers.layers };
   if (mixer && has(mixer, 'mix')) s.mix = { ...s.mix, ...mixer.mix };
   if (variant) for (const k of ['seed', 'variety']) if (has(variant, k)) t[k] = variant[k];
+  if (form && has(form, 'form')) t.form = form.form;
+  else if (r && has(r, 'length') && isValidForm(t.form)) {
+    // nur eine Länge, keine Form im Profil: die vorhandene Form wird für die nächste Zielgröße neu gewürfelt (Sperren fallen wie bei der Zielgröße)
+    t.form = rollForm({ template: t.form.auto ? 'auto' : t.form.template, style: s.style, targetBars: r.length, feel: t.form.feel, seed: t.seed, tags: t.tags });
+  }
 
   const errors = validateTrack(normalizeTrack(t));
-  return errors.length ? { ok: false, errors } : { ok: true, session: s };
+  if (errors.length) return { ok: false, errors };
+  if (isValidForm(t.form)) t.length = formLength(t.form); // mit Form bestimmt die Summe der Teile die Länge
+  return { ok: true, session: s };
 }
 
 // ---------- Hilfen ----------

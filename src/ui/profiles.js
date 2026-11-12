@@ -295,7 +295,7 @@ export function initProfiles({ render, restartIfPlaying, applyLive }) {
   });
 
   // --- Austausch ---
-  // Export folgt der Auswahl: Sitzung (alle 9 Teile), Werksprofil, Profil, Ordner samt Inhalt; "Meine Profile" = alles
+  // Export folgt der Auswahl: Sitzung (alle 10 Teile), Werksprofil, Profil, Ordner samt Inhalt; "Meine Profile" = alles
   function exportFile() {
     const s = selected();
     if (s.kind === 'profile') return makeProfileFile(s.node);
@@ -437,6 +437,7 @@ export function initProfiles({ render, restartIfPlaying, applyLive }) {
       folder.value = [...folder.options].some((o) => o.value === keep) ? keep : '';
     }
     setText(folder.options[0], t('ui.profileMine'));
+    for (const p of [picker, overwritePicker]) p.setUnavailable(state.track.form ? [] : ['form']);
     picker.render();
     setText(save, t('ui.profileSave'));
     setText(load, t('ui.profileLoad'));

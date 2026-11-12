@@ -479,6 +479,8 @@ export default {
   'part.mixer.hint': 'level per layer and overall',
   'part.variant': 'Variant',
   'part.variant.hint': 'variant number and “richer variants”',
+  'part.form': 'Song form',
+  'part.form.hint': 'song sections with their settings and the sliders (not available with “No form”)',
   'err.badProfile': 'This is not a valid profile. Expected is the text or file from “As file” or “Copy”.',
   'ui.mixMaster': 'Overall',
   'ui.mixMute': 'Mute',

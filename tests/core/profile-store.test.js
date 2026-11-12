@@ -138,7 +138,7 @@ test('feindliches JSON: Prototyp bleibt sauber', () => {
 
 // ---------- Migration der alten flachen Liste ----------
 
-test('Altliste wandert mit allen 9 Teilen in die oberste Ebene, beim Laden wird nichts geschrieben', () => {
+test('Altliste wandert mit allen 9 alten Teilen (ohne form) in die oberste Ebene, beim Laden wird nichts geschrieben', () => {
   const other = legacyProfile(session({ track: track({ bpm: 120 }), style: 'rock' }));
   const store = makeStore(JSON.stringify([{ name: 'Funk', profile: legacyProfile(session()) }, { name: 'Rock', profile: other }]));
   const before = store.data[PROFILES_KEY];
@@ -147,7 +147,7 @@ test('Altliste wandert mit allen 9 Teilen in die oberste Ebene, beim Laden wird 
   for (const n of t.items) {
     assert.equal(n.type, 'profile');
     assert.ok(n.id && typeof n.id === 'string');
-    assert.deepEqual(Object.keys(n.parts), PART_IDS);
+    assert.deepEqual(Object.keys(n.parts), PART_IDS.filter((id) => id !== 'form'));
   }
   assert.equal(t.items[0].parts.tempo.bpm, 96);
   assert.equal(t.items[0].parts.harmony.scale, 'blues');

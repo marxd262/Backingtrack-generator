@@ -114,9 +114,9 @@ test('count: Einzahl über den Schlüssel .one, weitere Platzhalter bleiben (Mel
   setLanguage('de');
 });
 
-test('partsSummary: alle Teile "Alles", sonst "n von 9"', () => {
+test('partsSummary: alle Teile "Alles", sonst "n von 10"', () => {
   setLanguage('de');
   assert.equal(partsSummary(PART_IDS, t), 'Inhalt: Alles');
-  assert.equal(partsSummary(PART_PRESETS.sound, t), 'Inhalt: 3 von 9');
-  assert.equal(partsSummary([], t), 'Inhalt: 0 von 9');
+  assert.equal(partsSummary(PART_PRESETS.sound, t), 'Inhalt: 3 von 10');
+  assert.equal(partsSummary([], t), 'Inhalt: 0 von 10');
 });

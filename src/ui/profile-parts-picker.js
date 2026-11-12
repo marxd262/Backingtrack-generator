@@ -1,4 +1,4 @@
-// Inhalt beim Speichern wählen: die 9 Teile (PART_IDS) als Kontrollkästchen mit Name und Erklärung in einer eingeklappten Zeile
+// Inhalt beim Speichern wählen: die Teile (PART_IDS) als Kontrollkästchen mit Name und Erklärung in einer eingeklappten Zeile
 // "Inhalt: …", dazu die Schnellwahlen aus PART_PRESETS. Bleibt eingeklappt, bis der Nutzer sie öffnet.
 // Dazu die reinen Textzeilen des Profil-Fensters über Inhalt und Ordner (ohne DOM, getestet in tests/core/profile-ui.test.js).
 import { PART_IDS, PART_PRESETS } from '../core/profile-parts.js';
@@ -7,7 +7,7 @@ import { setText } from './state.js';
 
 const el = (tag, props = {}) => Object.assign(document.createElement(tag), props);
 
-/** Text der eingeklappten Zeile: "Inhalt: Alles" oder "Inhalt: n von 9". */
+/** Text der eingeklappten Zeile: "Inhalt: Alles" oder "Inhalt: n von 10". */
 export const partsSummary = (ids, t) => (ids.length === PART_IDS.length ? t('ui.partsAll') : t('ui.partsCount', { n: ids.length, total: PART_IDS.length }));
 
 /** Zeile eines gespeicherten Profils: "Inhalt: Tempo, Klangregler" (Namen in PART_IDS-Reihenfolge). */
@@ -56,7 +56,16 @@ export function createPartsPicker({ idPrefix, t }) {
 
   const getIds = () => rows.filter((r) => r.box.checked).map((r) => r.id);
   function setIds(ids) {
-    for (const r of rows) r.box.checked = ids.includes(r.id);
+    for (const r of rows) r.box.checked = ids.includes(r.id) && !r.box.disabled;
+  }
+  // Teile, die die Sitzung gerade nicht hat (Songform bei "Ohne Form"), sind abgehakt und gesperrt; sie kehren angehakt zurück
+  function setUnavailable(ids) {
+    for (const r of rows) {
+      const gone = ids.includes(r.id);
+      if (r.box.disabled === gone) continue;
+      r.box.disabled = gone;
+      r.box.checked = !gone;
+    }
   }
   function render() {
     setText(summary, partsSummary(getIds(), t));
@@ -66,5 +75,5 @@ export function createPartsPicker({ idPrefix, t }) {
     }
     for (const b of buttons) setText(b, t(`ui.partsPreset.${b.dataset.preset}`));
   }
-  return { element, getIds, setIds, render };
+  return { element, getIds, setIds, setUnavailable, render };
 }

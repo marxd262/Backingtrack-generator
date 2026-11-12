@@ -13,11 +13,17 @@ const track = (extra = {}) => ({
   voices: { chords: { id: 'sample', variant: 'jazz' } }, jobs: { lead: 'melody', percussion: 'congas' }, groove: 'straight', complexity: 0.7, ...extra,
 });
 const session = (extra = {}) => ({ track: track(), scale: 'blues', style: 'funk', chordColor: 'sevenths', chordColorFromStyle: false, mix: { drums: 0.5, master: 0.8 }, ...extra });
+// gültige Form für 48 Takte; Teile mit allen Feldern, einer gesperrt
+const FORM = {
+  template: 'pop', auto: true, feel: { structure: 0.6, dynamics: 0.9, pauses: 0.4, randomness: 0.5 },
+  sections: [{ type: 'intro', bars: 8 }, { type: 'verse', bars: 16, level: -3, density: 0.25, transition: 'fill', crash: true, locked: true }, { type: 'chorus', bars: 16, transition: 'stop' }, { type: 'outro', bars: 8 }],
+};
 const deepFreeze = (o) => { for (const v of Object.values(o)) if (v && typeof v === 'object') deepFreeze(v); return Object.freeze(o); };
 const codes = (r) => r.errors.map((e) => e.code);
 
 test('PART_IDS und PART_PRESETS: eingefroren, Reihenfolge der Oberfläche', () => {
-  assert.deepEqual(PART_IDS, ['harmony', 'tempo', 'rhythm', 'style', 'sound', 'voices', 'layers', 'mixer', 'variant']);
+  assert.deepEqual(PART_IDS, ['harmony', 'tempo', 'rhythm', 'style', 'sound', 'voices', 'layers', 'mixer', 'variant', 'form']);
+  assert.equal(PART_IDS.length, 10);
   assert.ok(Object.isFrozen(PART_IDS));
   assert.deepEqual(PART_PRESETS.all, PART_IDS);
   assert.deepEqual(PART_PRESETS.sound, ['sound', 'voices', 'mixer']);
@@ -30,8 +36,8 @@ test('SCALE_MODE wohnt in music.js, state.js exportiert dasselbe weiter', () => 
   assert.equal(SCALE_MODE.dorian, 'dorian');
 });
 
-test('captureParts: alle 9 Teile als tiefe Kopie', () => {
-  const s = session();
+test('captureParts: alle 10 Teile als tiefe Kopie', () => {
+  const s = session({ track: track({ form: structuredClone(FORM), length: 48 }) });
   const parts = captureParts(s);
   assert.deepEqual(Object.keys(parts), PART_IDS);
   assert.deepEqual(parts.harmony, { key: { root: 'A', mode: 'minor' }, scale: 'blues', bars: s.track.bars, chordColor: 'sevenths', chordColorFromStyle: false, meter: [4, 4] });
@@ -44,10 +50,14 @@ test('captureParts: alle 9 Teile als tiefe Kopie', () => {
   assert.deepEqual(parts.layers, { layers: s.track.layers });
   assert.deepEqual(parts.mixer, { mix: { drums: 0.5, master: 0.8 } });
   assert.deepEqual(parts.variant, { seed: 42, variety: true });
+  assert.deepEqual(parts.form, { form: FORM });
+  assert.notEqual(parts.form.form, s.track.form, 'form nicht aliasen');
   assert.notEqual(parts.harmony.bars, s.track.bars, 'bars nicht aliasen');
   s.track.bars[0].chord.root = 'C';
   s.track.tags.development.push('x');
   s.mix.drums = 0;
+  s.track.form.sections[0].bars = 1;
+  assert.equal(parts.form.form.sections[0].bars, 8);
   assert.equal(parts.harmony.bars[0].chord.root, 'A');
   assert.deepEqual(parts.style.tags.development, ['fullFromStart']);
   assert.equal(parts.mixer.mix.drums, 0.5);
@@ -321,14 +331,155 @@ test('sanitizeParts harmony: höchstens 512 Takte, mehr lässt den Teil wegfalle
 test('jeder Teil allein: captureParts -> applyParts ergibt dieselbe Sitzung, ohne Aliasing', () => {
   const mutate = (o) => { for (const k of Object.keys(o)) { if (o[k] && typeof o[k] === 'object') mutate(o[k]); else o[k] = 'X'; } if (Array.isArray(o)) o.push('X'); else o.zz = 'X'; };
   for (const id of PART_IDS) {
-    const parts = captureParts(session());
+    const parts = captureParts(session({ track: track({ form: structuredClone(FORM), length: 48 }) }));
     const r = applyParts(session(), { [id]: parts[id] });
     assert.ok(r.ok, id);
     const want = session();
+    if (id === 'form') want.track.form = FORM;
     if (id === 'voices') want.track.voices = completeVoices(want.track.voices); // festgehalten wird die vollständige Wahl, gleich klingend
     assert.deepEqual(r.session, want, id);
     const before = structuredClone(r.session);
     mutate(parts);
     assert.deepEqual(r.session, before, `${id}: kein Aliasing`);
   }
+});
+
+// ---------- Teil form (Songform) ----------
+
+const withForm = (form = structuredClone(FORM), extra = {}) => session({ track: track({ form, length: form.sections.reduce((n, x) => n + x.bars, 0), ...extra }) });
+const sumOf = (f) => f.sections.reduce((n, x) => n + x.bars, 0);
+
+test('captureParts form: ohne Form (oder mit unbrauchbarer) gibt es den Teil nicht', () => {
+  assert.deepEqual(captureParts(session(), ['form']), {});
+  assert.equal(captureParts(session()).form, undefined);
+  assert.equal(Object.keys(captureParts(session())).length, 9);
+  assert.deepEqual(captureParts(withForm({ ...FORM, sections: [{ type: 'nope', bars: 8 }] }), ['form']), {});
+  assert.deepEqual(captureParts(withForm(), ['form']), { form: { form: FORM } });
+});
+
+test('sanitizeParts form: gültige Form unverändert, Rundlauf über JSON, unbekannte Felder ignoriert', () => {
+  const r = sanitizeParts(JSON.parse(JSON.stringify({ form: { form: FORM } })));
+  assert.deepEqual(r, { parts: { form: { form: FORM } }, skipped: 0 });
+  const extra = sanitizeParts({ form: { zukunft: 1, form: { ...FORM, neu: 1, sections: FORM.sections.map((s) => ({ ...s, farbe: 'rot' })) } } });
+  assert.deepEqual(extra, { parts: { form: { form: FORM } }, skipped: 0 });
+});
+
+test('sanitizeParts form: ungültige Teile der Liste einzeln verworfen und gezählt, Rest bleibt', () => {
+  const r = sanitizeParts({ form: { form: { template: 'jam', auto: false, feel: {}, sections: [
+    { type: 'verse', bars: 8 }, { type: 'nope', bars: 8 }, { type: 'chorus', bars: 0 }, { type: 'chorus', bars: 1.5 }, { type: 'chorus', bars: 65 },
+    { type: 'break', bars: 4, level: 5 }, { type: 'break', bars: 4, density: 2 }, { type: 'break', bars: 4, transition: 'x' }, { type: 'break', bars: 4, crash: 'ja' },
+    { type: 'break', bars: 4, locked: 1 }, 'str', null, 5, [], { type: 'outro', bars: 4, level: -6, transition: 'stop' },
+  ] } } });
+  assert.deepEqual(r.parts.form.form.sections, [{ type: 'verse', bars: 8 }, { type: 'outro', bars: 4, level: -6, transition: 'stop' }]);
+  assert.equal(r.skipped, 13);
+  assert.deepEqual(r.parts.form.form.feel, { structure: 0.6, dynamics: 0.6, pauses: 0.4, randomness: 0.5 }, 'fehlende Regler: Standard');
+  assert.equal(r.parts.form.form.template, 'jam');
+});
+
+test('sanitizeParts form: leere oder fehlende Liste lässt den Teil wegfallen', () => {
+  for (const sections of [[], undefined, 'x', {}, [{ type: 'nope', bars: 8 }]]) {
+    const r = sanitizeParts({ form: { form: { template: 'pop', sections } } });
+    assert.deepEqual(r.parts, {}, JSON.stringify(sections));
+  }
+  assert.equal(sanitizeParts({ form: { form: { template: 'pop', sections: [] } } }).skipped, 0, 'leere Liste: kein Fehler gezählt');
+  assert.deepEqual(sanitizeParts({ form: {} }), { parts: {}, skipped: 0 });
+  for (const form of ['x', 5, [], null]) assert.deepEqual(sanitizeParts({ form: { form } }), { parts: {}, skipped: 1 });
+});
+
+test('sanitizeParts form: Vorlage, auto und Regler wie normalizeForm geprüft', () => {
+  const sec = [{ type: 'verse', bars: 8 }];
+  const one = (form) => sanitizeParts({ form: { form: { sections: sec, ...form } } });
+  assert.equal(one({ template: 'blues', auto: true }).parts.form.form.auto, true);
+  assert.equal(one({ template: 'blues' }).parts.form.form.auto, false);
+  const r = one({ template: 'gibtsnicht', auto: 'ja' });
+  assert.equal(r.skipped, 2);
+  assert.ok(typeof r.parts.form.form.template === 'string' && typeof r.parts.form.form.auto === 'boolean');
+  const f = one({ template: 'pop', feel: { structure: 2, dynamics: 1.3, pauses: NaN, randomness: -1, zusatz: 1 } });
+  assert.deepEqual(f.parts.form.form.feel, { structure: 0.6, dynamics: 1.3, pauses: 0.4, randomness: 0.5 });
+  assert.equal(f.skipped, 3);
+  assert.equal(one({ template: 'pop', feel: 'x' }).skipped, 1);
+  assert.equal(one({ template: 'pop', feel: { dynamics: 1.31 } }).skipped, 1);
+});
+
+test('sanitizeParts form: bis 64 Teile und 512 Takte, riesige Listen kosten nichts und werfen nicht', () => {
+  const many = Array.from({ length: 200000 }, () => ({ type: 'verse', bars: 1 }));
+  let r = sanitizeParts({ form: { form: { template: 'pop', sections: many } } });
+  assert.equal(r.parts.form.form.sections.length, 64);
+  assert.equal(r.skipped, 200000 - 64);
+  r = sanitizeParts({ form: { form: { template: 'pop', sections: Array.from({ length: 20 }, () => ({ type: 'verse', bars: 64 })) } } });
+  assert.equal(r.parts.form.form.sections.length, 8, '8 x 64 = 512');
+  assert.equal(r.skipped, 12);
+  assert.ok(sumOf(r.parts.form.form) <= 512);
+  assert.ok(applyParts(session(), r.parts).ok);
+});
+
+test('sanitizeParts form: __proto__, constructor und prototype in Form, Teilen und Reglern', () => {
+  const evil = JSON.parse('{"form":{"__proto__":{"x":1},"form":{"__proto__":{"y":1},"template":"pop","feel":{"__proto__":{"z":1},"structure":0.2,"constructor":1},"sections":[{"__proto__":{"w":1},"type":"verse","bars":8,"prototype":1},{"constructor":{"a":1},"type":"outro","bars":4}]}}}');
+  const r = sanitizeParts(evil);
+  assert.deepEqual(r.parts.form.form.sections, [{ type: 'verse', bars: 8 }, { type: 'outro', bars: 4 }]);
+  assert.equal(r.parts.form.form.feel.structure, 0.2);
+  assert.ok(r.skipped >= 5, 'verbotene Schlüssel zählen als ungültig');
+  for (const k of ['x', 'y', 'z', 'w', 'a']) assert.equal(({})[k], undefined);
+  assert.equal(Object.getPrototypeOf(r.parts.form.form.sections[0]), Object.prototype);
+  assert.equal(Object.getPrototypeOf(r.parts.form.form.feel), Object.prototype);
+  for (const hostile of [{ form: { form: { sections: [() => 1, new Proxy({}, { ownKeys() { throw new Error('boom'); } })] } } }, { form: { form: { sections: { length: 1e9 } } } }]) {
+    const h = sanitizeParts(hostile);
+    assert.ok(h && typeof h.skipped === 'number', 'wirft nicht');
+  }
+});
+
+test('applyParts form: setzt die Form, die Länge ist die Summe der Teile, Eingabe bleibt unverändert', () => {
+  const s = deepFreeze(session()); // length 48, ohne Form
+  const other = { ...structuredClone(FORM), sections: [{ type: 'verse', bars: 10 }, { type: 'chorus', bars: 14 }] };
+  const r = applyParts(s, { form: { form: other }, rhythm: { length: 96 } });
+  assert.ok(r.ok);
+  assert.deepEqual(r.session.track.form, other);
+  assert.equal(r.session.track.length, 24, 'die Form gewinnt gegen rhythm.length');
+  assert.notEqual(r.session.track.form, other, 'Kopie');
+  assert.equal(s.track.form, undefined);
+});
+
+test('applyParts: Profile ohne Teil form lassen die Form unberührt', () => {
+  const s = deepFreeze(withForm());
+  for (const parts of [{}, { tempo: { bpm: 77 } }, { rhythm: { groove: 'straight' } }, { harmony: captureParts(session()).harmony }, { style: { style: 'rock' } }]) {
+    const r = applyParts(s, parts);
+    assert.ok(r.ok);
+    assert.deepEqual(r.session.track.form, FORM, JSON.stringify(Object.keys(parts)));
+    assert.equal(r.session.track.length, 48);
+  }
+});
+
+test('applyParts: rhythm.length ohne Teil form würfelt die vorhandene Form für die nächste Zielgröße neu', () => {
+  const s = deepFreeze(withForm({ ...structuredClone(FORM), auto: false, template: 'rock' }));
+  const r = applyParts(s, { rhythm: { length: 96 } });
+  assert.ok(r.ok);
+  const f = r.session.track.form;
+  assert.equal(f.template, 'rock');
+  assert.equal(f.auto, false);
+  assert.deepEqual(f.feel, FORM.feel, 'Regler bleiben');
+  assert.ok(Math.abs(sumOf(f) - 96) <= 12, `Summe ${sumOf(f)} nahe 96`);
+  assert.equal(r.session.track.length, sumOf(f));
+  assert.deepEqual(applyParts(s, { rhythm: { length: 96 } }).session.track.form, f, 'reproduzierbar');
+  const near = applyParts(s, { rhythm: { length: 50 } }).session.track.form; // nächste Zielgröße: 48
+  assert.ok(Math.abs(sumOf(near) - 48) <= 8, `Summe ${sumOf(near)} nahe 48`);
+  assert.equal(applyParts(withForm({ ...structuredClone(FORM), auto: true }), { rhythm: { length: 96 } }).session.track.form.auto, true, 'Auto bleibt Auto');
+  // rhythm ohne length rührt die Form nicht an
+  assert.deepEqual(applyParts(s, { rhythm: { groove: null } }).session.track.form, s.track.form);
+});
+
+test('applyParts: ohne Form setzt rhythm.length nur die Länge (Ohne Form bleibt Ohne Form)', () => {
+  const r = applyParts(session(), { rhythm: { length: 96 } });
+  assert.equal(r.session.track.length, 96);
+  assert.equal(r.session.track.form, undefined);
+});
+
+test('Rundlauf: Sitzung mit Form -> captureParts -> JSON -> sanitizeParts -> applyParts ergibt dieselbe Form', () => {
+  const s = withForm();
+  const { parts, skipped } = sanitizeParts(JSON.parse(JSON.stringify(captureParts(s))));
+  assert.equal(skipped, 0);
+  assert.deepEqual(Object.keys(parts), PART_IDS);
+  const r = applyParts(withForm({ ...structuredClone(FORM), sections: [{ type: 'verse', bars: 24 }, { type: 'chorus', bars: 24 }], feel: { structure: 0, dynamics: 0, pauses: 0, randomness: 0 } }), parts);
+  assert.ok(r.ok);
+  assert.deepEqual(r.session.track.form, FORM);
+  assert.equal(r.session.track.length, 48);
 });
