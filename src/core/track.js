@@ -5,13 +5,14 @@ import { isMeter, GROOVES } from './grooves.js';
 import { TAG_CATEGORIES } from './tags.js';
 import { layerDefaults, completeJobs, isJob } from './layers.js';
 import { VOICE_LAYERS, isVoice } from './voices.js';
+import { normalizeForm, checkForm, isValidForm, formLength } from './form.js';
 
 /**
  * Alle Codes, die validateTrack melden kann; die Oberfläche übersetzt sie über `err.<code>`.
- * @type {readonly ('emptyBars'|'chordNotInKey'|'badBpm'|'unknownQuality'|'badBeats'|'badLength'|'badKey'|'badBar'|'badTags'|'badMeter'|'badComplexity'|'badGroove'|'badVoice'|'badJob')[]}
+ * @type {readonly ('emptyBars'|'chordNotInKey'|'badBpm'|'unknownQuality'|'badBeats'|'badLength'|'badKey'|'badBar'|'badTags'|'badMeter'|'badComplexity'|'badGroove'|'badVoice'|'badJob'|'badForm')[]}
  */
 export const VALIDATION_CODES = Object.freeze([
-  'emptyBars', 'chordNotInKey', 'badBpm', 'unknownQuality', 'badBeats', 'badLength', 'badKey', 'badBar', 'badTags', 'badMeter', 'badComplexity', 'badGroove', 'badVoice', 'badJob',
+  'emptyBars', 'chordNotInKey', 'badBpm', 'unknownQuality', 'badBeats', 'badLength', 'badKey', 'badBar', 'badTags', 'badMeter', 'badComplexity', 'badGroove', 'badVoice', 'badJob', 'badForm',
 ]);
 
 /** Obergrenze für `length` (Takte); schützt Arrangement und Audio vor riesigen Eingaben. */
@@ -35,10 +36,13 @@ function normalizeJobs(jobs) {
 
 export function normalizeTrack(track) {
   const t = isObject(track) ? structuredClone(track) : {};
+  // Songform: bei gültiger Form ist die Länge abgeleitet (Summe der Teile); ohne Form bleibt alles wie bisher
+  const form = normalizeForm(t.form);
   return {
     ...t,
+    ...(form !== undefined && { form }),
     meter: t.meter ?? [4, 4],
-    length: t.length ?? 24,
+    length: isValidForm(form) ? formLength(form) : t.length ?? 24,
     layers: { ...layerDefaults(), ...t.layers },
     jobs: normalizeJobs(t.jobs),
     tags: t.tags ?? {},
@@ -91,7 +95,7 @@ function checkJobs(jobs, add) {
 /**
  * Sammelt Meldungen, wirft nie (leer = gültig). bpm muss in [20, 400] liegen, length in [1, MAX_LENGTH],
  * beats in [1, MAX_BEATS].
- * @returns {{ code: 'emptyBars'|'chordNotInKey'|'badBpm'|'unknownQuality'|'badBeats'|'badLength'|'badKey'|'badBar'|'badTags'|'badMeter'|'badComplexity'|'badGroove'|'badVoice'|'badJob',
+ * @returns {{ code: 'emptyBars'|'chordNotInKey'|'badBpm'|'unknownQuality'|'badBeats'|'badLength'|'badKey'|'badBar'|'badTags'|'badMeter'|'badComplexity'|'badGroove'|'badVoice'|'badJob'|'badForm',
  *             params: Record<string, string|number> }[]}
  */
 export function validateTrack(track) {
@@ -109,6 +113,7 @@ export function validateTrack(track) {
   if (t.complexity != null && !(Number.isFinite(t.complexity) && t.complexity >= 0 && t.complexity <= 1)) add('badComplexity', { complexity: show(t.complexity) });
   checkVoices(t.voices, add);
   checkJobs(t.jobs, add);
+  checkForm(t.form, add);
   const keyOk = isValidKey(t.key);
   if (!keyOk) add('badKey');
   checkTags(t.tags, add);

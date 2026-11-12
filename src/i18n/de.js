@@ -118,6 +118,7 @@ export default {
   'err.badGroove': 'Der Groove {groove} ist unbekannt.',
   'err.badVoice': 'Die Stimme {voice} ist für {layer} unbekannt.',
   'err.badJob': 'Die Aufgabe {job} ist für {layer} unbekannt.',
+  'err.badForm': 'Die Songform ist ungültig ({reason}).',
   'voice.kind.synth': 'Synthese',
   'voice.kind.model': 'Saitenmodell',
   'voice.kind.sample': 'Samples',

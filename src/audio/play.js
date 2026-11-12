@@ -4,6 +4,7 @@ import { buildEvents } from '../core/events.js';
 import { resolveTrackTimbre } from '../core/timbre.js';
 import { resolveVoices } from '../core/voices.js';
 import { normalizeTrack } from '../core/track.js';
+import { chordIndex } from '../core/form.js';
 import { meterKey } from '../core/grooves.js';
 import { createInstruments as synthInstruments } from './synth.js';
 import { sliderGain } from './mix.js';
@@ -38,7 +39,7 @@ export function play(ctx, trackInput, { loops = 1, startBar = 0, levels, master,
   let loopSec = 0, startSec = 0; // startSec: Liedzeit am Beginn von startBar
   for (let i = 0; i < loopBars; i++) {
     if (i === startBar) startSec = loopSec;
-    loopSec += (track.bars[i % track.bars.length].beats * 60) / bpm;
+    loopSec += (track.bars[chordIndex(track, i)].beats * 60) / bpm;
   }
 
   // Schlagworte sind durch buildEvents geprüft, resolveTimbre wirft hier nicht
@@ -159,7 +160,7 @@ export function play(ctx, trackInput, { loops = 1, startBar = 0, levels, master,
       const next2 = buildEvents({ ...newTrack, bpm });
       const t2 = normalizeTrack({ ...newTrack, bpm });
       let sec = 0;
-      for (let i = 0; i < t2.length; i++) sec += (t2.bars[i % t2.bars.length].beats * 60) / bpm;
+      for (let i = 0; i < t2.length; i++) sec += (t2.bars[chordIndex(t2, i)].beats * 60) / bpm;
       if (t2.length !== loopBars || Math.abs(sec - loopSec) > 1e-9 || meterKey(t2.meter) !== startMeter) return false;
       // gleichzeitige Ereignisse plant ein Planerlauf zusammen: was bis tLast geplant ist, wird nicht wiederholt
       const tLast = next > 0 ? events[next - 1].t : -Infinity;

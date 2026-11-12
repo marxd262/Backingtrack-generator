@@ -55,7 +55,7 @@ export function initTuning({ render, restartIfPlaying, toggleLayer, applyLive })
   function renderFretboard() {
     const { track } = state;
     const current = state.current?.chord ?? track.bars[0]?.chord ?? null;
-    const next = nextDistinctChord(track.bars, track.length, state.current?.bar ?? 0);
+    const next = nextDistinctChord(track.bars, track.length, state.current?.bar ?? 0, track.form);
     fretboard.update({ key: track.key, scale: state.scale, current, next, labels: state.layout.labels });
     for (const b of document.querySelectorAll('[data-labels]')) pressed(b, b.dataset.labels === state.layout.labels);
     setText($('play-next'), next ? `${t('ui.nextChord')}: ${chordName(next)}` : '');

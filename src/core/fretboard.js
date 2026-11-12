@@ -1,5 +1,6 @@
 // Griffbrett-Logik: Tonrollen je Bund, Stufenbezeichnung, hörbar nächster Akkord. Reine Logik, kein DOM.
 import { isValidKey, noteToPc, scalePcs, chordMidi, noteName } from './music.js';
+import { chordIndex } from './form.js';
 
 export const STANDARD_TUNING = [64, 59, 55, 50, 45, 40]; // MIDI, hohe e-Saite zuerst
 export const FRETS = 15;
@@ -48,11 +49,12 @@ export function fretboardNotes({ key, scale, current, next, tuning = STANDARD_TU
 const sameChord = (a, b) => noteToPc(a.root) === noteToPc(b.root) && a.quality === b.quality;
 
 // Erster vom jetzigen Takt verschiedene Akkord, zyklisch über die Tracklänge (Sprung zu Takt 0 inklusive)
-export function nextDistinctChord(bars, length, barIndex) {
+// `form` (optional): mit Songform beginnt die Folge in jedem Teil neu
+export function nextDistinctChord(bars, length, barIndex, form) {
   if (!Array.isArray(bars) || bars.length === 0 || !Number.isInteger(length) || length < 1) return null;
   const start = Number.isInteger(barIndex) && barIndex > 0 ? barIndex % length : 0;
   try {
-    const chordAt = (i) => bars[i % bars.length].chord;
+    const chordAt = (i) => bars[chordIndex({ bars, form }, i)].chord;
     const cur = chordAt(start);
     for (let step = 1; step < length; step++) {
       const c = chordAt((start + step) % length);

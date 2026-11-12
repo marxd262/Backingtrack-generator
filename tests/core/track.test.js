@@ -108,10 +108,10 @@ test('validateTrack: unbekannter Akkord-Grundton ergibt chordNotInKey, ohne zu w
   assert.deepEqual(errs, [{ code: 'chordNotInKey', params: { bar: 1, chord: 'Hm' } }]);
 });
 
-test('VALIDATION_CODES listet alle vierzehn Codes', () => {
+test('VALIDATION_CODES listet alle fünfzehn Codes', () => {
   assert.deepEqual([...VALIDATION_CODES].sort(),
-    ['badBar', 'badBeats', 'badBpm', 'badComplexity', 'badGroove', 'badJob', 'badKey', 'badLength', 'badMeter', 'badTags', 'badVoice', 'chordNotInKey', 'emptyBars', 'unknownQuality'].sort());
-  assert.equal(VALIDATION_CODES.length, 14);
+    ['badBar', 'badBeats', 'badBpm', 'badComplexity', 'badForm', 'badGroove', 'badJob', 'badKey', 'badLength', 'badMeter', 'badTags', 'badVoice', 'chordNotInKey', 'emptyBars', 'unknownQuality'].sort());
+  assert.equal(VALIDATION_CODES.length, 15);
 });
 
 test('validateTrack: beats höchstens MAX_BEATS (16)', () => {

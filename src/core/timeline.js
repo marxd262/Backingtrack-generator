@@ -1,6 +1,7 @@
 // Taktzeiten: eine Quelle für Ereignisstrom und chordTimeline, damit beide nie auseinanderlaufen.
 import { normalizeTrack, validateTrack } from './track.js';
 import { meterGrid } from './grooves.js';
+import { chordIndex } from './form.js';
 
 export const r6 = (x) => Math.round(x * 1e6) / 1e6;
 
@@ -14,15 +15,15 @@ export function checkedTrack(input) {
   return track;
 }
 
-// Takte: bars läuft im Kreis über length; Startzeit = Schläge davor * 60 / bpm; das Raster (Schritte je Schlag) kommt aus der Taktart
+// Takte: bars läuft im Kreis über length (mit Form beginnt die Folge in jedem Teil neu, siehe chordIndex); Startzeit = Schläge davor * 60 / bpm; das Raster (Schritte je Schlag) kommt aus der Taktart
 export function barTimeline(track) {
   const { sub } = meterGrid(track.meter);
   let startBeat = 0;
   return Array.from({ length: track.length }, (_, index) => {
-    const { chord, beats } = track.bars[index % track.bars.length];
+    const { chord, beats } = track.bars[chordIndex(track, index)];
     const b = {
       index, chord, beats,
-      next: track.bars[(index + 1) % track.bars.length].chord,
+      next: track.bars[chordIndex(track, index + 1)].chord,
       sub,
       steps: beats * sub,
       stepSec: 60 / track.bpm / sub,
