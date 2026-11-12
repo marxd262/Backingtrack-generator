@@ -3,25 +3,26 @@ import { fitCanvas, cssColors } from './canvas.js';
 import { LAYER_IDS } from '../core/layers.js';
 
 const LANES = LAYER_IDS;
-const SECTION = 8; // Abschnittsgrenze alle 8 Takte
+const SECTION = 8; // Abschnittsgrenze alle 8 Takte, solange der Track keine Songform hat
 const summaries = new WeakMap();
 
 /** Memo-Schlüssel des Verlaufs: alles, was den Ereignisstrom ändert. Tempo und Schichten fehlen (x-Achse sind Takte, stumme Spuren werden nur gedimmt). */
 export const laneKey = ({ key, bars, tags, seed, length, meter, groove, complexity, form, jobs, voices, variety }) =>
   JSON.stringify([key, bars, tags, seed, length, meter, groove, complexity, form, jobs, voices, variety]);
 
-// Je Takt: Startzeit, Anzahl Ereignisse je Schicht, Fill-Marker. Einmal je Ereignisliste.
+// Je Takt: Startzeit, Anzahl Ereignisse je Schicht, Fill-Marker und Teilanfänge der Form. Einmal je Ereignisliste.
 function summarize(events) {
   const starts = [];
   const fills = [];
+  const parts = [];
   const counts = Object.fromEntries(LANES.map((l) => [l, []]));
   for (const e of events) {
     if (e.type === 'chord') starts[e.bar] = e.t;
-    else if (e.type === 'marker') fills.push(e.bar);
+    else if (e.type === 'marker') (e.name === 'fill' ? fills : e.name === 'section' ? parts : []).push(e.bar);
     else if (counts[e.layer]) counts[e.layer][e.bar] = (counts[e.layer][e.bar] ?? 0) + 1;
   }
   const max = Object.fromEntries(LANES.map((l) => [l, Math.max(1, ...counts[l].filter(Boolean))]));
-  return { starts, fills, counts, max };
+  return { starts, fills, parts, counts, max };
 }
 
 /**
@@ -62,7 +63,9 @@ export function drawLanes(canvas, events, positionSec, layers = {}) {
 
   ctx.globalAlpha = 1;
   ctx.fillStyle = c.inkSoft;
-  for (let b = SECTION; b < bars; b += SECTION) ctx.fillRect(Math.round(b * bw) - 0.5, 0, 1, height);
+  // mit Form folgen die Linien den Teilgrenzen (Teilanfänge ab dem zweiten Teil), sonst alle 8 Takte
+  const bounds = s.parts.length ? s.parts.filter((b) => b > 0) : Array.from({ length: Math.ceil(bars / SECTION) - 1 }, (_, i) => (i + 1) * SECTION);
+  for (const b of bounds) ctx.fillRect(Math.round(b * bw) - 0.5, 0, 1, height);
   // Fill: kleines Dreieck über dem Ende des Takts
   ctx.fillStyle = c.ink;
   for (const b of s.fills) {

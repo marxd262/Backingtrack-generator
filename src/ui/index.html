@@ -119,7 +119,64 @@
         </section>
         <section class="block" data-view="lanes" aria-labelledby="view-lanes-title">
           <h3 class="block-title" id="view-lanes-title" data-i18n="view.lanes"></h3>
+          <!-- Ein Raster: Streifen der Teile und Verlauf teilen die rechte Spalte, also dieselbe Takt-Achse. Reihen: Knöpfe, Hinweis, Streifen, Einstellungen, Verlauf.
+               Streifen und Einstellungen baut form-strip.js (nur mit gültiger Form sichtbar). -->
           <div class="lanes">
+            <div class="form-bar" id="form-bar" hidden>
+              <button type="button" class="chip" id="form-roll" data-i18n="form.roll"></button>
+              <button type="button" class="chip" id="form-add" data-i18n="form.add" aria-describedby="form-note"></button>
+            </div>
+            <p class="sub-label form-hint" id="form-hint" hidden></p>
+            <div class="form-strip" id="form-strip" role="listbox" aria-orientation="horizontal" data-i18n-label="form.strip" hidden></div>
+            <div class="form-insp" id="form-insp" role="group" aria-labelledby="form-insp-title" hidden>
+              <h4 class="label" id="form-insp-title"></h4>
+              <div class="form-insp-grid">
+                <div class="field">
+                  <label class="label" for="part-type" data-i18n="form.insp.type"></label>
+                  <select id="part-type"></select>
+                </div>
+                <div class="field">
+                  <span class="label" id="part-len-label" data-i18n="form.insp.length"></span>
+                  <div class="stepper" role="group" aria-labelledby="part-len-label">
+                    <button type="button" class="chip" id="part-shorter" data-i18n-label="form.insp.shorter" aria-describedby="form-note">&minus;</button>
+                    <output id="part-len-out" for="part-shorter part-longer"></output>
+                    <button type="button" class="chip" id="part-longer" data-i18n-label="form.insp.longer" aria-describedby="form-note">+</button>
+                  </div>
+                </div>
+                <div class="field">
+                  <label class="label" for="part-level" data-i18n="form.insp.level"></label>
+                  <div class="tempo-row">
+                    <input type="range" id="part-level" min="-24" max="0" step="1">
+                    <span><output id="part-level-out" for="part-level"></output></span>
+                  </div>
+                  <button type="button" class="chip" id="part-level-reset" data-i18n="form.insp.reset" data-i18n-label="form.insp.resetLevel"></button>
+                </div>
+                <div class="field">
+                  <label class="label" for="part-density" data-i18n="form.insp.density"></label>
+                  <div class="tempo-row">
+                    <input type="range" id="part-density" min="-100" max="100" step="1">
+                    <span><output id="part-density-out" for="part-density"></output></span>
+                  </div>
+                  <button type="button" class="chip" id="part-density-reset" data-i18n="form.insp.reset" data-i18n-label="form.insp.resetDensity"></button>
+                </div>
+                <div class="field">
+                  <label class="label" for="part-transition" data-i18n="form.insp.transition"></label>
+                  <select id="part-transition"></select>
+                </div>
+                <div class="field">
+                  <label class="check"><input type="checkbox" id="part-crash"> <span data-i18n="form.insp.crash"></span></label>
+                  <button type="button" class="chip" id="part-lock" aria-pressed="false" aria-describedby="part-lock-hint" data-i18n="form.insp.lock"></button>
+                  <p class="sub-label" id="part-lock-hint" data-i18n="form.insp.lockHint"></p>
+                </div>
+              </div>
+              <div class="form-actions">
+                <button type="button" class="chip" id="part-left" data-i18n="form.insp.left"></button>
+                <button type="button" class="chip" id="part-right" data-i18n="form.insp.right"></button>
+                <button type="button" class="chip" id="part-copy" data-i18n="form.insp.copy" aria-describedby="form-note"></button>
+                <button type="button" class="chip" id="part-delete" data-i18n="form.insp.delete" aria-describedby="form-note"></button>
+              </div>
+              <p class="sub-label" id="form-note"></p>
+            </div>
             <div class="lane-buttons" id="lane-buttons" role="group" data-i18n-label="ui.layers"></div>
             <canvas id="lanes" role="img" data-i18n-label="ui.lanesLabel"></canvas>
           </div>

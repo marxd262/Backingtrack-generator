@@ -69,6 +69,7 @@ export const state = {
     meter: [4, 4], // Taktart; groove und complexity fehlen, bis der Nutzer sie wählt (Standard-Groove der Taktart, Komplexität 0,5)
   },
   formTarget: 96, // Zielgröße der Songform (Takte); ohne Form ist sie die Länge
+  formSalt: 0, // wie oft "Neu würfeln" bei dieser Variante gedrückt wurde (siehe roll)
   formFeel: { ...FEEL_DEFAULTS }, // Reglerwerte Struktur, Dynamik, Pausen, Zufall; bleiben auch ohne Form stehen
   scale: 'minorPentatonic',
   chordColor: 'triads', // Akkordfarbe: wie erzeugte Folgen gefärbt werden (triads, sevenths, extended, power); deriveBars wendet sie an
@@ -149,16 +150,18 @@ export const formChoice = (track = state.track) => (track.form ? (track.form.aut
 // Reglerwerte: die der Form, sonst die gemerkten
 const feelNow = () => state.track.form?.feel ?? state.formFeel;
 
-function roll(choice, previous) {
+// salt 0: die Form folgt allein der Variante (gleiche Eingaben, gleiche Form); "Neu würfeln" zählt ihn hoch, damit dieselbe Variante andere Teile zieht
+function roll(choice, previous, salt = 0) {
   const { seed, tags } = state.track;
-  const form = rollForm({ template: choice, style: state.style, targetBars: state.formTarget, feel: feelNow(), seed, tags, previous });
+  const form = rollForm({ template: choice, style: state.style, targetBars: state.formTarget, feel: feelNow(), seed: seed + salt * 10000, tags, previous });
+  state.formSalt = salt;
   state.track.form = form;
   state.track.length = formLength(form);
 }
 
-/** Würfelt die nicht gesperrten Teile neu (Variante, Stilwechsel mit Auto, Struktur-Regler); ohne Form nichts. */
-export function rollNewForm() {
-  if (state.track.form) roll(formChoice(), state.track.form);
+/** Würfelt die nicht gesperrten Teile neu (Variante, Stilwechsel mit Auto, Struktur-Regler); ohne Form nichts. reroll: dieselbe Variante, andere Teile ("Neu würfeln"). */
+export function rollNewForm({ reroll = false } = {}) {
+  if (state.track.form) roll(formChoice(), state.track.form, reroll ? state.formSalt + 1 : 0);
 }
 
 /** Vorlage wechseln würfelt alles neu (Sperren fallen); 'off' entfernt die Form, die Länge ist dann die Zielgröße. */

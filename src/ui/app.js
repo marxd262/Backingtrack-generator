@@ -16,6 +16,7 @@ import { initVoices } from './voices-panel.js';
 import { initJobs } from './jobs-panel.js';
 import { initRhythm } from './rhythm.js';
 import { initFormPanel } from './form-panel.js';
+import { initFormStrip } from './form-strip.js';
 import { initViews } from './blocks.js';
 
 // Dekoratives 16tel-Bild je Stil, 1 = Schlag
@@ -214,6 +215,7 @@ const renderMixer = initMixer({ render: () => render(), player: () => player, to
 const renderProfiles = initProfiles({ render: () => render(), restartIfPlaying, applyLive });
 const renderRhythm = initRhythm({ render: () => render(), restartIfPlaying, applyLive });
 const renderForm = initFormPanel({ render: () => render(), restartIfPlaying, applyLive });
+const renderStrip = initFormStrip({ render: () => render(), restartIfPlaying, applyLive });
 const renderTimbre = initTimbrePanel({ render: () => render(), player: () => player }); // vor initGroups: baut die Klang-Gruppen
 const renderVoices = initVoices({ render: () => render(), player: () => player }); // nach dem Klangpanel: setzt seine Zeilen in dessen Gruppen
 const renderJobs = initJobs({ render: () => render(), changed: () => applyLive({ patterns: true }) }); // ebenso: Aufgaben-Dropdowns in den Gruppen
@@ -310,6 +312,7 @@ function render() {
   renderTimbre();
   renderRhythm();
   renderForm();
+  renderStrip();
 }
 
 deriveBars();
