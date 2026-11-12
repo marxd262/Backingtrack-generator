@@ -3,6 +3,7 @@
 import { chordOptions } from '../core/music.js';
 import { CHORDS, CHORD_GROUPS, chordName } from '../core/chords.js';
 import { METERS, meterKey } from '../core/grooves.js';
+import { chordIndex } from '../core/form.js';
 import { t } from '../index.js';
 import { $, state, setText, setAttr, pressed, MAX_CHORDS } from './state.js';
 
@@ -89,7 +90,7 @@ export function initProgressionEditor(changed, render) {
       row.append(b);
     }
     while (row.children.length > bars.length) row.lastChild.remove();
-    const now = state.current ? state.current.bar % bars.length : -1;
+    const now = state.current ? chordIndex(state.track, state.current.bar) : -1;
     bars.forEach(({ chord }, i) => {
       const b = row.children[i];
       setText(b, chordName(chord));

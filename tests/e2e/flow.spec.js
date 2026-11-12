@@ -352,6 +352,8 @@ test.describe('Randfälle der Folge', () => {
       const names = ['Am', 'Dm', 'E', 'F', 'G'];
       await openPlayPage(page);
       await setProgression(page, names);
+      // die Naht ohne Form: mit Form beginnt die Folge in jedem Teil neu
+      await page.locator('#form-template').selectOption('off');
       await page.locator('#length').selectOption('24');
       await expect(page.locator('#length')).toHaveValue('24');
       await setTempoFast(page);

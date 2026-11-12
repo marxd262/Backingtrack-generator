@@ -2,7 +2,7 @@
 // Griffbrett und Akkordrad (Blöcke), Akkordfolge (Leiste "Akkorde"). Teilt den Zustand mit der Startseite; app.js ruft die
 // zurückgegebene Funktion in jedem render() auf.
 import { buildEvents, t } from '../index.js';
-import { $, LAYERS, ALL_LAYERS, LENGTHS, state, layoutStorage, chordName, pressed, setText } from './state.js';
+import { $, LAYERS, ALL_LAYERS, state, layoutStorage, chordName, pressed, setText } from './state.js';
 import { saveLayout } from './layout-state.js';
 import { nextDistinctChord } from '../core/fretboard.js';
 import { createFretboard, chordSentence } from './fretboard.js';
@@ -10,14 +10,11 @@ import { buildTags, renderTags, toggleTag } from './tags-ui.js';
 import { isSoundOnlyChange } from '../core/tags.js';
 import { initProgressionEditor, addChord } from './progression-editor.js';
 import { initChordColor } from './chord-color.js';
-import { drawLanes } from './lanes.js';
+import { drawLanes, laneKey } from './lanes.js';
 import { createWheel } from './wheel.js';
 
 export function initTuning({ render, restartIfPlaying, toggleLayer, applyLive }) {
   const changed = () => { restartIfPlaying(); render(); };
-
-  for (const n of LENGTHS) $('length').append(new Option('', String(n)));
-  $('length').addEventListener('change', (e) => { state.track.length = Number(e.target.value); changed(); });
 
   for (const name of LAYERS) {
     const b = Object.assign(document.createElement('button'), { type: 'button', className: 'chip' });
@@ -64,12 +61,10 @@ export function initTuning({ render, restartIfPlaying, toggleLayer, applyLive })
 
   const wheel = createWheel($('wheel'), wheelState(), (chord) => (addChord(chord) ? changed() : render()));
 
-  // Ereignisse nur neu bauen, wenn sich Folge, Schlagworte, Variante oder Länge ändern. Tempo und Schichten
-  // fehlen im Schlüssel: die x-Achse sind Takte, stumme Spuren werden nur gedimmt gezeichnet.
+  // Ereignisse nur neu bauen, wenn sich der Schlüssel (laneKey) ändert; Tempo und Schichten gehören nicht dazu.
   let memo = { id: '', events: [] };
   function laneEvents() {
-    const { key, bars, tags, seed, length, meter, groove, complexity } = state.track;
-    const id = JSON.stringify([key, bars, tags, seed, length, meter, groove, complexity]);
+    const id = laneKey(state.track);
     if (id !== memo.id) {
       let events = [];
       try { events = buildEvents({ ...state.track, layers: ALL_LAYERS }); } catch { /* ungültiger Track: leerer Verlauf */ }
@@ -95,11 +90,10 @@ export function initTuning({ render, restartIfPlaying, toggleLayer, applyLive })
     if (state.page !== 'play') return;
     const { track } = state;
     renderTags($('tags'), track.tags);
-    // nur bei Änderung: <output>.value ersetzt den Textknoten, die offene Längen-Auswahl bleibt unberührt
-    for (const [id, v] of [['tuning-tempo', track.bpm], ['tuning-tempo-out', track.bpm], ['length', track.length]]) {
+    // nur bei Änderung: <output>.value ersetzt den Textknoten
+    for (const [id, v] of [['tuning-tempo', track.bpm], ['tuning-tempo-out', track.bpm]]) {
       if ($(id).value !== String(v)) $(id).value = String(v);
     }
-    for (const o of $('length').options) setText(o, t('ui.barsCount', { n: o.value }));
     for (const b of $('lane-buttons').children) pressed(b, track.layers[b.dataset.layer]);
     renderProgression();
     renderChordColor();

@@ -149,8 +149,6 @@
               <input type="range" id="tuning-tempo" min="40" max="200" step="1">
               <span><output id="tuning-tempo-out" for="tuning-tempo"></output> <span data-i18n="ui.bpm"></span></span>
             </div>
-            <label class="label" for="length" data-i18n="ui.length"></label>
-            <select id="length"></select>
           </div>
         </details>
         <details class="group" data-group="rhythm">
@@ -164,6 +162,35 @@
             <div class="tempo-row">
               <input type="range" id="complexity" min="0" max="100" step="1">
               <span><output id="complexity-out" for="complexity"></output></span>
+            </div>
+          </div>
+        </details>
+        <details class="group" data-group="form">
+          <summary data-i18n="group.form"></summary>
+          <div class="settings">
+            <label class="label" for="form-template" data-i18n="ui.formTemplate"></label>
+            <select id="form-template"></select>
+            <label class="label" for="length" id="length-label"></label>
+            <select id="length"></select>
+            <label class="label" for="form-structure" data-i18n="form.feel.structure"></label>
+            <div class="tempo-row">
+              <input type="range" id="form-structure" min="0" max="100" step="1">
+              <span><output id="form-structure-out" for="form-structure"></output></span>
+            </div>
+            <label class="label" for="form-dynamics" data-i18n="form.feel.dynamics"></label>
+            <div class="tempo-row">
+              <input type="range" id="form-dynamics" min="0" max="100" step="1">
+              <span><output id="form-dynamics-out" for="form-dynamics"></output></span>
+            </div>
+            <label class="label" for="form-pauses" data-i18n="form.feel.pauses"></label>
+            <div class="tempo-row">
+              <input type="range" id="form-pauses" min="0" max="100" step="1">
+              <span><output id="form-pauses-out" for="form-pauses"></output></span>
+            </div>
+            <label class="label" for="form-randomness" data-i18n="form.feel.randomness"></label>
+            <div class="tempo-row">
+              <input type="range" id="form-randomness" min="0" max="100" step="1">
+              <span><output id="form-randomness-out" for="form-randomness"></output></span>
             </div>
           </div>
         </details>

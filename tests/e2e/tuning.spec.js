@@ -193,16 +193,17 @@ test('Tempo in der Leiste Klang ändert das Tempo im Satz', async ({ page }) => 
   await expect(page.locator('#tempo')).toHaveValue('150');
 });
 
-test('Länge ändert die Gesamtzahl in der Taktzeile, auch während der Wiedergabe', async ({ page }) => {
+test('Zielgröße ändert die Gesamtzahl in der Taktzeile, auch während der Wiedergabe', async ({ page }) => {
   await openPlayPage(page);
   const length = page.locator('#length');
   await expect(length).toHaveValue('96');
-  expect(await length.locator('option').evaluateAll((os) => os.map((o) => o.value))).toEqual(['24', '48', '96', '192']);
+  expect(await length.locator('option').evaluateAll((os) => os.map((o) => o.value))).toEqual(['24', '32', '48', '64', '96', '128', '192']); // Zielgrößen der Songform
   await length.selectOption('48');
   await playFast(page);
   await expect(position(page)).toHaveText('Takt 1 von 48');
   await length.selectOption('24');
-  await expect(position(page)).toHaveText('Takt 1 von 24', { timeout: BAR_TIMEOUT });
+  // Längenänderung startet an der gleichen Position neu (nicht ab Takt 1)
+  await expect(position(page)).toHaveText(/^Takt \d+ von 24$/, { timeout: BAR_TIMEOUT });
   await playGo(page).click();
 });
 

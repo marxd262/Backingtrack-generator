@@ -1,7 +1,7 @@
 // Start- und Spielseite: ein Zustandsobjekt (state.js), render() schreibt daraus alle Texte und Attribute neu.
 import { play, STYLE_PRESETS, validateTrack, t, setLanguage } from '../index.js';
-import { positionLabel } from './position.js';
-import { $, LAYERS, ALL_LAYERS, state, layoutStorage, chordName, rollVariant, preset, pressed, setText, setAttr, saveLang, deriveBars, applyStyle } from './state.js';
+import { positionLabel, chordAtBar } from './position.js';
+import { $, LAYERS, ALL_LAYERS, state, layoutStorage, chordName, rollVariant, preset, pressed, setText, setAttr, saveLang, deriveBars, applyStyle, rollNewForm, setFormTemplate } from './state.js';
 import { saveLayout } from './layout-state.js';
 import { initTuning } from './tuning.js';
 import { initMixer } from './mixer.js';
@@ -15,6 +15,7 @@ import { initTimbrePanel } from './timbre-panel.js';
 import { initVoices } from './voices-panel.js';
 import { initJobs } from './jobs-panel.js';
 import { initRhythm } from './rhythm.js';
+import { initFormPanel } from './form-panel.js';
 import { initViews } from './blocks.js';
 
 // Dekoratives 16tel-Bild je Stil, 1 = Schlag
@@ -69,20 +70,20 @@ function restartIfPlaying({ inPlace = false } = {}) {
   start(current ? current.bar % state.track.length : 0);
   // derselbe Takt beginnt neu: Taktzeile, Verlauf und Griffbrett bleiben dort, statt bis zum ersten onBar leer zu sein;
   // der Akkord kommt aus der (bei einer neuen Variante anderen) Folge
-  if (current && state.playing) state.current = { ...current, chord: state.track.bars[current.bar % state.track.bars.length].chord };
+  if (current && state.playing) state.current = { ...current, chord: chordAtBar(state.track, current.bar) };
 }
 
 // Schlagwort- und Stilwechsel live an den laufenden Player geben statt neu zu starten: Klang per setTimbre, Tempo per setTempo,
 // Muster per setTrack (tauscht den Ereignisstrom ab dem nächsten ungeplanten Ereignis). Liefert setTrack false (Länge oder
-// Taktlängen anders) oder wirft es, bleibt der Neustart; ohne laufenden Player gibt es nichts zu tun.
+// Taktlängen anders) oder wirft es, bleibt der Neustart an der gleichen Position; ohne laufenden Player gibt es nichts zu tun.
 function applyLive({ patterns = false, tempo = false } = {}) {
   if (!player) return;
   try {
     player.setTimbre(resolveTrackTimbre(state.track));
     if (tempo) player.setTempo(state.track.bpm);
-    if (patterns && !player.setTrack({ ...state.track, layers: ALL_LAYERS })) restartIfPlaying();
+    if (patterns && !player.setTrack({ ...state.track, layers: ALL_LAYERS })) restartIfPlaying({ inPlace: true });
   } catch {
-    restartIfPlaying();
+    restartIfPlaying({ inPlace: true });
   }
 }
 
@@ -172,6 +173,7 @@ $('play-back').addEventListener('click', () => showPage('start'));
 function setVariant(seed) {
   state.track.seed = seed;
   deriveBars();
+  rollNewForm(); // die nicht gesperrten Teile der Form
   restartIfPlaying({ inPlace: true });
   render();
 }
@@ -211,6 +213,7 @@ const renderTuning = initTuning({ render: () => render(), restartIfPlaying, togg
 const renderMixer = initMixer({ render: () => render(), player: () => player, toggleLayer });
 const renderProfiles = initProfiles({ render: () => render(), restartIfPlaying, applyLive });
 const renderRhythm = initRhythm({ render: () => render(), restartIfPlaying, applyLive });
+const renderForm = initFormPanel({ render: () => render(), restartIfPlaying, applyLive });
 const renderTimbre = initTimbrePanel({ render: () => render(), player: () => player }); // vor initGroups: baut die Klang-Gruppen
 const renderVoices = initVoices({ render: () => render(), player: () => player }); // nach dem Klangpanel: setzt seine Zeilen in dessen Gruppen
 const renderJobs = initJobs({ render: () => render(), changed: () => applyLive({ patterns: true }) }); // ebenso: Aufgaben-Dropdowns in den Gruppen
@@ -306,7 +309,9 @@ function render() {
   renderJobs();
   renderTimbre();
   renderRhythm();
+  renderForm();
 }
 
 deriveBars();
+setFormTemplate('auto'); // Standard: Songform passend zum Stil, Ziel 96 Takte
 render();

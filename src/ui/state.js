@@ -10,12 +10,14 @@ import { colorProgression } from '../core/harmony.js';
 import { styleChordColor } from '../core/tags.js';
 import { METERS, meterKey, convertTempo } from '../core/grooves.js';
 import { SCALE_MODE } from '../core/music.js';
+import { rollForm } from '../core/form-roll.js';
+import { formLength } from '../core/form.js';
+import { FEEL_DEFAULTS } from '../core/form-types.js';
 
 export const ROOTS = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
 export { SCALE_MODE }; // wohnt in core/music.js, hier weiter erreichbar
 export const LAYERS = LAYER_IDS;
 export const ALL_LAYERS = Object.fromEntries(LAYERS.map((l) => [l, true]));
-export const LENGTHS = [24, 48, 96, 192];
 export const MAX_CHORDS = 8;
 const STORAGE_KEY = 'backingtrack.lang';
 
@@ -66,6 +68,8 @@ export const state = {
     length: 96,
     meter: [4, 4], // Taktart; groove und complexity fehlen, bis der Nutzer sie wählt (Standard-Groove der Taktart, Komplexität 0,5)
   },
+  formTarget: 96, // Zielgröße der Songform (Takte); ohne Form ist sie die Länge
+  formFeel: { ...FEEL_DEFAULTS }, // Reglerwerte Struktur, Dynamik, Pausen, Zufall; bleiben auch ohne Form stehen
   scale: 'minorPentatonic',
   chordColor: 'triads', // Akkordfarbe: wie erzeugte Folgen gefärbt werden (triads, sevenths, extended, power); deriveBars wendet sie an
   chordColorFromStyle: true, // true: die Farbe kommt vom Stil (und folgt der Variante), false: der Nutzer hat sie gewählt
@@ -115,6 +119,7 @@ export function applyStyle(id) {
   state.track.bpm = convertTempo(p.bpm, '4/4', meterKey(state.track.meter));
   state.track.tags = structuredClone(p.tags);
   state.track.timbre = {}; // neue Vorlage, neuer Ausgangspunkt für die Regler
+  if (state.track.form?.auto) rollNewForm(); // Vorlage Auto folgt dem Stil (gesperrte Teile bleiben)
 }
 
 // Taktart wechseln: der Standard-Groove der Taktart gilt, das Tempo wird umgerechnet (convertTempo), die Takte der Folge bekommen die
@@ -134,4 +139,45 @@ export function setMeter(key) {
   state.track.bpm = bpm;
   state.track.bars = state.track.bars.map((bar) => ({ ...bar, beats: METERS[key].beats }));
   return true;
+}
+
+// --- Songform: Vorlage, Zielgröße und Regler; die Form selbst steht in state.track.form (fehlt = "Ohne Form") ---
+
+/** Gewählte Vorlage: 'auto', eine Vorlagen-id oder 'off' (keine Form). */
+export const formChoice = (track = state.track) => (track.form ? (track.form.auto ? 'auto' : track.form.template) : 'off');
+
+// Reglerwerte: die der Form, sonst die gemerkten
+const feelNow = () => state.track.form?.feel ?? state.formFeel;
+
+function roll(choice, previous) {
+  const { seed, tags } = state.track;
+  const form = rollForm({ template: choice, style: state.style, targetBars: state.formTarget, feel: feelNow(), seed, tags, previous });
+  state.track.form = form;
+  state.track.length = formLength(form);
+}
+
+/** Würfelt die nicht gesperrten Teile neu (Variante, Stilwechsel mit Auto, Struktur-Regler); ohne Form nichts. */
+export function rollNewForm() {
+  if (state.track.form) roll(formChoice(), state.track.form);
+}
+
+/** Vorlage wechseln würfelt alles neu (Sperren fallen); 'off' entfernt die Form, die Länge ist dann die Zielgröße. */
+export function setFormTemplate(choice) {
+  if (choice === 'off') {
+    delete state.track.form;
+    state.track.length = state.formTarget;
+  } else roll(choice);
+}
+
+/** Zielgröße wechseln würfelt alles neu (Sperren fallen); ohne Form ist sie die Länge. */
+export function setFormTarget(bars) {
+  state.formTarget = bars;
+  if (state.track.form) roll(formChoice());
+  else state.track.length = bars;
+}
+
+/** Einen Regler setzen (0..1, Dynamik bis DYNAMICS_MAX); würfelt nicht neu. */
+export function setFormFeel(name, value) {
+  state.formFeel = { ...feelNow(), [name]: value };
+  if (state.track.form) state.track.form = { ...state.track.form, feel: { ...state.formFeel } };
 }

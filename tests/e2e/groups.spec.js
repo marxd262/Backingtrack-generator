@@ -30,7 +30,7 @@ const group = (page, id) => page.locator(`details[data-group="${id}"]`);
 const summary = (page, id) => group(page, id).locator('> summary');
 
 test('Standard: Stil, Tempo, Tonart, Akkordfolge und Ansichten offen', async ({ page }) => {
-  for (const id of ['style', 'tempo', 'rhythm', 'key', 'progression', 'triad', 'views']) await expect(group(page, id), id).toHaveJSProperty('open', true);
+  for (const id of ['style', 'tempo', 'rhythm', 'form', 'key', 'progression', 'triad', 'views']) await expect(group(page, id), id).toHaveJSProperty('open', true);
   for (const id of ['seventh', 'extended']) await expect(group(page, id), id).toHaveJSProperty('open', false);
 });
 
@@ -44,7 +44,8 @@ test('Gruppen liegen in der richtigen Leiste und Reihenfolge', async ({ page }) 
 test('Inhalte stehen in ihren Gruppen', async ({ page }) => {
   await expect(group(page, 'style').locator('#tags')).toBeAttached();
   await expect(group(page, 'tempo').locator('#tuning-tempo')).toBeAttached();
-  await expect(group(page, 'tempo').locator('#length')).toBeAttached();
+  await expect(group(page, 'form').locator('#length')).toBeAttached(); // Zielgröße der Songform (früher Länge im Tempo)
+  await expect(group(page, 'form').locator('#form-template')).toBeAttached();
   await expect(group(page, 'key').locator('#side-key-chips')).toBeAttached();
   await expect(group(page, 'key').locator('#side-scale-chips')).toBeAttached();
   await expect(group(page, 'progression').locator('#progression')).toBeAttached();
