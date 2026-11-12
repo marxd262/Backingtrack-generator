@@ -483,3 +483,22 @@ test('Rundlauf: Sitzung mit Form -> captureParts -> JSON -> sanitizeParts -> app
   assert.deepEqual(r.session.track.form, FORM);
   assert.equal(r.session.track.length, 48);
 });
+
+test('applyParts: gleiche Zielgröße wie die vorhandene Form behält die Form samt Sperren, andere Zielgröße würfelt neu ohne Sperren', () => {
+  const s = deepFreeze(withForm()); // Summe 48, ein gesperrter Teil
+  for (const length of [48, 50, 44]) { // alle mit nächster Zielgröße 48
+    const r = applyParts(s, { rhythm: { length } });
+    assert.ok(r.ok);
+    assert.deepEqual(r.session.track.form, FORM, `Länge ${length}: unverändert`);
+    assert.equal(r.session.track.length, 48);
+  }
+  const other = applyParts(s, { rhythm: { length: 96 } }).session.track.form;
+  assert.ok(other.sections.every((x) => !x.locked), 'Sperren fallen beim Neuwürfeln');
+  assert.ok(Math.abs(sumOf(other) - 96) <= 12);
+});
+
+test('sanitizeParts form: Reglernamen werden als eigene Schlüssel geprüft (toString, valueOf zählen nicht)', () => {
+  const r = sanitizeParts({ form: { form: { template: 'pop', sections: [{ type: 'verse', bars: 8 }], feel: { toString: 5, valueOf: 'x', hasOwnProperty: 1, structure: 0.2 } } } });
+  assert.equal(r.skipped, 0);
+  assert.deepEqual(r.parts.form.form.feel, { structure: 0.2, dynamics: 0.6, pauses: 0.4, randomness: 0.5 });
+});

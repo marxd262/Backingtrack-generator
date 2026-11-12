@@ -11,7 +11,7 @@ import { CHORD_COLORS } from './harmony.js';
 import { DEFAULT_TIMBRE } from './timbre.js';
 import { normalizeForm, isValidForm, formLength } from './form.js';
 import { FEEL_DEFAULTS, DYNAMICS_MAX, FORM_LIMITS } from './form-types.js';
-import { rollForm, resolveTemplate, TEMPLATE_IDS } from './form-roll.js';
+import { rollForm, resolveTemplate, TEMPLATE_IDS, TARGET_SIZES } from './form-roll.js';
 
 /** Teile in der Reihenfolge der Oberfläche. */
 export const PART_IDS = Object.freeze(['harmony', 'tempo', 'rhythm', 'style', 'sound', 'voices', 'layers', 'mixer', 'variant', 'form']);
@@ -177,7 +177,7 @@ function sanitize(raw) {
       const feel = {};
       if ('feel' in g) {
         if (!isPlain(g.feel)) bad();
-        else for (const [k, v] of Object.entries(fields(g.feel))) if (k in FEEL_DEFAULTS) { if (typeof v === 'number' && v >= 0 && v <= (k === 'dynamics' ? DYNAMICS_MAX : 1)) feel[k] = v; else bad(); }
+        else for (const [k, v] of Object.entries(fields(g.feel))) if (Object.hasOwn(FEEL_DEFAULTS, k)) { if (typeof v === 'number' && v >= 0 && v <= (k === 'dynamics' ? DYNAMICS_MAX : 1)) feel[k] = v; else bad(); }
       }
       // Vorlage und Auto wie normalizeForm (Typ prüfen); unbekannte Vorlage fällt auf Pop zurück
       if ('template' in g && !TEMPLATE_IDS.includes(g.template)) bad();
@@ -202,6 +202,7 @@ function sanitize(raw) {
 
 // ---------- anwenden ----------
 
+const nearestSize = (x) => TARGET_SIZES.reduce((a, b) => (Math.abs(b - x) < Math.abs(a - x) ? b : a));
 const defaultScale = (mode) => Object.keys(SCALE_MODE).find((name) => SCALE_MODE[name] === mode);
 
 /**
@@ -244,8 +245,9 @@ export function applyParts(session, parts) {
   if (mixer && has(mixer, 'mix')) s.mix = { ...s.mix, ...mixer.mix };
   if (variant) for (const k of ['seed', 'variety']) if (has(variant, k)) t[k] = variant[k];
   if (form && has(form, 'form')) t.form = form.form;
-  else if (r && has(r, 'length') && isValidForm(t.form)) {
-    // nur eine Länge, keine Form im Profil: die vorhandene Form wird für die nächste Zielgröße neu gewürfelt (Sperren fallen wie bei der Zielgröße)
+  else if (r && has(r, 'length') && isValidForm(t.form) && nearestSize(r.length) !== nearestSize(formLength(t.form))) {
+    // nur eine Länge, keine Form im Profil: die vorhandene Form wird für eine andere nächste Zielgröße neu gewürfelt (Sperren fallen wie bei der Zielgröße);
+    // bei gleicher Zielgröße bleibt die Form samt Sperren, wie sie ist
     t.form = rollForm({ template: t.form.auto ? 'auto' : t.form.template, style: s.style, targetBars: r.length, feel: t.form.feel, seed: t.seed, tags: t.tags });
   }
 

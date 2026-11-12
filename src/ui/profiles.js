@@ -437,7 +437,9 @@ export function initProfiles({ render, restartIfPlaying, applyLive }) {
       folder.value = [...folder.options].some((o) => o.value === keep) ? keep : '';
     }
     setText(folder.options[0], t('ui.profileMine'));
-    for (const p of [picker, overwritePicker]) p.setUnavailable(state.track.form ? [] : ['form']);
+    const noForm = state.track.form ? [] : ['form'];
+    picker.setUnavailable(noForm);
+    overwritePicker.setUnavailable(noForm, { recheck: false });
     picker.render();
     setText(save, t('ui.profileSave'));
     setText(load, t('ui.profileLoad'));

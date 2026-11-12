@@ -1512,3 +1512,26 @@ test('Export und Import eines Profils mit Songform: Rundlauf; „Alles sichern�
   await page.locator('#profile-import-text').click();
   await expect(message(page)).not.toContainText('ungültig');
 });
+
+test('Überschreiben: ein Profil ohne Songform bekommt ihn nicht angehakt, auch wenn die Form erst später wieder da ist', async ({ page }) => {
+  await item(page, 'Aktuelle Sitzung').click();
+  await presetParts(page, 'Nur Klang');
+  await page.getByLabel('Name des Profils').fill('Klang');
+  await page.locator('#profile-save').click();
+  await hideWindow(page);
+  await leftOpen(page);
+  await formTemplate(page).selectOption('off');
+  await openWindow(page);
+  await item(page, 'Klang').click();
+  await page.locator('#profile-overwrite').click();
+  const box = page.locator('#profile-overwrite-parts').getByRole('checkbox', { name: 'Songform', exact: true });
+  await expect(box).toBeDisabled();
+  await hideWindow(page);
+  await formTemplate(page).selectOption('auto');
+  await openWindow(page);
+  await expect(box).toBeEnabled();
+  await expect(box).not.toBeChecked();
+  await expect(page.locator('#profile-overwrite-parts summary')).toHaveText('Inhalt: 3 von 10');
+  await page.locator('#profile-overwrite-go').click();
+  expect(await storedParts(page, 'Klang')).toEqual(['sound', 'voices', 'mixer']);
+});

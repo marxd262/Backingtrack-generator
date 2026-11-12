@@ -58,13 +58,14 @@ export function createPartsPicker({ idPrefix, t }) {
   function setIds(ids) {
     for (const r of rows) r.box.checked = ids.includes(r.id) && !r.box.disabled;
   }
-  // Teile, die die Sitzung gerade nicht hat (Songform bei "Ohne Form"), sind abgehakt und gesperrt; sie kehren angehakt zurück
-  function setUnavailable(ids) {
+  // Teile, die die Sitzung gerade nicht hat (Songform bei "Ohne Form"), sind nicht angehakt und gesperrt; mit `recheck` kehren sie angehakt zurück
+  // (Speichern), sonst bleiben sie frei und ungehakt (Überschreiben: die Haken kommen aus dem Profil und ändern sich nicht von allein)
+  function setUnavailable(ids, { recheck = true } = {}) {
     for (const r of rows) {
       const gone = ids.includes(r.id);
       if (r.box.disabled === gone) continue;
       r.box.disabled = gone;
-      r.box.checked = !gone;
+      r.box.checked = gone ? false : recheck;
     }
   }
   function render() {
