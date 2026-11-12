@@ -3,8 +3,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { rollForm, resolveTemplate, TEMPLATE_IDS, STYLE_TEMPLATE, TARGET_SIZES } from '../../src/core/form-roll.js';
+import { STYLE_PRESETS } from '../../src/core/tags.js';
 import { checkForm, formLength } from '../../src/core/form.js';
-import { FEEL_DEFAULTS, PART_TYPES } from '../../src/core/form-types.js';
+import { FEEL_DEFAULTS, TRANSITIONS } from '../../src/core/form-types.js';
 import { createRng } from '../../src/core/rng.js';
 
 const IDS = ['jam', 'pop', 'buildDrop', 'blues', 'rock'];
@@ -12,7 +13,8 @@ const SIZES = [24, 32, 48, 64, 96, 128, 192];
 const MIN = { intro: 2, build: 2, break: 2, outro: 2, verse: 4, chorus: 4 };
 const MAX_PART = 32;
 const TAGSETS = [{}, { development: ['buildsSlowly'] }, { development: ['fullFromStart'] }, { development: ['withBreakouts'] }, { development: ['buildsSlowly', 'withBreakouts'] }];
-const SEEDS = 300;
+const SEEDS = 200;
+const STRUCTURES = [FEEL_DEFAULTS.structure, 0, 1];
 const types = (f) => f.sections.map((s) => s.type);
 const reasons = (form) => { const out = []; checkForm(form, (c, p) => out.push(p.reason)); return out; };
 const label = (ctx, f) => `${JSON.stringify(ctx)} ${f.sections.map((s) => `${s.type}${s.bars}`).join(' ')}`;
@@ -23,6 +25,8 @@ function broken(form, { jam, checkBars = true } = {}) {
   if (!['intro', 'verse'].includes(t[0])) return 'erster Teil';
   if (!['outro', 'chorus'].includes(t[n - 1])) return 'letzter Teil';
   for (let i = 0; i < n; i++) {
+    if (t[i] === 'intro' && i > 0) return 'Intro nicht vorn';
+    if (t[i] === 'outro' && i < n - 1) return 'Outro nicht am Ende';
     if (t[i] === 'build' && t[i + 1] !== 'chorus') return 'Aufbau nicht vor Refrain';
     if (t[i] === 'break' && (i === 0 || i === n - 1)) return 'Break am Rand';
     if (t[i] === 'break' && t[i + 1] === 'break') return 'zwei Breaks';
@@ -32,7 +36,6 @@ function broken(form, { jam, checkBars = true } = {}) {
   if (!jam && formLength(form) >= 24 && !t.includes('chorus')) return 'kein Refrain';
   return null;
 }
-const nearest = (x) => SIZES.reduce((a, b) => (Math.abs(b - x) < Math.abs(a - x) ? b : a));
 
 test('Konstanten: Vorlagen, Zielgrößen, Auto-Zuordnung', () => {
   assert.deepEqual([...TEMPLATE_IDS], IDS);
@@ -40,10 +43,21 @@ test('Konstanten: Vorlagen, Zielgrößen, Auto-Zuordnung', () => {
   assert.deepEqual({ ...STYLE_TEMPLATE }, { funk: 'jam', reggae: 'jam', psych: 'buildDrop', dreamy: 'pop', country: 'pop', poppunk: 'pop', blues: 'blues', rock: 'rock', hardrock: 'rock' });
 });
 
-test('resolveTemplate: Auto nach Stil, buildsSlowly bevorzugt Build & Drop, unbekannt wird Pop', () => {
-  for (const [style, id] of Object.entries(STYLE_TEMPLATE)) assert.deepEqual(resolveTemplate('auto', style, {}), { template: id, auto: true }, style);
-  assert.deepEqual(resolveTemplate('auto', 'rock', { development: ['buildsSlowly'] }), { template: 'buildDrop', auto: true });
-  assert.deepEqual(resolveTemplate('auto', 'rock', { development: ['fullFromStart'] }), { template: 'rock', auto: true });
+test('resolveTemplate: der Stil bestimmt Auto, Schlagworte nur bei unbekanntem Stil', () => {
+  const preset = (id) => STYLE_PRESETS.find((p) => p.id === id);
+  for (const [style, id] of Object.entries(STYLE_TEMPLATE)) {
+    assert.deepEqual(resolveTemplate('auto', style, {}), { template: id, auto: true }, style);
+    // auch mit den echten Schlagworten des Stils gewinnt die Zuordnung
+    assert.deepEqual(resolveTemplate('auto', style, preset(style).tags), { template: id, auto: true }, style);
+  }
+  for (const [style, id] of [['funk', 'jam'], ['dreamy', 'pop'], ['psych', 'buildDrop']]) {
+    assert.deepEqual(preset(style).tags.development, ['buildsSlowly']); // Voraussetzung des Falls
+    assert.deepEqual(resolveTemplate('auto', style, preset(style).tags), { template: id, auto: true });
+  }
+  assert.deepEqual(resolveTemplate('auto', 'rock', { development: ['buildsSlowly'] }), { template: 'rock', auto: true });
+  assert.deepEqual(resolveTemplate('auto', 'unbekannt', { development: ['buildsSlowly'] }), { template: 'buildDrop', auto: true });
+  assert.deepEqual(resolveTemplate('auto', undefined, { development: ['buildsSlowly', 'fullFromStart'] }), { template: 'pop', auto: true });
+  assert.deepEqual(resolveTemplate('auto', 'unbekannt', { development: ['fullFromStart'] }), { template: 'pop', auto: true });
   assert.deepEqual(resolveTemplate('auto', 'unbekannt', {}), { template: 'pop', auto: true });
   assert.deepEqual(resolveTemplate('auto', undefined, undefined), { template: 'pop', auto: true });
   assert.deepEqual(resolveTemplate('blues', 'funk', { development: ['buildsSlowly'] }), { template: 'blues', auto: false });
@@ -53,10 +67,10 @@ test('resolveTemplate: Auto nach Stil, buildsSlowly bevorzugt Build & Drop, unbe
 });
 
 test('Leitplanken 1 bis 6, Summe nahe Ziel, gültig: Seeds x Vorlagen x Zielgrößen x Schlagworte', () => {
-  for (const template of IDS) for (const targetBars of SIZES) for (const [ti, tags] of TAGSETS.entries()) {
+  for (const template of IDS) for (const targetBars of SIZES) for (const [ti, tags] of TAGSETS.entries()) for (const structure of STRUCTURES) {
     for (let seed = 1; seed <= SEEDS; seed++) {
-      const ctx = { template, targetBars, ti, seed };
-      const f = rollForm({ template, style: 'rock', targetBars, feel: FEEL_DEFAULTS, seed, tags });
+      const ctx = { template, targetBars, ti, structure, seed };
+      const f = rollForm({ template, style: 'rock', targetBars, feel: { ...FEEL_DEFAULTS, structure }, seed, tags });
       const why = broken(f, { jam: template === 'jam' });
       if (why) assert.fail(`${why}: ${label(ctx, f)}`);
       const r = reasons(f);
@@ -74,7 +88,7 @@ test('Leitplanken 1 bis 6, Summe nahe Ziel, gültig: Seeds x Vorlagen x Zielgrö
 test('Blues: Teile zu 12 Takten, Summe das nächste Vielfache von 12', () => {
   for (const targetBars of SIZES) for (let seed = 1; seed <= 40; seed++) {
     const f = rollForm({ template: 'blues', targetBars, seed });
-    assert.ok(f.sections.every((s) => s.bars === 12 || s.bars === 24), label({ targetBars, seed }, f));
+    assert.ok(f.sections.every((s) => s.bars === 12), label({ targetBars, seed }, f));
     assert.equal(formLength(f), Math.round(targetBars / 12) * 12, label({ targetBars, seed }, f));
   }
 });
@@ -150,7 +164,6 @@ test('Zielgröße außerhalb fällt auf die nächste zurück', () => {
       assert.ok(Math.abs(formLength(f) - expect) <= 4, `${input}: ${formLength(f)}`);
     }
   }
-  assert.equal(nearest(130), 128);
 });
 
 test('feindliche Eingaben werfen nie und ergeben eine gültige Form', () => {
@@ -174,16 +187,28 @@ test('feindliche Eingaben werfen nie und ergeben eine gültige Form', () => {
 });
 
 // --- gesperrte Teile ---
-function lockSome(prev, rng) {
-  const sections = prev.sections.map((s) => (rng.next() < 0.35 ? { ...s, locked: true } : { ...s }));
-  if (!sections.some((s) => s.locked)) sections[rng.int(0, sections.length - 1)].locked = true;
+// gesperrt werden auch Pegel, Dichte, Crash und Übergang (vom Nutzer gesetzt); `mode` wählt, welche Teile
+function lockSome(prev, rng, mode = 'random') {
+  const n = prev.sections.length;
+  const pick = { random: () => rng.next() < 0.35, first: (i) => i === 0, last: (i) => i === n - 1, ends: (i) => i === 0 || i === n - 1 }[mode];
+  const sections = prev.sections.map((s, i) => {
+    if (!pick(i)) return { ...s };
+    const out = { ...s, locked: true };
+    if (rng.next() < 0.5) out.level = -rng.int(0, 12);
+    if (rng.next() < 0.5) out.density = rng.int(-10, 10) / 10;
+    if (rng.next() < 0.5) out.crash = rng.next() < 0.5;
+    if (rng.next() < 0.5) out.transition = rng.pick(TRANSITIONS);
+    return out;
+  });
+  if (!sections.some((s) => s.locked)) sections[rng.int(0, n - 1)].locked = true;
   return { ...prev, sections };
 }
 test('gesperrte Teile bleiben bit-gleich an ihrer Stelle, Leitplanken gelten rundherum', () => {
   let changed = 0, total = 0;
-  for (const template of IDS) for (const targetBars of SIZES) for (let seed = 1; seed <= 30; seed++) {
+  const modes = ['random', 'random', 'first', 'last', 'ends'];
+  for (const template of IDS) for (const targetBars of SIZES) for (let seed = 1; seed <= 40; seed++) {
     const rng = createRng(seed * 977 + targetBars);
-    const prev = lockSome(rollForm({ template, targetBars, seed }), rng);
+    const prev = lockSome(rollForm({ template, targetBars, seed }), rng, modes[seed % modes.length]);
     const next = rollForm({ template, targetBars, seed: seed + 1000, previous: prev });
     const ctx = { template, targetBars, seed, prev: label({}, prev) };
     prev.sections.forEach((s, i) => { if (s.locked) assert.deepEqual(next.sections[i], s, `Index ${i}: ${label(ctx, next)}`); });
@@ -197,12 +222,38 @@ test('gesperrte Teile bleiben bit-gleich an ihrer Stelle, Leitplanken gelten run
   assert.ok(changed > total * 0.8, `nur ${changed} von ${total} verändert`);
 });
 
-test('ohne gesperrte Teile würfelt previous alles neu; Sperren ändern den Seed-Strom nicht', () => {
+test('ohne gesperrte Teile würfelt previous alles neu; gleiche Sperren und Seed ergeben dieselbe Form', () => {
   const prev = rollForm({ template: 'pop', targetBars: 64, seed: 4 });
   const fresh = rollForm({ template: 'pop', targetBars: 64, seed: 9 });
   assert.deepEqual(rollForm({ template: 'pop', targetBars: 64, seed: 9, previous: prev }), fresh);
-  const locked = { ...prev, sections: prev.sections.map((s, i) => (i === 0 ? { ...s, locked: true } : s)) };
-  assert.deepEqual(rollForm({ template: 'pop', targetBars: 64, seed: 9, previous: locked }), rollForm({ template: 'pop', targetBars: 64, seed: 9, previous: locked }));
+  const lock = () => ({ ...prev, sections: prev.sections.map((s, i) => (i === 0 ? { ...s, locked: true } : { ...s })) });
+  const a = rollForm({ template: 'pop', targetBars: 64, seed: 9, previous: lock() });
+  assert.deepEqual(a, rollForm({ template: 'pop', targetBars: 64, seed: 9, previous: lock() }));
+  assert.deepEqual(a.sections[0], lock().sections[0]);
+});
+
+test('Sperren (Index 0, Ende, Zufall): hinter gesperrten Teilen kein zweites Intro, Outro nur am Ende', () => {
+  for (const template of IDS) for (const targetBars of SIZES) for (const mode of ['first', 'last', 'ends', 'random']) for (let seed = 1; seed <= 25; seed++) {
+    const rng = createRng(seed * 31 + targetBars);
+    const prev = lockSome(rollForm({ template, targetBars, seed }), rng, mode);
+    const next = rollForm({ template, targetBars, seed: seed + 500, previous: prev });
+    const t = types(next);
+    if (t.indexOf('intro', 1) !== -1) assert.fail(`zweites Intro (${mode}): ${label({ template, targetBars, seed }, next)}`);
+    if (t.indexOf('outro') !== -1 && t.indexOf('outro') !== t.length - 1) assert.fail(`Outro mitten (${mode}): ${label({ template, targetBars, seed }, next)}`);
+  }
+});
+
+test('Phrasen: ohne Sperren sind fast alle Teile Vielfache von 4 Takten (Blues zu 12)', () => {
+  for (const template of IDS.filter((t) => t !== 'blues')) {
+    let forms = 0, odd = 0;
+    for (const targetBars of SIZES) for (let seed = 1; seed <= 150; seed++) {
+      const f = rollForm({ template, targetBars, seed });
+      forms++;
+      if (f.sections.some((x) => x.bars % 4)) odd++;
+    }
+    assert.ok(forms >= 1000);
+    assert.ok(odd / forms < 0.02, `${template}: ${odd} von ${forms} mit Teil, der kein Vielfaches von 4 ist`);
+  }
 });
 
 test('unmögliche Sperren: nie ein Wurf, gesperrte Teile bleiben, Ergebnis gültig', () => {
@@ -222,10 +273,14 @@ test('previous wird nicht verändert', () => {
   assert.deepEqual(prev, copy);
 });
 
-test('Quelle: Zufall nur aus dem Strom formgen, nie Math.random', async () => {
-  const { readFileSync } = await import('node:fs');
-  const src = readFileSync(new URL('../../src/core/form-roll.js', import.meta.url), 'utf8');
-  assert.ok(!/Math\.random/.test(src));
-  assert.ok(/'formgen'/.test(src));
-  assert.deepEqual(PART_TYPES.length, 6);
+test('Zufall nur aus dem eigenen Strom: Math.random und Date.now werden nie gelesen', () => {
+  const { random } = Math, { now } = Date;
+  Math.random = () => { throw new Error('Math.random'); };
+  Date.now = () => { throw new Error('Date.now'); };
+  try {
+    for (let seed = 1; seed <= 300; seed++) rollForm({ template: IDS[seed % IDS.length], targetBars: SIZES[seed % SIZES.length], seed, previous: seed % 3 ? undefined : rollForm({ seed }) });
+  } finally {
+    Math.random = random;
+    Date.now = now;
+  }
 });

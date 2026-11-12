@@ -15,8 +15,9 @@ const FALLBACK_TEMPLATE = 'pop';
 const MIN_BARS = Object.freeze({ intro: 2, build: 2, break: 2, outro: 2, verse: 4, chorus: 4 });
 const MAX_BARS = 32;
 const STEP = 2; // Anpassung an die Zielgröße in Schritten von 2 Takten
-const TOLERANCE = 1; // die Anpassung hört auf, wenn die Summe höchstens so viele Takte neben dem Ziel liegt (Spec: höchstens 4)
-const SCORE_TOLERANCE = 4; // so weit darf die Summe für einen "guten" Versuch vom Ziel abweichen
+const TOLERANCE = 4; // so weit darf die Summe vom Ziel abweichen (Spec: höchstens 4); die Notlösung in fit() hört dann auf
+const PHRASE = 4; // Phrasenlänge: Teile sollen Vielfache davon sein
+const FILLER_BARS = 8; // Länge eines Platzhalters vor einem gesperrten Teil
 const LEN_FRACTION = 0.25; // Längenwahlen über diesem Anteil der Zielgröße werden nicht gezogen (kleine Ziele bekommen kurze Teile)
 const MIN_CHORUS_LENGTH = 24; // Leitplanke 5: ab dieser Gesamtlänge (außer Jam) mindestens ein Refrain
 const MAX_BODY_PARTS = 60; // Schutz vor endlosem Anhängen
@@ -38,10 +39,10 @@ const slot = (type, bars, p = 1, repeat) => ({ types: [].concat(type), bars, p, 
 /** `unit`: alle Teile haben diese Länge (Blues), die Summe ist ein Vielfaches davon. `jam`: Regel 4 und 5 gelten nicht. */
 export const TEMPLATES = Object.freeze({
   jam: { jam: true, head: [slot('intro', [4, 8], 0.3)], cycle: [slot('verse', [8, 16], 1, [1, 3]), slot('chorus', [8, 16], 0.6), slot('break', [4, 8], 0.12)], tail: [slot('chorus', [8, 16]), slot('outro', [4, 8], 0.35)] },
-  pop: { head: [slot('intro', [4, 8], 0.65)], cycle: [slot('verse', [8, 16]), slot('build', [2, 4], 0.35), slot('chorus', [8, 16]), slot('break', [4, 8], 0.2)], tail: [slot('chorus', [8, 16], 0.5), slot('outro', [4, 8], 0.6)] },
+  pop: { head: [slot('intro', [4, 8], 0.65)], cycle: [slot('verse', [8, 16]), slot('build', [4], 0.35), slot('chorus', [8, 16]), slot('break', [4, 8], 0.2)], tail: [slot('chorus', [8, 16], 0.5), slot('outro', [4, 8], 0.6)] },
   buildDrop: { head: [slot(['intro', 'verse'], [8, 16])], cycle: [slot('verse', [8, 16], 0.3), slot('build', [4, 8], 0.9), slot('chorus', [8, 16]), slot('break', [8, 16], 0.45)], tail: [slot('chorus', [8, 16], 0.4), slot('outro', [8, 16], 0.6)] },
   blues: { unit: 12, head: [slot('intro', [12], 0.3)], cycle: [slot('verse', [12], 1, [1, 2]), slot('chorus', [12], 0.8)], tail: [slot('chorus', [12], 0.5), slot('outro', [12], 0.3)] },
-  rock: { head: [slot('intro', [4, 8], 0.45)], cycle: [slot('verse', [8, 16]), slot('verse', [8], 0.3), slot('build', [2, 4], 0.15), slot('chorus', [8, 16]), slot('break', [4, 8], 0.15)], tail: [slot('chorus', [8, 16], 0.4), slot('outro', [4, 8], 0.5)] },
+  rock: { head: [slot('intro', [4, 8], 0.45)], cycle: [slot('verse', [8, 16]), slot('verse', [8], 0.3), slot('build', [4], 0.15), slot('chorus', [8, 16]), slot('break', [4, 8], 0.15)], tail: [slot('chorus', [8, 16], 0.4), slot('outro', [4, 8], 0.5)] },
 });
 
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -49,16 +50,15 @@ const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
 const read = (obj, key) => { try { return obj?.[key]; } catch { return undefined; } }; // werfende Getter zählen als fehlend
 const sumBars = (items) => items.reduce((s, it) => s + it.bars, 0);
 
-const devTags = (tags) => { const d = read(tags, 'development'); return Array.isArray(d) ? d.filter((t) => typeof t === 'string') : []; };
+const devTags = (tags) => { const d = read(tags, 'development'); return Array.isArray(d) ? [...new Set(d.filter((t) => typeof t === 'string'))] : []; };
 
-/** Vorlage für „auto“ (Stil, `buildsSlowly` bevorzugt Build & Drop) oder die gewählte; Unbekanntes wird Pop. */
+/** Vorlage für „auto“ (der Stil bestimmt sie; bei unbekanntem Stil bevorzugt `buildsSlowly` Build & Drop, sonst Pop) oder die gewählte; Unbekanntes wird Pop. */
 export function resolveTemplate(templateOrAuto, styleId, tags) {
   if (TEMPLATE_IDS.includes(templateOrAuto)) return { template: templateOrAuto, auto: false };
   if (templateOrAuto != null && templateOrAuto !== 'auto') return { template: FALLBACK_TEMPLATE, auto: false };
-  const dev = devTags(tags);
-  if (dev.includes('buildsSlowly') && !dev.includes('fullFromStart')) return { template: 'buildDrop', auto: true };
-  const byStyle = typeof styleId === 'string' && Object.hasOwn(STYLE_TEMPLATE, styleId) ? STYLE_TEMPLATE[styleId] : FALLBACK_TEMPLATE;
-  return { template: byStyle, auto: true };
+  if (typeof styleId === 'string' && Object.hasOwn(STYLE_TEMPLATE, styleId)) return { template: STYLE_TEMPLATE[styleId], auto: true };
+  const dev = devTags(tags); // nur für einen unbekannten Stil entscheidet das Schlagwort; sonst wirkt es über DEV_FACTORS in der Vorlage
+  return { template: dev.includes('buildsSlowly') && !dev.includes('fullFromStart') ? 'buildDrop' : FALLBACK_TEMPLATE, auto: true };
 }
 
 const nearestTarget = (x) => (typeof x === 'number' && Number.isFinite(x) ? TARGET_SIZES.reduce((a, b) => (Math.abs(b - x) < Math.abs(a - x) ? b : a)) : DEFAULT_TARGET);
@@ -89,7 +89,13 @@ function lockedParts(previous) {
 }
 
 // --- Ziehen ---
-function drawSlot(sl, ctx, rng) {
+// Längen, die ein Platz beim Anpassen annehmen darf: seine Wahlen plus die Vielfachen von PHRASE dazwischen (nie außerhalb von [lo, hi]).
+function lengthOptions(choices) {
+  const lo = Math.min(...choices), hi = Math.max(...choices), out = new Set(choices);
+  for (let b = lo; b <= hi; b++) if (b % PHRASE === 0) out.add(b);
+  return [...out].sort((a, b) => a - b);
+}
+function drawSlot(sl, ctx, rng, extra = false) {
   const weights = sl.types.map((t) => ctx.mult[t] ?? 1);
   let r = rng.next() * weights.reduce((a, b) => a + b, 0), pick = 0;
   while (pick < weights.length - 1 && r >= weights[pick]) r -= weights[pick++];
@@ -99,14 +105,16 @@ function drawSlot(sl, ctx, rng) {
   const allowed = sl.bars.filter((b) => b <= ctx.cap);
   const pool = allowed.length ? allowed : [Math.min(...sl.bars)];
   const count = sl.repeat ? rng.int(sl.repeat[0], sl.repeat[1]) : 1;
-  return Array.from({ length: count }, () => ({ type, bars: rng.pick(pool), opt: !required, locked: false }));
+  const opts = lengthOptions(sl.bars);
+  // Wiederholungen und weitere Durchläufe sind entbehrlich (opt): beim Anpassen an kleine Ziele fallen sie zuerst weg
+  return Array.from({ length: count }, (_, k) => ({ type, bars: rng.pick(pool), opt: !required || extra || k > 0, locked: false, opts }));
 }
 
 function drawItems(tpl, ctx, rng) {
-  const run = (slots) => slots.flatMap((sl) => drawSlot(sl, ctx, rng));
+  const run = (slots, extra) => slots.flatMap((sl) => drawSlot(sl, ctx, rng, extra));
   const head = run(tpl.head), tail = run(tpl.tail), body = [];
   let cycles = 0;
-  do { body.push(...run(tpl.cycle)); cycles++; } while (sumBars(head) + sumBars(body) + sumBars(tail) < ctx.target && head.length + body.length + tail.length < MAX_BODY_PARTS && cycles < MAX_BODY_PARTS);
+  do { body.push(...run(tpl.cycle, cycles > 0)); cycles++; } while (sumBars(head) + sumBars(body) + sumBars(tail) < ctx.target && head.length + body.length + tail.length < MAX_BODY_PARTS && cycles < MAX_BODY_PARTS);
   return [...head, ...body, ...tail];
 }
 
@@ -119,9 +127,11 @@ function mergeLocked(items, locks, unit) {
     if (locks.has(i)) { const sec = locks.get(i); merged.push({ type: sec.type, bars: sec.bars, locked: true, opt: false, sec }); continue; }
     // vor einem gesperrten Teil sind Intro (außer vorn) und Outro fehl am Platz
     while (queue.length && (queue[0].type === 'outro' || (queue[0].type === 'intro' && i > 0))) queue.shift();
-    merged.push(queue.shift() ?? { type: 'verse', bars: unit ?? 8, opt: false, locked: false });
+    merged.push(queue.shift() ?? { type: 'verse', bars: unit ?? FILLER_BARS, opt: false, locked: false, opts: unit ? [unit] : lengthOptions([PHRASE, 2 * FILLER_BARS]) });
   }
-  return { merged: [...merged, ...queue], last };
+  // hinter dem letzten gesperrten Teil gibt es kein Intro mehr, ein Outro nur ganz am Ende, und hinter einem gesperrten Outro nichts
+  const rest = merged[last].type === 'outro' ? [] : queue.filter((it, k) => it.type !== 'intro' && (it.type !== 'outro' || k === queue.length - 1));
+  return { merged: [...merged, ...rest], last };
 }
 
 // --- Anpassen der Summe ---
@@ -135,7 +145,41 @@ function dropOne(items, last, rng) {
   return true;
 }
 const isMain = (it) => it.type === 'verse' || it.type === 'chorus';
-function fit(items, target, unit, last, rng) {
+
+/** Bester Zug (kleinste Restabweichung, bei Gleichstand zufällig), der die Abweichung `diff` verkleinert, sonst undefined. */
+function bestMove(moves, diff, rng) {
+  const better = moves.filter((m) => Math.abs(diff - m.delta) < Math.abs(diff));
+  if (!better.length) return undefined;
+  const least = Math.min(...better.map((m) => Math.abs(diff - m.delta)));
+  return rng.pick(better.filter((m) => Math.abs(diff - m.delta) === least));
+}
+
+/**
+ * Erst nur Längen aus dem Bereich des Platzes [lo, hi] (Wahlen und Vielfache von PHRASE), dann optionale Teile weglassen oder eine
+ * Strophe anhängen; so bleiben die Teile Vielfache von PHRASE. Hört auf, wenn kein Zug die Abweichung mehr verkleinert.
+ */
+function fitInRange(items, target, last, rng) {
+  for (let guard = 0; guard < 600; guard++) {
+    const diff = target - sumBars(items);
+    const lengths = [];
+    for (const it of items) if (!it.locked && it.opts) for (const b of it.opts) if (b !== it.bars) lengths.push({ it, delta: b - it.bars });
+    let move = bestMove(lengths, diff, rng);
+    if (!move && diff < 0 && items.length > 2) {
+      move = bestMove(items.flatMap((it, i) => (i > last && !it.locked && it.opt ? [{ it, delta: -it.bars }] : [])), diff, rng);
+      if (move) { items.splice(items.indexOf(move.it), 1); continue; }
+    }
+    if (!move && diff > 0 && items.length < FORM_LIMITS.parts) {
+      const verse = items.find((it) => !it.locked && it.type === 'verse' && it.opts);
+      move = verse && bestMove(verse.opts.map((b) => ({ delta: b, b })), diff, rng);
+      if (move) { items.splice(Math.max(last + 1, items.length - 1), 0, { type: 'verse', bars: move.b, opt: true, locked: false, opts: verse.opts }); continue; }
+    }
+    if (!move) return;
+    move.it.bars += move.delta;
+  }
+}
+
+/** Notlösung: 2-Takt-Schritte zwischen Mindest- und Höchstlänge, ganze Teile weglassen, bei `unit` ganze Teile anhängen. */
+function fitAnyLength(items, target, unit, last, rng) {
   const tol = unit ? unit / 2 : TOLERANCE;
   const movable = (pred) => items.filter((it) => !it.locked && pred(it));
   for (let guard = 0; guard < 600; guard++) {
@@ -153,6 +197,10 @@ function fit(items, target, unit, last, rng) {
       items.splice(Math.max(last + 1, items.length - 1), 0, { type: 'verse', bars: unit, opt: false, locked: false });
     }
   }
+}
+function fit(items, target, unit, last, rng) {
+  if (!unit) fitInRange(items, target, last, rng);
+  fitAnyLength(items, target, unit, last, rng); // tut nichts, wenn die Summe schon höchstens TOLERANCE neben dem Ziel liegt
 }
 
 // --- Leitplanken (lokale Fenster, damit die Suche nur prüft, was sie gerade ändert) ---
@@ -178,7 +226,7 @@ function assignTypes(items, jam, total) {
     if (++nodes > SEARCH_BUDGET) return false;
     const i = free[k], drawn = items[i].type;
     for (const t of [drawn, ...TYPE_ORDER.filter((x) => x !== drawn)]) {
-      if (items[i].bars < MIN_BARS[t] || items[i].bars > MAX_BARS) continue;
+      if (items[i].bars < MIN_BARS[t] || items[i].bars > MAX_BARS || (t === 'intro' && i > 0) || (t === 'outro' && i < items.length - 1)) continue;
       seq[i] = t;
       if (!windowBad(seq, i, jam) && rec(k + 1)) return true;
     }
@@ -206,7 +254,7 @@ function attempt(tpl, ctx, locks, rng) {
   const out = sections.map((s) => s.sec);
   const total = sumBars(out);
   const types = out.map((s) => s.type);
-  const lengthMiss = Math.max(0, Math.abs(ctx.target - total) - (unit ? unit / 2 : SCORE_TOLERANCE));
+  const lengthMiss = Math.max(0, Math.abs(ctx.target - total) - (unit ? unit / 2 : TOLERANCE));
   return { sections: out, score: countViolations(types, !!tpl.jam, total) * 1000 + lengthMiss + (ok ? 0 : 1) };
 }
 
@@ -224,7 +272,7 @@ export function rollForm(args) {
   const mult = {};
   for (const d of dev) if (Object.hasOwn(DEV_FACTORS, d)) for (const [type, f] of Object.entries(DEV_FACTORS[d])) mult[type] = (mult[type] ?? 1) * f;
   const target = nearestTarget(get('targetBars'));
-  const ctx = { target, mult, structure: clamp(feel.structure / FEEL_DEFAULTS.structure, 0, 1 / FEEL_DEFAULTS.structure), cap: Math.max(...[0], target * LEN_FRACTION) };
+  const ctx = { target, mult, structure: clamp(feel.structure / FEEL_DEFAULTS.structure, 0, 1 / FEEL_DEFAULTS.structure), cap: target * LEN_FRACTION };
   const tpl = TEMPLATES[template];
   const finish = (locks) => {
     const rng = createRng(typeof seed === 'number' ? seed : 0).fork('formgen');
