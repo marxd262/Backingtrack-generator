@@ -335,7 +335,7 @@ Das Gewählte bestimmt Rechtsfeld, Export und Importziel:
 
 ### Hörhilfen für die Entwicklung
 
-Der Klang lässt sich nur teilweise messen. Dafür gibt es: die **Hörprobe-Seite** `/ui/render-harness.html` (Stimme und Variante je Instrument wählen, auch während des Spiels; Feinwerte live verstellen; **Werte exportieren** liefert den JSON-Text für `tunables.js`; "Ton anspielen" spielt eine Einzelnote) und die **Spektrogramm-Seite** `/ui/spectrogram.html` (Spektrogramm, Obertonverläufe, Anschlagszeit, Grundton in Cent, Spektralschwerpunkt einer Stimme, optional neben einer Referenzaufnahme). Als Bild: `node scripts/spectrogram.mjs <ausgabe.png> "layer=bass&id=string&variant=finger&midi=40" [referenz.wav]`.
+Der Klang lässt sich nur teilweise messen. Dafür gibt es: die **Hörprobe-Seite** `/ui/render-harness.html` (Stimme und Variante je Instrument wählen, auch während des Spiels; Feinwerte live verstellen; **Werte exportieren** liefert den JSON-Text für `tunables.js`; "Ton anspielen" spielt eine Einzelnote) und die **Spektrogramm-Seite** `/ui/spectrogram.html` (Spektrogramm, Obertonverläufe, Anschlagszeit, Grundton in Cent, Spektralschwerpunkt einer Stimme, optional neben einer Referenzaufnahme). Die Songform hört man mit `node scripts/render-form.mjs [ausgabeordner] [takte]`: je Stil (funk, psych, country) ein Song mit Form und derselbe Track ohne Form als WAV (`form-<stil>-mit.wav` und `-ohne.wav`, Standard `.superpowers/audio-ab/`), dazu Spitzenpegel und Pegel je Teil; der Offline-Render von 96 Takten dauert je Datei rund 8 Minuten. Als Bild: `node scripts/spectrogram.mjs <ausgabe.png> "layer=bass&id=string&variant=finger&midi=40" [referenz.wav]`.
 
 ## Schlagworte und Stile
 
