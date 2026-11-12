@@ -63,22 +63,29 @@ const MAX_RELEASE = 2; // s, die Presets haben bis zu 4,5 s (Pads würden in den
  * zusätzliches Abklingen für gezupfte Instrumente: die Presets halten ihren Schleifenton fast ohne Abfall, das klänge bei langen Noten wie eine Orgel.
  * `eq` ({ lowDb, midDb, midHz, highDb, highHz }, oder null) entzerrt den Klang: Tiefenregal bei 200 Hz, Glocke bei midHz, Höhenregal ab highHz; Stufen
  * mit weniger als 0,05 dB entfallen; davor ein Hochpass bei 50 Hz. Nach dem Ausklingen stoppt die Quelle. `zone` (optional) spielt diese Zone statt
- * der nach Ton und Anschlag gewählten (Schläge: sample-hits.js).
+ * der nach Ton und Anschlag gewählten (Schläge: sample-hits.js). `cents` verstimmt zusätzlich. `oneShot` spielt nie die Schleife: das Sample
+ * klingt an seinem Ende aus; reicht die Note bis dahin, beginnt das Ausklingen spätestens `fadeOut` (s) vor dem Ende und endet mit ihm.
  */
-export function playNote(ctx, out, t, { pack, midi, dur, vel, zone = pickZone(pack.meta.zones, midi, vel), gain = 1, timeScale = 1, filter = 20000, naturalDecay = 0, eq = null }) {
+export function playNote(ctx, out, t, { pack, midi, dur, vel, zone = pickZone(pack.meta.zones, midi, vel), gain = 1, timeScale = 1, filter = 20000, naturalDecay = 0, eq = null, cents = 0, oneShot = false, fadeOut = 0.15 }) {
   if (!zone) return;
   const sample = pack.meta.samples[zone.sample];
   const src = ctx.createBufferSource();
   src.buffer = buffersFor(ctx, pack)[zone.sample];
-  src.playbackRate.value = playbackRate(zone, midi);
-  if (zone.loop) { src.loop = true; src.loopStart = sample.loopStart / sample.rate; src.loopEnd = sample.loopEnd / sample.rate; }
+  const rate = playbackRate(zone, midi) * 2 ** (cents / 1200);
+  src.playbackRate.value = rate;
+  if (zone.loop && !oneShot) { src.loop = true; src.loopStart = sample.loopStart / sample.rate; src.loopEnd = sample.loopEnd / sample.rate; }
 
   const velocity = Number.isFinite(vel) ? Math.min(1, Math.max(0, vel)) : 1; // ungültig zählt wie kräftig (wie bei der Zonenwahl)
   const peak = Math.max(FLOOR, gain * zoneGain(zone.attenuationDb) * velocity);
   const sustain = Math.max(FLOOR, peak * dbToGain(zone.sustainDb));
   const attack = Math.max(0.003, zone.attack * timeScale), decay = Math.max(0.001, zone.decay * timeScale);
-  const release = Math.min(MAX_RELEASE, Math.max(MIN_RELEASE, zone.release * timeScale));
-  const noteEnd = t + (Number.isFinite(dur) ? Math.max(0.02, dur) : 0.5);
+  let release = Math.min(MAX_RELEASE, Math.max(MIN_RELEASE, zone.release * timeScale));
+  let noteEnd = t + (Number.isFinite(dur) ? Math.max(0.02, dur) : 0.5);
+  if (oneShot) { // ohne Schleife ist am Sample-Ende Stille: vorher ausklingen, statt abzureißen
+    const sampleEnd = t + sample.frames / sample.rate / rate;
+    noteEnd = Math.min(noteEnd, Math.max(t + 0.02, sampleEnd - fadeOut));
+    release = Math.min(release, Math.max(MIN_RELEASE, sampleEnd - noteEnd));
+  }
   const g = ctx.createGain();
   // Hüllkurve bis zum Notenende (der Wert dort wird gerechnet, damit das Ausklingen an der richtigen Stelle beginnt)
   g.gain.setValueAtTime(FLOOR, t);

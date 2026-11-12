@@ -8,6 +8,10 @@ const deepFreeze = (o) => {
 };
 
 const spec = (min, max, step, value) => ({ min, max, step, value });
+// Natürlichere Sample-Gitarren (sample.js, nach Wissen gesetzt, nicht gehört): velExp Anschlagkurve (Pegel = Anschlag ** velExp, 1 = linear wie
+// früher), softHz Tiefpass bei leisem Anschlag (Anschlag 0,2; 20000 = aus), oneShot 1 spielt nie die kurze Endschleife (das Sample klingt am Ende
+// aus, 0 = Schleife wie früher), humanCents und humanDb zufällige Abweichung je Anschlag (gleichverteilt in ±, aus dem Seed der Stimme)
+const REALISM = { velExp: spec(0.5, 3, 0.05, 1.6), softHz: spec(800, 20000, 100, 3500), oneShot: spec(0, 1, 1, 1), humanCents: spec(0, 10, 0.5, 2.5), humanDb: spec(0, 3, 0.1, 0.8) };
 // Gemeinsame Namen der Saitenstimmen (Bedeutung: string-model.js STRING_DEFAULTS); die Startwerte sind nach bestem Wissen gesetzt und
 // werden in der Hörprobe nach Gehör verändert. level gleicht den Pegel an den klassischen Synth an (gemessen, siehe voices-string-sound.spec.js).
 export const TUNABLES = deepFreeze({
@@ -26,10 +30,16 @@ export const TUNABLES = deepFreeze({
   'bass/sample/finger': { level: spec(0.05, 8, 0.05, 4), decay: spec(0.2, 10, 0.1, 2.5) },
   'bass/sample/pick': { level: spec(0.05, 8, 0.05, 4.65), decay: spec(0.2, 10, 0.1, 2) },
   // Gitarre: Entzerrer gegen die nasale Mitte des Presets. Gemessen (volle FFT, dB relativ zu 317 bis 635 Hz): ohne Entzerrung liegen 1,6 bis 3,2 kHz bei +2 bis 0
-  // dB, Synth bei -10 bis -23, Saitenmodell bei -19 bis -35; mit den Standardwerten bei -12 bis -16, die Tiefen unter 200 Hz fehlen im Preset und kommen teilweise zurück
+  // dB, Synth bei -10 bis -23, Saitenmodell bei -19 bis -35; mit den damaligen Werten (lowDb 9, midDb -12, highDb -10) bei -12 bis -16, die Tiefen unter 200 Hz fehlen im Preset und kommen teilweise zurück.
+  // Seit Stufe 1 milder (lowDb 5, midDb -6, highDb -4): die Quelle hat nur 22 050 Hz, die Höhen fehlten sonst ganz.
+  // Pegel der sieben Gitarren nach Stufe 1 neu gemessen (2026-11-12, Track aus voices-sample-sound.spec.js, 8 s, Schicht allein, ohne Begrenzer):
+  // rms Sample / Synth mit den neuen Standardwerten und dem alten level (guitar 1.7, muted 1.2, jazz 4.25, funk 0.9, steel 5, nylon 1.85,
+  // twelve 6.5): guitar 1.147, muted 0.885, jazz 0.869, funk 0.918, steel 0.892, nylon 0.873, twelve 0.885; level = altes level / Verhältnis,
+  // auf 0.05 gerundet; mit den ausgelieferten Werten 0.991 bis 1.020
   'chords/sample/guitar': {
-    level: spec(0.05, 8, 0.05, 1.7), decay: spec(0.2, 10, 0.1, 3), strum: spec(0, 0.05, 0.002, 0.012),
-    lowDb: spec(-12, 12, 0.5, 9), midDb: spec(-12, 6, 0.5, -12), midHz: spec(500, 5000, 50, 2400), highDb: spec(-12, 6, 0.5, -10), highHz: spec(1500, 8000, 100, 2600),
+    level: spec(0.05, 8, 0.05, 1.5), decay: spec(0.2, 10, 0.1, 3), strum: spec(0, 0.05, 0.002, 0.012),
+    lowDb: spec(-12, 12, 0.5, 5), midDb: spec(-12, 6, 0.5, -6), midHz: spec(500, 5000, 50, 2400), highDb: spec(-12, 6, 0.5, -4), highHz: spec(1500, 8000, 100, 2600),
+    ...REALISM,
   },
   'chords/sample/epiano': { level: spec(0.05, 8, 0.05, 2.25), decay: spec(0.2, 10, 0.1, 3) },
   'pad/sample/strings': { level: spec(0.05, 8, 0.05, 1.95) },
@@ -42,14 +52,14 @@ export const TUNABLES = deepFreeze({
   // bis 2.9, Hi-Hat 0.5 bis 1.7, Shaker 2.3, Tamburin 2.9, Kuhglocke 0.55
   'bass/sample/upright': { level: spec(0.05, 8, 0.05, 3), decay: spec(0.2, 10, 0.1, 2.5) },
   'chords/sample/organ': { level: spec(0.05, 8, 0.05, 0.9) },
-  'chords/sample/muted': { level: spec(0.05, 8, 0.05, 1.2), decay: spec(0.2, 10, 0.1, 1.5) },
+  'chords/sample/muted': { level: spec(0.05, 8, 0.05, 1.35), decay: spec(0.2, 10, 0.1, 1.5), ...REALISM },
   // Jazz- und Funk-Gitarre (gemessen 2026-11-11, Track wie oben, rms Sample / Synth bei level 1.7 und decay 3: jazz 0.398, funk 1.930, steel 0.341, nylon 0.907, twelve 0.262; level = 1.7 / Verhältnis; mit den ausgelieferten Werten 0.91 bis 1.02);
   // strum wie bei der Clean Guitar, ohne Entzerrer (Klang unbeurteilt, nicht gehört)
-  'chords/sample/jazz': { level: spec(0.05, 8, 0.05, 4.25), decay: spec(0.2, 10, 0.1, 3), strum: spec(0, 0.05, 0.002, 0.012) },
-  'chords/sample/steel': { level: spec(0.05, 8, 0.05, 5), decay: spec(0.2, 10, 0.1, 3), strum: spec(0, 0.05, 0.002, 0.012) },
-  'chords/sample/nylon': { level: spec(0.05, 8, 0.05, 1.85), decay: spec(0.2, 10, 0.1, 3), strum: spec(0, 0.05, 0.002, 0.012) },
-  'chords/sample/twelve': { level: spec(0.05, 8, 0.05, 6.5), decay: spec(0.2, 10, 0.1, 3), strum: spec(0, 0.05, 0.002, 0.012) },
-  'chords/sample/funk': { level: spec(0.05, 8, 0.05, 0.9), decay: spec(0.2, 10, 0.1, 3), strum: spec(0, 0.05, 0.002, 0.012) },
+  'chords/sample/jazz': { level: spec(0.05, 8, 0.05, 4.9), decay: spec(0.2, 10, 0.1, 3), strum: spec(0, 0.05, 0.002, 0.012), ...REALISM },
+  'chords/sample/steel': { level: spec(0.05, 8, 0.05, 5.6), decay: spec(0.2, 10, 0.1, 3), strum: spec(0, 0.05, 0.002, 0.012), ...REALISM },
+  'chords/sample/nylon': { level: spec(0.05, 8, 0.05, 2.1), decay: spec(0.2, 10, 0.1, 3), strum: spec(0, 0.05, 0.002, 0.012), ...REALISM },
+  'chords/sample/twelve': { level: spec(0.05, 8, 0.05, 7.35), decay: spec(0.2, 10, 0.1, 3), strum: spec(0, 0.05, 0.002, 0.012), ...REALISM },
+  'chords/sample/funk': { level: spec(0.05, 8, 0.05, 1), decay: spec(0.2, 10, 0.1, 3), strum: spec(0, 0.05, 0.002, 0.012), ...REALISM },
   'lead/sample/flute': { level: spec(0.05, 8, 0.05, 2.4) },
   'lead/sample/sax': { level: spec(0.05, 8, 0.05, 1.3) },
   'lead/sample/synth': { level: spec(0.05, 8, 0.05, 4.3) },

@@ -2,6 +2,7 @@
 // Live-Wechsel, Feinwerte. Harness: /ui/render-harness.html
 import { test, expect } from '@playwright/test';
 import { TUNABLES } from '../../src/audio/voices/tunables.js';
+import { GUITARS, legacyTuning } from '../../scripts/render-ab.mjs';
 
 const bars = [['A', 'min'], ['A', 'min'], ['D', 'min'], ['E', 'maj']].map(([root, quality]) => ({ chord: { root, quality }, beats: 4 }));
 const track = (extra = {}) => ({
@@ -161,12 +162,14 @@ for (const [layer, variant, notes, checkPitch, cents = 15] of SAMPLES) {
       const { createInstruments } = await import('/audio/synth.js');
       const out = [];
       for (const [name, min, max] of list) {
+        // oneShot wirkt erst am Ende des Samples (bis etwa 4 s): lange Note, decay auf dem Maximum, damit das Abklingen den Unterschied nicht verdeckt
+        const [dur, seconds, extra] = name === 'oneShot' ? [5, 6, { decay: 10 }] : [0.5, 1, {}];
         const run = async (value) => {
-          const ctx = new OfflineAudioContext(1, 44100, 44100);
-          const inst = createInstruments(ctx, { limiter: false, voices: { [layerName]: { id: 'sample', variant: variantName } }, tuning: { [tunableKey]: { [name]: value } }, timbre: { master: { echo: 0, reverb: 0 } } });
+          const ctx = new OfflineAudioContext(1, seconds * 44100, 44100);
+          const inst = createInstruments(ctx, { limiter: false, voices: { [layerName]: { id: 'sample', variant: variantName } }, tuning: { [tunableKey]: { ...extra, [name]: value } }, timbre: { master: { echo: 0, reverb: 0 } } });
           await inst.whenReady();
           inst.output.connect(ctx.destination);
-          for (const n of layerName === 'bass' ? [40] : [52, 59, 64]) inst.layers[layerName].trigger({ type: 'note', layer: layerName, midi: n, dur: 0.5, vel: 0.8 }, 0.05);
+          for (const n of layerName === 'bass' ? [40] : [52, 59, 64]) inst.layers[layerName].trigger({ type: 'note', layer: layerName, midi: n, dur, vel: 0.8 }, 0.05);
           return (await ctx.startRendering()).getChannelData(0);
         };
         const a = await run(min), b = await run(max);
@@ -177,6 +180,105 @@ for (const [layer, variant, notes, checkPitch, cents = 15] of SAMPLES) {
       return out;
     }, [layer, variant, k, names.map((n) => [n, TUNABLES[k][n].min, TUNABLES[k][n].max])]);
     for (const [name, diff] of rows) expect(diff, `${k}.${name}`).toBeGreaterThan(1e-3);
+  });
+}
+
+// ---- Natürlichere Gitarren (Stufe 1): ohne Endschleife, Helligkeit nach Anschlag, Zufallsabweichung, andere Stimmen unverändert ----
+const rmsOf = (d, from, to) => { let s = 0; for (let i = from; i < to; i++) s += d[i] * d[i]; return Math.sqrt(s / (to - from)); };
+
+for (const variant of GUITARS) {
+  const k = key('chords', variant);
+  test(`${k}: 6 s gehaltene Note klingt aus (kein Dauerton aus der Endschleife); mit oneShot 0 bleibt er`, async ({ page }) => {
+    test.setTimeout(120_000);
+    // decay auf dem Maximum: das zusätzliche Abklingen soll den Schleifenton hier nicht verdecken. Ton 47: in allen sieben Packs eine Zone mit
+    // Schleife (die gedämpfte Gitarre schleift ab Ton 51 nicht mehr), Sample 0,9 bis 2,9 s lang
+    const r = await page.evaluate(async ([v, tunableKey]) => {
+      const voices = { chords: { id: 'sample', variant: v } };
+      const run = async (oneShot) => {
+        const d = await window.__renderNote('chords', { midi: 47, dur: 6, vel: 0.8, seconds: 7, voices, tuning: { [tunableKey]: { decay: 10, oneShot } } });
+        let s0 = 0, s1 = 0;
+        for (let i = 2205; i < 2205 + 66150; i++) s0 += d[i] * d[i];
+        for (let i = 200655; i < 266805; i++) s1 += d[i] * d[i];
+        return s1 / s0 > 0 ? Math.sqrt(s1 / s0) : 0;
+      };
+      return { oneShot: await run(1), looped: await run(0) };
+    }, [variant, k]);
+    expect(r.oneShot, JSON.stringify(r)).toBeLessThan(1e-3); // Ende (letzte 1,5 s der Note) mindestens 60 dB unter dem Anfang
+    // gedämpfte Gitarre: ihre Schleifen liegen im schon verklungenen Ende des Samples (gemessen mit Schleife 3,5e-6), dort gibt es keinen Dauerton
+    if (variant !== 'muted') expect(r.looped, JSON.stringify(r)).toBeGreaterThan(Math.max(1e-3, 10 * r.oneShot));
+  });
+
+  test(`${k}: weicher Anschlag dunkler und leiser als harter; mit softHz 20000 und velExp 1 nur leiser`, async ({ page }) => {
+    test.setTimeout(120_000);
+    const r = await page.evaluate(async ([v, tunableKey]) => {
+      const { spectralCentroid } = await import('/audio/spectrum.js');
+      const voices = { chords: { id: 'sample', variant: v } };
+      const run = async (vel, tune) => {
+        const d = await window.__renderNote('chords', { midi: 57, dur: 1, vel, seconds: 1.5, voices, tuning: { [tunableKey]: tune } });
+        let s = 0;
+        for (const x of d) s += x * x;
+        return { centroid: spectralCentroid(d, 44100), rms: Math.sqrt(s / d.length) };
+      };
+      const flat = { softHz: 20000, velExp: 1, humanCents: 0, humanDb: 0 };
+      return { soft: await run(0.3, {}), hard: await run(1, {}), flatSoft: await run(0.3, flat), flatHard: await run(1, flat) };
+    }, [variant, k]);
+    const label = JSON.stringify(r);
+    // gedämpfte Gitarre: bei Anschlag 0,3 liegt der Tiefpass bei 4,8 kHz, darüber hat sie kaum Anteile; die kleine Resonanz des Web-Audio-
+    // Tiefpasses (Q 1 dB) hebt den Schwerpunkt dort sogar leicht (gemessen 1685 gegen 1649 Hz). Nur leiser, nicht dunkler (Feinwert softHz senken)
+    if (variant !== 'muted') expect(r.soft.centroid, label).toBeLessThan(0.98 * r.hard.centroid);
+    expect(r.soft.rms, label).toBeLessThan(0.5 * r.hard.rms);
+    expect(Math.abs(r.flatSoft.centroid / r.flatHard.centroid - 1), label).toBeLessThan(0.01);
+    expect(r.flatSoft.rms, label).toBeLessThan(r.flatHard.rms);
+  });
+
+  test(`${k}: zwei gleiche Anschläge klingen verschieden (Zufallsabweichung), derselbe Render zweimal gleich`, async ({ page }) => {
+    test.setTimeout(120_000);
+    const r = await page.evaluate(async ([v, tunableKey]) => {
+      const { createInstruments } = await import('/audio/synth.js');
+      const run = async (tune) => {
+        const ctx = new OfflineAudioContext(1, 185220, 44100); // 4,2 s
+        const inst = createInstruments(ctx, { limiter: false, voices: { chords: { id: 'sample', variant: v } }, tuning: { [tunableKey]: tune }, timbre: { master: { echo: 0, reverb: 0 } } });
+        await inst.whenReady();
+        inst.output.connect(ctx.destination);
+        for (const at of [0.05, 2.05]) inst.layers.chords.trigger({ type: 'note', layer: 'chords', midi: 57, dur: 0.8, vel: 0.8 }, at);
+        return (await ctx.startRendering()).getChannelData(0);
+      };
+      const strokes = (d) => { let diff = 0, e = 0; for (let i = 2205; i < 2205 + 88200; i++) { diff += (d[i] - d[i + 88200]) ** 2; e += d[i] * d[i]; } return Math.sqrt(diff / e); };
+      const a = await run({}), b = await run({}), still = await run({ humanCents: 0, humanDb: 0 });
+      let same = 0;
+      for (let i = 0; i < a.length; i++) same = Math.max(same, Math.abs(a[i] - b[i]));
+      return { human: strokes(a), still: strokes(still), same };
+    }, [variant, k]);
+    expect(r.human, JSON.stringify(r)).toBeGreaterThan(1e-3);
+    expect(r.still, JSON.stringify(r)).toBeLessThan(1e-4);
+    expect(r.same, JSON.stringify(r)).toBe(0);
+  });
+}
+
+// Bezug vor Stufe 1 (aufgenommen 2026-11-12 mit e93653a/482f2a4, Track wie oben, 4 s, Schicht allein, ohne Begrenzer): rms und Schwerpunkt.
+// Zwischen zwei Browserläufen schwanken die Werte um bis zu 2e-9 (relativ), darum die Grenze 1e-6. Die Gitarren mit den alten Werten
+// (legacyTuning, scripts/render-ab.mjs) müssen den alten Klang wiederherstellen.
+const REFERENCE = [
+  ['chords', 'epiano', 0.06921231115196144, 627.6670757948046, {}],
+  ['bass', 'finger', 0.08135153180452052, 299.5768354730511, {}],
+  ['pad', 'strings', 0.03879362725610885, 1709.2765362642458, {}],
+  ['lead', 'flute', 0.05093956295317625, 2764.8405913788793, {}],
+  ['drums', 'standard', 0.04676808117726703, 4774.146728744033, {}],
+  ['chords', 'guitar', 0.048016682314904906, 1830.6922262994242],
+  ['chords', 'muted', 0.06477307441819671, 1387.6950202685991],
+  ['chords', 'jazz', 0.06999652177652821, 1860.4150446219408],
+  ['chords', 'funk', 0.06787817278458343, 2562.3292259688687],
+  ['chords', 'steel', 0.06672254797513058, 2923.578060603636],
+  ['chords', 'nylon', 0.061382203683208486, 2267.1952843784666],
+  ['chords', 'twelve', 0.07200118590105599, 2948.2551675096493],
+];
+for (const [layer, variant, rms, centroid, tuning = legacyTuning(variant)] of REFERENCE) {
+  test(`${key(layer, variant)}: klingt wie vor Stufe 1${Object.keys(tuning).length ? ' (mit den alten Feinwerten)' : ''}`, async ({ page }) => {
+    test.setTimeout(120_000);
+    const t = track({ ...base(layer), voices: voiceOf(layer, variant) });
+    const r = await compare(page, t, t, 4, { layer, limiter: false, tuning });
+    expect(Math.abs(r.rmsA / rms - 1), JSON.stringify(r)).toBeLessThan(1e-6);
+    expect(Math.abs(r.centroidA / centroid - 1), JSON.stringify(r)).toBeLessThan(1e-6);
   });
 }
 

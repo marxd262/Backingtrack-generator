@@ -42,10 +42,10 @@ function levels(d) {
 
 /**
  * Rendert die ersten `seconds` Sekunden: Summe und jede Schicht allein (andere stumm geschaltet).
- * `limiter: false` misst die Mischung vor dem Begrenzer. `levels` und `master` setzen das Mischpult (siehe play).
+ * `limiter: false` misst die Mischung vor dem Begrenzer. `levels` und `master` setzen das Mischpult (siehe play), `tuning` die Feinwerte der Stimmen.
  */
-export async function renderOffline(trackInput, seconds, { limiter = true, levels: layerLevels, master } = {}) {
-  const mix = { levels: layerLevels, master };
+export async function renderOffline(trackInput, seconds, { limiter = true, levels: layerLevels, master, tuning } = {}) {
+  const mix = { levels: layerLevels, master, tuning };
   const perLayer = {};
   for (const name of LAYERS) perLayer[name] = levels(await renderLeft(trackInput, seconds, name, limiter, mix));
   return { ...levels(await renderLeft(trackInput, seconds, undefined, limiter, mix)), perLayer };
@@ -53,11 +53,11 @@ export async function renderOffline(trackInput, seconds, { limiter = true, level
 
 /**
  * Vergleicht zwei Tracks bei gleicher Länge: mit `layer` nur diese Schicht, sonst die Summe.
- * `levels` und `master` gelten für beide Seiten. diff = rms(a - b) / rms(a) ab dem ersten Ereignis (a ist der Bezug, 0 bei Stille von a); rms und Schwerpunkte ebenfalls ab dort.
+ * `levels`, `master` und `tuning` gelten für beide Seiten. diff = rms(a - b) / rms(a) ab dem ersten Ereignis (a ist der Bezug, 0 bei Stille von a); rms und Schwerpunkte ebenfalls ab dort.
  */
-export async function compareRenders(trackA, trackB, seconds, { layer, limiter = true, levels: layerLevels, master } = {}) {
+export async function compareRenders(trackA, trackB, seconds, { layer, limiter = true, levels: layerLevels, master, tuning } = {}) {
   if (layer !== undefined && !LAYERS.includes(layer)) throw new RangeError(`Unknown layer: ${JSON.stringify(layer)}`);
-  const mix = { levels: layerLevels, master };
+  const mix = { levels: layerLevels, master, tuning };
   const a = (await renderLeft(trackA, seconds, layer, limiter, mix)).subarray(FIRST);
   const b = (await renderLeft(trackB, seconds, layer, limiter, mix)).subarray(FIRST);
   const rmsA = rms(a);

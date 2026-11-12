@@ -66,6 +66,31 @@ test('jede Sample-Stimme hat einen gemessenen Pegel (level) und ein vorhandenes 
   for (const key of ['bass/sample/upright', 'chords/sample/muted']) assert.ok(TUNABLES[key].decay, `${key}: decay`);
 });
 
+// Stufe 1 der natürlicheren Gitarren: Anschlagkurve, Helligkeit nach Anschlag, ohne Endschleife, kleine Zufallsabweichung
+const GUITARS = ['guitar', 'muted', 'jazz', 'funk', 'steel', 'nylon', 'twelve'];
+const REALISM = { velExp: [0.5, 3, 1.6], softHz: [800, 20000, 3500], oneShot: [0, 1, 1], humanCents: [0, 10, 2.5], humanDb: [0, 3, 0.8] };
+
+test('Gitarren-Samples: die fünf Feinwerte der Natürlichkeit mit ihren Standardwerten; andere Sample-Stimmen haben sie nicht', () => {
+  for (const variant of GUITARS) {
+    const table = TUNABLES[`chords/sample/${variant}`];
+    for (const [name, [min, max, value]] of Object.entries(REALISM)) {
+      assert.deepEqual([table[name]?.min, table[name]?.max, table[name]?.value], [min, max, value], `${variant}.${name}`);
+    }
+  }
+  for (const layer of VOICE_LAYERS) {
+    for (const variant of VOICES[layer].sample?.variants ?? []) {
+      if (layer === 'chords' && GUITARS.includes(variant)) continue;
+      for (const name of Object.keys(REALISM)) assert.ok(!TUNABLES[`${layer}/sample/${variant}`]?.[name], `${layer}/sample/${variant}.${name}`);
+    }
+  }
+});
+
+test('Clean Guitar: milderer Entzerrer (Standardwerte); die anderen Gitarren ohne Entzerrer', () => {
+  const t = TUNABLES['chords/sample/guitar'];
+  assert.deepEqual([t.lowDb.value, t.midDb.value, t.midHz.value, t.highDb.value, t.highHz.value], [5, -6, 2400, -4, 2600]);
+  for (const variant of GUITARS.slice(1)) assert.ok(!TUNABLES[`chords/sample/${variant}`].midDb, variant);
+});
+
 test('Tastenbelegung der Schläge: jeder Name hat eine Taste, jede Taste eine Zone in jedem Kit', () => {
   assert.deepEqual(Object.keys(HIT_KEYS.drums).sort(), [...DRUM_NAMES].sort());
   assert.deepEqual(Object.keys(HIT_KEYS.percussion).sort(), [...PERCUSSION_NAMES].sort());
