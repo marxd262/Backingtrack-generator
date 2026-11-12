@@ -6,7 +6,8 @@ import { CHORDS } from './chords.js';
 import { checkedTrack, barTimeline, r6 } from './timeline.js';
 import { resolveTags, driftParams } from './tags.js';
 import { buildArrangement } from './arrange.js';
-import { LAYER_IDS } from './layers.js';
+import { LAYER_IDS, LAYERS } from './layers.js';
+import { buildFormArrangement, withSection, phrasesOf } from './form-arrange.js';
 import { grooveFor, grooveCycle, levelOf, applyComplexity } from './grooves.js';
 import { at, note, humanVel } from './event-helpers.js';
 import { leadPlayer } from './lead.js';
@@ -25,11 +26,16 @@ const BASS_MAX = 52;
 // bleiben die ersten, ohne den Schalter ändert sich nichts (auch nicht, welche Zufallszahl welches Muster wählt)
 const pool = (base, extra, params) => (params.variety ? [...base, ...extra] : base);
 
-const drumSection = (params, rng, g) => {
+// Mit Form (sec.kind) steht die offene Hi-Hat im Refrain fest und fehlt in Strophe, Break und Intro; die Ziehung bleibt (gleiche Zahl an Zufallszahlen)
+const OPEN_HAT = { chorus: true, verse: false, break: false, intro: false };
+
+const drumSection = (params, rng, g, sec) => {
   const step = levelOf(params.drive, g.drums.thresholds);
   const tier = g.drums.tiers[step];
   const kicks = pool(tier.kicks, g.drums.extraKicks[step], params);
-  return { tier, kicks: [rng.pick(kicks), rng.pick(kicks)], openHat: rng.next() < 0.5, fill: rng.pick(pool(g.drums.fills, g.drums.extraFills, params)) };
+  const picked = [rng.pick(kicks), rng.pick(kicks)];
+  const drawn = rng.next() < 0.5;
+  return { tier, kicks: picked, openHat: OPEN_HAT[sec?.kind] ?? drawn, fill: rng.pick(pool(g.drums.fills, g.drums.extraFills, params)) };
 };
 
 function playDrums(b, v, rng, params, fill, g) {
@@ -156,23 +162,34 @@ export function buildEvents(input) {
   // Komplexität: verschiebt die Parameter nach der Streuung durch variety (bei 0,5 und ohne Angabe bleibt alles gleich)
   params = applyComplexity(params, track.complexity);
   const g = grooveFor(track);
-  const { sections } = buildArrangement(track, params, master.fork('arrangement'));
+  // Songform: Abschnitte aus den Teilen; ohne Form der bisherige Pfad (buildArrangement, unverändert)
+  const form = track.form ? track.form : null;
+  const { sections } = form ? buildFormArrangement(track) : buildArrangement(track, params, master.fork('arrangement'));
   const bars = barTimeline(track);
 
   const events = bars.map((b) => ({ t: r6(b.start), bar: b.index, beat: 0, type: 'chord', chord: { ...b.chord } }));
   for (const sec of sections) {
     const last = sec.start + sec.bars - 1;
+    if (form) events.push({ t: r6(bars[sec.start].start), bar: sec.start, beat: 0, type: 'marker', name: 'section', kind: sec.kind, index: sec.index });
     if (sec.fillAtEnd) events.push({ t: r6(bars[last].start), bar: last, type: 'marker', name: 'fill' });
   }
   for (const layer of LAYER_IDS) {
     if (!track.layers[layer] || !PLAYERS[layer]) continue; // ohne Spieler keine Ereignisse
     const rng = master.fork(layer); // eigener Zufall je Schicht, damit Schichten sich nicht verschieben
     const { section, play } = PLAYERS[layer];
+    // Mit Form: je 4-Takt-Phrase mit der Wahrscheinlichkeit `randomness` ein neues Muster (die Münze kommt aus einem eigenen Zweig,
+    // so verschiebt sie den Schichtstrom nicht); Lead und Percussion halten ihren Zustand (Lage, Ruf) über den ganzen Teil
+    const coin = form && !LAYERS[layer].follows ? master.fork(`form:${layer}`) : null;
     for (const sec of sections) {
       if (!sec.layers[layer]) continue;
-      const v = section(params, rng, g, sec); // der Abschnitt selbst nur für Spieler, die ihre Lage darin brauchen (Lead-Fills)
       const last = sec.start + sec.bars - 1;
-      for (let i = sec.start; i <= last; i++) for (const e of play(bars[i], v, rng, params, sec.fillAtEnd && i === last, g, track.jobs[layer], track)) events.push(e);
+      let v;
+      for (const ph of form ? phrasesOf(sec) : [sec]) {
+        const first = ph.start === sec.start;
+        const paramsAt = (i) => (form ? withSection(params, sec.resolved, i - sec.start, form.feel) : params);
+        if (first || (coin && coin.next() < form.feel.randomness)) v = section(paramsAt(ph.start), rng, g, sec); // der Abschnitt selbst nur für Spieler, die ihre Lage darin brauchen (Lead-Fills)
+        for (let i = ph.start; i < ph.start + ph.bars; i++) for (const e of play(bars[i], v, rng, paramsAt(i), sec.fillAtEnd && i === last, g, track.jobs[layer], track)) events.push(e);
+      }
     }
   }
   return events.sort((x, y) => x.t - y.t || (RANK[x.type] ?? 2) - (RANK[y.type] ?? 2));
