@@ -244,14 +244,14 @@ test('mit Form läuft die Akkordfolge in jedem Teil neu: Anzeige, aria-current u
   }
 });
 
-// Profile bringen bis Aufgabe 8 nur `rhythm.length` mit, keine Form: die Länge richtet sich nach der Form im Zustand
+// Länge, Summe der Form und Zielgröße im Zustand (Profile mit Teil `form` bringen die Form mit, solche mit nur `rhythm.length` würfeln sie neu)
 const shown = (page) => page.evaluate(async () => {
   const { state } = await import('/ui/state.js');
   const f = state.track.form;
   return { length: state.track.length, sum: f ? f.sections.reduce((n, x) => n + x.bars, 0) : null, target: state.formTarget };
 });
 
-test('Profil bei Länge 96 gespeichert, Zielgröße 48, Profil laden: Länge folgt der Form, Wiedergabe läuft ohne Fehler', async ({ page }) => {
+test('Profil mit Form bei Länge 96 gespeichert, Zielgröße 48, Profil laden: die gespeicherte Form kommt zurück, Länge folgt der Form, Wiedergabe läuft ohne Fehler', async ({ page }) => {
   await page.locator('#profiles-btn').click();
   await page.getByRole('treeitem', { name: 'Aktuelle Sitzung', exact: true }).click();
   await page.getByLabel('Name des Profils').fill('P96');
@@ -267,8 +267,8 @@ test('Profil bei Länge 96 gespeichert, Zielgröße 48, Profil laden: Länge fol
   await page.locator('#profiles-pop').evaluate((el) => el.hidePopover());
   const after = await shown(page);
   expect(after.length).toBe(after.sum);
-  expect(Math.abs(after.sum - 48)).toBeLessThanOrEqual(4);
-  await expect(target(page)).toHaveValue('48');
+  expect(Math.abs(after.sum - 96)).toBeLessThanOrEqual(8);
+  await expect(target(page)).toHaveValue('96');
   await expect(page.locator('#play-go')).toHaveText('Stopp');
   await expect(position(page)).toHaveText(new RegExp(`^Takt \\d+ von ${after.sum}$`), { timeout: BAR_TIMEOUT });
   await page.locator('#play-go').click();
@@ -283,7 +283,10 @@ test('altes Profil mit rhythm.length 48 in die Standardform (96) geladen: stimmi
     if (!r.ok) throw new Error('Profil nicht anwendbar');
     writeSession(state, r.session);
   });
+  await page.locator('[data-lang="de"]').first().click(); // neu zeichnen (die Seite zeichnet nur bei Änderungen oder je Takt)
   const after = await shown(page);
+  expect(Math.abs(after.sum - 48)).toBeLessThanOrEqual(8); // die Form wurde für die nächste Zielgröße neu gewürfelt
+  expect(after.target).toBe(48);
   expect(after.length).toBe(after.sum);
   await expect(target(page)).toHaveValue(String(after.target));
   await page.locator('#tuning-tempo').fill('200');
