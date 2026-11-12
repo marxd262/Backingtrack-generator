@@ -159,6 +159,8 @@ export default {
   'variant.chords.sample.steel': 'Stahlsaiten-Gitarre (Sample)',
   'variant.chords.sample.nylon': 'Nylon-Gitarre (Sample)',
   'variant.chords.sample.twelve': '12-Saiter (Sample)',
+  'variant.chords.sample.freepats': 'E-Gitarre clean (Freepats, Sample)',
+  'variant.chords.sample.freepatsjazz': 'E-Gitarre Jazz (Freepats, Sample)',
   'variant.lead.sample.flute': 'Flöte (Sample)',
   'variant.lead.sample.sax': 'Altsaxofon (Sample)',
   'variant.lead.sample.synth': 'Synth-Lead (Sample)',

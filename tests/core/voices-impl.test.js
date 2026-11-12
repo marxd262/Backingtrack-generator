@@ -67,7 +67,18 @@ test('jede Sample-Stimme hat einen gemessenen Pegel (level) und ein vorhandenes 
 });
 
 // Stufe 1 der natürlicheren Gitarren: Anschlagkurve, Helligkeit nach Anschlag, ohne Endschleife, kleine Zufallsabweichung
-const GUITARS = ['guitar', 'muted', 'jazz', 'funk', 'steel', 'nylon', 'twelve'];
+const GUITARS = ['guitar', 'muted', 'jazz', 'funk', 'steel', 'nylon', 'twelve', 'freepats', 'freepatsjazz'];
+
+test('Freepats-Gitarren (Stufe 2): im Register, mit Umsetzung, Pack aus der FSBS-Quelle, level, decay und strum', () => {
+  for (const [variant, source] of [['freepats', 'fsbs-clean'], ['freepatsjazz', 'fsbs-jazz']]) {
+    assert.ok(isVoice('chords', 'sample', variant) && hasVoice('chords', 'sample', variant), variant);
+    assert.equal(packIdFor('chords', variant), `chords-${variant}`);
+    assert.equal(SCRIPT_PACKS[`chords-${variant}`]?.source, source, variant);
+    const t = TUNABLES[`chords/sample/${variant}`];
+    for (const name of ['level', 'decay', 'strum']) assert.ok(t?.[name], `${variant}.${name}`);
+    assert.equal(t.strum.value, TUNABLES['chords/sample/guitar'].strum.value, `${variant}.strum`);
+  }
+});
 const REALISM = { velExp: [0.5, 3, 1.6], softHz: [800, 20000, 3500], oneShot: [0, 1, 1], humanCents: [0, 10, 2.5], humanDb: [0, 3, 0.8] };
 
 test('Gitarren-Samples: die fünf Feinwerte der Natürlichkeit mit ihren Standardwerten; andere Sample-Stimmen haben sie nicht', () => {

@@ -1,8 +1,11 @@
 // Sample-Packs (src/assets/samples): Dateien, Zonen, Sample-Verweise, Schleifen, Tastenabdeckung, Größe und Lizenzvermerk.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, statSync, existsSync } from 'node:fs';
-import { PACKS as SCRIPT_PACKS } from '../../scripts/extract-samples.mjs';
+import { readFileSync, statSync, existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { PACKS as SCRIPT_PACKS, SOURCES, buildPack } from '../../scripts/extract-samples.mjs';
+import { readSoundFont } from '../../scripts/soundfont.mjs';
 
 const DIR = new URL('../../src/assets/samples/', import.meta.url);
 // Pack-ID -> [Instrument, GM-Programm, niedrigste und höchste Taste, die abgedeckt sein muss, Bank (Standard 0)]
@@ -31,7 +34,13 @@ const DRUMS = {
   'drums-standard': [0, DRUM_KEYS], 'drums-brushes': [40, DRUM_KEYS], 'drums-jazz': [32, DRUM_KEYS], 'drums-electronic': [24, DRUM_KEYS], 'drums-808': [25, DRUM_KEYS],
   'percussion-studio': [0, [54, 56, 60, 61, 63, 64, 75, 82]],
 };
-const ALL = [...Object.keys(PACKS), ...Object.keys(DRUMS)];
+// Packs aus den Freepats-FSBS-Gitarren (.sf2, CC0): Pack-ID -> [Quelle, GM-Programm, das die Stimme vertritt, niedrigste und höchste Taste der
+// Quelle (13 Samples, Tasten 35 bis 86)]
+const FREEPATS = {
+  'chords-freepats': ['fsbs-clean', 27, 35, 86],
+  'chords-freepatsjazz': ['fsbs-jazz', 26, 35, 86],
+};
+const ALL = [...Object.keys(PACKS), ...Object.keys(DRUMS), ...Object.keys(FREEPATS)];
 const NEW = ALL.filter((id) => !['bass-finger', 'bass-pick', 'chords-guitar', 'chords-epiano', 'pad-strings', 'pad-warm'].includes(id));
 const load = (id) => ({ meta: JSON.parse(readFileSync(new URL(`${id}.json`, DIR), 'utf8')), size: statSync(new URL(`${id}.pcm`, DIR)).size });
 
@@ -39,17 +48,60 @@ test('PACKS im Skript und die erwarteten Packs sind dieselben', () => {
   assert.deepEqual(Object.keys(SCRIPT_PACKS).sort(), ALL.slice().sort());
   for (const [id, [, gm, , , bank = 0]] of Object.entries(PACKS)) assert.equal(SCRIPT_PACKS[id].bank, bank, id), assert.equal(SCRIPT_PACKS[id].program, gm, id);
   for (const [id, [gm, keys]] of Object.entries(DRUMS)) assert.deepEqual([SCRIPT_PACKS[id].bank, SCRIPT_PACKS[id].program, SCRIPT_PACKS[id].keys], [128, gm, keys], id);
+  for (const [id, spec] of Object.entries(SCRIPT_PACKS)) assert.equal(spec.source ?? 'msg', FREEPATS[id]?.[0] ?? 'msg', `${id}: Quelle`);
+  for (const [id, [, gm]] of Object.entries(FREEPATS)) assert.equal(SCRIPT_PACKS[id].gm, gm, id);
 });
 
 test('jedes Pack hat .json und .pcm, die ID stimmt, Quelle und GM-Programm sind angegeben', () => {
-  const gms = { ...Object.fromEntries(Object.entries(PACKS).map(([id, v]) => [id, v[1]])), ...Object.fromEntries(Object.entries(DRUMS).map(([id, v]) => [id, v[0]])) };
+  const gms = { ...Object.fromEntries(Object.entries(PACKS).map(([id, v]) => [id, v[1]])), ...Object.fromEntries(Object.entries(DRUMS).map(([id, v]) => [id, v[0]])), ...Object.fromEntries(Object.entries(FREEPATS).map(([id, v]) => [id, v[1]])) };
   for (const id of ALL) {
     const gm = gms[id];
     assert.ok(existsSync(new URL(`${id}.json`, DIR)) && existsSync(new URL(`${id}.pcm`, DIR)), id);
     const { meta } = load(id);
     assert.equal(meta.id, id);
-    assert.equal(meta.source, 'MuseScore_General');
+    assert.equal(meta.source, SOURCES[FREEPATS[id]?.[0] ?? 'msg'], id);
     assert.equal(meta.gm, gm, `${id}: GM-Programm`);
+  }
+});
+
+// Kleinste SF2 von Hand: ein Preset -> ein Instrument -> ein Sample (Tasten 40 bis 80, Schleife an). Das Sample liegt hinter 10 anderen
+// Abtastwerten im smpl-Chunk, damit Anfang und Schleifenpunkte (in der SF2 ab dem Chunk-Anfang gezählt) umgerechnet werden müssen.
+function tinySf2({ pcm, lead = 10, loopStart, loopEnd, rate = 22050, root = 64 }) {
+  const chunk = (id, body) => Buffer.concat([Buffer.from(id, 'latin1'), Buffer.from(new Uint32Array([body.length]).buffer), body, Buffer.alloc(body.length & 1)]);
+  const list = (type, ...parts) => chunk('LIST', Buffer.concat([Buffer.from(type, 'latin1'), ...parts]));
+  const rec = (size, fill) => { const b = Buffer.alloc(size); fill(b); return b; };
+  const gen = (oper, amount) => rec(4, (b) => { b.writeUInt16LE(oper, 0); b.writeInt16LE(amount, 2); });
+  const smpl = Buffer.concat([Buffer.alloc(2 * lead), Buffer.from(pcm.buffer), Buffer.alloc(2 * 46)]); // SF2: 46 Nullwerte nach jedem Sample
+  const pdta = list('pdta',
+    chunk('phdr', Buffer.concat([rec(38, (b) => b.write('Test', 0, 'latin1')), rec(38, (b) => { b.write('EOP', 0, 'latin1'); b.writeUInt16LE(1, 24); })])),
+    chunk('pbag', Buffer.concat([rec(4, () => {}), rec(4, (b) => b.writeUInt16LE(1, 0))])),
+    chunk('pgen', Buffer.concat([gen(41, 0), rec(4, () => {})])),
+    chunk('inst', Buffer.concat([rec(22, (b) => b.write('Inst', 0, 'latin1')), rec(22, (b) => { b.write('EOI', 0, 'latin1'); b.writeUInt16LE(1, 20); })])),
+    chunk('ibag', Buffer.concat([rec(4, () => {}), rec(4, (b) => b.writeUInt16LE(3, 0))])),
+    chunk('igen', Buffer.concat([rec(4, (b) => { b.writeUInt16LE(43, 0); b.writeUInt8(40, 2); b.writeUInt8(80, 3); }), gen(54, 1), gen(53, 0), rec(4, () => {})])),
+    chunk('shdr', Buffer.concat([rec(46, (b) => {
+      b.write('S', 0, 'latin1');
+      [lead, lead + pcm.length, lead + loopStart, lead + loopEnd, rate].forEach((v, i) => b.writeUInt32LE(v, 20 + 4 * i));
+      b.writeUInt8(root, 40); b.writeUInt16LE(1, 44); // mono
+    }), rec(46, (b) => b.write('EOS', 0, 'latin1'))])));
+  const body = Buffer.concat([Buffer.from('sfbk', 'latin1'), list('INFO', chunk('ifil', Buffer.from([2, 0, 1, 0]))), list('sdta', chunk('smpl', smpl)), pdta]);
+  return chunk('RIFF', body);
+}
+
+test('Extraktor liest unkomprimierte SF2: 16-Bit-PCM unverändert, Rate erhalten, Schleife relativ zum Sampleanfang', () => {
+  const pcm = Int16Array.from({ length: 500 }, (_, i) => Math.round(10000 * Math.sin(i / 7)));
+  const dir = mkdtempSync(join(tmpdir(), 'sf2-'));
+  try {
+    const path = join(dir, 'tiny.sf2');
+    writeFileSync(path, tinySf2({ pcm, loopStart: 100, loopEnd: 400 }));
+    const { meta, pcm: out } = buildPack(readSoundFont(path), 'test-tiny', { source: 'fsbs-clean', bank: 0, program: 0, gm: 27 });
+    assert.deepEqual(new Int16Array(out.buffer, out.byteOffset, out.length / 2), pcm);
+    assert.deepEqual(meta.samples, [{ offset: 0, frames: 500, rate: 22050, loopStart: 100, loopEnd: 400 }]);
+    assert.deepEqual([meta.id, meta.source, meta.gm, meta.name], ['test-tiny', SOURCES['fsbs-clean'], 27, 'Test']);
+    assert.equal(meta.zones.length, 1);
+    assert.deepEqual([meta.zones[0].keyLo, meta.zones[0].keyHi, meta.zones[0].rootKey, meta.zones[0].loop, meta.zones[0].sample], [40, 80, 64, true, 0]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
@@ -92,7 +144,7 @@ test('Zonen: gültige Bereiche, Verweise auf vorhandene Samples, endliche Zeiten
 });
 
 test('Abdeckung: jede geforderte Taste hat eine Zone (je Anschlagsebene)', () => {
-  for (const [id, [, , lo, hi]] of Object.entries(PACKS)) {
+  for (const [id, [, , lo, hi]] of [...Object.entries(PACKS), ...Object.entries(FREEPATS)]) {
     const { meta } = load(id);
     for (let key = lo; key <= hi; key++) {
       for (const vel of [1, 64, 127]) {
@@ -112,16 +164,29 @@ test('Schlagzeug: jede geforderte Taste hat eine Zone, und es bleibt nichts Unbe
   }
 });
 
-test('Größe: jedes Pack unter 6 MB, alle zusammen unter 15 MB (alte sechs); Lizenzvermerk liegt bei', () => {
-  let total = 0, added = 0;
+test('Freepats: keine unbenutzten Samples, Abtastrate der Quelle (44,1 kHz) erhalten', () => {
+  for (const id of Object.keys(FREEPATS)) {
+    const { meta } = load(id);
+    assert.equal(new Set(meta.zones.map((z) => z.sample)).size, meta.samples.length, `${id}: unbenutzte Samples`);
+    for (const s of meta.samples) assert.equal(s.rate, 44100, id);
+  }
+});
+
+test('Größe: jedes Pack unter 6 MB (Freepats unter 12 MB), alle zusammen unter 15 MB (alte sechs); Lizenzvermerke liegen bei', () => {
+  let total = 0, added = 0, all = 0;
   for (const id of ALL) {
     const { size } = load(id);
-    assert.ok(size < 6 * 1048576, `${id}: ${size}`);
+    // Freepats: 13 lange Samples (3 bis 20 s, natürliches Ausklingen) in 44,1 kHz; ausdünnen hieße kürzen oder die Rate senken, beides
+    // nähme den Grund für die Quelle weg
+    assert.ok(size < (FREEPATS[id] ? 12 : 6) * 1048576, `${id}: ${size}`);
     if (NEW.includes(id)) added += size; else total += size;
+    all += size;
   }
   assert.ok(total < 15 * 1048576, `zusammen ${(total / 1048576).toFixed(1)} MB`);
-  console.log(`# neue Packs zusammen: ${(added / 1048576).toFixed(2)} MB`); // nur gemeldet, nicht geprüft
+  console.log(`# neue Packs zusammen: ${(added / 1048576).toFixed(2)} MB, alle Packs ${(all / 1048576).toFixed(2)} MB`); // nur gemeldet, nicht geprüft
   const license = readFileSync(new URL('LICENSE-MuseScore_General.md', DIR), 'utf8');
   assert.ok(license.includes('must be included in any derivative work'));
   assert.ok(license.includes('Frank Wen') && license.includes('S. Christian Collins'));
+  const freepats = readFileSync(new URL('LICENSE-Freepats-FSBS.md', DIR), 'utf8');
+  assert.ok(freepats.includes('CC0 1.0') && freepats.includes('https://freepats.zenvoid.org/ElectricGuitar/clean-electric-guitar.html') && freepats.includes('2026-08-07'));
 });

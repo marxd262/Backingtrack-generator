@@ -1,17 +1,25 @@
-// Schneidet die benötigten Instrumente aus einer SoundFont (.sf3, zum Beispiel MuseScore_General) in kleine Packs für die Sample-Stimmen:
-// je Pack <id>.json (Zonen) und <id>.pcm (16-Bit-Mono, die Samples hintereinander in ihrer Originalrate). Nur zum Bauen der Packs; die
-// gebauten Dateien liegen im Repository, zur Laufzeit wird weder dieses Skript noch ffmpeg gebraucht.
+// Schneidet die benötigten Instrumente aus SoundFonts (.sf3 wie MuseScore_General, unkomprimierte .sf2 wie die Freepats-Gitarren) in kleine
+// Packs für die Sample-Stimmen: je Pack <id>.json (Zonen) und <id>.pcm (16-Bit-Mono, die Samples hintereinander in ihrer Originalrate). Nur
+// zum Bauen der Packs; die gebauten Dateien liegen im Repository, zur Laufzeit wird weder dieses Skript noch ffmpeg gebraucht.
 //
-// Aufruf: node scripts/extract-samples.mjs <MuseScore_General.sf3> [ausgabeordner]
+// Aufruf: node scripts/extract-samples.mjs <MuseScore_General.sf3> [ausgabeordner] [--fsbs-clean <datei.sf2>] [--fsbs-jazz <datei.sf2>]
 // Packs: siehe PACKS unten (Bass, Akkorde, Pads, Leads, fünf Schlagzeug-Kits, Percussion; Schlagzeug und Percussion nur mit den benutzten Tasten).
-// Quelle: https://ftp.osuosl.org/pub/musescore/soundfont/MuseScore_General/MuseScore_General.sf3 (MIT, Lizenztext: src/assets/samples/LICENSE-MuseScore_General.md)
+// Packs, deren Quelle nicht angegeben ist, werden übersprungen.
+// Quellen: msg = https://ftp.osuosl.org/pub/musescore/soundfont/MuseScore_General/MuseScore_General.sf3 (MIT, Lizenztext:
+// src/assets/samples/LICENSE-MuseScore_General.md); fsbs-clean und fsbs-jazz = Freepats FSBS Electric Guitar, kleine SF2 (CC0, Adressen in
+// src/assets/samples/LICENSE-Freepats-FSBS.md).
 // Voraussetzung: ffmpeg im Pfad (dekodiert die Ogg-Vorbis-Samples der .sf3).
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { parseArgs } from 'node:util';
 import { readSoundFont } from './soundfont.mjs';
 
-// Pack-ID -> Preset der SoundFont (Bank, Programm) und optional die Tasten, die behalten werden (Schlagzeug: nur die benutzten Hits)
+/** Quelle eines Packs -> Name im Pack (meta.source). */
+export const SOURCES = { msg: 'MuseScore_General', 'fsbs-clean': 'Freepats FSBS Electric Guitar Clean', 'fsbs-jazz': 'Freepats FSBS Electric Guitar Jazz' };
+
+// Pack-ID -> Preset der SoundFont (Bank, Programm) und optional die Tasten, die behalten werden (Schlagzeug: nur die benutzten Hits), die
+// Quelle (Standard msg) und das GM-Programm, das die Stimme vertritt (Standard: das Programm des Presets)
 const DRUM_KEYS = [35, 36, 37, 38, 41, 42, 43, 44, 46, 47, 50];
 export const PACKS = {
   'bass-finger': { bank: 0, program: 33 }, // Fingered Bass
@@ -37,6 +45,8 @@ export const PACKS = {
   'drums-electronic': { bank: 128, program: 24, keys: DRUM_KEYS }, // Electronic
   'drums-808': { bank: 128, program: 25, keys: DRUM_KEYS }, // TR-808
   'percussion-studio': { bank: 128, program: 0, keys: [54, 56, 60, 61, 63, 64, 75, 82] }, // Standard: Tamburin, Kuhglocke, Bongos, Congas, Claves
+  'chords-freepats': { source: 'fsbs-clean', bank: 0, program: 0, gm: 27 }, // EGuitar Cl. Br. Sm. (einziges Preset)
+  'chords-freepatsjazz': { source: 'fsbs-jazz', bank: 0, program: 0, gm: 26 }, // EGuitar Jz. Br. Sm. (einziges Preset)
 };
 
 // Timecents in Sekunden; der Standardwert -12000 (und alles darunter) bedeutet "sofort"
@@ -47,7 +57,7 @@ function decode(ogg) {
   return execFileSync('ffmpeg', ['-v', 'error', '-i', 'pipe:0', '-f', 's16le', '-ac', '1', 'pipe:1'], { input: ogg, maxBuffer: 256 * 1024 * 1024 });
 }
 
-export function buildPack(sf, id, { bank, program, keys }) {
+export function buildPack(sf, id, { bank, program, keys, source = 'msg', gm = program }) {
   const preset = sf.presets.find((p) => p.bank === bank && p.program === program);
   if (!preset) throw new Error(`Kein Preset für Bank ${bank}, Programm ${program}`);
   // Stereo-Paare (links und rechts mit gleichem Tasten- und Anschlagbereich) liefern zwei Zonen; die Wahl nimmt immer die erste, die
@@ -66,11 +76,13 @@ export function buildPack(sf, id, { bank, program, keys }) {
   let offset = 0;
   for (const sampleId of order) {
     const head = sf.samples[sampleId];
-    if (!(head.type & 0x10)) throw new Error(`${head.name}: unkomprimierte Samples (.sf2) werden nicht unterstützt, bitte die .sf3 verwenden`);
-    const pcm = decode(sf.buf.subarray(sf.smplAt + head.start, sf.smplAt + head.end));
+    // .sf3: Ogg Vorbis (Anfang und Ende in Bytes, Schleifenpunkte in Abtastwerten relativ zum Sampleanfang). .sf2: 16-Bit-PCM, alle Punkte in
+    // Abtastwerten ab dem Anfang des smpl-Chunks; ein 24-Bit-Zusatz (sm24) bleibt unbenutzt
+    const compressed = head.type & 0x10;
+    const pcm = compressed ? decode(sf.buf.subarray(sf.smplAt + head.start, sf.smplAt + head.end)) : Buffer.from(sf.buf.subarray(sf.smplAt + 2 * head.start, sf.smplAt + 2 * head.end));
     const frames = pcm.length / 2;
-    // Schleifenpunkte der .sf3 sind in Abtastwerten relativ zum Sampleanfang; ungültige Schleifen gelten als keine
-    let loopStart = head.loopStart, loopEnd = head.loopEnd;
+    // ungültige Schleifen gelten als keine
+    let loopStart = head.loopStart - (compressed ? 0 : head.start), loopEnd = head.loopEnd - (compressed ? 0 : head.start);
     if (!(loopStart >= 0 && loopStart < loopEnd && loopEnd <= frames)) loopStart = loopEnd = 0;
     samples.push({ offset, frames, rate: head.sampleRate, loopStart, loopEnd });
     chunks.push(pcm);
@@ -89,20 +101,31 @@ export function buildPack(sf, id, { bank, program, keys }) {
       release: round(seconds(z.releaseVolEnv), 4), sustainDb: round(z.sustainVolEnv / 10, 2),
     };
   });
-  return { meta: { id, source: 'MuseScore_General', gm: program, name: preset.name, samples, zones: out }, pcm: Buffer.concat(chunks) };
+  return { meta: { id, source: SOURCES[source], gm, name: preset.name, samples, zones: out }, pcm: Buffer.concat(chunks) };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const [sfPath, outArg] = process.argv.slice(2);
-  if (!sfPath) {
-    console.error('Aufruf: node scripts/extract-samples.mjs <MuseScore_General.sf3> [ausgabeordner]');
+  const usage = 'Aufruf: node scripts/extract-samples.mjs <MuseScore_General.sf3> [ausgabeordner] [--fsbs-clean <datei.sf2>] [--fsbs-jazz <datei.sf2>]';
+  let args;
+  try {
+    args = parseArgs({ allowPositionals: true, options: { 'fsbs-clean': { type: 'string' }, 'fsbs-jazz': { type: 'string' } } });
+  } catch (err) {
+    console.error(`${err.message}\n${usage}`);
     process.exit(2);
   }
+  const [sfPath, outArg] = args.positionals;
+  if (!sfPath) {
+    console.error(usage);
+    process.exit(2);
+  }
+  const files = { ...args.values, msg: sfPath };
   const dir = outArg ?? fileURLToPath(new URL('../src/assets/samples/', import.meta.url));
   mkdirSync(dir, { recursive: true });
-  const sf = readSoundFont(sfPath);
+  const fonts = {}; // Quelle -> gelesene SoundFont (je Datei einmal)
   for (const [id, spec] of Object.entries(PACKS)) {
-    const { meta, pcm } = buildPack(sf, id, spec);
+    const source = spec.source ?? 'msg';
+    if (!files[source]) { console.log(`${id}: übersprungen (Quelle ${source} nicht angegeben)`); continue; }
+    const { meta, pcm } = buildPack((fonts[source] ??= readSoundFont(files[source])), id, spec);
     writeFileSync(`${dir}/${id}.json`, `${JSON.stringify(meta)}\n`);
     writeFileSync(`${dir}/${id}.pcm`, pcm);
     console.log(`${id}: ${meta.name}, ${meta.samples.length} Samples, ${meta.zones.length} Zonen, ${(pcm.length / 1048576).toFixed(2)} MB`);

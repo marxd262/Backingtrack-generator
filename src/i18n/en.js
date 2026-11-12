@@ -159,6 +159,8 @@ export default {
   'variant.chords.sample.steel': 'Steel-string guitar (sample)',
   'variant.chords.sample.nylon': 'Nylon guitar (sample)',
   'variant.chords.sample.twelve': '12-string guitar (sample)',
+  'variant.chords.sample.freepats': 'Electric guitar, clean (Freepats, sample)',
+  'variant.chords.sample.freepatsjazz': 'Electric guitar, jazz (Freepats, sample)',
   'variant.lead.sample.flute': 'Flute (sample)',
   'variant.lead.sample.sax': 'Alto sax (sample)',
   'variant.lead.sample.synth': 'Synth lead (sample)',

@@ -60,6 +60,11 @@ export const TUNABLES = deepFreeze({
   'chords/sample/nylon': { level: spec(0.05, 8, 0.05, 2.1), decay: spec(0.2, 10, 0.1, 3), strum: spec(0, 0.05, 0.002, 0.012), ...REALISM },
   'chords/sample/twelve': { level: spec(0.05, 8, 0.05, 7.35), decay: spec(0.2, 10, 0.1, 3), strum: spec(0, 0.05, 0.002, 0.012), ...REALISM },
   'chords/sample/funk': { level: spec(0.05, 8, 0.05, 1), decay: spec(0.2, 10, 0.1, 3), strum: spec(0, 0.05, 0.002, 0.012), ...REALISM },
+  // Freepats FSBS Clean und Jazz (Stufe 2, CC0, 44,1 kHz, eine Anschlagstufe): Feinwerte wie die anderen Gitarren, ohne Entzerrer. Pegel gleiches
+  // Verfahren (gemessen 2026-11-12, Track aus voices-sample-sound.spec.js, 8 s, Schicht allein, ohne Begrenzer): rms Sample / Synth bei level 1:
+  // freepats 1.337, freepatsjazz 1.649; level = 1 / Verhältnis, auf 0.05 gerundet; mit den ausgelieferten Werten freepats 1.004, freepatsjazz 0.991
+  'chords/sample/freepats': { level: spec(0.05, 8, 0.05, 0.75), decay: spec(0.2, 10, 0.1, 3), strum: spec(0, 0.05, 0.002, 0.012), ...REALISM },
+  'chords/sample/freepatsjazz': { level: spec(0.05, 8, 0.05, 0.6), decay: spec(0.2, 10, 0.1, 3), strum: spec(0, 0.05, 0.002, 0.012), ...REALISM },
   'lead/sample/flute': { level: spec(0.05, 8, 0.05, 2.4) },
   'lead/sample/sax': { level: spec(0.05, 8, 0.05, 1.3) },
   'lead/sample/synth': { level: spec(0.05, 8, 0.05, 4.3) },

@@ -1,15 +1,19 @@
 // Vorher/Nachher-Vergleich der Sample-Gitarren als WAV (Entwicklerwerkzeug, niemand kann hier hören: der Nutzer vergleicht die Dateien).
 // Je Gitarre der gleiche 8-Takt-Akkordlauf (A-Moll, Am Am Dm E, 100 bpm, nur Akkorde, ohne Echo, Hall und Begrenzer): erst gehaltene
 // Akkorde (complexity 0), nach einer Sekunde Pause derselbe Lauf mit complexity 1. "vorher" = alte Werte über Feinwert-Überschreibungen,
-// "nachher" = die ausgelieferten Standardwerte. Ausgabe: <ordner>/<stimme>-vorher.wav und -nachher.wav, 16 Bit, mono, 44,1 kHz.
+// "nachher" = die ausgelieferten Standardwerte. Ausgabe: <ordner>/<stimme>-vorher.wav und -nachher.wav, 16 Bit, mono, 44,1 kHz. Stimmen ohne
+// alten Stand (die Freepats-Gitarren aus Stufe 2) gibt es nur "nachher".
 // Aufruf: node scripts/render-ab.mjs [ausgabeordner]   (Standard: .superpowers/audio-ab)
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { VOICES } from '../src/core/voices.js';
 
-export const GUITARS = ['guitar', 'muted', 'jazz', 'funk', 'steel', 'nylon', 'twelve'];
-// level vor der Neumessung (tunables.js bis e93653a)
+// level vor der Neumessung (tunables.js bis e93653a): die Gitarren, die es vor Stufe 1 gab
 const OLD_LEVEL = { guitar: 1.7, muted: 1.2, jazz: 4.25, funk: 0.9, steel: 5, nylon: 1.85, twelve: 6.5 };
+export const LEGACY_GUITARS = Object.keys(OLD_LEVEL);
+/** Alle Gitarren unter den Sample-Stimmen der Akkorde (Register-Reihenfolge; E-Piano und Orgel sind keine). */
+export const GUITARS = VOICES.chords.sample.variants.filter((v) => v !== 'epiano' && v !== 'organ');
 
 /** Feinwert-Überschreibungen, die den Klang vor Stufe 1 wiederherstellen (alte Anschlagkurve, keine Helligkeit, Schleife, kein Zufall, alter Entzerrer und Pegel). */
 export const legacyTuning = (variant) => ({
@@ -45,7 +49,7 @@ async function main() {
     await page.goto(`http://localhost:${server.address().port}/ui/render-harness.html`);
     await page.waitForFunction(() => typeof window.__render === 'function');
     for (const variant of GUITARS) {
-      for (const [label, tuning] of [['vorher', legacyTuning(variant)], ['nachher', {}]]) {
+      for (const [label, tuning] of [...(LEGACY_GUITARS.includes(variant) ? [['vorher', legacyTuning(variant)]] : []), ['nachher', {}]]) {
         const r = await page.evaluate(async ([v, tune]) => {
           const { buildEvents } = await import('/core/events.js');
           const { resolveTrackTimbre } = await import('/core/timbre.js');

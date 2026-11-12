@@ -26,7 +26,7 @@ export const VOICES = deepFreeze({
     synth: { kind: 'synth', variants: ['classic'], uses: ['chords.brightness', 'chords.length', 'chords.chorus', 'chords.tremolo'] },
     string: { kind: 'model', hidden: true, variants: ['electric'], uses: ['chords.brightness', 'chords.length'] },
     epiano: { kind: 'synth', variants: ['rhodes'], uses: ['chords.brightness', 'chords.length', 'chords.tremolo'] },
-    sample: { kind: 'sample', variants: ['guitar', 'epiano', 'organ', 'muted', 'jazz', 'funk', 'steel', 'nylon', 'twelve'], uses: ['chords.brightness', 'chords.length'] },
+    sample: { kind: 'sample', variants: ['guitar', 'epiano', 'organ', 'muted', 'jazz', 'funk', 'steel', 'nylon', 'twelve', 'freepats', 'freepatsjazz'], uses: ['chords.brightness', 'chords.length'] },
   },
   pad: {
     synth: { kind: 'synth', variants: ['classic'], uses: ['pad.attack', 'pad.cutoff', 'pad.lfoSpeed', 'pad.lfoDepth', 'pad.shimmer', 'pad.thickness'] },
