@@ -126,6 +126,91 @@ Ein Groove ist ein Datensatz mit Taktart, Fill-Länge (`fillBeats`, Schläge am 
 2. Seinen Namen `groove.<id>` in `src/i18n/de.js` und `src/i18n/en.js` ergänzen.
 3. `npm test` ausführen: `tests/core/grooves.test.js` und `groove-events.test.js` laufen über alle Grooves (Schritte im Zyklus, Hi-Hat-Werte je Schlag, Ereignisse im Takt, Raster, Fills, Namen) und melden Unvollständiges. Die Oberfläche zeigt neue Grooves ihrer Taktart von selbst; nur die Pegelprüfung in `tests/e2e/sound.spec.js` läuft ebenfalls automatisch über alle Grooves.
 
+## Songform
+
+Mit `track.form` besteht der Song aus **Teilen** (Intro, Strophe, Aufbau, Refrain, Break, Outro) statt aus einer gleichförmigen Schleife. Ohne `form` (fehlt oder `null`) gilt alles wie vorher; `tests/core/golden.test.js` hält das bitgleich fest. Die Form ist reine Daten im Track: `buildEvents` hängt nur von ihm ab, das Würfeln einer Form (`rollForm`) liegt davor und ist **nicht** Teil von `src/index.js`.
+
+```json
+{
+  "key": { "root": "A", "mode": "minor" },
+  "bpm": 100,
+  "bars": [
+    { "chord": { "root": "A", "quality": "min" }, "beats": 4 },
+    { "chord": { "root": "D", "quality": "min" }, "beats": 4 },
+    { "chord": { "root": "E", "quality": "maj" }, "beats": 4 }
+  ],
+  "form": {
+    "template": "pop",
+    "feel": { "structure": 0.6, "dynamics": 0.6, "pauses": 0.4, "randomness": 0.5 },
+    "sections": [
+      { "type": "intro", "bars": 4 },
+      { "type": "verse", "bars": 8 },
+      { "type": "build", "bars": 4, "locked": true },
+      { "type": "chorus", "bars": 8, "crash": true },
+      { "type": "break", "bars": 4, "level": -9, "transition": "stop" },
+      { "type": "outro", "bars": 4 }
+    ]
+  },
+  "seed": 7
+}
+```
+
+Dieser Track hat 32 Takte (ein mitgegebenes `length` würde überschrieben), gültig ist er ohne weitere Felder.
+
+**Felder** (Grenzen und Fehler: Tabelle `form` oben):
+
+| Feld | Regel |
+| --- | --- |
+| `sections` | 1 bis 64 Teile, in Spielreihenfolge; Gesamtlänge höchstens 512 Takte |
+| `type` | `intro`, `verse`, `build`, `chorus`, `break`, `outro` |
+| `bars` | ganzzahlig 1 bis 64 |
+| `level` | dB relativ zum Refrain, -24 bis 0; fehlt: Standard des Typs. Ein gesetzter Wert gilt für den ganzen Teil (`[x, x]`) und wird nie von `feel.dynamics` skaliert |
+| `density` | Verschiebung der Rhythmusdichte, -1 bis +1; fehlt: Standard des Typs; wie `level` unskaliert |
+| `transition` | Übergang **davor**: `none`, `fill`, `roll`, `stop`; fehlt: Standard des Typs. Er wirkt im letzten Takt des vorigen Teils, beim ersten Teil also nie |
+| `crash` | Crash (`hit` `crash`) auf der Eins des Teils; fehlt: Standard des Typs |
+| `locked` | Wahrheitswert (Standard `false`); gesperrte Teile bleiben beim Neuwürfeln stehen, auf die Wiedergabe hat das keinen Einfluss |
+| `feel` | `structure`, `dynamics` (bis 1,3), `pauses`, `randomness`; fehlende Werte 0,6 / 0,6 / 0,4 / 0,5. `structure` wirkt nur beim Würfeln, die drei anderen beim Erzeugen der Ereignisse |
+| `template`, `auto` | von `rollForm` gesetzt (`template` ist nie `auto`, `auto: true` heißt „folgt dem Stil“); `buildEvents` liest beides nicht |
+
+**Standardwerte der Typen** (`TYPE_TABLE` in `src/core/form-types.js`, die einzige Stelle der Zahlen). `Dichte` und `Pegel` sind `[Anfang, Ende]`, dazwischen steigt oder fällt der Wert Takt für Takt linear:
+
+| Typ | Schichten | Dichte | Pegel (dB) | Übergang davor | Crash |
+| --- | --- | --- | --- | --- | --- |
+| `intro` | Bass, Akkorde, Pad | -0,25 | -5 | `none` | nein |
+| `verse` | Bass, Schlagzeug, Akkorde | -0,15 | -3 | `fill` | nein |
+| `build` | Bass, Schlagzeug, Akkorde, Pad | -0,10 bis +0,25 | -4 bis -1 | `roll` | nein |
+| `chorus` | Schlagzeug, Bass, Akkorde, Pad | +0,20 | 0 | `fill` | ja |
+| `break` | Akkorde, Pad | -0,40 | -7 | `stop` | nein |
+| `outro` | Bass, Akkorde, Pad, Schlagzeug | -0,15 bis -0,30 | -4 bis -8 | `none` | nein |
+
+Lead und Percussion folgen wie ohne Form den Akkorden und dem Schlagzeug (`follows`). **Dynamik:** die Abweichung des Typs vom Refrain (Pegel und Dichte) wird mit `feel.dynamics / 0,6` multipliziert, begrenzt auf 0 bis 1,3 / 0,6 und auf die Grenzen von `level` und `density`: 0 macht alle Teile wie den Refrain, der Standard 0,6 (60 %) ergibt genau die Tabelle, 1,3 spreizt sie auf das 2,2-Fache.
+
+**Wirkung auf die Ereignisse** (nur mit Form, `buildEvents` → `buildFormArrangement` → Spieler → `postProcess` in `src/core/form-post.js`):
+
+1. **Dichte:** `withSection` legt `drive` in das Fenster 0,2 bis 0,75 und `bassMovement` in 0,25 bis 0,6 (damit Stile mit extremen Werten die Teile nicht auf eine Stufe klemmen) und verschiebt dann `drive` um die Dichte des Takts, `bassMovement` um 0,6 mal die Dichte, `syncopation` um 0,4 mal die Dichte plus `(randomness - 0,5) * 0,4`; alles auf 0 bis 1 begrenzt. Im Refrain steht die offene Hi-Hat fest, in Strophe, Break und Intro fehlt sie (Aufbau und Outro: wie bisher zufällig).
+2. **Phrasen und Zufall:** Jeder Teil läuft in Phrasen zu 4 Takten (die letzte kürzer). Für Schlagzeug, Bass, Akkorde und Pad wird in jeder Phrase nach der ersten mit der Wahrscheinlichkeit `feel.randomness` ein neues Muster gewählt, sonst bleibt das vorige; ändert sich die Dichte von einer Phrase zur nächsten (Aufbau, Outro), wird ebenfalls neu gewählt. Lead und Percussion halten ihren Zustand über den ganzen Teil. Die Münze kommt aus einem eigenen Zweig des Seeds, sie verschiebt die Schichtströme nicht; gleicher Track und gleicher Seed geben denselben Strom.
+3. **Pegel:** `vel` jedes `note` und `hit` wird mit `10^(dB/20)` des Takts multipliziert (nie über 1; es gibt keine Verstärkung über den Refrain). Der Crash wird dabei höchstens um 3 dB gedämpft, weil die Samples leise sind.
+4. **Übergänge** (im letzten Takt des Teils davor, nach `transition` des folgenden Teils): `fill` setzt das Schlagzeug-Fill des Grooves (`fillBeats`) und den Marker `fill`. `roll` ersetzt ab der Taktmitte alle Schläge des Schlagzeugs außer dem Kick durch einen Snare-Wirbel (Achtel, dann Sechzehntel, `vel` von 0,45 auf 0,95), nur wenn die Schicht `drums` im Track und im Teil davor spielt. `stop` lässt den Takt ab dem letzten Schlag still (ab den letzten zwei Schlägen bei `feel.pauses` ab 0,6; der erste Schlag des Takts bleibt immer); `note` und `hit` ab dort entfallen, davor beginnende Töne werden gekürzt, `chord` und `marker` bleiben.
+5. **Crash:** ein `hit` `crash` (`vel` 0,9 vor dem Pegel) auf der Eins jedes Teils mit `crash`, nie im allerersten Takt und nur bei eingeschalteter Schicht `drums`.
+6. **Pausen:** im vierten Takt jeder Phrase eines Teils (Takt 4, 8, ... im Teil) fällt mit der Wahrscheinlichkeit `feel.pauses` mal Typfaktor (`verse` 0,6, `intro` und `outro` 0,5, `chorus` 0,25, `build` und `break` 0) eine Schicht aus `chords`, `pad`, `lead`, `percussion`, `drums` für diesen Takt aus. Vom Schlagzeug entfallen nur die Schläge außer `kick`, `hat` und `openHat`; der Bass pausiert nie. Der letzte Takt vor einem Fill oder Stopp pausiert nicht.
+7. **Akkordfolge:** `bars` beginnt in jedem Teil neu beim ersten Akkord. `chordIndex(track, barIndex)` (`src/core/form.js`) liefert den Eintrag: mit gültiger Form `(Takt - Teilanfang) mod bars.length` (die Form läuft für weitere Durchläufe im Kreis), sonst `Takt mod bars.length`. `chordTimeline`, `play` (Dauer, `startBar`), die Zeitleiste und das Griffbrett benutzen es.
+8. **Schlagworte der Entwicklung** (`development`) wählen mit Form nicht mehr die Schichten (das tut die Tabelle), sondern beeinflussen nur das Würfeln: `buildsSlowly` erhöht die Wahrscheinlichkeit von Intro und Aufbau, `fullFromStart` senkt sie, `withBreakouts` erhöht die von Breaks. Gelesen werden sie direkt aus `tags.development`.
+
+**Marker:** `{ t, bar, beat: 0, type: 'marker', name: 'section', kind, index }` am Anfang jedes Teils (`kind` ist der Typ, `index` der Platz in `sections`; nur mit Form), und wie bisher `{ t, bar, type: 'marker', name: 'fill' }` am Anfang des Takts, der das Fill enthält, mit Form im letzten Takt des Teils vor einem Teil mit Übergang `fill`.
+
+**Würfeln** (`rollForm({ template, style, targetBars, feel, seed, tags, previous })` in `src/core/form-roll.js`, rein, wirft nie, Zufall nur aus `createRng(seed).fork('formgen')`; liefert `{ template, auto, feel, sections }`, das `checkForm` besteht):
+
+- **Vorlagen:** `jam`, `pop`, `buildDrop` (Build & Drop), `blues`, `rock`; `auto` oder fehlend wählt nach dem Stil (`funk`, `reggae`: `jam`; `psych`: `buildDrop`; `dreamy`, `country`, `poppunk`: `pop`; `blues`: `blues`; `rock`, `hardrock`: `rock`). Bei unbekanntem Stil wählt `buildsSlowly` (ohne `fullFromStart`) `buildDrop`, sonst `pop`; eine unbekannte Vorlage wird `pop`. Der Blues nutzt Teile zu 12 Takten mit der gewählten Akkordfolge (keine eigene 12-Takt-Folge).
+- **Zielgröße:** `targetBars` wird auf die nächste von 24, 32, 48, 64, 96, 128, 192 gesetzt (Standard 96); die Summe liegt höchstens 4 Takte daneben (Blues: das nächste Vielfache von 12).
+- **Leitplanken:** (1) der erste Teil ist Intro oder Strophe, der letzte Outro oder Refrain; (2) ein Aufbau steht nur vor einem Refrain, ein Refrain nie am Anfang; (3) ein Break nie am Anfang oder Ende und nie zweimal hintereinander; (4) nie drei gleiche Typen hintereinander (nicht in `jam`); (5) ab 24 Takten mindestens ein Refrain (nicht in `jam`); (6) Mindestlänge Aufbau, Break, Intro und Outro 2, Strophe und Refrain 4, höchstens 32 Takte je Teil. Die Teile sind meist Vielfache von 4 Takten.
+- **Struktur:** `feel.structure` (0 bis 1) skaliert die Wahrscheinlichkeit der optionalen Plätze (Aufbau, Break, Intro, Outro, Stopp vor dem Refrain): kleiner ist Jam-artig, größer abwechslungsreicher.
+- **Sperren:** `previous` ist die bisherige Form; ihre gültigen Teile mit `locked: true` bleiben an ihrem Platz (Index, alle Felder), die anderen werden neu gezogen, die Leitplanken gelten auch rund um sie. Ohne Sperren ändert `previous` nichts. Bei unmöglichen Sperren bleibt das Ergebnis trotzdem gültig.
+- **Reproduzierbar:** gleiche Eingaben ergeben dieselbe Form.
+
+**Wann die eigene Oberfläche würfelt** (`src/ui/state.js`): die nicht gesperrten Teile bei Variantenwechsel (Seed = Variante), beim Stilwechsel (nur mit Vorlage Auto) und beim Loslassen des Reglers Struktur; „Neu würfeln“ nimmt dazu die Variante plus `formSalt * 10000` als Seed, damit dieselbe Variante andere Teile zieht. **Alles** (Sperren fallen) wird bei Wechsel von Vorlage oder Zielgröße neu gewürfelt. Dynamik, Pausen und Zufall würfeln nicht, sie wirken live über `setTrack`. „Ohne Form“ entfernt `track.form` (die Länge ist dann die Zielgröße); die Reglerwerte bleiben im Zustand und kehren mit der nächsten Form zurück. Beim Start würfelt die App eine Form mit Vorlage Auto und dem Ziel 96 Takte.
+
+**Oberfläche** (`src/ui/form-panel.js`, `form-strip.js`, `form-ui.js`; nicht Teil des Vertrags): die Gruppe **Songform** in der linken Leiste (Vorlage mit „Ohne Form“, Zielgröße, die Regler Struktur, Dynamik, Pausen und Zufall; ohne Form sind die Regler ausgegraut), über dem Verlauf ein **Streifen** (ein `listbox`: Breite eines Blocks = Takte, Höhe = mittlerer Pegel, Pfeiltasten, Pos1 und Ende wählen, der gerade gespielte Teil trägt `aria-current`) und darunter die **Einstellungen des gewählten Teils** (Typ, Länge um einen Takt, Pegel, Dichte, Übergang davor, Crash, Sperren, nach links oder rechts, Kopie, Löschen; „Standard“ setzt Pegel oder Dichte zurück). Jede Bearbeitung sperrt den Teil. „Teil hinzufügen“ hängt eine gesperrte Strophe mit 8 Takten an; der letzte Teil lässt sich nicht löschen, Grenzen sind 64 Teile, 64 Takte je Teil und 512 Takte. Bleibt die Gesamtlänge gleich, wirkt eine Änderung live (`setTrack`), sonst startet die Wiedergabe an der gleichen Stelle neu. Die Abschnittslinien des Verlaufs folgen den Teilgrenzen (ohne Form alle 8 Takte).
+
 ## Stimmen: Synths und Saitenmodelle
 
 Jede Schicht (`drums`, `bass`, `chords`, `pad`, `lead`, `percussion`) hat wählbare Stimmen in `src/core/voices.js` (`VOICES`, reine Daten). Eine Stimme ist ein Eintrag mit `kind` (`synth`, `model` oder später `sample`; so gruppiert die Oberfläche), `variants` (die erste ist der Standard) und `uses` (die Klangregler, auf die sie hörbar reagiert; Fuzz, Overdrive und Distortion gelten immer, die Verzerrerkette liegt hinter jeder Stimme). Aufgefüllt wird mit `completeVoices(voices)` / `resolveVoices(track)`; der Standard je Instrument ist `synth` / `classic`, der bisherige Klang.
@@ -186,7 +271,7 @@ Ein Profil hält nur die Teile, die beim Speichern angehakt waren (`PART_IDS`, `
 | `variant` | `seed`, `variety` | Variante (1 bis 9999 in der Oberfläche; Datei: ganze Zahl 0 bis 4294967295) und der Schalter für mehr Abwechslung |
 | `form` | `form` { `template`, `auto`, `feel`, `sections` } | die Songform (`track.form`, „Songform“) samt Vorlage, Auto-Schalter, den vier Reglern und allen Teilen mit ihren Sperren |
 
-**Der Teil `form`.** `captureParts` kopiert `track.form` tief (nur bekannte Felder). Hat die Sitzung keine (gültige) Form („Ohne Form“), **gibt es den Teil nicht**: `captureParts(session, ['form'])` liefert `{}`, ein Profil entsteht ohne ihn, und im Speichern-Fenster ist das Kästchen „Songform“ nicht angehakt und gesperrt (die Zeile zeigt dann „9 von 10“). `sanitizeParts` prüft jeden Teil der Liste einzeln wie `checkForm` (Typ, `bars` 1 bis 64, `level`, `density`, `transition`, `crash`, `locked`): ein ungültiger Teil fällt allein weg und wird gezählt, unbekannte Felder werden ignoriert, mehr als 64 Teile oder mehr als 512 Takte insgesamt werden abgeschnitten (der Rest wird gezählt), eine leere oder fehlende Liste lässt den Teil ganz wegfallen. `template` muss eine bekannte Vorlage sein (sonst Pop, gezählt), `auto` ein Wahrheitswert; fehlende oder ungültige Regler (`structure`, `dynamics` bis 1,3, `pauses`, `randomness`) bekommen den Standard (ungültige werden gezählt). **Laden:** `applyParts` setzt `track.form`, und die Länge ist die Summe der Teile (ein mitgeliefertes `rhythm.length` gilt dann nicht); danach folgen `state.formTarget` (nächste Zielgröße) und `state.formFeel` der Form. **Profile ohne den Teil lassen die Form unberührt.** Ausnahme: bringt ein Profil `rhythm.length`, aber keinen Teil `form` mit, wird die vorhandene Form (gleiche Vorlage, gleicher Auto-Schalter, gleiche Regler, Sperren fallen) für die nächste Zielgröße dieser Länge neu gewürfelt (`rollForm`, gleiche Eingaben, gleiche Form); liegt die Zielgröße der Länge schon bei der der vorhandenen Form, bleibt die Form samt Sperren; bei „Ohne Form“ setzt `rhythm.length` wie bisher nur die Länge. Alte Dateien (Version 1 und 2 mit 9 Teilen) laden die Form deshalb nicht an. Werksprofile haben keinen Teil `form`.
+**Der Teil `form`.** `captureParts` kopiert `track.form` tief (nur bekannte Felder). Hat die Sitzung keine (gültige) Form („Ohne Form“), **gibt es den Teil nicht**: `captureParts(session, ['form'])` liefert `{}`, ein Profil entsteht ohne ihn, und im Speichern-Fenster ist das Kästchen „Songform“ nicht angehakt und gesperrt (die Zeile zeigt dann „9 von 10“). `sanitizeParts` prüft jeden Teil der Liste einzeln wie `checkForm` (Typ, `bars` 1 bis 64, `level`, `density`, `transition`, `crash`, `locked`): ein ungültiger Teil fällt allein weg und wird gezählt, unbekannte Felder werden ignoriert, mehr als 64 Teile oder mehr als 512 Takte insgesamt werden abgeschnitten (der Rest wird gezählt), eine leere oder fehlende Liste lässt den Teil ganz wegfallen. `template` muss eine bekannte Vorlage sein (sonst Pop, gezählt), `auto` ein Wahrheitswert; fehlende oder ungültige Regler (`structure`, `dynamics` bis 1,3, `pauses`, `randomness`) bekommen den Standard (ungültige werden gezählt). **Laden:** `applyParts` setzt `track.form`, und die Länge ist die Summe der Teile (ein mitgeliefertes `rhythm.length` gilt dann nicht); danach folgen `state.formTarget` (nächste Zielgröße) und `state.formFeel` der Form. **Profile ohne den Teil lassen die Form unberührt.** Ausnahme: bringt ein Profil `rhythm.length`, aber keinen Teil `form` mit, wird die vorhandene Form (gleiche Vorlage, gleicher Auto-Schalter, gleiche Regler, Sperren fallen) für die nächste Zielgröße dieser Länge neu gewürfelt (`rollForm`, gleiche Eingaben, gleiche Form); liegt die Zielgröße der Länge schon bei der der vorhandenen Form, bleibt die Form samt Sperren; bei „Ohne Form“ setzt `rhythm.length` wie bisher nur die Länge. Dateien ohne den Teil `form` laden die Form deshalb nicht an: Version 1, und auch Version-2-Dateien aus der Zeit vor der Songform (die Versionsnummer blieb 2, `form` ist nur ein zusätzlicher Teil). Werksprofile haben keinen Teil `form`.
 
 `captureParts(session, ids)` hält die Sitzung `{ track, scale, style, chordColor, chordColorFromStyle, mix }` (die Form von `state`, `src/ui/profile-session.js` liest und schreibt sie) als tiefe Kopie fest. Layout und Sprache gehören nie dazu. Die Auswahl im Fenster hat die Schnellwahlen Alles, Klang (`sound`, `voices`, `mixer`), Rhythmus (`tempo`, `rhythm`) und Nichts (`PART_PRESETS`); ohne einen Haken wird nicht gespeichert.
 
@@ -202,6 +287,7 @@ Ein Profil hält nur die Teile, die beim Speichern angehakt waren (`PART_IDS`, `
 
 ```json
 { "format": "backingtrack-profile", "version": 2, "name": "Mein Groove", "parts": { "tempo": { "bpm": 96, "meter": [4, 4] }, "rhythm": { "groove": null, "complexity": 0.7, "length": 24 } } }
+{ "format": "backingtrack-profile", "version": 2, "name": "Mit Songform", "parts": { "form": { "form": { "template": "pop", "auto": false, "feel": { "structure": 0.6, "dynamics": 0.6, "pauses": 0.4, "randomness": 0.5 }, "sections": [ { "type": "verse", "bars": 8 }, { "type": "chorus", "bars": 8, "crash": true } ] } } } }
 { "format": "backingtrack-folder", "version": 1, "name": "Meine Profile", "backup": true, "items": [
   { "type": "folder", "name": "Blues", "items": [ { "type": "profile", "name": "Langsam", "parts": { "tempo": { "bpm": 70 } } } ] },
   { "type": "profile", "name": "Mein Groove", "parts": { "tempo": { "bpm": 96 } } } ] }
@@ -255,7 +341,7 @@ Der Klang lässt sich nur teilweise messen. Dafür gibt es: die **Hörprobe-Seit
 
 - `TAG_CATEGORIES`: `[{ id, tags: [id, ...] }]`, alle Kategorien und Schlagwort-IDs, die der Generator kennt.
 - `STYLE_PRESETS`: `[{ id, bpm, tags, chordColor?, chordColorAlt? }]`. `tags` kann direkt in einen Track übernommen werden, `bpm` ist der Vorschlag des Stils. `chordColor` (`triads`, `sevenths`, `extended`, `power`; fehlt es, gelten Dreiklänge) ist die Akkordfarbe, die die eigene Oberfläche beim Wählen des Stils setzt (Blues: Septakkorde, Hardrock und Pop-Punk: Powerchords); mit `variety` wählt der Seed in etwa jeder vierten Variante die Ausweichfarbe `chordColorAlt` (Blues: Erweiterungen, Hardrock und Pop-Punk: Dreiklänge). Die Berechnung steht in `styleChordColor(preset, seed, variety)` in `src/core/tags.js` (nicht aus `src/index.js` exportiert); die Schnittstelle selbst ignoriert beide Felder.
-- Aufbau (Kategorie `development`) in Abschnitten zu 8 Takten, der letzte Abschnitt spielt immer alles: ohne Angabe Bass, Schlagzeug und Akkorde, Pad erst im letzten Abschnitt; `fullFromStart` alles von Anfang an; `buildsSlowly` Bass und Schlagzeug ab Takt 1, im zweiten Abschnitt kommt (je Seed) Akkorde oder Pad dazu, ab dem dritten alles. Der Aufbau beginnt mit jedem Durchlauf über `length` Takte neu.
+- Aufbau (Kategorie `development`) in Abschnitten zu 8 Takten (nur ohne `form`; mit Form bestimmen die Teile die Schichten, siehe „Songform“), der letzte Abschnitt spielt immer alles: ohne Angabe Bass, Schlagzeug und Akkorde, Pad erst im letzten Abschnitt; `fullFromStart` alles von Anfang an; `buildsSlowly` Bass und Schlagzeug ab Takt 1, im zweiten Abschnitt kommt (je Seed) Akkorde oder Pad dazu, ab dem dritten alles. Der Aufbau beginnt mit jedem Durchlauf über `length` Takte neu.
 - Klang-Schlagworte: vier Kategorien (`drumSound`, `bassSound`, `chordSound`, `padSound`) und die früher wirkungslosen Schlagworte `gritty`, `warm`, `dark`, `bright`, `psychedelic` ändern den **Klang**, dazu `dreamy`. `dreamy` war nie wirkungslos: es behält seine alte Muster-Wirkung (`padWidth` +0.2, kann über 0.6 das Pad-Voicing verdoppeln) und wirkt zusätzlich auf den Klang. Zusammen sind es 26 klangrelevante Schlagworte:
 
   | Kategorie | Schlagwort-IDs | Wirkung |
@@ -316,15 +402,15 @@ Berechnet vorab, ohne Audio, den nach `t` sortierten Strom (bei gleichem `t`: `c
 (Die echten Zeiten von `hit` und `note` weichen durch Swing und leichtes Timing-Jitter um wenige Millisekunden von der Rasterzeit ab.)
 
 - `t`: Sekunden ab Start (auf 6 Stellen gerundet). `bar`: 0-basierter Takt. `beat`: 0-basierte Rasterposition im Takt in Schlägen (Sechzehntel = 0.25).
-- `hit` hat `layer: 'drums'` und einen Namen aus `kick`, `snare`, `hat`, `openHat`, `tomHigh`, `tomMid`, `tomLow`, `crash` (`DRUM_NAMES` aus `src/index.js`). Geisternoten sind `snare` mit `vel < 0.3`.
+- `hit` hat `layer: 'drums'` und einen Namen aus `kick`, `snare`, `hat`, `openHat`, `tomHigh`, `tomMid`, `tomLow`, `crash` (`DRUM_NAMES` aus `src/index.js`; den `crash` gibt es nur mit `form`). Geisternoten sind `snare` mit `vel < 0.3`.
 - `hit` mit `layer: 'percussion'` hat einen Namen aus `shaker`, `tambourine`, `congaHigh`, `congaLow`, `bongoHigh`, `bongoLow`, `claves`, `cowbell` (`PERCUSSION_NAMES` aus `src/index.js`); die Anschläge liegen unter 0,8, die Schicht spielt hinter dem Schlagzeug. Welche Namen vorkommen, bestimmt `jobs.percussion` (`mixed`: Shaker, Tamburin und Congas; `congas`: `congaHigh` und `congaLow`; `bongos`: `bongoHigh` und `bongoLow`; die übrigen je ihr eigener Name).
 - `note` hat `layer` `bass`, `chords`, `pad` oder `lead`, `midi`, `vel` (0 bis 1) und `dur` in Sekunden. Der `lead` ist einstimmig, liegt zwischen MIDI 72 und 88 (eine Oktave über den Akkorden) und nimmt Töne der Tonleiter der Tonart (Moll: Moll-Pentatonik, Dur: Dur-Pentatonik, Dorisch: dorisch) und des Akkords im Takt; seine Aufgabe (`jobs.lead`) bestimmt das Muster: `fills` kurze Phrasen am Taktende in der zweiten Hälfte eines Abschnitts, `arpeggio` einen Lauf durch die Akkordtöne, `melody` lange, spärliche Töne, `callResponse` eine Phrase und im nächsten Takt die Antwort; `off` liefert nichts.
-- `marker` mit `name: 'fill'` sitzt am Anfang des Takts, der das Schlagzeug-Fill enthält.
-- Ausgeschaltete Schichten fehlen im Strom; `chord` und `marker` gibt es immer. Im Arrangement spielt der `lead` dort, wo die Akkorde spielen, die Percussion dort, wo das Schlagzeug spielt (`follows` im Register). Mit `lead: off` und ausgeschalteter Percussion ist der Strom bitgleich wie vor diesen Schichten (Golden-Test).
+- `marker` mit `name: 'fill'` sitzt am Anfang des Takts, der das Schlagzeug-Fill enthält. Mit `form` kommt je Teil ein `marker` mit `name: 'section'`, `kind` (Typ des Teils) und `index` (Platz in `sections`) am Teilanfang (`beat: 0`) dazu, und der Schlag `crash` (Abschnitt „Songform“); ohne `form` gibt es weder den Marker noch den Crash.
+- Ausgeschaltete Schichten fehlen im Strom; `chord` und `marker` gibt es immer (`section` nur mit Form). Im Arrangement spielt der `lead` dort, wo die Akkorde spielen, die Percussion dort, wo das Schlagzeug spielt (`follows` im Register). Mit `lead: off` und ausgeschalteter Percussion ist der Strom bitgleich wie vor diesen Schichten (Golden-Test).
 
 ## `chordTimeline(track)`
 
-Ersatz für das alte `buildEvents(track, loops)` von Interactive Scales: ein Eintrag je Takt für `length` Takte, genau so berechnet wie die `chord`-Ereignisse.
+Ersatz für das alte `buildEvents(track, loops)` von Interactive Scales: ein Eintrag je Takt für `length` Takte (mit `form` die Summe der Teile, die Folge beginnt in jedem Teil neu), genau so berechnet wie die `chord`-Ereignisse.
 
 ```js
 chordTimeline(track) // [{ time: 0, bar: 0, chord: { root: 'A', quality: 'min' }, durationSec: 2.666667 }, ...]
@@ -355,7 +441,7 @@ const h = play(ctx, track, { loops: 1, levels: { bass: 0.5 }, master: 1, onBar: 
 
 ## Prüfung
 
-`validateTrack(track)` liefert `{ code, params }[]` (leer heißt gültig) und wirft für JSON-artige Daten nie (auch nicht bei `null`, Zahlen, Strings oder kaputten Feldern). Nicht klonbare Daten, etwa eine Funktion als Feld, lassen das interne `structuredClone` einen `DataCloneError` werfen, genau wie bei `buildEvents`. Die öffentliche Funktion wendet vorher die Standardwerte an (`length`, `meter`, `tags`, `layers`, `seed`), akzeptiert also auch Teil-Tracks wie das alte Format von Interactive Scales und meldet genau die Codes, die `buildEvents` und `chordTimeline` als `err.errors` werfen würden. Es gibt 15 Codes (`VALIDATION_CODES` aus `src/index.js`): `emptyBars`, `chordNotInKey`, `badBpm`, `unknownQuality`, `badBeats`, `badLength`, `badKey`, `badBar`, `badTags`, `badMeter`, `badComplexity`, `badGroove`, `badVoice`, `badJob`, `badForm` (`badMeter`, `badComplexity` und `badGroove` tragen den Wert als `params.meter`, `params.complexity`, `params.groove`; `badVoice` trägt `params.layer` und `params.voice`, bei einer ungültigen Variante als `id/variante`; `badJob` trägt `params.layer` und `params.job`; `badForm` trägt `params.reason`, ein kurzes englisches Stichwort). `badTags` trägt `params.category` und `params.tag`, soweit bekannt (kein Objekt: leere `params`). Text in der Sprache der App: `t('err.' + code, params)`.
+`validateTrack(track)` liefert `{ code, params }[]` (leer heißt gültig) und wirft für JSON-artige Daten nie (auch nicht bei `null`, Zahlen, Strings oder kaputten Feldern). Nicht klonbare Daten, etwa eine Funktion als Feld, lassen das interne `structuredClone` einen `DataCloneError` werfen, genau wie bei `buildEvents`. Die öffentliche Funktion wendet vorher die Standardwerte an (`length`, `meter`, `tags`, `layers`, `seed`), akzeptiert also auch Teil-Tracks wie das alte Format von Interactive Scales und meldet genau die Codes, die `buildEvents` und `chordTimeline` als `err.errors` werfen würden. Es gibt 15 Codes (`VALIDATION_CODES` aus `src/index.js`): `emptyBars`, `chordNotInKey`, `badBpm`, `unknownQuality`, `badBeats`, `badLength`, `badKey`, `badBar`, `badTags`, `badMeter`, `badComplexity`, `badGroove`, `badVoice`, `badJob`, `badForm` (`badMeter`, `badComplexity` und `badGroove` tragen den Wert als `params.meter`, `params.complexity`, `params.groove`; `badVoice` trägt `params.layer` und `params.voice`, bei einer ungültigen Variante als `id/variante`; `badJob` trägt `params.layer` und `params.job`; `badForm` trägt `params.reason`, ein kurzes englisches Stichwort: `form` (kein Objekt), `sections` (keine Liste, leer oder mehr als 64 Teile, oder ein Teil kein Objekt), `type`, `bars`, `level`, `density`, `transition`, `crash`, `locked`, `feel` oder `length` (Summe über 512); jedes Stichwort höchstens einmal). `badTags` trägt `params.category` und `params.tag`, soweit bekannt (kein Objekt: leere `params`). Text in der Sprache der App: `t('err.' + code, params)`.
 
 ```js
 const errors = validateTrack(track);
