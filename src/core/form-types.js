@@ -43,7 +43,7 @@ const CHORUS = TYPE_TABLE.chorus;
  */
 export function resolveSection(section, feel) {
   const row = TYPE_TABLE[section.type];
-  const dyn = feel?.dynamics ?? FEEL_DEFAULTS.dynamics;
+  const dyn = Number.isFinite(feel?.dynamics) ? feel.dynamics : FEEL_DEFAULTS.dynamics;
   const factor = clamp(dyn / FEEL_DEFAULTS.dynamics, 0, DYNAMICS_MAX / FEEL_DEFAULTS.dynamics);
   const level = section.level != null
     ? [section.level, section.level]

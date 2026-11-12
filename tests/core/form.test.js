@@ -261,3 +261,49 @@ test('play: Dauer und Startposition mit Form nutzen die Akkordfolge je Teil', as
     h.stop();
   }
 });
+
+test('normalizeForm: null im feel gilt als fehlend, template nur als Text, auto nur als Wahrheitswert', () => {
+  assert.equal(normalizeForm({ feel: { pauses: null }, sections: [] }).feel.pauses, 0.4);
+  assert.equal(normalizeForm({ feel: { pauses: undefined }, sections: [] }).feel.pauses, 0.4);
+  const f = normalizeForm({ template: 5, auto: 'yes', sections: [] });
+  assert.equal(Object.hasOwn(f, 'template'), false);
+  assert.equal(Object.hasOwn(f, 'auto'), false);
+  const g = normalizeForm({ template: 'pop', auto: true, sections: [] });
+  assert.deepEqual([g.template, g.auto], ['pop', true]);
+});
+
+test('resolveSection: unbrauchbare dynamics fällt auf den Standard zurück', () => {
+  const ref = resolveSection(sec('break', 8), FEEL_DEFAULTS);
+  for (const dynamics of [NaN, 'x', Infinity, null, undefined]) {
+    const r = resolveSection(sec('break', 8), { ...FEEL_DEFAULTS, dynamics });
+    assert.ok(r.level.every(Number.isFinite) && r.density.every(Number.isFinite), String(dynamics));
+    assert.deepEqual(r, ref, String(dynamics));
+  }
+});
+
+test('resolveSection: feste Spec-Werte bei dynamics 0.6 (unabhängig von der Tabelle)', () => {
+  const near = (actual, expected, msg) => assert.ok(actual.every((x, i) => Math.abs(x - expected[i]) < 1e-9), `${msg}: ${actual}`);
+  const lv = (type) => resolveSection(sec(type, 8), { ...FEEL_DEFAULTS }).level;
+  near(lv('intro'), [-5, -5], 'intro');
+  near(lv('verse'), [-3, -3], 'verse');
+  near(lv('break'), [-7, -7], 'break');
+  near(lv('build'), [-4, -1], 'build');
+  near(lv('outro'), [-4, -8], 'outro');
+  near(lv('chorus'), [0, 0], 'chorus');
+  near(resolveSection(sec('chorus', 8), FEEL_DEFAULTS).density, [0.2, 0.2], 'chorus Dichte');
+  near(resolveSection(sec('build', 8), FEEL_DEFAULTS).density, [-0.1, 0.25], 'build Dichte');
+});
+
+test('chordIndex: ungültige Form fällt auf barIndex mod n zurück', () => {
+  const t = { bars: [1, 2, 3].map(() => chord('A')) };
+  for (const form of [{ sections: [sec('solo', 4)] }, { sections: [] }, 'x', 5, { sections: [sec('verse', 0)] }]) {
+    assert.deepEqual([0, 3, 4, 7].map((i) => chordIndex({ ...t, form }, i)), [0, 0, 1, 1], JSON.stringify(form));
+  }
+});
+
+test('checkForm: gleiche Meldungen nur einmal, auch bei dünnen Listen', () => {
+  assert.deepEqual(reasons({ sections: [sec('solo', 4), sec('solo', 4), sec('solo', 4)] }), [['badForm', 'type']]);
+  // eslint-disable-next-line no-sparse-arrays
+  assert.deepEqual(reasons({ sections: [, , ,] }), [['badForm', 'sections']]);
+  assert.deepEqual(reasons({ sections: [{ type: 'verse', bars: 0 }, { type: 'verse', bars: 99 }] }), [['badForm', 'bars']]);
+});

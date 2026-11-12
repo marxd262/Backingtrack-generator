@@ -7,10 +7,10 @@ const SECTION_KEYS = ['type', 'bars', 'level', 'density', 'transition', 'crash',
 /** Gesamtlänge in Takten: Summe der `bars` aller Teile. */
 export const formLength = (form) => (Array.isArray(form?.sections) ? form.sections.reduce((sum, s) => sum + (Number.isFinite(s?.bars) ? s.bars : 0), 0) : 0);
 
-// nur bekannte eigene Felder kopieren; Werte bleiben, wie sie sind, damit checkForm Ungültiges sieht
+// nur bekannte eigene Felder kopieren; null und undefined gelten als fehlend, sonst bleiben Werte, wie sie sind, damit checkForm Ungültiges sieht
 const pick = (src, keys) => {
   const out = {};
-  for (const k of keys) if (Object.hasOwn(src, k) && src[k] !== undefined) out[k] = src[k];
+  for (const k of keys) if (Object.hasOwn(src, k) && src[k] != null) out[k] = src[k];
   return out;
 };
 
@@ -21,7 +21,9 @@ const pick = (src, keys) => {
 export function normalizeForm(form) {
   if (form == null) return undefined;
   if (!isObject(form)) return form;
-  const out = pick(form, ['template', 'auto', 'sections']);
+  const out = pick(form, ['sections']);
+  if (typeof form.template === 'string') out.template = form.template;
+  if (typeof form.auto === 'boolean') out.auto = form.auto;
   if (Array.isArray(form.sections)) out.sections = form.sections.map((s) => (isObject(s) ? pick(s, SECTION_KEYS) : s));
   const feel = form.feel;
   out.feel = feel == null ? { ...FEEL_DEFAULTS } : isObject(feel) ? { ...FEEL_DEFAULTS, ...pick(feel, Object.keys(FEEL_DEFAULTS)) } : feel;
@@ -44,7 +46,7 @@ export function sectionAt(form, bar) {
 /** Index in `track.bars` für den Takt `barIndex`: mit Form beginnt jeder Teil bei 0 (die Form läuft im Kreis), sonst `barIndex mod bars.length`. */
 export function chordIndex(track, barIndex) {
   const n = track.bars.length;
-  if (!Array.isArray(track.form?.sections)) return barIndex % n;
+  if (!isValidForm(track.form)) return barIndex % n;
   const total = formLength(track.form);
   const hit = total > 0 ? sectionAt(track.form, barIndex % total) : null;
   return hit ? hit.barInSection % n : barIndex % n;
@@ -55,7 +57,8 @@ const inRange = (v, lo, hi) => typeof v === 'number' && Number.isFinite(v) && v 
 /** Meldet jeden Fehler der Form als `add('badForm', { reason })` (kurzes englisches Stichwort); wirft nie, gültig = keine Meldung. */
 export function checkForm(form, add) {
   if (form == null) return;
-  const bad = (reason) => add('badForm', { reason });
+  const seen = new Set(); // gleiche Meldung nur einmal (viele gleich kaputte Teile)
+  const bad = (reason) => { if (!seen.has(reason)) { seen.add(reason); add('badForm', { reason }); } };
   if (!isObject(form)) return bad('form');
   const { sections, feel } = form;
   if (feel != null) {
