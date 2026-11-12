@@ -11,6 +11,7 @@ const KEEP = new Set(['kick', 'hat', 'openHat']); // das Schlagzeug pausiert nie
 const STOP_TWO_BEATS = 0.6; // ab diesem Regler zwei Schläge Stille
 const CROSS = 0.01; // Ereignisse so kurz vor dem Stopp gehören zum Stopp (Jitter, Swing)
 const ROLL = { from: 0.45, to: 0.95 };
+const CRASH_FLOOR = 10 ** (-3 / 20); // der Crash wird nie leiser als -3 dB (die Samples sind ohnehin leise)
 
 const isSound = (e) => e.type === 'note' || e.type === 'hit';
 const removable = (e, layer) => e.layer === layer && isSound(e) && (layer !== 'drums' || !KEEP.has(e.name));
@@ -31,7 +32,7 @@ export function postProcess(events, track, bars, sections, rng) {
   const paused = new Map();
   for (const sec of sections) {
     for (let i = 3; i < sec.bars; i += 4) {
-      if (i === sec.bars - 1 && transitionAfter(sec) === 'stop') continue;
+      if (i === sec.bars - 1 && (sec.fillAtEnd || transitionAfter(sec) === 'stop')) continue; // Fill- und Stopp-Takt bleiben voll (vor der Ziehung: der Strom bleibt stabil)
       if (rng.next() >= pauses * (PAUSE_FACTOR[sec.kind] ?? 0)) continue;
       const bar = sec.start + i;
       const candidates = PAUSE_LAYERS.filter((l) => out.some((e) => e.bar === bar && removable(e, l)));
@@ -78,8 +79,8 @@ export function postProcess(events, track, bars, sections, rng) {
       .map((s) => ({ t: r6(bars[s.start].start), bar: s.start, beat: 0, type: 'hit', layer: 'drums', name: 'crash', vel: 0.9 }))];
   }
 
-  // (5) Pegel: Takt für Takt mal 10^(dB/20), nie über 1 (der Pegel ist höchstens 0 dB)
+  // (5) Pegel: Takt für Takt mal 10^(dB/20), nie über 1 (der Pegel ist höchstens 0 dB); der Crash höchstens um 3 dB gedämpft
   const gain = new Map();
   for (const sec of sections) for (let i = 0; i < sec.bars; i++) gain.set(sec.start + i, 10 ** (Math.min(0, levelAt(sec.resolved, i)) / 20));
-  return out.map((e) => (isSound(e) ? { ...e, vel: roundVel(e.vel * gain.get(e.bar)) } : e)).sort(byTime);
+  return out.map((e) => (isSound(e) ? { ...e, vel: roundVel(e.vel * (e.name === 'crash' ? Math.max(gain.get(e.bar), CRASH_FLOOR) : gain.get(e.bar))) } : e)).sort(byTime);
 }

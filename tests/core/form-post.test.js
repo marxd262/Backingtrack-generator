@@ -132,21 +132,23 @@ test('Pausen: höchstens eine Schicht je Takt, nie Bass, Schlagzeug behält Hi-H
       const base = buildEvents(mk(full, { dynamics: 0, pauses: 0 }, { seed }));
       const track = mk(full, { dynamics: 0, pauses }, { seed });
       const { sections } = info(track);
+      const stopBar = sections[4].start + sections[4].bars - 1; // letzter Takt vor dem Break (Stopp)
       const out = buildEvents(track);
-      const key = (e) => JSON.stringify(e);
+      const key = (e) => JSON.stringify({ ...e, dur: 0 }); // Noten vor dem Stopp werden gekürzt: dur zählt nicht
       const kept = new Set(out.map(key));
       const lost = base.filter((e) => isSound(e) && !kept.has(key(e)));
       const byBar = new Map();
       for (const e of lost) byBar.set(e.bar, [...(byBar.get(e.bar) ?? []), e]);
+      // im Takt vor dem Stopp fällt höchstens das Stoppfenster (die letzten zwei Schläge) weg, sonst nichts
+      assert.ok((byBar.get(stopBar) ?? []).every((e) => e.beat >= 2), 'nie im letzten Takt vor einem Stopp');
+      byBar.delete(stopBar);
       for (const [bar, es] of byBar) {
-        if (bar === 55) continue; // Stoppbreite hängt vom Regler ab // letzter Takt vor dem Stopp
         const sec = sectionOf(sections, bar);
         assert.equal(new Set(es.map((e) => e.layer)).size, 1, `Takt ${bar}: mehr als eine Schicht`);
         assert.ok(!es.some((e) => e.layer === 'bass'), 'Bass pausiert nicht');
         assert.ok(!es.some((e) => e.layer === 'drums' && KEEP.includes(e.name)), 'Hi-Hat/Kick bleiben');
         assert.equal((bar - sec.start) % 4, 3, `Takt ${bar}: nur jeder 4. Takt eines Teils`);
-              }
-      assert.ok(out.length - base.length <= 0);
+      }
       paused += byBar.size;
       eligible += sections.reduce((n, s) => n + (s.index === 4 ? Math.floor(s.bars / 4) - 1 : Math.floor(s.bars / 4)), 0);
     }
@@ -201,4 +203,32 @@ test('postProcess ist rein: Eingabe unverändert (auch eingefroren), neues Array
   const out = postProcess(frozen, t, bars, sections, createRng(5));
   assert.notEqual(out, frozen);
   assert.equal(JSON.stringify(frozen), before);
+});
+
+test('Crash bleibt hörbar: im Break bei Dynamik 1,3 mindestens 0,6, im Refrain 0,9', () => {
+  for (const seed of SEEDS.slice(0, 5)) {
+    const crashes = buildEvents(mk([['verse', 4], ['break', 4, { crash: true }], ['chorus', 4]], { dynamics: 1.3 }, { seed })).filter((e) => e.name === 'crash');
+    assert.deepEqual(crashes.map((e) => e.bar), [4, 8]);
+    assert.ok(crashes[0].vel >= 0.6 && crashes[0].vel < 0.9, `Break: ${crashes[0].vel}`);
+    assert.equal(crashes[1].vel, 0.9);
+  }
+});
+
+test('Pausen: nie im Fill-Takt, der Fill (Snare/Toms) bleibt erhalten', () => {
+  const parts = [['verse', 4], ['verse', 8], ['verse', 4], ['chorus', 8]]; // Strophe -> Strophe/Refrain: fill davor
+  let fills = 0;
+  for (const seed of SEEDS) {
+    const track = mk(parts, { dynamics: 0, pauses: 1 }, { seed });
+    const { sections } = info(track);
+    const events = buildEvents(track);
+    for (const s of sections.filter((x) => x.fillAtEnd)) {
+      const bar = s.start + s.bars - 1;
+      fills++;
+      assert.ok(events.some((e) => e.bar === bar && e.layer === 'drums' && e.type === 'hit' && !KEEP.includes(e.name)), `seed ${seed}: Fill in Takt ${bar} erhalten`);
+      const base = buildEvents(mk(parts, { dynamics: 0, pauses: 0 }, { seed }));
+      const sig = (es) => es.filter((e) => e.bar === bar && e.type !== 'marker').map((e) => JSON.stringify({ ...e, dur: 0 }));
+      assert.deepEqual(sig(events), sig(base), `seed ${seed}: Takt ${bar} unverändert`);
+    }
+  }
+  assert.ok(fills >= SEEDS.length * 3);
 });
