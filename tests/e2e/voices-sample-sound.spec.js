@@ -162,14 +162,15 @@ for (const [layer, variant, notes, checkPitch, cents = 15] of SAMPLES) {
       const { createInstruments } = await import('/audio/synth.js');
       const out = [];
       for (const [name, min, max] of list) {
-        // oneShot wirkt erst am Ende des Samples (bis etwa 4 s): lange Note, decay auf dem Maximum, damit das Abklingen den Unterschied nicht verdeckt
-        const [dur, seconds, extra] = name === 'oneShot' ? [5, 6, { decay: 10 }] : [0.5, 1, {}];
+        // oneShot wirkt erst am Ende des Samples (bis etwa 4 s) und nur bei Zonen mit Schleife (gedämpfte Gitarre: nur bis Ton 50): lange Note
+        // mit Ton 47 dazu, decay auf dem Maximum, damit das Abklingen den Unterschied nicht verdeckt
+        const [dur, seconds, extra, chord] = name === 'oneShot' ? [5, 6, { decay: 10 }, [47, 52, 59]] : [0.5, 1, {}, [52, 59, 64]];
         const run = async (value) => {
           const ctx = new OfflineAudioContext(1, seconds * 44100, 44100);
           const inst = createInstruments(ctx, { limiter: false, voices: { [layerName]: { id: 'sample', variant: variantName } }, tuning: { [tunableKey]: { ...extra, [name]: value } }, timbre: { master: { echo: 0, reverb: 0 } } });
           await inst.whenReady();
           inst.output.connect(ctx.destination);
-          for (const n of layerName === 'bass' ? [40] : [52, 59, 64]) inst.layers[layerName].trigger({ type: 'note', layer: layerName, midi: n, dur, vel: 0.8 }, 0.05);
+          for (const n of layerName === 'bass' ? [40] : chord) inst.layers[layerName].trigger({ type: 'note', layer: layerName, midi: n, dur, vel: 0.8 }, 0.05);
           return (await ctx.startRendering()).getChannelData(0);
         };
         const a = await run(min), b = await run(max);
@@ -206,6 +207,27 @@ for (const variant of GUITARS) {
     expect(r.oneShot, JSON.stringify(r)).toBeLessThan(1e-3); // Ende (letzte 1,5 s der Note) mindestens 60 dB unter dem Anfang
     // gedämpfte Gitarre: ihre Schleifen liegen im schon verklungenen Ende des Samples (gemessen mit Schleife 3,5e-6), dort gibt es keinen Dauerton
     if (variant !== 'muted') expect(r.looped, JSON.stringify(r)).toBeGreaterThan(Math.max(1e-3, 10 * r.oneShot));
+  });
+
+  test(`${k}: Note länger als das Sample (oneShot): kein Knacken am Sample-Ende, die letzten 10 ms davor sind fast still`, async ({ page }) => {
+    test.setTimeout(120_000);
+    const r = await page.evaluate(async ([v, tunableKey]) => {
+      const { loadPack } = await import('/audio/voices/sampler.js');
+      const { pickZone, playbackRate } = await import('/audio/voices/sample-zones.js');
+      const { packIdFor } = await import('/audio/voices/index.js');
+      const midi = 47; // in allen Gitarren eine Zone mit Schleife
+      const { meta } = await loadPack(packIdFor('chords', v));
+      const zone = pickZone(meta.zones, midi, 0.8), sample = meta.samples[zone.sample];
+      const end = 0.05 + sample.frames / sample.rate / playbackRate(zone, midi); // Sample-Ende im Render (ohne Zufallsverstimmung)
+      // decay auf dem Maximum, damit das zusätzliche Abklingen ein hartes Abreißen nicht verdeckt
+      const d = await window.__renderNote('chords', { midi, dur: end + 1, vel: 0.8, seconds: end + 0.5, voices: { chords: { id: 'sample', variant: v } }, tuning: { [tunableKey]: { decay: 10, humanCents: 0, humanDb: 0 } } });
+      let peak = 0, last = 0;
+      for (const x of d) peak = Math.max(peak, Math.abs(x));
+      for (let i = Math.floor((end - 0.01) * 44100); i < Math.floor(end * 44100); i++) last = Math.max(last, Math.abs(d[i]));
+      return { loop: zone.loop, end, peak, last, ratio: last / peak };
+    }, [variant, k]);
+    expect(r.loop, JSON.stringify(r)).toBe(true);
+    expect(r.ratio, JSON.stringify(r)).toBeLessThan(1e-3);
   });
 
   test(`${k}: weicher Anschlag dunkler und leiser als harter; mit softHz 20000 und velExp 1 nur leiser`, async ({ page }) => {

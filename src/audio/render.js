@@ -15,7 +15,8 @@ export const NOTE_LAYERS = LAYERS.filter((l) => l !== 'drums' && l !== 'percussi
 const FIRST = Math.round(SAMPLE_RATE * OFFSET); // Abtastwert des ersten Ereignisses
 
 // Rendert die ersten `seconds` Sekunden eines Tracks (Klang aus seinen Schlagworten), linker Kanal.
-// solo: nur diese Schicht hörbar, die anderen stumm geschaltet. mix: { levels, master } wie bei play (Reglerstellungen 0..1).
+// solo: nur diese Schicht hörbar, die anderen stumm geschaltet. mix: { levels, master } wie bei play (Reglerstellungen 0..1) und
+// tuning (Überschreibungen der Feinwerte, siehe tunables.js).
 async function renderLeft(trackInput, seconds, solo, limiter, mix) {
   const events = buildEvents(trackInput); // prüft den Track samt Schlagworten
   const ctx = new OfflineAudioContext(2, Math.ceil(SAMPLE_RATE * (OFFSET + seconds + TAIL)), SAMPLE_RATE);

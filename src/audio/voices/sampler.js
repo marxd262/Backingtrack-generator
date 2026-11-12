@@ -63,8 +63,8 @@ const MAX_RELEASE = 2; // s, die Presets haben bis zu 4,5 s (Pads würden in den
  * zusätzliches Abklingen für gezupfte Instrumente: die Presets halten ihren Schleifenton fast ohne Abfall, das klänge bei langen Noten wie eine Orgel.
  * `eq` ({ lowDb, midDb, midHz, highDb, highHz }, oder null) entzerrt den Klang: Tiefenregal bei 200 Hz, Glocke bei midHz, Höhenregal ab highHz; Stufen
  * mit weniger als 0,05 dB entfallen; davor ein Hochpass bei 50 Hz. Nach dem Ausklingen stoppt die Quelle. `zone` (optional) spielt diese Zone statt
- * der nach Ton und Anschlag gewählten (Schläge: sample-hits.js). `cents` verstimmt zusätzlich. `oneShot` spielt nie die Schleife: das Sample
- * klingt an seinem Ende aus; reicht die Note bis dahin, beginnt das Ausklingen spätestens `fadeOut` (s) vor dem Ende und endet mit ihm.
+ * der nach Ton und Anschlag gewählten (Schläge: sample-hits.js). `cents` verstimmt zusätzlich. `oneShot` spielt nie die Schleife einer Zone mit
+ * Schleife: das Sample klingt an seinem Ende aus (Zonen ohne Schleife bleiben unverändert); reicht die Note bis dahin, beginnt das Ausklingen spätestens `fadeOut` (s) vor dem Ende und endet mit ihm.
  */
 export function playNote(ctx, out, t, { pack, midi, dur, vel, zone = pickZone(pack.meta.zones, midi, vel), gain = 1, timeScale = 1, filter = 20000, naturalDecay = 0, eq = null, cents = 0, oneShot = false, fadeOut = 0.15 }) {
   if (!zone) return;
@@ -81,7 +81,7 @@ export function playNote(ctx, out, t, { pack, midi, dur, vel, zone = pickZone(pa
   const attack = Math.max(0.003, zone.attack * timeScale), decay = Math.max(0.001, zone.decay * timeScale);
   let release = Math.min(MAX_RELEASE, Math.max(MIN_RELEASE, zone.release * timeScale));
   let noteEnd = t + (Number.isFinite(dur) ? Math.max(0.02, dur) : 0.5);
-  if (oneShot) { // ohne Schleife ist am Sample-Ende Stille: vorher ausklingen, statt abzureißen
+  if (oneShot && zone.loop) { // ohne Schleife ist am Sample-Ende Stille: vorher ausklingen, statt abzureißen (Zonen ohne Schleife klingen wie bisher)
     const sampleEnd = t + sample.frames / sample.rate / rate;
     noteEnd = Math.min(noteEnd, Math.max(t + 0.02, sampleEnd - fadeOut));
     release = Math.min(release, Math.max(MIN_RELEASE, sampleEnd - noteEnd));

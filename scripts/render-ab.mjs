@@ -34,9 +34,10 @@ async function main() {
   const { start } = await import('./serve.js');
   const outDir = resolve(process.argv[2] ?? fileURLToPath(new URL('../.superpowers/audio-ab', import.meta.url)));
   await mkdir(outDir, { recursive: true });
-  const server = await start(0);
-  const browser = await chromium.launch();
+  let server, browser; // beide im try: scheitert der Start des Browsers, wird der Server trotzdem geschlossen
   try {
+    server = await start(0);
+    browser = await chromium.launch();
     const page = await browser.newPage();
     const errors = [];
     page.on('pageerror', (err) => errors.push(err.message));
@@ -79,8 +80,8 @@ async function main() {
     }
     if (errors.length) { console.error(errors.join('\n')); process.exitCode = 1; }
   } finally {
-    await browser.close();
-    server.close();
+    await browser?.close();
+    server?.close();
   }
 }
 
