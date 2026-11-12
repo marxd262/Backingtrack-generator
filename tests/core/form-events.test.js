@@ -219,7 +219,7 @@ test('Eigenschaften: zufällige Formen halten den Vertrag', () => {
     if (parts.reduce((x, p) => x + p.bars, 0) > 160) parts.forEach((p) => { if (p.bars === 64) p.bars = 5; }); // schnell genug bleiben
     const style = rng.pick(STYLES), meter = rng.pick(METERS), randomness = rng.pick([0, 0.5, 1]), layers = rng.pick(LAYER_SETS);
     // complexity 0 senkt die Synkopen auf 0: ohne Zufallsstreuung ist das Muster einer Phrase festgelegt
-    const track = { ...mk({ seed: n + 1, tags: style.tags, bpm: style.bpm, layers, meter, complexity: 0 }), form: { sections: parts, feel: { randomness } } };
+    const track = { ...mk({ seed: n + 1, tags: style.tags, bpm: style.bpm, layers, meter, complexity: 0 }), form: { sections: parts, feel: { randomness, pauses: 0 } } };
     const ctx = `#${n} ${style.id} ${meter} r${randomness} ${parts.map((p) => p.type + p.bars)}`;
     const ev = buildEvents(track);
     const timeline = chordTimeline(track);
@@ -244,9 +244,9 @@ test('Eigenschaften: zufällige Formen halten den Vertrag', () => {
     for (const e of ev.filter((x) => x.layer === 'bass' && x.beat === 0)) {
       assert.equal(e.midi % 12, noteToPc(timeline[e.bar].chord.root), `${ctx}: Bass-Grundton in Takt ${e.bar}`);
     }
-    // Zufall 0 (nur Stile ohne Synkopen-Streuung nach complexity 0: sonst würfeln Zusatzstabs): Teile mit gleichbleibender Dichte spielen in allen Phrasen dasselbe Muster (Takt j und j + 4, ohne den Fill-Takt)
+    // Zufall 0 (nur Stile ohne Synkopen-Streuung nach complexity 0: sonst würfeln Zusatzstabs): Teile mit gleichbleibender Dichte spielen in allen Phrasen dasselbe Muster (Takt j und j + 4, ohne den Fill-Takt; ohne Pausen und Crash, die kommen aus der Nachbearbeitung)
     if (randomness === 0 && ['rock', 'country', 'psych'].includes(style.id)) {
-      const sig = (bar, layer) => ev.filter((e) => e.bar === bar && e.layer === layer).map((e) => `${e.name ?? ''}@${e.beat}`).sort().join();
+      const sig = (bar, layer) => ev.filter((e) => e.bar === bar && e.layer === layer && e.name !== 'crash').map((e) => `${e.name ?? ''}@${e.beat}`).sort().join();
       parts.forEach((p, i) => {
         if (p.type === 'build' || p.type === 'outro') return;
         for (let j = starts[i]; j + 4 < starts[i] + p.bars - 1; j++) {

@@ -10,7 +10,8 @@ import { LAYER_IDS, LAYERS } from './layers.js';
 import { buildFormArrangement, withSection, phrasesOf } from './form-arrange.js';
 import { densityAt } from './form-types.js';
 import { grooveFor, grooveCycle, levelOf, applyComplexity } from './grooves.js';
-import { at, note, humanVel } from './event-helpers.js';
+import { at, note, humanVel, byTime } from './event-helpers.js';
+import { postProcess } from './form-post.js';
 import { leadPlayer } from './lead.js';
 import { percussionPlayer } from './percussion.js';
 
@@ -151,8 +152,6 @@ const PLAYERS = {
   percussion: percussionPlayer,
 };
 
-const RANK = { chord: 0, marker: 1 };
-
 /** Track -> Ereignisse sortiert nach t (bei Gleichstand chord, marker, Rest). Wirft bei ungültigem Track. */
 export function buildEvents(input) {
   const track = checkedTrack(input);
@@ -197,5 +196,7 @@ export function buildEvents(input) {
       }
     }
   }
-  return events.sort((x, y) => x.t - y.t || (RANK[x.type] ?? 2) - (RANK[y.type] ?? 2));
+  events.sort(byTime);
+  // Songform: Pegel, Wirbel, Stopps, Pausen und Crash auf dem fertigen Strom (eigener Zufallszweig, Tracks ohne Form bleiben unberührt)
+  return form ? postProcess(events, track, bars, sections, master.fork('form')) : events;
 }

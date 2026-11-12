@@ -14,9 +14,16 @@ export function at(b, step, rng, swing) {
   return r6(clamp(t, b.start, b.end - END_GAP));
 }
 
+/** Lautstärke auf [0.05, 1] geklemmt, auf drei Stellen gerundet. */
+export const roundVel = (x) => r3(clamp(x, 0.05, 1));
+
 /** Lautstärke um ±6 % gestreut, in [0.05, 1]. Zieht genau eine Zufallszahl. */
-export const humanVel = (base, rng) => r3(clamp(base * (0.94 + rng.next() * 0.12), 0.05, 1));
+export const humanVel = (base, rng) => roundVel(base * (0.94 + rng.next() * 0.12));
 
 /** Noten-Ereignis; die Dauer endet spätestens am Taktende. */
 export const note = (b, layer, step, t, midi, vel, dur) =>
   ({ t, bar: b.index, beat: step / b.sub, type: 'note', layer, midi, vel, dur: r6(Math.min(dur, b.end - t)) });
+
+const RANK = { chord: 0, marker: 1 };
+/** Sortierung des Ereignisstroms: nach t, bei Gleichstand chord, marker, Rest. */
+export const byTime = (x, y) => x.t - y.t || (RANK[x.type] ?? 2) - (RANK[y.type] ?? 2);
