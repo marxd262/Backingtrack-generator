@@ -1,5 +1,6 @@
 // Gruppe "Songform" der Spielseite (echte Seite /ui/index.html): Vorlage, Zielgröße, vier Regler, Zustand der Form.
 import { test, expect } from '@playwright/test';
+import { countingScript, recordPositions, positionsSince, shownBar, expectContinuous, sets, contexts } from './count-helpers.js';
 
 const FEEL = ['structure', 'dynamics', 'pauses', 'randomness'];
 const RAW_KEY = /\b(ui|form|group)\.[A-Za-z.]+\b/;
@@ -13,16 +14,7 @@ test.beforeEach(async ({ page }) => {
   problems = [];
   page.on('console', (msg) => msg.type() === 'error' && problems.push(`console: ${msg.text()}`));
   page.on('pageerror', (err) => problems.push(`pageerror: ${err.message}`));
-  await page.addInitScript(() => {
-    window.__audioContexts = 0;
-    const Original = window.AudioContext;
-    window.AudioContext = class extends Original {
-      constructor(...args) {
-        super(...args);
-        window.__audioContexts++;
-      }
-    };
-  });
+  await page.addInitScript(countingScript);
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto('/ui/index.html');
   await expect(page.locator('#go')).toHaveText(/\S/);
@@ -60,7 +52,8 @@ test('beim Laden hat der Track eine Form: Summe gleich Länge, Vorlage Auto, Zie
   await expect(target(page)).toHaveValue('96');
   expect(await target(page).locator('option').evaluateAll((os) => os.map((o) => o.value))).toEqual(['24', '32', '48', '64', '96', '128', '192']);
   await expect(page.locator('#length-label')).toHaveText('Zielgröße');
-  expect(await template(page).locator('option').allTextContents()).toEqual(['Auto', 'Jam', 'Pop', 'Build & Drop', 'Blues', 'Rock', 'Ohne Form']);
+  // Auto nennt die gewürfelte Vorlage dazu (Funk würfelt Jam)
+  expect(await template(page).locator('option').allTextContents()).toEqual(['Auto (Jam)', 'Jam', 'Pop', 'Build & Drop', 'Blues', 'Rock', 'Ohne Form']);
 });
 
 test('Gruppe Songform: offen, nach Rhythmus, per Tastatur erreichbar; Regler zeigen Prozentwerte', async ({ page }) => {
@@ -147,20 +140,156 @@ test('Ohne Form: Regler ausgegraut, Länge gleich Zielgröße, Reglerwerte kehre
   expect((await form(page)).feel.randomness).toBeCloseTo(0.8);
 });
 
-test('Regler während der Wiedergabe: sie läuft weiter, ein AudioContext; neue Zielgröße startet an gleicher Stelle neu', async ({ page }) => {
+test('Ohne Form: Beschriftung abgeblendet, ein Hinweis nennt den Grund; mit Form wieder weg', async ({ page }) => {
+  const hint = page.locator('#form-feel-hint');
+  await expect(hint).toBeHidden();
+  await template(page).selectOption('off');
+  await expect(hint).toBeVisible();
+  await expect(hint).toHaveText('Die Regler wirken nur mit einer Vorlage.');
+  for (const name of FEEL) await expect(page.locator(`label[for="form-${name}"]`)).toHaveClass(/\boff\b/);
+  await page.locator('[data-lang="en"]').first().click();
+  await expect(hint).toHaveText('The sliders only work with a template.');
+  await page.locator('[data-lang="de"]').first().click();
+  await template(page).selectOption('pop');
+  await expect(hint).toBeHidden();
+  await expect(template(page).locator('option').first()).toHaveText('Auto');
+  for (const name of FEEL) await expect(page.locator(`label[for="form-${name}"]`)).not.toHaveClass(/\boff\b/);
+});
+
+test('Regler und gleich lange Form während der Wiedergabe: kein Neustart; neue Zielgröße: ein Neustart an gleicher Stelle', async ({ page }) => {
+  await setVariant(page, 1); // fest: Funk gibt in Jam und Pop genau 96 Takte
+  await page.locator('#tuning-tempo').fill('200');
   await page.locator('#play-go').click();
   await expect(page.locator('#play-go')).toHaveText('Stopp');
-  await expect(position(page)).toHaveText(/^Takt \d+ von 96$/, { timeout: BAR_TIMEOUT });
-  await slider(page, 'randomness').fill('90');
-  await slider(page, 'pauses').fill('10');
-  await slider(page, 'dynamics').fill('100');
-  await slider(page, 'structure').fill('20'); // Loslassen würfelt neu, die Summe bleibt 96
+  await expect.poll(() => shownBar(page), { timeout: BAR_TIMEOUT }).toBeGreaterThanOrEqual(3);
+  await recordPositions(page);
+  expect(await sets(page)).toBe(1);
+  expect(await contexts(page)).toBe(1);
+
+  const live = async (label, change) => {
+    const before = await shownBar(page);
+    await positionsSince(page);
+    await change();
+    await expectContinuous(page, before, label);
+    expect(await sets(page), `${label}: kein neuer Instrumentensatz`).toBe(1);
+    expect(await contexts(page), label).toBe(1);
+    await expect(page.locator('#play-go')).toHaveText('Stopp');
+  };
+  await live('Zufall', () => slider(page, 'randomness').fill('90'));
+  await live('Pausen', () => slider(page, 'pauses').fill('10'));
+  await live('Dynamik', () => slider(page, 'dynamics').fill('100'));
+  await live('Struktur', () => slider(page, 'structure').fill('20')); // Loslassen würfelt neu, die Summe bleibt 96
   expect((await form(page)).feel).toMatchObject({ structure: 0.2, dynamics: 1, pauses: 0.1, randomness: 0.9 });
-  await expect(page.locator('#play-go')).toHaveText('Stopp');
+  await live('Vorlage Pop', async () => {
+    await template(page).selectOption('pop');
+    expect(sum(await form(page))).toBe(96);
+  });
+
+  // neue Zielgröße: andere Länge, also genau ein Neustart (ein Instrumentensatz mehr), an der gleichen Stelle
+  const before = await shownBar(page);
+  await positionsSince(page);
   await target(page).selectOption('48');
   await expect(position(page)).toHaveText(/^Takt \d+ von 48$/, { timeout: BAR_TIMEOUT });
+  await expectContinuous(page, before, 'Zielgröße 48');
+  expect(await sets(page)).toBe(2);
+  expect(await contexts(page)).toBe(1);
   await expect(page.locator('#play-go')).toHaveText('Stopp');
-  expect(await page.evaluate(() => window.__audioContexts)).toBe(1);
+  await page.locator('#play-go').click();
+});
+
+test('mit Form läuft die Akkordfolge in jedem Teil neu: Anzeige, aria-current und nächster Akkord stimmen an jedem Takt, auch an der Naht', async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.evaluate(async () => {
+    const { state } = await import('/ui/state.js');
+    const names = [['A', 'min'], ['D', 'min'], ['E', 'maj'], ['F', 'maj'], ['G', 'maj']];
+    state.track.bars = names.map(([root, quality]) => ({ chord: { root, quality }, beats: 4 }));
+    // kleine Form 8 + 8 + 8: fünf Akkorde passen in keinen Teil glatt, jede Teilgrenze bricht den Kreis
+    state.track.form = { template: 'pop', auto: false, feel: { ...state.formFeel }, sections: [8, 8, 8].map((bars, i) => ({ type: i === 1 ? 'chorus' : 'verse', bars })) };
+    state.track.length = 24;
+    state.formTarget = 24;
+  });
+  await page.locator('#tuning-tempo').fill('200');
+  await page.locator('#play-go').click();
+  const rows = new Map();
+  const deadline = Date.now() + 90_000;
+  while (Date.now() < deadline) {
+    const r = await page.evaluate(async () => {
+      const { state, chordName } = await import('/ui/state.js');
+      const { chordIndex } = await import('/core/form.js');
+      const c = state.current;
+      if (!c) return null;
+      const bars = state.track.bars;
+      const idx = chordIndex(state.track, c.bar);
+      return {
+        bar: c.bar,
+        now: document.getElementById('play-now').textContent,
+        wantNow: chordName(bars[idx].chord),
+        next: document.getElementById('play-next').textContent,
+        wantNext: `Als Nächstes: ${chordName(bars[chordIndex(state.track, c.bar + 1)].chord)}`,
+        aria: [...document.querySelectorAll('#progression button')].findIndex((b) => b.getAttribute('aria-current') === 'true'),
+        idx,
+      };
+    });
+    if (r) rows.set(r.bar, r);
+    if (r && r.bar >= 26) break;
+    await page.waitForTimeout(80);
+  }
+  await page.locator('#play-go').click();
+  const seen = [...rows.keys()];
+  for (const bar of [7, 8, 15, 16, 23, 24, 25]) expect(seen, `Takt ${bar} gesehen`).toContain(bar);
+  for (const r of rows.values()) {
+    expect(r.now, `Takt ${r.bar}: Akkord`).toBe(r.wantNow);
+    expect(r.next, `Takt ${r.bar}: nächster Akkord`).toBe(r.wantNext);
+    expect(r.aria, `Takt ${r.bar}: aria-current`).toBe(r.idx);
+  }
+});
+
+// Profile bringen bis Aufgabe 8 nur `rhythm.length` mit, keine Form: die Länge richtet sich nach der Form im Zustand
+const shown = (page) => page.evaluate(async () => {
+  const { state } = await import('/ui/state.js');
+  const f = state.track.form;
+  return { length: state.track.length, sum: f ? f.sections.reduce((n, x) => n + x.bars, 0) : null, target: state.formTarget };
+});
+
+test('Profil bei Länge 96 gespeichert, Zielgröße 48, Profil laden: Länge folgt der Form, Wiedergabe läuft ohne Fehler', async ({ page }) => {
+  await page.locator('#profiles-btn').click();
+  await page.getByRole('treeitem', { name: 'Aktuelle Sitzung', exact: true }).click();
+  await page.getByLabel('Name des Profils').fill('P96');
+  await page.locator('#profile-save').click();
+  await page.locator('#profiles-pop').evaluate((el) => el.hidePopover());
+  await target(page).selectOption('48');
+  await page.locator('#tuning-tempo').fill('200');
+  await page.locator('#play-go').click();
+  await expect.poll(() => shownBar(page), { timeout: BAR_TIMEOUT }).toBeGreaterThanOrEqual(3);
+  await page.locator('#profiles-btn').click();
+  await page.getByRole('treeitem', { name: 'P96', exact: true }).click();
+  await page.locator('#profile-load').click();
+  await page.locator('#profiles-pop').evaluate((el) => el.hidePopover());
+  const after = await shown(page);
+  expect(after.length).toBe(after.sum);
+  expect(Math.abs(after.sum - 48)).toBeLessThanOrEqual(4);
+  await expect(target(page)).toHaveValue('48');
+  await expect(page.locator('#play-go')).toHaveText('Stopp');
+  await expect(position(page)).toHaveText(new RegExp(`^Takt \\d+ von ${after.sum}$`), { timeout: BAR_TIMEOUT });
+  await page.locator('#play-go').click();
+});
+
+test('altes Profil mit rhythm.length 48 in die Standardform (96) geladen: stimmige Anzeige, kein RangeError, Wiedergabe startet', async ({ page }) => {
+  await page.evaluate(async () => {
+    const { state } = await import('/ui/state.js');
+    const { applyParts } = await import('/core/profile-parts.js');
+    const { readSession, writeSession } = await import('/ui/profile-session.js');
+    const r = applyParts(readSession(state), { rhythm: { length: 48 } });
+    if (!r.ok) throw new Error('Profil nicht anwendbar');
+    writeSession(state, r.session);
+  });
+  const after = await shown(page);
+  expect(after.length).toBe(after.sum);
+  await expect(target(page)).toHaveValue(String(after.target));
+  await page.locator('#tuning-tempo').fill('200');
+  await page.locator('#play-go').click();
+  await expect(page.locator('#play-go')).toHaveText('Stopp');
+  await expect(position(page)).toHaveText(new RegExp(`^Takt \\d+ von ${after.sum}$`), { timeout: BAR_TIMEOUT });
   await page.locator('#play-go').click();
 });
 
@@ -169,7 +298,7 @@ test('Sprachwechsel beschriftet Gruppe, Auswahl und Regler neu', async ({ page }
   await expect(page.locator('details[data-group="form"] > summary')).toHaveText('Song form');
   await expect(page.locator('label[for="form-template"]')).toHaveText('Template');
   await expect(page.locator('#length-label')).toHaveText('Target size');
-  expect(await template(page).locator('option').allTextContents()).toEqual(['Auto', 'Jam', 'Pop', 'Build & Drop', 'Blues', 'Rock', 'No form']);
+  expect(await template(page).locator('option').allTextContents()).toEqual(['Auto (Jam)', 'Jam', 'Pop', 'Build & Drop', 'Blues', 'Rock', 'No form']);
   await expect(target(page).locator('option').first()).toHaveText('24 bars');
   await expect(page.locator('label[for="form-randomness"]')).toHaveText('Randomness');
   await expect(page.locator('#form-structure-out')).toHaveText('60%');

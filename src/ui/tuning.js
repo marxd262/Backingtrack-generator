@@ -4,6 +4,7 @@
 import { buildEvents, t } from '../index.js';
 import { $, LAYERS, ALL_LAYERS, state, layoutStorage, chordName, pressed, setText } from './state.js';
 import { saveLayout } from './layout-state.js';
+import { loopBars } from './position.js';
 import { nextDistinctChord } from '../core/fretboard.js';
 import { createFretboard, chordSentence } from './fretboard.js';
 import { buildTags, renderTags, toggleTag } from './tags-ui.js';
@@ -79,7 +80,7 @@ export function initTuning({ render, restartIfPlaying, toggleLayer, applyLive })
   function drawCanvases() {
     if (state.page !== 'play') return;
     const { events, starts } = laneEvents();
-    const sec = state.current ? starts[state.current.bar % state.track.length] ?? 0 : 0;
+    const sec = state.current ? starts[state.current.bar % loopBars(state.track)] ?? 0 : 0;
     drawLanes($('lanes'), events, sec, state.track.layers);
     if (wheelShown()) wheel.update(wheelState());
   }

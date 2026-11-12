@@ -115,6 +115,7 @@ export default {
   'group.form': 'Song form',
   'ui.formTemplate': 'Template',
   'ui.formTarget': 'Target size',
+  'ui.formFeelOff': 'The sliders only work with a template.',
   'ui.formFeelValue': '{n}% (default {def}%)',
   'form.template.auto': 'Auto',
   'form.template.jam': 'Jam',

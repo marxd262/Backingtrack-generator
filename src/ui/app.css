@@ -295,6 +295,8 @@ main {
 .group[open] > summary::before { content: "▾" / ""; }
 .group > summary .label { margin: 0; color: var(--ink); font-size: 1rem; }
 .group[open] { padding-bottom: 8px; }
+.settings .label.off { color: var(--ink-soft); }
+.tempo-row input:disabled { opacity: 0.5; }
 .sub-label { margin: 8px 0 4px; color: var(--ink-soft); font-size: 0.85rem; }
 #add-qualities .chips { margin-bottom: 4px; }
 #add-qualities .group { border-top-style: dashed; }

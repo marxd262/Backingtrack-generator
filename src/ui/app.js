@@ -1,6 +1,6 @@
 // Start- und Spielseite: ein Zustandsobjekt (state.js), render() schreibt daraus alle Texte und Attribute neu.
 import { play, STYLE_PRESETS, validateTrack, t, setLanguage } from '../index.js';
-import { positionLabel, chordAtBar } from './position.js';
+import { positionLabel, chordAtBar, loopBars } from './position.js';
 import { $, LAYERS, ALL_LAYERS, state, layoutStorage, chordName, rollVariant, preset, pressed, setText, setAttr, saveLang, deriveBars, applyStyle, rollNewForm, setFormTemplate } from './state.js';
 import { saveLayout } from './layout-state.js';
 import { initTuning } from './tuning.js';
@@ -67,7 +67,7 @@ function restartIfPlaying({ inPlace = false } = {}) {
   if (!state.playing) return;
   const current = inPlace ? state.current : null;
   stop();
-  start(current ? current.bar % state.track.length : 0);
+  start(current ? current.bar % loopBars(state.track) : 0); // nie hinter dem Ende (play wirft sonst RangeError)
   // derselbe Takt beginnt neu: Taktzeile, Verlauf und Griffbrett bleiben dort, statt bis zum ersten onBar leer zu sein;
   // der Akkord kommt aus der (bei einer neuen Variante anderen) Folge
   if (current && state.playing) state.current = { ...current, chord: chordAtBar(state.track, current.bar) };
@@ -286,7 +286,7 @@ function render() {
   if (document.activeElement !== $('variant') && $('variant').value !== String(track.seed)) $('variant').value = String(track.seed);
   setText($('chords'), track.bars.map((b) => chordName(b.chord)).join(' – '));
   const now = current ? chordName(current.chord) : '';
-  const bar = current ? positionLabel(current.bar, track.length) : '';
+  const bar = current ? positionLabel(current.bar, loopBars(track)) : '';
   const message = errors.map((e) => t(`err.${e.code}`, e.params)).join(' ');
   for (const id of ['go', 'play-go']) {
     setText($(id), t(playing ? 'ui.stop' : 'ui.go'));

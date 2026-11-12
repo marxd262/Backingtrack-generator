@@ -1,6 +1,6 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { positionLabel, chordAtBar } from '../../src/ui/position.js';
+import { positionLabel, chordAtBar, loopBars } from '../../src/ui/position.js';
 import { setLanguage } from '../../src/i18n/index.js';
 
 after(() => setLanguage('de'));
@@ -31,4 +31,11 @@ test('chordAtBar: mit Form beginnt die Folge in jedem Teil neu, ohne Form läuft
   assert.equal(chordAtBar(withForm, 6).root, 'C');
   assert.equal(chordAtBar(withForm, 12).root, 'A'); // zweiter Durchlauf zählt weiter
   assert.equal(chordAtBar({ bars, length: 8 }, 4).root, 'B');
+});
+
+test('loopBars: mit gültiger Form die Summe der Teile (auch bei abweichender length), sonst length', () => {
+  const form = { template: 'pop', sections: [{ type: 'verse', bars: 8 }, { type: 'chorus', bars: 8 }], feel: {} };
+  assert.equal(loopBars({ bars: [], length: 48, form }), 16);
+  assert.equal(loopBars({ bars: [], length: 48 }), 48);
+  assert.equal(loopBars({ bars: [], length: 48, form: { sections: [] } }), 48);
 });

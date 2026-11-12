@@ -2,6 +2,7 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { state, formChoice, rollNewForm, setFormTemplate, setFormTarget, setFormFeel } from '../../src/ui/state.js';
+import { writeSession } from '../../src/ui/profile-session.js';
 import { laneKey } from '../../src/ui/lanes.js';
 import { formLength, isValidForm } from '../../src/core/form.js';
 import { FEEL_DEFAULTS } from '../../src/core/form-types.js';
@@ -94,4 +95,17 @@ test('laneKey ändert sich mit Form, Aufgaben, Stimmen und Vielfalt, nicht mit T
     assert.notEqual(laneKey({ ...base, ...change }), k, Object.keys(change)[0]);
   }
   assert.notEqual(laneKey({ ...base, form }), laneKey({ ...base, form: { ...form, feel: { ...FEEL_DEFAULTS, pauses: 1 } } }));
+});
+
+test('writeSession: mit Form bestimmt die Summe die Länge, Zielgröße und Regler folgen der Form', () => {
+  setFormTemplate('auto');
+  const form = structuredClone(state.track.form);
+  form.feel = { ...form.feel, randomness: 0.9 };
+  // ein Profil von früher bringt nur rhythm.length mit
+  const session = { track: { ...structuredClone(state.track), form, length: 48 }, scale: state.scale, style: state.style, chordColor: state.chordColor, chordColorFromStyle: true, mix: state.mix };
+  state.formTarget = 48;
+  writeSession(state, session);
+  assert.equal(state.track.length, 96);
+  assert.equal(state.formTarget, 96);
+  assert.equal(state.formFeel.randomness, 0.9);
 });

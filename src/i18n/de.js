@@ -115,6 +115,7 @@ export default {
   'group.form': 'Songform',
   'ui.formTemplate': 'Vorlage',
   'ui.formTarget': 'Zielgröße',
+  'ui.formFeelOff': 'Die Regler wirken nur mit einer Vorlage.',
   'ui.formFeelValue': '{n} % (Standard {def} %)',
   'form.template.auto': 'Auto',
   'form.template.jam': 'Jam',

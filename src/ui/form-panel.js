@@ -60,17 +60,20 @@ export function initFormPanel({ render, restartIfPlaying, applyLive }) {
     const { track, formTarget } = state;
     const choice = formChoice();
     const on = choice !== 'off';
-    for (const o of template.options) setText(o, t(`form.template.${o.value}`));
+    // Auto nennt die gewürfelte Vorlage dazu: "Auto (Pop)"
+    for (const o of template.options) setText(o, o.value === 'auto' && track.form?.auto ? `${t('form.template.auto')} (${t(`form.template.${track.form.template}`)})` : t(`form.template.${o.value}`));
     if (template.value !== choice) template.value = choice;
     setText($('length-label'), t(on ? 'ui.formTarget' : 'ui.length'));
     for (const o of target.options) setText(o, t('ui.barsCount', { n: o.value }));
     const shown = String(on ? formTarget : track.length);
     if (target.value !== shown) target.value = shown;
+    if ($('form-feel-hint').hidden !== on) $('form-feel-hint').hidden = on;
     const feel = track.form?.feel ?? state.formFeel;
     for (const [name, el] of sliders) {
       const percent = String(Math.round(feel[name] * 100));
       if (el.value !== percent) el.value = percent;
       if (el.disabled === on) el.disabled = !on;
+      $(`form-${name}-label`).classList.toggle('off', !on);
       const text = t('ui.percent', { n: percent });
       setText($(`form-${name}-out`), text);
       setAttr(el, 'aria-valuetext', t('ui.formFeelValue', { n: percent, def: Math.round(FEEL_DEFAULTS[name] * 100) }));

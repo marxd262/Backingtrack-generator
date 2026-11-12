@@ -3,6 +3,7 @@ import { test, expect } from '@playwright/test';
 import { addChordByName } from './chord-helpers.js';
 import { chooseStyle, currentStyle } from './style-helpers.js';
 import { layoutWheel } from '../../src/ui/wheel-geometry.js';
+import { countContexts, recordPositions, positionsSince, shownBar, expectContinuous } from './count-helpers.js';
 import { STYLE_PRESETS, TAG_CATEGORIES } from '../../src/core/tags.js';
 
 const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view|group|timbre|chord|chordGroup|chordColor|groove|meter)\.[A-Za-z.]+$/;
@@ -194,6 +195,7 @@ test('Tempo in der Leiste Klang ändert das Tempo im Satz', async ({ page }) => 
 });
 
 test('Zielgröße ändert die Gesamtzahl in der Taktzeile, auch während der Wiedergabe', async ({ page }) => {
+  await countContexts(page);
   await openPlayPage(page);
   const length = page.locator('#length');
   await expect(length).toHaveValue('96');
@@ -201,9 +203,17 @@ test('Zielgröße ändert die Gesamtzahl in der Taktzeile, auch während der Wie
   await length.selectOption('48');
   await playFast(page);
   await expect(position(page)).toHaveText('Takt 1 von 48');
+  await expect.poll(() => shownBar(page), { timeout: BAR_TIMEOUT }).toBeGreaterThanOrEqual(3);
+  await recordPositions(page);
+  const before = await shownBar(page);
+  await positionsSince(page);
+  expect(await page.evaluate(() => window.__instrumentSets)).toBe(1);
   await length.selectOption('24');
-  // Längenänderung startet an der gleichen Position neu (nicht ab Takt 1)
+  // Längenänderung startet an der gleichen Position neu (neuer Instrumentensatz, gleicher AudioContext), nicht ab Takt 1
   await expect(position(page)).toHaveText(/^Takt \d+ von 24$/, { timeout: BAR_TIMEOUT });
+  await expectContinuous(page, before, 'Zielgröße 24');
+  expect(await page.evaluate(() => window.__instrumentSets)).toBe(2);
+  expect(await page.evaluate(() => window.__audioContexts)).toBe(1);
   await playGo(page).click();
 });
 
@@ -482,49 +492,6 @@ test('Werksprofile: jeder Stil wählt genau seine Schlagworte in allen zehn Grup
   }
 });
 
-// Zählt erzeugte AudioContexts (window.__audioContexts) und Instrumentensätze (window.__instrumentSets, je einer hat genau einen
-// Faltungshall) ab dem nächsten Laden: ein Neustart der Wiedergabe baut einen neuen Satz, eine Live-Änderung nicht
-async function countContexts(page) {
-  await page.addInitScript(() => {
-    window.__audioContexts = 0;
-    window.__instrumentSets = 0;
-    const convolver = BaseAudioContext.prototype.createConvolver;
-    BaseAudioContext.prototype.createConvolver = function (...args) {
-      window.__instrumentSets++;
-      return convolver.apply(this, args);
-    };
-    const Original = window.AudioContext;
-    window.AudioContext = class extends Original {
-      constructor(...args) {
-        super(...args);
-        window.__audioContexts++;
-      }
-    };
-  });
-  await page.reload();
-  await expect(page.locator('#go')).toHaveText(/\S/);
-}
-
-// Zeichnet jeden Text der Taktzeile auf (window.__positions), auch kurze Zwischenstände wie die leere Zeile beim Neustart
-const recordPositions = (page) => page.evaluate(() => {
-  window.__positions = [];
-  const el = document.querySelector('#play-position');
-  new MutationObserver(() => window.__positions.push(el.textContent)).observe(el, { childList: true, characterData: true, subtree: true });
-});
-const positionsSince = async (page) => page.evaluate(() => window.__positions.splice(0));
-const shownBar = async (page) => Number((await position(page).textContent()).match(/^Takt (\d+) von \d+$/)?.[1] ?? NaN);
-
-// Ein reines Klang-Schlagwort wirkt live ohne Neustart: die Taktzeile wird nie leer (ein Neustart leerte sie kurz),
-// springt nie zurück und läuft weiter
-async function expectContinuous(page, before, label) {
-  await expect.poll(() => shownBar(page), { message: label, timeout: BAR_TIMEOUT }).toBeGreaterThan(before);
-  const texts = await positionsSince(page);
-  expect(texts.every(Boolean), `${label}: Taktzeile war leer: ${JSON.stringify(texts)}`).toBe(true);
-  const shown = texts.map((text) => Number(text.match(/^Takt (\d+) von/)[1]));
-  expect(shown.length, label).toBeGreaterThan(0);
-  for (const bar of shown) expect(bar, `${label}: ${shown}`).toBeGreaterThanOrEqual(before);
-}
-
 test('Klang-Schlagwort während der Wiedergabe: läuft ohne Neustart weiter, genau ein Player, kein neuer AudioContext', async ({ page }) => {
   await countContexts(page);
   await openPlayPage(page);
@@ -594,6 +561,10 @@ test('Funk-Vorlage im zweiten Teil: Klang-Schlagwort, Muster-Schlagwort und Stil
 
 test('Stil auf der Startseite während der Wiedergabe: wirkt live ohne Neustart', async ({ page }) => {
   await countContexts(page);
+  // feste Variante: Funk und Psych müssen die Summe 96 behalten (Build & Drop trifft das Ziel bei wenigen Varianten um 4 Takte
+  // verfehlt, dann gäbe es zu Recht einen Neustart); Variante 1 behält sie
+  await page.locator('#variant').fill('1');
+  await page.locator('#variant').press('Enter');
   await page.locator('#go').click();
   await expect(playPage(page)).toBeVisible();
   await expect(playGo(page)).toHaveText('Stopp');

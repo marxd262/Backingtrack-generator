@@ -3,6 +3,8 @@
 import { layoutStorage } from './state.js';
 import { saveMix } from './mix-state.js';
 import { meterKey } from '../core/grooves.js';
+import { formLength, isValidForm } from '../core/form.js';
+import { TARGET_SIZES } from '../core/form-roll.js';
 
 const FIELDS = ['track', 'scale', 'style', 'chordColor', 'chordColorFromStyle', 'mix'];
 
@@ -13,6 +15,14 @@ export const readSession = (state) => Object.fromEntries(FIELDS.map((k) => [k, s
 export function writeSession(state, session) {
   // Tempo oder Taktart kommen jetzt vom Profil: der gemerkte Wert des letzten Taktartwechsels gilt nicht mehr (sonst bleibt er)
   if (state.track.bpm !== session.track.bpm || meterKey(state.track.meter) !== meterKey(session.track.meter)) delete state.tempoRef;
+  // Mit Form bestimmt die Summe der Teile die Länge (ein Profil kann nur `rhythm.length` mitbringen); Zielgröße und Regler folgen der Form
+  const form = session.track.form;
+  if (isValidForm(form)) {
+    const total = formLength(form);
+    session.track.length = total;
+    state.formTarget = TARGET_SIZES.reduce((a, b) => (Math.abs(b - total) < Math.abs(a - total) ? b : a));
+    state.formFeel = { ...form.feel };
+  }
   for (const k of FIELDS) state[k] = session[k];
   saveMix(layoutStorage, state.mix);
   state.notice = null;
