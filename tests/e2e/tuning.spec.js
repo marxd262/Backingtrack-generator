@@ -1,7 +1,7 @@
 // Spielseite (über Feintuning geöffnet): Schlagworte, Tempo, Länge, Schichten, Verlauf, Akkordfolge, Akkordrad.
 import { test, expect } from '@playwright/test';
-import { addChordByName } from './chord-helpers.js';
-import { chooseStyle, currentStyle } from './style-helpers.js';
+import { addChordByName, openAddPop } from './chord-helpers.js';
+import { chooseStyle, currentStyle, openTags } from './style-helpers.js';
 import { layoutWheel } from '../../src/ui/wheel-geometry.js';
 import { countContexts, recordPositions, positionsSince, shownBar, expectContinuous } from './count-helpers.js';
 import { STYLE_PRESETS, TAG_CATEGORIES } from '../../src/core/tags.js';
@@ -125,13 +125,14 @@ test('Werksprofil Träumerisch belegt Schlagworte und 80 bpm vor', async ({ page
     'bass.calm', 'bassSound.round', 'chordSound.mellow', 'development.buildsSlowly', 'drumSound.roomy', 'drums.halftime', 'drums.loose',
     'mood.dreamy', 'padSound.airy', 'padSound.swelling', 'synths.warm', 'synths.widePad',
   ]);
-  await expect(page.locator('#tuning-tempo-out')).toHaveText('80');
+  await expect(page.locator('#tuning-tempo-out')).toHaveText('80 bpm');
   await expect(page.locator('#tempo-btn')).toHaveText('80 bpm');
   expect(await currentStyle(page)).toBe('dreamy');
 });
 
 test('Schlagworte nach Kategorien, mehrere pro Kategorie wählbar', async ({ page }) => {
   await openPlayPage(page);
+  await openTags(page);
   const groups = page.locator('#tags [role="group"]');
   await expect(groups).toHaveCount(10);
   await expect(page.getByRole('group', { name: 'Entwicklung' })).toBeVisible();
@@ -147,6 +148,7 @@ test('Schlagworte nach Kategorien, mehrere pro Kategorie wählbar', async ({ pag
 
 test('Schlagworte ohne Wirkung: gedämpft, mit Hinweis in beiden Sprachen, weiter wählbar', async ({ page }) => {
   await openPlayPage(page);
+  await openTags(page);
   const withBreakouts = page.locator('#tags [data-tag="withBreakouts"]');
   await expect(withBreakouts).toHaveClass(/\binert\b/);
   await expect(withBreakouts).toHaveAttribute('title', 'noch ohne Wirkung');
@@ -175,6 +177,7 @@ test('Schlagwort während der Wiedergabe: wirkt live ohne Neustart und Fehler, T
   await recordPositions(page);
   const before = await shownBar(page);
   await positionsSince(page);
+  await openTags(page);
   await page.locator('#tags [data-tag="swing"]').click();
   await expect(page.locator('#tags [data-tag="swing"]')).toHaveAttribute('aria-pressed', 'true');
   // kein Neustart: die Taktzeile springt nicht auf Takt 1 zurück und es entsteht kein neuer Instrumentensatz
@@ -186,11 +189,11 @@ test('Schlagwort während der Wiedergabe: wirkt live ohne Neustart und Fehler, T
   await expect(page.locator('#go')).toHaveText('Los');
 });
 
-test('Tempo in der Leiste Klang ändert das Tempo im Satz', async ({ page }) => {
+test('Tempo im Modul Rhythmus ändert das Tempo im Satz', async ({ page }) => {
   await openPlayPage(page);
   await page.locator('#tuning-tempo').fill('150');
   await expect(page.locator('#tempo-btn')).toHaveText('150 bpm');
-  await expect(page.locator('#tuning-tempo-out')).toHaveText('150');
+  await expect(page.locator('#tuning-tempo-out')).toHaveText('150 bpm');
   await expect(page.locator('#tempo')).toHaveValue('150');
 });
 
@@ -217,26 +220,28 @@ test('Zielgröße ändert die Gesamtzahl in der Taktzeile, auch während der Wie
   await playGo(page).click();
 });
 
-test('Schichten: Knöpfe schalten live, alle aus läuft weiter', async ({ page }) => {
+test('Schichten: Stummtasten im Mischpult schalten live, die Spurnamen zeigen es, alle aus läuft weiter', async ({ page }) => {
   await openPlayPage(page);
-  const layers = page.locator('#lane-buttons button');
+  const layers = page.locator('#lane-buttons [data-layer]');
+  const mutes = page.locator('#mixer button[data-mute]');
   await expect(layers).toHaveCount(6);
+  await expect(mutes).toHaveCount(6);
   expect(await layers.allTextContents()).toEqual(['Schlagzeug', 'Bass', 'Akkorde', 'Pad', 'Lead', 'Percussion']);
   // Percussion startet aus, alle anderen an
-  for (const [i, b] of (await layers.all()).entries()) await expect(b).toHaveAttribute('aria-pressed', String(i !== 5));
+  for (const [i, b] of (await layers.all()).entries()) await expect(b).toHaveAttribute('data-muted', String(i === 5));
   await playFast(page);
   await expect(position(page)).toHaveText('Takt 2 von 96', { timeout: BAR_TIMEOUT });
-  await layers.nth(0).click();
-  await expect(layers.nth(0)).toHaveAttribute('aria-pressed', 'false');
+  await mutes.nth(0).click();
+  await expect(layers.nth(0)).toHaveAttribute('data-muted', 'true');
   // live, kein Neustart: ein Neustart leert die Taktzeile sofort und beginnt bei Takt 1
   expect(await position(page).textContent()).toMatch(/^Takt [2-9] von 96$/);
   await expect(position(page)).toHaveText('Takt 3 von 96', { timeout: BAR_TIMEOUT });
-  await layers.nth(0).click();
-  await expect(layers.nth(0)).toHaveAttribute('aria-pressed', 'true');
+  await mutes.nth(0).click();
+  await expect(layers.nth(0)).toHaveAttribute('data-muted', 'false');
   await playGo(page).click();
 
-  for (const b of (await layers.all()).slice(0, 5)) await b.click();
-  for (const b of await layers.all()) await expect(b).toHaveAttribute('aria-pressed', 'false');
+  for (const b of (await mutes.all()).slice(0, 5)) await b.click();
+  for (const b of await layers.all()) await expect(b).toHaveAttribute('data-muted', 'true');
   await playGo(page).click();
   await expect(playGo(page)).toHaveText('Stopp');
   await expect(position(page)).toHaveText('Takt 1 von 96', { timeout: BAR_TIMEOUT });
@@ -244,7 +249,7 @@ test('Schichten: Knöpfe schalten live, alle aus läuft weiter', async ({ page }
   expect(await shownChords(page)).toContain(first);
   await expect(position(page)).toHaveText('Takt 2 von 96', { timeout: BAR_TIMEOUT });
   // einschalten während der Wiedergabe geht ohne Neustart
-  await layers.nth(2).click();
+  await mutes.nth(2).click();
   expect(await position(page).textContent()).toMatch(/^Takt [2-9] von 96$/);
   await expect(position(page)).toHaveText('Takt 3 von 96', { timeout: BAR_TIMEOUT });
   await playGo(page).click();
@@ -263,9 +268,9 @@ test('Verlauf: Canvas zeichnet, Zeiger wandert beim Spielen', async ({ page }) =
   await expect.poll(painted).toBe(true);
   // gedimmte Spur ändert das Bild
   const stopped = await lanes.evaluate((c) => c.toDataURL());
-  await page.locator('#lane-buttons [data-layer="bass"]').click();
+  await page.locator('#mixer button[data-mute="bass"]').click();
   await expect.poll(() => lanes.evaluate((c) => c.toDataURL())).not.toBe(stopped);
-  await page.locator('#lane-buttons [data-layer="bass"]').click();
+  await page.locator('#mixer button[data-mute="bass"]').click();
 
   await playFast(page);
   const firstBar = await lanes.evaluate((c) => c.toDataURL());
@@ -303,6 +308,11 @@ test('Tastatur: Akkord-Knöpfe fügen an und entfernen, nie leer, höchstens 8',
   const roots = page.locator('#add-roots button');
   await expect(roots).toHaveCount(7); // A-Moll: sieben Grundtöne, die Dur-Dominante E teilt sich den Chip mit Em
   expect(await roots.allTextContents()).toEqual(['A', 'B', 'C', 'D', 'E', 'F', 'G']);
+  // + öffnet die Auswahl als Popover; Tastaturbedienung der Folge schließt es nicht
+  await expect(page.locator('#add-btn')).toHaveAccessibleName('Akkord hinzufügen');
+  await expect(page.locator('#add-pop')).toBeHidden();
+  await openAddPop(page);
+  await expect(page.locator('#add-btn')).toHaveAttribute('aria-expanded', 'true');
   await expect(page.getByRole('heading', { name: 'Akkord hinzufügen' })).toBeVisible();
 
   // per Tastatur entfernen bis einer übrig ist
@@ -350,12 +360,29 @@ test('Tastatur: Akkord-Knöpfe fügen an und entfernen, nie leer, höchstens 8',
   await expect(progression(page).first()).toHaveAccessibleName(/entfernen/);
 });
 
+test('Akkordfolge: Rollen als Klassen und römische Stufe darunter, gestoppt bei Takt 1 für Am Am Dm E', async ({ page }) => {
+  await openPlayPage(page);
+  while ((await progression(page).count()) > 1) await progression(page).first().click();
+  for (const name of ['Am', 'Am', 'Dm', 'E']) await addChordByName(page, name);
+  await progression(page).first().click(); // der übrig gebliebene Akkord der Ausgangsfolge
+  expect(await progression(page).allTextContents()).toEqual(['Am', 'Am', 'Dm', 'E']);
+  expect(await progression(page).evaluateAll((els) => els.map((el) => el.className.match(/role-\w+/)[0])))
+    .toEqual(['role-now', 'role-hold', 'role-next', 'role-later']);
+  // Hold trägt den pinken Rand (nicht von der allgemeinen Chip-Regel überstimmt)
+  expect(await progression(page).nth(1).evaluate((el) => getComputedStyle(el).boxShadow)).toContain('rgb(227, 70, 94)');
+  expect(await progression(page).evaluateAll((els) => els.map((el) => el.dataset.degree))).toEqual(['i', 'i', 'iv', 'V']);
+  // Stufe steht nicht im Namen der Taste
+  await expect(progression(page).nth(2)).toHaveAccessibleName(/Dm.*entfernen/);
+});
+
 test('Live-Region: Hinweis bleibt bei Taktwechseln still, zweite Ablehnung meldet sich neu', async ({ page }) => {
   await openPlayPage(page);
   const add = page.locator('#add-qualities button:not([disabled])'); // erster aktiver Chip: Am
+  await openAddPop(page);
   while ((await progression(page).count()) < 8) await add.first().click();
   await playFast(page);
   const message = page.locator('#tuning-message');
+  await openAddPop(page);
   await add.first().click();
   await expect(message).toHaveText(/8/);
   await page.evaluate(() => {
@@ -365,8 +392,10 @@ test('Live-Region: Hinweis bleibt bei Taktwechseln still, zweite Ablehnung melde
       .observe(document.querySelector('#tuning-message'), { childList: true, characterData: true, subtree: true });
     // Bedienelemente, die sich beim Taktwechsel nicht ändern: nichts neu schreiben
     const quiet = new MutationObserver((list) => { window.__controls += list.length; });
-    for (const id of ['#tags', '#lane-buttons', '#length', '#add-chords', '#play-title', '#play-back',
-      '#play-variant', '#side-key-chips', '#side-scale-chips', '#side-left-title', '#side-right-title']) {
+    // die LED vor der Spur (Klasse "on") folgt den Ereignissen und wechselt, wo eine Schicht ein- oder aussteigt: Klasse ausgenommen
+    quiet.observe(document.querySelector('#lane-buttons'), { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ['data-muted', 'aria-label', 'disabled'] });
+    for (const id of ['#tags', '#length', '#add-chords', '#play-title', '#play-back',
+      '#play-variant', '#key-select', '#scale-select', '#mode-switch', '#mod-harmony-title']) {
       quiet.observe(document.querySelector(id), { childList: true, characterData: true, subtree: true, attributes: true });
     }
   });
@@ -375,6 +404,7 @@ test('Live-Region: Hinweis bleibt bei Taktwechseln still, zweite Ablehnung melde
   await expect(position(page)).toHaveText(`Takt ${bar + 2} von 96`, { timeout: BAR_TIMEOUT });
   expect(await page.evaluate(() => [window.__region, window.__controls])).toEqual([0, 0]);
   // zweite Ablehnung: Region ändert sich (leeren und neu setzen), Text bleibt die Meldung
+  await openAddPop(page);
   await add.first().click();
   await expect.poll(() => page.evaluate(() => window.__region)).toBeGreaterThan(0);
   await expect(message).toHaveText(/8/);
@@ -416,15 +446,18 @@ test('keine rohen Schlüssel in beiden Sprachen auf der Spielseite', async ({ pa
   expect(await rawKeysIn(page)).toEqual([]);
   await page.locator('[data-lang="en"]').click();
   await expect(tuneBtn(page)).toHaveText('Fine-tune');
-  await expect(page.locator('#play-back')).toHaveText('To start page');
+  await expect(page.locator('#play-back')).toHaveText('Backing track generator');
+  await expect(page.locator('#play-back')).toHaveAttribute('title', 'To start page');
   expect(await rawKeysIn(page)).toEqual([]);
   for (const id of ['#lanes', '#wheel']) {
     const label = await page.locator(id).getAttribute('aria-label');
     expect(label).toMatch(/\S/);
     expect(label).not.toMatch(RAW_KEY);
   }
+  await openTags(page);
   await expect(page.getByRole('group', { name: 'Development' })).toBeVisible();
   await page.locator('[data-lang="de"]').click();
+  await openTags(page);
   await expect(page.getByRole('group', { name: 'Entwicklung' })).toBeVisible();
 });
 
@@ -433,7 +466,7 @@ test('360 px breit auf der Spielseite: kein waagerechtes Scrollen, Knöpfe minde
   await openPlayPage(page);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   const small = await page.evaluate(() => [...document.querySelectorAll('#play button, #play input, #play select')]
-    .filter((el) => el.checkVisibility())
+    .filter((el) => el.checkVisibility() && !el.closest('.instrument, #mod-mixer')) // kleine Klangknöpfe und Fader (28 px): Handy-Unterstützung folgt später (Spec, Nicht-Ziele)
     .map((el) => ({ el: el.id || el.textContent.trim(), r: el.getBoundingClientRect() }))
     .filter(({ r }) => r.width < 44 || r.height < 44)
     .map(({ el, r }) => `${el} ${Math.round(r.width)}x${Math.round(r.height)}`));
@@ -447,6 +480,7 @@ test('Wiedergabe: Rad färbt den aktuellen Akkord, große Akkordanzeige der Star
   await openPlayPage(page);
   await expect(page.locator('#now-chord')).toBeHidden();
   const wheel = page.locator('#wheel');
+  await page.evaluate(() => document.fonts.load("14px 'Share Tech Mono'")); // die Mitte des Rads zeichnet mit der LCD-Schrift
   const still = await wheel.evaluate((c) => c.toDataURL());
   await playFast(page);
   await expect.poll(() => wheel.evaluate((c) => c.toDataURL())).not.toBe(still);
@@ -461,7 +495,7 @@ test('Wiedergabe: Rad färbt den aktuellen Akkord, große Akkordanzeige der Star
 const presetPressed = (preset) => TAG_CATEGORIES
   .flatMap(({ id }) => (preset.tags[id] ?? []).map((tag) => `${id}.${tag}`)).sort();
 
-test('Schlagworte: die vier Klang-Gruppen stehen in beiden Sprachen übersetzt in der Seitenleiste, ohne rohe Schlüssel', async ({ page }) => {
+test('Schlagworte: die vier Klang-Gruppen stehen in beiden Sprachen übersetzt im Modul Charakter, ohne rohe Schlüssel', async ({ page }) => {
   await openPlayPage(page);
   const labels = {
     de: { drumSound: 'Schlagzeugklang', bassSound: 'Bassklang', chordSound: 'Akkordklang', padSound: 'Padklang' },
@@ -469,8 +503,9 @@ test('Schlagworte: die vier Klang-Gruppen stehen in beiden Sprachen übersetzt i
   };
   for (const lang of ['de', 'en']) {
     await page.locator(`[data-lang="${lang}"]`).click();
+    await openTags(page);
     for (const [id, label] of Object.entries(labels[lang])) {
-      const group = page.locator('#side-left').getByRole('group', { name: label, exact: true });
+      const group = page.locator('#tags-pop').getByRole('group', { name: label, exact: true });
       await expect(group, `${lang} ${id}`).toBeVisible();
       await expect(group.getByRole('button')).toHaveCount(5);
       for (const button of await group.getByRole('button').all()) expect(await button.textContent(), `${lang} ${id}`).toMatch(/\S/);
@@ -506,6 +541,7 @@ test('Klang-Schlagwort während der Wiedergabe: läuft ohne Neustart weiter, gen
   for (const [category, tag] of [['drumSound', 'boomy'], ['bassSound', 'sub'], ['chordSound', 'tremolo'], ['padSound', 'moving']]) {
     const before = await shownBar(page);
     await positionsSince(page);
+    await openTags(page);
     await page.locator(`#tags [data-category="${category}"][data-tag="${tag}"]`).click();
     await expect(page.locator(`#tags [data-tag="${tag}"]`)).toHaveAttribute('aria-pressed', 'true');
     await expectContinuous(page, before, tag);
@@ -532,6 +568,7 @@ test('Funk-Vorlage im zweiten Teil: Klang-Schlagwort, Muster-Schlagwort und Stil
   for (const [category, tag] of [['padSound', 'glassy'], ['chordSound', 'tremolo']]) {
     const before = await shownBar(page);
     await positionsSince(page);
+    await openTags(page);
     await page.locator(`#tags [data-category="${category}"][data-tag="${tag}"]`).click();
     await expect(page.locator(`#tags [data-category="${category}"][data-tag="${tag}"]`)).toHaveAttribute('aria-pressed', 'true');
     await expectContinuous(page, before, tag);
@@ -541,6 +578,7 @@ test('Funk-Vorlage im zweiten Teil: Klang-Schlagwort, Muster-Schlagwort und Stil
   // Muster-Schlagwort: der Ereignisstrom ändert sich und wird live getauscht, ohne Neustart und ohne neuen Instrumentensatz
   let before = await shownBar(page);
   await positionsSince(page);
+  await openTags(page);
   await page.locator('#tags [data-category="drums"][data-tag="driving"]').click();
   await expect(page.locator('#tags [data-category="drums"][data-tag="driving"]')).toHaveAttribute('aria-pressed', 'false');
   await expectContinuous(page, before, 'driving');

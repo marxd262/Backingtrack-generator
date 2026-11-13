@@ -10,6 +10,7 @@
   "scripts": {
     "start": "node scripts/serve.js",
     "test": "node --test tests/core",
+    "test:ui": "playwright test --project=realtime --no-deps",
     "test:e2e": "playwright test"
   },
   "devDependencies": {

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { setLanguage } from '../../src/i18n/index.js';
 import { formLength, isValidForm } from '../../src/core/form.js';
 import { FEEL_DEFAULTS, PART_TYPES } from '../../src/core/form-types.js';
-import { levelHeight, stripBlocks, levelLabel, densityLabel, levelValue, densityValue, limits, editPart, setLocked, addPart, copyPart, deletePart, movePart, barsText } from '../../src/ui/form-ui.js';
+import { levelHeight, stripBlocks, levelLabel, densityLabel, levelValue, densityValue, limits, editPart, setLocked, addPart, copyPart, deletePart, movePart, barsText, barsFromDrag } from '../../src/ui/form-ui.js';
 import { state, rollNewForm, setFormTemplate } from '../../src/ui/state.js';
 
 beforeEach(() => setLanguage('de'));
@@ -210,4 +210,13 @@ test('Neu würfeln (reroll): dieselbe Variante, andere Teile; gesperrte bleiben 
   state.track.form.sections[0].locked = false;
   rollNewForm();
   assert.equal(JSON.stringify(state.track.form.sections), base, 'Variante allein bestimmt die Form (Salz 0)');
+});
+
+test('barsFromDrag: ganze Takte aus der Ziehstrecke, begrenzt auf min und max', () => {
+  const lim = { min: 1, max: 64 };
+  assert.equal(barsFromDrag(8, 35, 10, lim), 12); // 3,5 Takte dazu: auf 4 gerundet
+  assert.equal(barsFromDrag(8, -200, 10, lim), 1);
+  assert.equal(barsFromDrag(60, 100, 10, lim), 64);
+  assert.equal(barsFromDrag(8, 0, 10, lim), 8);
+  assert.equal(barsFromDrag(8, 5, 0, lim), 8, 'ohne Breite pro Takt keine Änderung');
 });

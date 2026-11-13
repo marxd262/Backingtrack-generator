@@ -1,4 +1,4 @@
-// Die Schnellauswahl der Leiste "Klang" ist weg: Stile kommen aus den Werksprofilen im Profil-Fenster.
+// Die frühere Schnellauswahl der Stile ist weg: Stile kommen aus den Werksprofilen im Profil-Fenster.
 import { test, expect } from '@playwright/test';
 import { STYLE_PRESETS } from '../../src/core/tags.js';
 import { chooseStyle, currentStyle } from './style-helpers.js';
@@ -11,17 +11,17 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator('#play')).toBeVisible();
 });
 
-test('keine Schnellauswahl; der Abschnitt Stil der Leiste Klang hält die Schlagworte', async ({ page }) => {
+test('keine Schnellauswahl; das Modul Charakter hält die Schlagworte', async ({ page }) => {
   await expect(page.locator('#quick-pick')).toHaveCount(0);
   await expect(page.locator('#quick-title')).toHaveCount(0);
-  await expect(page.locator('details[data-group="style"] #tags')).toBeAttached();
+  await expect(page.locator('#mod-character #tags')).toBeAttached();
 });
 
 test('chooseStyle(blues) setzt das Tempo des Stils, currentStyle meldet blues; alle neun Stile stehen als Werksprofile im Baum', async ({ page }) => {
   expect(await currentStyle(page)).toBe('funk');
   await chooseStyle(page, 'blues');
   // Standard-Taktart 4/4: das Tempo des Stils ohne Umrechnung
-  await expect(page.locator('#tuning-tempo-out')).toHaveText(String(STYLE_PRESETS.find((p) => p.id === 'blues').bpm));
+  await expect(page.locator('#tuning-tempo-out')).toHaveText(`${STYLE_PRESETS.find((p) => p.id === 'blues').bpm} bpm`);
   expect(await currentStyle(page)).toBe('blues');
   await expect(page.locator('#profiles-pop')).toBeHidden();
   await page.locator('#profiles-btn').click();

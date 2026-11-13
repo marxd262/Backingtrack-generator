@@ -1,5 +1,6 @@
-// Akkordrad: Quintenzirkel auf Canvas. Passende Akkorde kräftig umrandet, die Folge gestrichelt verbunden,
-// der aktuelle Akkord als einziges farbiges Objekt. Geometrie und Trefferprüfung in wheel-geometry.js.
+// Akkordrad: Quintenzirkel auf Canvas. Jetziger Akkord pink, nächster türkis (beide gefüllt, Text dunkel), Akkorde der Tonart grau
+// hinterlegt, Akkorde der Folge kräftig umrandet und gestrichelt verbunden; in der Mitte die Tonart als LCD-Kreis.
+// Geometrie und Trefferprüfung in wheel-geometry.js.
 import { allowedChords, diatonicChords, noteToPc } from '../core/music.js';
 import { layoutWheel, hitTest, nodeMatches } from './wheel-geometry.js';
 import { chordShort } from '../core/chords.js';
@@ -50,29 +51,54 @@ export function createWheel(canvas, state, onPick) {
       ctx.stroke();
     });
 
+    const inProgression = (chord) => current.progression.some((p) => same(p, chord));
     for (const n of l.nodes) {
       const chord = allowedAt(n);
       const isCurrent = chord && current.current && nodeMatches(n, current.current, current.key);
+      const isNext = !isCurrent && chord && current.next && nodeMatches(n, current.next, current.key);
+      const isDiatonic = chord && diatonic.some((d) => same(d, chord));
       ctx.globalAlpha = chord ? 1 : 0.3;
-      ctx.setLineDash(chord && !diatonic.some((d) => same(d, chord)) ? [4, 3] : []); // Dur-Dominante in Moll
-      ctx.lineWidth = chord ? 2.5 : 1;
-      ctx.fillStyle = isCurrent ? c.accent : c.paper;
+      ctx.setLineDash(chord && !isDiatonic ? [4, 3] : []); // Dur-Dominante in Moll
+      ctx.lineWidth = chord && inProgression(chord) ? 3 : 1.5;
+      ctx.fillStyle = isCurrent ? c.accent : isNext ? c.accent2 : isDiatonic ? c.diatonic : c.paper;
       ctx.beginPath();
       ctx.arc(n.x, n.y, n.r, 0, 2 * Math.PI);
       ctx.fill();
-      if (!isCurrent) ctx.stroke();
+      ctx.stroke();
       ctx.globalAlpha = chord ? 1 : 0.45;
-      ctx.fillStyle = isCurrent ? c.onAccent : c.ink;
-      ctx.font = `${Math.round(n.r * 0.72)}px ${c.font}`;
+      ctx.fillStyle = isCurrent || isNext ? c.onAccent : c.ink;
+      ctx.font = `${Math.max(11, Math.round(n.r * 0.72))}px ${c.font}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(chordShort(chord ?? n.chord), n.x, n.y);
     }
     ctx.globalAlpha = 1;
     ctx.setLineDash([]);
+
+    // Mitte: Tonart als LCD-Kreis, darunter der nächste Akkord in der zweiten Farbe
+    const lcdR = l.innerRadius - l.size * 0.07;
+    ctx.fillStyle = c.lcd;
+    ctx.beginPath();
+    ctx.arc(l.cx, l.cy, lcdR, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const keyName = `${current.key.root}${current.key.mode === 'minor' ? 'm' : ''}`;
+    ctx.fillStyle = c.lcdInk;
+    ctx.font = `${Math.max(14, Math.round(lcdR * 0.62))}px ${c.mono}`;
+    ctx.fillText(keyName, l.cx, l.cy - (current.next ? lcdR * 0.14 : 0));
+    if (current.next) {
+      ctx.fillStyle = c.lcdInk2;
+      ctx.font = `${Math.max(11, Math.round(lcdR * 0.32))}px ${c.mono}`;
+      ctx.fillText(`→ ${chordShort(current.next)}`, l.cx, l.cy + lcdR * 0.42);
+    }
   }
 
   draw();
+  document.fonts?.addEventListener('loadingdone', draw); // die LCD-Schrift der Mitte lädt erst beim ersten Zeichnen
   return {
     update(next) {
       current = next;

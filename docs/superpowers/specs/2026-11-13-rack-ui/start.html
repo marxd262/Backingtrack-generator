@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Startseite-Entwurf</title>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+  :root{--rail:#1d1d1d;--rail-dot:#3a3a3a;--panel:#e9e9e6;--panel-edge:#d2d2ce;--ink:#2a2a2a;--ink-2:#6b6b68;--teal:#18a2a6;--pink:#e3465e;--lcd:#161a14;--lcd-ink:#b9f26b;--lcd-ink-2:#6fe3e6}
+  *{box-sizing:border-box}
+  html,body{margin:0;background:#0d0d0d;color:var(--ink);font-family:Barlow,system-ui,sans-serif}
+  .page{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px}
+  .rail{height:12px;width:1180px;background:var(--rail) radial-gradient(circle,var(--rail-dot) 2px,transparent 2.5px) 0 50%/16px 12px repeat-x}
+  .shelf{display:flex;gap:3px;padding:3px;width:1180px;background:#111}
+  .mod{background:var(--panel);border-radius:2px;position:relative;padding:22px 26px 22px;box-shadow:inset 0 0 0 1px var(--panel-edge)}
+  .mod::before,.mod::after{content:"";position:absolute;top:6px;width:8px;height:8px;border-radius:50%;background:#cfcfcb;box-shadow:inset 0 0 0 1px #b8b8b4}
+  .mod::before{left:6px}.mod::after{right:6px}
+  .title{position:absolute;top:4px;right:22px;font-size:13px;color:#444}
+  .lbl{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:#3c3c3a;font-weight:500}
+  .lcd{background:var(--lcd);color:var(--lcd-ink);font-family:"Share Tech Mono",monospace;border-radius:3px;padding:2px 10px;letter-spacing:.04em;box-shadow:inset 0 0 0 2px #000;white-space:nowrap}
+  .led{display:inline-block;width:8px;height:8px;border-radius:50%;background:#bdbdb9;box-shadow:inset 0 0 0 1px rgba(0,0,0,.15)}
+  .led.on{background:var(--pink);box-shadow:0 0 6px var(--pink)}
+  .push{width:44px;height:44px;border-radius:50%;background:#151515;box-shadow:0 0 0 4px #fff,0 0 0 5px #b9b9b5;cursor:pointer;flex:none}
+  .push.sm{width:30px;height:30px;box-shadow:0 0 0 3px #fff,0 0 0 4px #b9b9b5}
+  .btn{width:18px;height:18px;border-radius:2px;background:#151515;box-shadow:0 0 0 2px #fff,0 0 0 3px #b9b9b5;display:inline-block;color:#ddd;font-size:11px;line-height:18px;text-align:center;cursor:pointer}
+  .dots{border-top:1.5px dotted #8f8f8b}
+
+  /* Satz */
+  .sentence{font-size:30px;line-height:1.9;color:#333}
+  .sentence .w{display:inline-flex;align-items:center;gap:8px;vertical-align:middle;margin:0 4px}
+  .sentence .lcd{font-size:26px;padding:2px 12px;cursor:pointer}
+  .sentence .lcd:hover{box-shadow:inset 0 0 0 2px #000,0 0 0 2px var(--teal)}
+
+  /* Wolke */
+  .cloudhead{display:flex;align-items:baseline;gap:14px;margin:4px 0 10px}
+  .cloud{display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:10px 18px;padding:18px 24px;min-height:210px;background:#f3f2ee;border-radius:2px;box-shadow:inset 0 0 0 1px #d6d5d0}
+  .word{cursor:pointer;color:#555;transition:font-size .25s,opacity .25s,color .2s;user-select:none;display:inline-flex;align-items:center;gap:6px;padding:1px 8px;border-radius:2px;line-height:1.25}
+  .word:hover{color:#111}
+  .word.on{background:#151515;color:#fff}
+  .word.on::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--pink);box-shadow:0 0 5px var(--pink)}
+  .word.style{box-shadow:inset 0 0 0 1.5px #151515;color:#151515}
+  .word.out{opacity:.22;text-decoration:line-through;pointer-events:none}
+  .ticker{margin-top:10px;font-size:13px;padding:4px 10px;min-height:26px;color:var(--lcd-ink-2)}
+  .legend{display:flex;gap:18px;font-size:12px;color:#555;margin-top:8px}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+
+  /* rechte Spalte */
+  .side{width:300px;display:flex;flex-direction:column;gap:18px}
+  .card{display:flex;flex-direction:column;gap:8px}
+  .row{display:flex;align-items:center;gap:12px}
+  .go{display:flex;align-items:center;gap:16px}
+  .go .lbl{font-size:13px}
+  .note{min-width:1180px;max-width:1180px;margin:22px auto 0;background:#f6f5f1;padding:18px 24px;font-size:14px;line-height:1.5;border-radius:2px}
+  .note ol{margin:6px 0 0;padding-left:20px;columns:2;column-gap:36px}
+  .note li{break-inside:avoid;margin-bottom:6px}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="rail"></div>
+  <div class="shelf">
+
+    <!-- linke Fläche: Satz und Wolke -->
+    <div class="mod" style="flex:1">
+      <span class="title">backingtrack generator</span>
+      <div class="sentence">
+        Spiel
+        <span class="w"><span class="lcd" id="key">A-MOLL PENT</span></span>
+        im Stil
+        <span class="w"><span class="lcd" id="style">FUNK</span></span><br>
+        bei
+        <span class="w"><span class="lcd" id="bpm">100</span></span>
+        BPM
+      </div>
+
+      <div class="dots" style="margin:14px 0 12px"></div>
+      <div class="cloudhead">
+        <span class="lbl" style="font-size:12px">wie soll es sich anfühlen?</span>
+        <span style="font-size:12px;color:var(--ink-2)">Klick grenzt ein. Passendes wird größer, Gegensätze treten zurück.</span>
+      </div>
+      <div class="cloud" id="cloud"></div>
+      <div class="lcd ticker" id="ticker">FAHR ÜBER EIN WORT, UM ZU SEHEN, WAS ES BEWIRKT</div>
+      <div class="legend">
+        <span><span class="word style" style="font-size:12px;padding:0 6px">funky</span> vom Stil vorgeschlagen</span>
+        <span><span class="word on" style="font-size:12px;padding:0 6px">dunkel</span> von dir gewählt</span>
+        <span><span class="word out" style="font-size:12px;padding:0 6px;opacity:.35">hell</span> passt nicht dazu</span>
+      </div>
+    </div>
+
+    <!-- rechte Spalte: Los, Überrasch mich, Weitermachen -->
+    <div class="mod side">
+      <span class="title">start</span>
+      <div class="go">
+        <span class="push" style="width:58px;height:58px"></span>
+        <div><div class="lbl" style="font-size:15px">los</div><div style="font-size:12px;color:var(--ink-2)">mit diesem Startpunkt</div></div>
+      </div>
+      <div class="go">
+        <span class="push sm" id="dice" title="Überrasch mich"></span>
+        <div><div class="lbl">überrasch mich</div><div style="font-size:12px;color:var(--ink-2)">würfelt alles, was du nicht gewählt hast</div></div>
+      </div>
+      <div class="row" style="gap:8px">
+        <span class="lbl">variante</span><span class="btn">‹</span><span class="lcd" style="font-size:16px">1385</span><span class="btn">›</span>
+      </div>
+      <div class="dots"></div>
+      <div class="card">
+        <span class="lbl">zuletzt gespielt · vor 2 tagen</span>
+        <div class="lcd" style="font-size:13px;line-height:1.5;padding:6px 10px;white-space:normal">E-MOLL PENT · BLUES · 88 BPM<br><span style="color:var(--lcd-ink-2)">VARIANTE 0412 · TAKT 041/096</span></div>
+        <div class="go"><span class="push sm"></span><div><div class="lbl">weitermachen</div><div style="font-size:12px;color:var(--ink-2)">genau dort, wo du aufgehört hast</div></div></div>
+      </div>
+      <div class="dots"></div>
+      <div class="row" style="justify-content:space-between">
+        <span class="lbl">profile</span><span class="btn">›</span>
+      </div>
+      <div class="row" style="justify-content:space-between">
+        <span class="lbl">sprache</span><span class="lbl">de <span class="led on"></span> &nbsp;en <span class="led"></span></span>
+      </div>
+    </div>
+
+  </div>
+  <div class="rail"></div>
+</div>
+
+<div class="note">
+  <b>Was der Entwurf zeigt</b>
+  <ol>
+    <li><b>Satz oben</b> wie heute: Tonart, Stil und Tempo als Displays. Klick öffnet die Auswahl wie bisher.</li>
+    <li><b>Stil schlägt Wörter vor</b> (umrandet). Du kannst sie abwählen oder weitere dazunehmen. Die Wolke ist also kein zweiter Weg neben dem Stil, sondern verfeinert ihn.</li>
+    <li><b>Klick auf ein Wort</b> wählt es (schwarz mit LED). Wörter, die gut dazu passen, werden größer, Gegensätze treten durchgestrichen zurück. So siehst du, was sich ausschließt, ohne es zu lesen.</li>
+    <li><b>Fahr über ein Wort</b>, dann zeigt das Display darunter, was es bewirkt (welche Makros, welches Spielverhalten).</li>
+    <li><b>Überrasch mich</b> (anklickbar) würfelt Tonart, Stil, Tempo und ein paar Wörter, lässt aber stehen, was du selbst gewählt hast.</li>
+    <li><b>Weitermachen</b> zeigt die letzte Sitzung mit Takt und Variante und springt genau dorthin zurück.</li>
+    <li>Die Wörter sind auf <b>vier Arten</b> verteilt: Stimmung (dunkel, verträumt …), Feel (treibend, swing …), Aufbau (baut langsam auf …) und Klang (dreckig, weit, fett …). Klangwörter stellen die Makros in allen Instrumenten.</li>
+  </ol>
+</div>
+
+<script>
+// Wort: id, Text, Wirkung (für das Display), Gegensätze, Verwandte
+const W = [
+  ['dark', 'dunkel', 'HELLIGKEIT − · AKKORDE MELLOW · HI-HAT MATTER', ['bright'], ['warm', 'fat', 'wide']],
+  ['bright', 'hell', 'HELLIGKEIT + · HI-HAT GLÄNZT', ['dark', 'warm'], ['biting', 'dry']],
+  ['warm', 'warm', 'AKKORDE MELLOW · PAD WEICHER · BASS RUNDER', ['bright', 'biting'], ['dreamy', 'fat']],
+  ['dreamy', 'verträumt', 'HALL + · PAD SETZT WEICH EIN · PAD BREITER', ['driving'], ['wide', 'airy', 'loose', 'halftime', 'slow']],
+  ['psych', 'psychedelisch', 'ECHO + · HALL + · CHORUS + · PAD BEWEGT', [], ['wide', 'dirty', 'driving', 'shimmer']],
+  ['driving', 'treibend', 'SCHLAGZEUG DRÜCKT NACH VORN', ['loose', 'dreamy'], ['straight', 'dirty', 'full']],
+  ['loose', 'locker', 'SCHLAGZEUG ENTSPANNTER', ['driving'], ['swing', 'dreamy']],
+  ['halftime', 'halftime', 'HALBES TEMPO IM SCHLAGZEUG', [], ['dreamy', 'fat']],
+  ['funky', 'funky', 'ETWAS SWING · SYNKOPEN +', ['straight'], ['synco', 'dry', 'biting']],
+  ['straight', 'gerade', 'KEIN SWING · WENIGER SYNKOPEN', ['swing', 'funky'], ['driving']],
+  ['swing', 'swing', 'SWING +', ['straight'], ['loose', 'warm']],
+  ['synco', 'synkopiert', 'SYNKOPEN +', [], ['funky']],
+  ['slow', 'baut langsam auf', 'INSTRUMENTE KOMMEN NACH UND NACH', ['full'], ['dreamy']],
+  ['full', 'voll von anfang an', 'ALLE INSTRUMENTE AB TAKT 1', ['slow'], ['driving']],
+  ['breaks', 'mit breaks', 'MEHR PAUSEN IN DER FORM', [], ['funky']],
+  ['dry', 'trocken', 'MAKRO RAUM ← IN ALLEN INSTRUMENTEN', ['wide'], ['funky', 'biting']],
+  ['wide', 'weit', 'MAKRO RAUM → · HALL +', ['dry'], ['dreamy', 'airy']],
+  ['clean', 'sauber', 'MAKRO DRECK ← IN ALLEN INSTRUMENTEN', ['dirty'], ['airy']],
+  ['dirty', 'dreckig', 'MAKRO DRECK → · BASS FUZZ · AKKORDE OVERDRIVE', ['clean'], ['driving', 'fat']],
+  ['fat', 'fett', 'BASS SUB + · PAD DICHTER · KICK BOOMY', ['airy'], ['dark', 'dirty']],
+  ['airy', 'luftig', 'PAD SCHIMMER + · WENIGER DICHTE', ['fat'], ['wide', 'dreamy']],
+  ['biting', 'bissig', 'MAKRO FARBE → · AKKORDE KURZ UND HELL', ['warm', 'soft'], ['funky', 'bright']],
+  ['soft', 'weich', 'MAKRO FARBE ← · AKKORDE KLINGEN LÄNGER', ['biting'], ['warm', 'dreamy']],
+  ['shimmer', 'schimmernd', 'PAD SCHIMMER + · CHORUS +', [], ['airy', 'psych']],
+];
+const STYLE = ['funky', 'synco', 'dry', 'biting', 'slow'];
+let picked = new Set(['dark']);
+const cloud = document.getElementById('cloud'), ticker = document.getElementById('ticker');
+const els = {};
+// gemischte Reihenfolge, damit es wie eine Wolke wirkt
+const order = [4, 15, 0, 8, 19, 12, 5, 21, 3, 17, 10, 23, 1, 13, 6, 20, 9, 16, 2, 14, 7, 18, 11, 22];
+for (const i of order) {
+  const [id, text, fx] = W[i];
+  const e = document.createElement('span');
+  e.className = 'word'; e.textContent = text;
+  e.addEventListener('click', () => { picked.has(id) ? picked.delete(id) : picked.add(id); render(); });
+  e.addEventListener('mouseenter', () => { ticker.textContent = text.toUpperCase() + ': ' + fx; });
+  e.addEventListener('mouseleave', () => { ticker.textContent = 'FAHR ÜBER EIN WORT, UM ZU SEHEN, WAS ES BEWIRKT'; });
+  els[id] = e; cloud.append(e);
+}
+const byId = Object.fromEntries(W.map(w => [w[0], w]));
+function render() {
+  const active = new Set([...picked, ...STYLE]);
+  const out = new Set(), score = {};
+  for (const id of active) { for (const o of byId[id][3]) out.add(o); for (const r of byId[id][4]) score[r] = (score[r] || 0) + 1; }
+  for (const [id] of W) {
+    const e = els[id];
+    const isOut = out.has(id) && !active.has(id);
+    e.classList.toggle('on', picked.has(id));
+    e.classList.toggle('style', STYLE.includes(id) && !picked.has(id));
+    e.classList.toggle('out', isOut);
+    e.style.fontSize = (active.has(id) ? 22 : 15 + Math.min(3, score[id] || 0) * 4) + 'px';
+  }
+}
+render();
+// Überrasch mich: Attrappe
+const KEYS = ['A-MOLL PENT', 'E-MOLL PENT', 'D DORISCH', 'G-DUR PENT', 'C BLUES', 'F#-MOLL PENT'];
+const STYLES = ['FUNK', 'BLUES', 'TRÄUMERISCH', 'ROCK', 'REGGAE', 'COUNTRY', 'PSYCH INDIE'];
+document.getElementById('dice').addEventListener('click', () => {
+  const r = a => a[Math.floor(Math.random() * a.length)];
+  document.getElementById('key').textContent = r(KEYS);
+  document.getElementById('style').textContent = r(STYLES);
+  document.getElementById('bpm').textContent = 70 + Math.floor(Math.random() * 90);
+  const free = W.map(w => w[0]).filter(id => !picked.has(id));
+  for (let k = 0; k < 2; k++) picked.add(r(free));
+  render();
+});
+</script>
+</body>
+</html>

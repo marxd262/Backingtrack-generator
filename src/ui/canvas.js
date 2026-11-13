@@ -17,5 +17,5 @@ export function fitCanvas(canvas) {
 export function cssColors(canvas) {
   const css = getComputedStyle(canvas);
   const v = (name) => css.getPropertyValue(name).trim();
-  return { ink: v('--ink'), inkSoft: v('--ink-soft'), paper: v('--paper'), accent: v('--accent'), onAccent: v('--on-accent'), staff: v('--staff'), font: css.fontFamily };
+  return { ink: v('--ink'), inkSoft: v('--ink-soft'), paper: v('--paper'), accent: v('--accent'), accent2: v('--accent2'), diatonic: v('--wheel-grey'), mono: v('--mono'), lcd: v('--lcd'), lcdInk: v('--lcd-ink'), lcdInk2: v('--lcd-ink-2'), onAccent: v('--on-accent'), staff: v('--staff'), font: css.fontFamily };
 }

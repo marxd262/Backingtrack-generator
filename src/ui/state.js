@@ -78,7 +78,7 @@ export const state = {
   playing: false,
   lang: readLang(),
   page: 'start', // 'start' | 'play'
-  layout: loadLayout(layoutStorage), // Leisten, Ansichten, Beschriftung; Änderungen über saveLayout
+  layout: loadLayout(layoutStorage), // Fokus/Einstellen, Beschriftung, Bünde; Änderungen über saveLayout
   mix: loadMix(layoutStorage), // Mischpult-Regler { <Schicht-ids>, master }, je 0..1; Änderungen über saveMix
   current: null, // { bar, chord } aus onBar
   errors: [], // [{ code, params }], übersetzt erst in render()

@@ -40,8 +40,7 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator('#go')).toHaveText(/\S/);
   await page.locator('#tune-btn').click();
   await expect(page.locator('#play')).toBeVisible();
-  if (!(await page.locator('#side-left').isVisible())) await page.locator('#toggle-left').click();
-  if (!(await page.locator('#side-right').isVisible())) await page.locator('#toggle-right').click();
+  await expect(page.locator('#rack')).toBeVisible(); // Feintuning öffnet den Zustand Einstellen
 });
 
 test.afterEach(() => {

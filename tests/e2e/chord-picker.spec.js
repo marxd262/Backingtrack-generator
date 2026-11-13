@@ -2,7 +2,7 @@
 import { test, expect } from '@playwright/test';
 import { chordOptions } from '../../src/core/music.js';
 import { CHORDS } from '../../src/core/chords.js';
-import { addChordByName, openQualityGroup } from './chord-helpers.js';
+import { addChordByName, openAddPop, openQualityGroup } from './chord-helpers.js';
 
 const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view|group|timbre|chord|chordGroup|chordColor|groove|meter)\.[A-Za-z.]+$/;
 
@@ -19,8 +19,8 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator('#go')).toHaveText(/\S/);
   await page.locator('#tune-btn').click();
   await expect(page.locator('#play')).toBeVisible();
-  if (!(await page.locator('#side-right').isVisible())) await page.locator('#toggle-right').click();
-  await expect(page.locator('#side-right')).toBeVisible();
+  await expect(page.locator('#rack')).toBeVisible(); // Feintuning öffnet den Zustand Einstellen
+  await openAddPop(page); // die Auswahl ist ein Popover am + im Modul Harmonie
 });
 
 test.afterEach(() => {
@@ -54,24 +54,12 @@ test('deaktivierte Akkordarten sehen anders aus als aktive und bieten keinen Kli
   expect(off.border).not.toBe(on.border);
 });
 
-test('Akkordarten stehen in einklappbaren Gruppen: Dreiklänge offen, Septakkorde und Erweiterungen zu, jede Art hat einen Chip', async ({ page }) => {
+test('Akkordarten stehen in Gruppen, alle offen (keine Klappgruppen mehr), jede Art hat einen Chip', async ({ page }) => {
   await expect(page.locator('#add-qualities button')).toHaveCount(Object.keys(CHORDS).length);
   const summaries = page.locator('#add-qualities details > summary');
   expect(await summaries.allTextContents()).toEqual(['Dreiklänge', 'Septakkorde', 'Erweiterungen']);
-  const open = () => page.locator('#add-qualities details').evaluateAll((els) => els.map((el) => el.open));
-  expect(await open()).toEqual([true, false, false]);
-  // zu: nur die Chips der Dreiklänge sind zu sehen, die Leiste bleibt kurz
-  const triads = Object.values(CHORDS).filter((c) => c.group === 'triad').length;
-  await expect(page.locator('#add-qualities button:visible')).toHaveCount(triads);
-  await summaries.nth(1).click();
-  expect(await open()).toEqual([true, true, false]);
-  await expect(page.locator('#add-qualities button:visible')).toHaveCount(triads + Object.values(CHORDS).filter((c) => c.group === 'seventh').length);
-  // der Zustand wird gemerkt (das toggle-Ereignis speichert asynchron: erst warten, bis er im Speicher steht)
-  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('backingtrack.layout')).groups.seventh)).toBe(true);
-  await page.reload();
-  await expect(page.locator('#go')).toHaveText(/\S/);
-  await page.locator('#tune-btn').click();
-  expect(await open()).toEqual([true, true, false]);
+  expect(await page.locator('#add-qualities details').evaluateAll((els) => els.map((el) => el.open))).toEqual([true, true, true]);
+  await expect(page.locator('#add-qualities button:visible')).toHaveCount(Object.keys(CHORDS).length);
 });
 
 test('E in A-Moll vereint Moll- und Dur-Arten; Klick auf eine Art hängt den Akkord an', async ({ page }) => {
@@ -112,7 +100,7 @@ test('volle Folge (acht Akkorde): weitere Auswahl wird abgelehnt und gemeldet', 
 
 test('anderer Modus: die Grundtöne folgen chordOptions, die Auswahl springt auf den ersten', async ({ page }) => {
   await root(page, 'E').click();
-  await page.locator('#side-scale-chips').getByRole('button', { name: /Dorisch/ }).click();
+  await page.locator('#scale-select').selectOption('dorian');
   expect(await roots(page).allTextContents()).toEqual(chordOptions({ root: 'A', mode: 'dorian' }).map((o) => o.root));
   await expect(roots(page).first()).toHaveAttribute('aria-pressed', 'true');
 });
@@ -141,22 +129,15 @@ test('jeder Chip nennt die Akkordart als Hilfetext und im zugänglichen Namen, i
 
 test('helper addChordByName fügt einen Akkord über beide Schritte an', async ({ page }) => {
   const before = await shown(page);
-  await addChordByName(page, 'G', '#side-right');
+  await addChordByName(page, 'G', '#mod-harmony');
   await addChordByName(page, 'Bdim');
   expect(await shown(page)).toEqual([...before, 'G', 'Bdim']);
 });
 
 test('360 px: kein waagerechtes Scrollen, alle Chips mindestens 44 px hoch', async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 740 });
-  // schmal sind beide Leisten nicht zugleich offen: die rechte schließt erst nach dem Größenwechsel, dann als Schublade öffnen
-  await expect(page.locator('#side-right')).toBeHidden();
-  await page.keyboard.press('Escape'); // die linke Schublade bleibt offen und ist modal: erst schließen
-  await expect(page.locator('#side-left')).toBeHidden();
-  await page.locator('#toggle-right').click();
-  await expect(page.locator('#side-right')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
-  expect(await page.locator('#side-right').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
-  for (const quality of ['dom7', 'maj6']) await openQualityGroup(page, quality); // zugeklappte Chips haben keine Höhe
+  expect(await page.locator('#mod-harmony').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   const heights = await page.locator('#add-chords button').evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height));
   expect(heights.length).toBe(7 + Object.keys(CHORDS).length);
   for (const h of heights) expect(h).toBeGreaterThanOrEqual(43.5);

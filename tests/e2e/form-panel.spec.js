@@ -20,8 +20,7 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator('#go')).toHaveText(/\S/);
   await page.locator('#tune-btn').click();
   await expect(page.locator('#play')).toBeVisible();
-  if (!(await page.locator('#side-left').isVisible())) await page.locator('#toggle-left').click();
-  await expect(page.locator('#side-left')).toBeVisible();
+  await expect(page.locator('#rack')).toBeVisible(); // Feintuning öffnet den Zustand Einstellen
 });
 
 test.afterEach(() => {
@@ -56,16 +55,15 @@ test('beim Laden hat der Track eine Form: Summe gleich Länge, Vorlage Auto, Zie
   expect(await template(page).locator('option').allTextContents()).toEqual(['Auto (Jam)', 'Jam', 'Pop', 'Build & Drop', 'Blues', 'Rock', 'Ohne Form']);
 });
 
-test('Gruppe Songform: offen, nach Rhythmus, per Tastatur erreichbar; Regler zeigen Prozentwerte', async ({ page }) => {
-  const group = page.locator('details[data-group="form"]');
-  await expect(group).toHaveJSProperty('open', true);
-  const order = await page.locator('#side-left details[data-group]').evaluateAll((els) => els.map((el) => el.dataset.group));
-  expect(order.indexOf('form')).toBe(order.indexOf('rhythm') + 1);
-  await group.locator('> summary').focus();
+test('Feld Ganzes Lied: links im Modul Form & Spuren, nach dem Griffbrett per Tastatur erreichbar; Knöpfe zeigen Prozentwerte', async ({ page }) => {
+  await expect(page.locator('#mod-song #form-song')).toBeVisible();
+  await page.locator('#fretboard').focus(); // letzter Tab-Halt davor (der Akkordkreis hat keinen)
+  // die LCD-Auswahlen bringen ‹ und › ohne Kennung mit; gezählt werden die Stationen mit Kennung
   const seen = [];
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 12 && seen.at(-1) !== 'form-randomness'; i++) {
     await page.keyboard.press('Tab');
-    seen.push(await page.evaluate(() => document.activeElement.id));
+    const id = await page.evaluate(() => document.activeElement.id);
+    if (id) seen.push(id);
   }
   expect(seen).toEqual(['form-template', 'length', 'form-structure', 'form-dynamics', 'form-pauses', 'form-randomness']);
   const expected = { structure: 60, dynamics: 60, pauses: 40, randomness: 50 };
@@ -148,7 +146,7 @@ test('Ohne Form: Beschriftung abgeblendet, ein Hinweis nennt den Grund; mit Form
   await expect(hint).toHaveText('Die Regler wirken nur mit einer Vorlage.');
   for (const name of FEEL) await expect(page.locator(`label[for="form-${name}"]`)).toHaveClass(/\boff\b/);
   await page.locator('[data-lang="en"]').first().click();
-  await expect(hint).toHaveText('The sliders only work with a template.');
+  await expect(hint).toHaveText('The knobs only work with a template.');
   await page.locator('[data-lang="de"]').first().click();
   await template(page).selectOption('pop');
   await expect(hint).toBeHidden();
@@ -225,7 +223,7 @@ test('mit Form läuft die Akkordfolge in jedem Teil neu: Anzeige, aria-current u
         now: document.getElementById('play-now').textContent,
         wantNow: chordName(bars[idx].chord),
         next: document.getElementById('play-next').textContent,
-        wantNext: `Als Nächstes: ${chordName(bars[chordIndex(state.track, c.bar + 1)].chord)}`,
+        wantNext: chordName(bars[chordIndex(state.track, c.bar + 1)].chord),
         aria: [...document.querySelectorAll('#progression button')].findIndex((b) => b.getAttribute('aria-current') === 'true'),
         idx,
       };
@@ -298,7 +296,7 @@ test('altes Profil mit rhythm.length 48 in die Standardform (96) geladen: stimmi
 
 test('Sprachwechsel beschriftet Gruppe, Auswahl und Regler neu', async ({ page }) => {
   await page.locator('[data-lang="en"]').first().click();
-  await expect(page.locator('details[data-group="form"] > summary')).toHaveText('Song form');
+  await expect(page.locator('#form-song-title')).toHaveText('Whole song');
   await expect(page.locator('label[for="form-template"]')).toHaveText('Template');
   await expect(page.locator('#length-label')).toHaveText('Target size');
   expect(await template(page).locator('option').allTextContents()).toEqual(['Auto (Jam)', 'Jam', 'Pop', 'Build & Drop', 'Blues', 'Rock', 'No form']);
@@ -306,17 +304,16 @@ test('Sprachwechsel beschriftet Gruppe, Auswahl und Regler neu', async ({ page }
   await expect(page.locator('label[for="form-randomness"]')).toHaveText('Randomness');
   await expect(page.locator('#form-structure-out')).toHaveText('60%');
   await expect(slider(page, 'structure')).toHaveAttribute('aria-valuetext', '60% (default 60%)');
-  expect(await page.locator('details[data-group="form"]').innerText()).not.toMatch(RAW_KEY);
+  expect(await page.locator('#form-song').innerText()).not.toMatch(RAW_KEY);
   await page.locator('[data-lang="de"]').first().click();
-  await expect(page.locator('details[data-group="form"] > summary')).toHaveText('Songform');
+  await expect(page.locator('#form-song-title')).toHaveText('Ganzes Lied');
 });
 
 test('360 px: kein waagerechtes Scrollen, Bedienelemente mindestens 44 px hoch', async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 800 });
-  if (!(await page.locator('#side-left').isVisible())) await page.locator('#toggle-left').click();
   await expect(page.locator('#form-template')).toBeVisible();
   await page.locator('#form-template').scrollIntoViewIfNeeded();
-  const overflow = await page.evaluate(() => [document.documentElement, document.querySelector('#side-left')].map((el) => el.scrollWidth - el.clientWidth));
+  const overflow = await page.evaluate(() => [document.documentElement, document.querySelector('#form-song')].map((el) => el.scrollWidth - el.clientWidth));
   expect(overflow).toEqual([0, 0]);
   for (const id of ['form-template', 'length', ...FEEL.map((n) => `form-${n}`)]) {
     const box = await page.locator(`#${id}`).boundingBox();

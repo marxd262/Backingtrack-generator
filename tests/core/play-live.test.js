@@ -248,3 +248,21 @@ test('Instrumente ohne setVoices bleiben gültig', async () => {
     h.stop();
   }
 });
+
+test('songTime zählt die Liedzeit ab Liedanfang, folgt setTempo und bleibt nach stop() stehen', async () => {
+  const ctx = makeCtx();
+  const h = play(ctx, track({ bpm: 120 }), { loops: Infinity, createInstruments: spy().create });
+  try {
+    ctx.currentTime = 0.15 + 2; // LEAD + 2 s
+    assert.ok(Math.abs(h.songTime() - 2) < 0.01, `songTime ${h.songTime()}`);
+    h.setTempo(240); // doppeltes Tempo
+    ctx.currentTime += 1;
+    assert.ok(Math.abs(h.songTime() - 4) < 0.01, `songTime ${h.songTime()}`);
+  } finally {
+    h.stop();
+  }
+  const last = h.songTime();
+  ctx.currentTime += 5;
+  assert.equal(h.songTime(), last);
+  await tick();
+});

@@ -30,7 +30,7 @@ test('jede Kategorie, jedes Schlagwort, Stil, Schicht, Skala, Modus und Fehlerco
     for (const tag of c.tags) keys.push(`tag.${c.id}.${tag}`);
   }
   for (const s of STYLE_PRESETS) keys.push(`style.${s.id}`, `style.${s.id}.hint`);
-  for (const l of LAYERS) keys.push(`layer.${l}`, `group.${l}`);
+  for (const l of LAYERS) keys.push(`layer.${l}`);
   for (const l of LAYERS) for (const j of jobsFor(l)) keys.push(`job.${l}.${j}`, `ui.job.${l}`);
   for (const s of SCALE_NAMES) keys.push(`scale.${s}`);
   for (const m of MODE_NAMES) keys.push(`mode.${m}`);

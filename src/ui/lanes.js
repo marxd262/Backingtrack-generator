@@ -25,6 +25,15 @@ function summarize(events) {
   return { starts, fills, parts, counts, max };
 }
 
+const summaryOf = (events) => {
+  let s = summaries.get(events);
+  if (!s) summaries.set(events, (s = summarize(events)));
+  return s;
+};
+
+/** Schichten mit mindestens einem Ereignis in diesem Takt (für die LEDs an Modulen und Spuren). */
+export const activeLayers = (events, bar) => new Set(LANES.filter((l) => summaryOf(events).counts[l][bar]));
+
 /**
  * Zeichnet die Spuren; der Zeiger steht am Anfang des Takts, in dem positionSec liegt (Liedzeit wie in events).
  * layers (optional): { drums: false, ... } dimmt stumme Spuren.
@@ -33,8 +42,7 @@ export function drawLanes(canvas, events, positionSec, layers = {}) {
   const fit = fitCanvas(canvas);
   if (!fit) return;
   const { ctx, width, height } = fit;
-  let s = summaries.get(events);
-  if (!s) summaries.set(events, (s = summarize(events)));
+  const s = summaryOf(events);
   const bars = s.starts.length;
   if (!bars) return;
   const c = cssColors(canvas);

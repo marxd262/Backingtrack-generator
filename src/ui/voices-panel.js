@@ -1,12 +1,13 @@
-// Stimmenwahl in den Klanggruppen der Instrumente (linke Leiste): Dropdown Stimme (nach Art gruppiert), Dropdown Variante (nur bei
-// mehreren Varianten), Ladezustand der Sample-Stimmen und ein Hinweis auf ausgegraute Regler. Die Wahl steht in state.track.voices, wirkt live
-// über player.setVoices und bleibt bei einem Stilwechsel stehen. Welche Regler eine Stimme benutzt, steht im Register (usesTimbreField).
+// Stimmenwahl in den Instrument-Modulen (Rack): ein LCD-Select für Stimme und Variante zusammen (nach Art gruppiert, ein Eintrag je
+// Variante), Art-Kennung SMP/SYN, Ladezustand der Sample-Stimmen im Display und ein Hinweis auf ausgegraute Knöpfe. Die Wahl steht in
+// state.track.voices, wirkt live über player.setVoices und bleibt bei einem Stilwechsel stehen. Welche Regler eine Stimme benutzt, steht im Register (usesTimbreField).
 import { t } from '../index.js';
-import { $, state, setText } from './state.js';
+import { state, setText, setAttr } from './state.js';
 import { DEFAULT_TIMBRE } from '../core/timbre.js';
-import { VOICES, VOICE_LAYERS, completeVoices, usesTimbreField } from '../core/voices.js';
+import { VOICES, VOICE_LAYERS, completeVoices, usesTimbreField, setAllVoices } from '../core/voices.js';
 import { loadPack, peekPack } from '../audio/voices/sampler.js';
 import { packIdFor } from '../audio/voices/pack-id.js';
+import { createLcdSelect } from './lcd-select.js';
 
 const KINDS = ['synth', 'model', 'sample'];
 // nur Instrumente mit echter Wahl (mehr als eine sichtbare Stimme)
@@ -39,58 +40,64 @@ export function initVoices({ render, player }) {
     render();
   };
 
+  // alle Schichten auf Sample oder Synth; ein Pack, das nicht lädt, zeigt den Fehler nur im Display seines Instruments
+  const chooseAll = (kind) => {
+    state.track.voices = setAllVoices(state.track.voices, kind);
+    player()?.setVoices(state.track.voices);
+    for (const layer of VOICE_LAYERS) watch(layer);
+    render();
+  };
+
   for (const layer of CHOOSABLE) {
-    const details = $('timbre-groups').querySelector(`details[data-group="${layer}"]`);
-    const row = el('div', { className: 'voice-row' });
-    const voiceLabel = el('label', { htmlFor: `voice-${layer}` });
-    const voiceSelect = el('select', { id: `voice-${layer}` });
-    const variantLabel = el('label', { htmlFor: `variant-${layer}`, hidden: true });
-    const variantSelect = el('select', { id: `variant-${layer}`, hidden: true });
+    const slot = document.querySelector(`.instrument[data-layer="${layer}"] .inst-voice`);
+    const caption = el('div', { className: 'inst-caption' });
+    const label = el('label', { htmlFor: `voice-${layer}`, className: 'lbl' });
+    // Anzeige: Art-Kennung (SMP/SYN) und Ladezustand der Sample-Stimme
+    const display = el('span', { className: 'lcd alt' });
+    const kind = el('span', { id: `voice-kind-${layer}` });
     const status = el('span', { id: `voice-status-${layer}`, className: 'voice-status' });
     status.setAttribute('role', 'status'); // wird beim Laden und Bereitwerden angesagt
+    display.append(kind, status);
+    caption.append(label, display);
+    const select = el('select', { id: `voice-${layer}` });
     const hint = el('p', { id: `voice-hint-${layer}`, className: 'hint', hidden: true });
+    slot.append(caption, select, hint);
+    createLcdSelect(select, { prevKey: 'ui.lcdPrev', nextKey: 'ui.lcdNext' });
 
-    // Gruppen nach Art, nur solche, die es für das Instrument gibt
+    // Gruppen nach Art; eine Zeile je Stimme und Variante (Wert "id/variante"), Text = Variantenname
     const groups = {}, options = {};
-    for (const kind of KINDS) {
-      const ids = Object.keys(VOICES[layer]).filter((id) => VOICES[layer][id].kind === kind && !VOICES[layer][id].hidden); // hidden: nicht im Dropdown
+    for (const k of KINDS) {
+      const ids = Object.keys(VOICES[layer]).filter((id) => VOICES[layer][id].kind === k && !VOICES[layer][id].hidden); // hidden: nicht in der Auswahl
       if (!ids.length) continue;
-      groups[kind] = el('optgroup');
-      for (const id of ids) groups[kind].append((options[id] = el('option', { value: id })));
-      voiceSelect.append(groups[kind]);
+      groups[k] = el('optgroup');
+      for (const id of ids) for (const variant of VOICES[layer][id].variants) groups[k].append((options[`${id}/${variant}`] = el('option', { value: `${id}/${variant}` })));
+      select.append(groups[k]);
     }
-    voiceSelect.addEventListener('change', () => choose(layer, { id: voiceSelect.value })); // erste Variante der neuen Stimme
-    variantSelect.addEventListener('change', () => choose(layer, { id: voiceSelect.value, variant: variantSelect.value }));
-    row.append(voiceLabel, voiceSelect, variantLabel, variantSelect, status, hint);
-    details.querySelector('summary').after(row);
-    rows[layer] = { voiceLabel, voiceSelect, variantLabel, variantSelect, status, hint, groups, options, variantsOf: '' };
+    select.addEventListener('change', () => {
+      const [id, variant] = select.value.split('/');
+      choose(layer, { id, variant });
+    });
+    rows[layer] = { label, kind, status, select, hint, groups, options };
   }
 
-  return function renderVoices() {
+  function renderVoices() {
     const voices = completeVoices(state.track.voices);
     for (const layer of CHOOSABLE) {
       const r = rows[layer], { id, variant } = voices[layer];
-      setText(r.voiceLabel, t('ui.voice'));
-      setText(r.variantLabel, t('ui.variant'));
+      setText(r.label, t('ui.voice'));
       for (const [kind, group] of Object.entries(r.groups)) if (group.label !== t(`voice.kind.${kind}`)) group.label = t(`voice.kind.${kind}`);
-      for (const [optionId, option] of Object.entries(r.options)) setText(option, t(`voice.${layer}.${optionId}`));
-      if (r.voiceSelect.value !== id) r.voiceSelect.value = id;
-      // Varianten der gewählten Stimme; das Feld erscheint nur bei mehreren
-      const list = VOICES[layer][id].variants;
-      if (r.variantsOf !== id) {
-        r.variantsOf = id;
-        r.variantSelect.replaceChildren(...list.map((v) => el('option', { value: v })));
-      }
-      for (const option of r.variantSelect.children) setText(option, t(`variant.${layer}.${id}.${option.value}`));
-      if (r.variantSelect.value !== variant) r.variantSelect.value = variant;
-      const many = list.length > 1;
-      if (r.variantSelect.hidden === many) r.variantSelect.hidden = !many;
-      if (r.variantLabel.hidden === many) r.variantLabel.hidden = !many;
+      for (const [key, option] of Object.entries(r.options)) setText(option, t(`variant.${layer}.${key.replace('/', '.')}`));
+      // eine versteckte Stimme (Saitenmodell) hat keine Zeile: das Display bleibt dann leer
+      if (r.select.value !== `${id}/${variant}`) r.select.value = `${id}/${variant}`;
+      setAttr(r.select, 'title', r.options[`${id}/${variant}`]?.textContent ?? ''); // lange Namen werden im Display gekürzt
+      setText(r.kind, t(`voice.kindShort.${VOICES[layer][id].kind === 'sample' ? 'sample' : 'synth'}`));
       setText(r.status, loadState[layer] ? t(`voice.status.${loadState[layer]}`) : '');
-      // Hinweis, solange die Stimme Regler ihres Instruments nicht benutzt (sie sind in der Gruppe ausgegraut)
+      // Hinweis, solange die Stimme Regler ihres Instruments nicht benutzt (sie sind im Modul ausgegraut)
       const unused = Object.keys(DEFAULT_TIMBRE[layer] ?? {}).some((field) => !usesTimbreField(state.track.voices, `${layer}.${field}`));
       if (r.hint.hidden === unused) r.hint.hidden = !unused;
       setText(r.hint, unused ? t('ui.voiceHint') : '');
     }
-  };
+  }
+
+  return { render: renderVoices, chooseAll };
 }

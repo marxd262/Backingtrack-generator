@@ -1,42 +1,15 @@
-// Merkt sich Seitenleisten, ihre Gruppen, Ansichten und Beschriftung; der Speicher wird übergeben (keine Browser-Globals).
-// Die ausblendbaren Ansichten kommen aus der Registry (views.js); nicht ausblendbare und unbekannte werden verworfen.
-import { VIEWS } from './views.js';
-import { LAYER_IDS } from '../core/layers.js';
-
+// Merkt sich den Zustand der Spielseite (Fokus/Einstellen), die Beschriftung des Griffbretts und die Bundabstände; der Speicher
+// wird übergeben (keine Browser-Globals). Unbekannte und alte Felder (Leisten, Ansichten, Gruppen) werden verworfen.
 export const LAYOUT_KEY = 'backingtrack.layout';
 
-export const DEFAULT_LAYOUT = Object.freeze({
-  sidebars: Object.freeze({ left: false, right: false }),
-  views: Object.freeze(Object.fromEntries(VIEWS.filter((v) => v.hideable).map((v) => [v.id, true]))),
-  // einklappbare Gruppen der Seitenleisten (true = offen); die Klang-Gruppen (Schlagzeug bis Gesamt) und die Akkordarten
-  // Septakkorde und Erweiterungen starten zu, damit die rechte Leiste kurz bleibt
-  groups: Object.freeze({
-    style: true, tempo: true, rhythm: true, form: true, triad: true, seventh: false, extended: false, ...Object.fromEntries(LAYER_IDS.map((id) => [id, false])), master: false,
-    key: true, progression: true, views: true,
-  }),
-  labels: 'names',
-});
+export const DEFAULT_LAYOUT = Object.freeze({ mode: 'focus', labels: 'names', frets: 'real' });
 
-const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
-
-// Nur bekannte Schlüssel mit gültigem Wert; alles andere fällt auf den Standard zurück
-const pickBooleans = (raw, defaults) => {
-  const src = isObject(raw) ? raw : {};
-  const out = {};
-  for (const key of Object.keys(defaults)) {
-    out[key] = typeof src[key] === 'boolean' ? src[key] : defaults[key];
-  }
-  return out;
-};
+// je Feld die erlaubten Werte; der erste ist der Standard
+const CHOICES = { mode: ['focus', 'setup'], labels: ['names', 'degrees'], frets: ['real', 'even'] };
 
 const sanitize = (raw) => {
-  const src = isObject(raw) ? raw : {};
-  return {
-    sidebars: pickBooleans(src.sidebars, DEFAULT_LAYOUT.sidebars),
-    views: pickBooleans(src.views, DEFAULT_LAYOUT.views),
-    groups: pickBooleans(src.groups, DEFAULT_LAYOUT.groups),
-    labels: src.labels === 'names' || src.labels === 'degrees' ? src.labels : DEFAULT_LAYOUT.labels,
-  };
+  const src = raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  return Object.fromEntries(Object.entries(CHOICES).map(([key, values]) => [key, values.includes(src[key]) ? src[key] : values[0]]));
 };
 
 export function loadLayout(storage) {

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fretboardNotes, nextDistinctChord, degreeLabel, STANDARD_TUNING, FRETS } from '../../src/core/fretboard.js';
+import { fretboardNotes, nextDistinctChord, beatsUntilChange, degreeLabel, progressionRoles, romanDegree, STANDARD_TUNING, FRETS } from '../../src/core/fretboard.js';
 import { noteName } from '../../src/core/music.js';
 
 const aMinor = { root: 'A', mode: 'minor' };
@@ -15,9 +15,9 @@ const bars = (...chords) => chords.map((chord) => ({ chord, beats: 4 }));
 const base = { key: aMinor, scale: 'minorPentatonic', current: Am, next: Dm };
 const at = (notes, string, fret) => notes.find((n) => n.string === string && n.fret === fret);
 
-test('Konstanten: Standardstimmung und 15 Bünde', () => {
+test('Konstanten: Standardstimmung und 22 Bünde', () => {
   assert.deepEqual(STANDARD_TUNING, [64, 59, 55, 50, 45, 40]);
-  assert.equal(FRETS, 15);
+  assert.equal(FRETS, 22);
 });
 
 test('fretboardNotes: Rollen auf der tiefen E-Saite in A-Moll', () => {
@@ -34,7 +34,7 @@ test('fretboardNotes: Anzahl entspricht Brute-Force-Zählung, Reihenfolge Saite 
   const notes = fretboardNotes(base);
   const pcs = new Set([9, 0, 2, 4, 7, 5]);
   let expected = 0;
-  for (const open of STANDARD_TUNING) for (let f = 0; f <= 15; f++) if (pcs.has((open + f) % 12)) expected++;
+  for (const open of STANDARD_TUNING) for (let f = 0; f <= FRETS; f++) if (pcs.has((open + f) % 12)) expected++;
   assert.equal(notes.length, expected);
   const order = notes.map((n) => n.string * 100 + n.fret);
   assert.deepEqual(order, [...order].sort((a, b) => a - b));
@@ -45,6 +45,7 @@ test('fretboardNotes: ohne Akkorde nur Leitertöne, frets begrenzt die Bünde', 
   assert.ok(notes.length > 0);
   assert.ok(notes.every((n) => n.scale && !n.current && !n.next && !n.root && n.fret <= 12));
   assert.ok(notes.some((n) => n.fret === 12));
+  assert.equal(Math.max(...fretboardNotes(base).map((n) => n.fret)), 22);
 });
 
 test('fretboardNotes: verändert Eingaben nicht, ungültige Eingaben ergeben []', () => {
@@ -94,4 +95,38 @@ test('nextDistinctChord: gleiche Akkorde, Bb gleich A#, ungültige Eingaben', ()
   assert.equal(nextDistinctChord(null, 8, 0), null);
   assert.equal(nextDistinctChord([{ beats: 4 }], 8, 0), null);
   assert.equal(nextDistinctChord(bars({ root: 'H', quality: 'maj' }, Am), 8, 0), null);
+});
+
+test('progressionRoles: jetzt, derselbe Akkord geht weiter, nächster Wechsel (im Kreis), später', () => {
+  const am = { root: 'A', quality: 'min' }, dm = { root: 'D', quality: 'min' }, e = { root: 'E', quality: 'maj' };
+  const track = { bars: [{ chord: am }, { chord: am }, { chord: dm }, { chord: e }], length: 16 };
+  assert.deepEqual(progressionRoles(track, 0), ['now', 'hold', 'next', 'later']);
+  assert.deepEqual(progressionRoles(track, 2), ['later', 'later', 'now', 'next']);
+  assert.deepEqual(progressionRoles(track, 3), ['next', 'later', 'later', 'now']); // E jetzt, danach im Kreis Am
+  assert.deepEqual(progressionRoles(track, null), ['now', 'hold', 'next', 'later']);
+  assert.deepEqual(progressionRoles({ bars: [{ chord: am }], length: 8 }, 3), ['now']);
+});
+
+test('romanDegree: römische Stufe zur Tonart, klein bei Moll und vermindert, b vor chromatischen Stufen', () => {
+  const [A, D, Eq, C, G] = ['A', 'D', 'E', 'C', 'G'].map((root) => (quality) => ({ root, quality }));
+  const roman = (...chords) => chords.map((c) => romanDegree(aMinor, c));
+  assert.deepEqual(roman(A('min'), A('min'), D('min'), Eq('maj')), ['i', 'i', 'iv', 'V']);
+  assert.deepEqual(roman(C('maj'), G('maj'), Eq('dim'), D('sus4')), ['bIII', 'bVII', 'v', 'IV']);
+  assert.equal(romanDegree(cMajor, { root: 'B', quality: 'dim' }), 'vii');
+  assert.equal(romanDegree(cMajor, { root: 'Bb', quality: 'dom7' }), 'bVII');
+  assert.equal(romanDegree(cMajor, { root: 'A', quality: 'min7' }), 'vi');
+});
+
+test('beatsUntilChange: ganze Schläge bis zum nächsten Takt mit anderem Akkord, aufgerundet, mindestens 1', () => {
+  const track = { bpm: 60, length: 4, bars: bars(Am, Am, Dm, E) }; // 4/4 bei 60 bpm: 1 Schlag = 1 s
+  assert.equal(beatsUntilChange(track, 0), 8);
+  assert.equal(beatsUntilChange(track, 0.5), 8); // 7,5 aufgerundet
+  assert.equal(beatsUntilChange(track, 7.2), 1); // 0,8 aufgerundet
+  assert.equal(beatsUntilChange(track, 8), 4);
+  assert.equal(beatsUntilChange(track, 12), 4); // E, danach im Kreis Am
+  assert.equal(beatsUntilChange(track, 16 + 0.5), 8); // zweiter Durchlauf
+});
+
+test('beatsUntilChange: eine Folge mit nur einem Akkord ergibt null', () => {
+  assert.equal(beatsUntilChange({ bpm: 60, length: 4, bars: bars(Am, Am) }, 3), null);
 });

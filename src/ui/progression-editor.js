@@ -4,6 +4,7 @@ import { chordOptions } from '../core/music.js';
 import { CHORDS, CHORD_GROUPS, chordName } from '../core/chords.js';
 import { METERS, meterKey } from '../core/grooves.js';
 import { chordIndex } from '../core/form.js';
+import { progressionRoles, romanDegree } from '../core/fretboard.js';
 import { t } from '../index.js';
 import { $, state, setText, setAttr, pressed, MAX_CHORDS } from './state.js';
 
@@ -41,8 +42,8 @@ export function initProgressionEditor(changed, render) {
   let addKey = '';
   let options = []; // chordOptions der gewählten Tonart
   let picked = ''; // gewählter Grundton
-  // Chips der Akkordarten einmal bauen (alle des Registers, je Gruppe eine einklappbare Reihe; der Offen-Zustand steht im Layout,
-  // app.js bindet ihn über initGroups); beim Rendern wechseln nur Text und Aktivierung
+  // Chips der Akkordarten einmal bauen (alle des Registers, je Gruppe eine Reihe; app.js hält die Gruppen offen);
+  // beim Rendern wechseln nur Text und Aktivierung
   const qualityChips = [];
   for (const group of CHORD_GROUPS) {
     const details = Object.assign(document.createElement('details'), { className: 'group' });
@@ -91,9 +92,12 @@ export function initProgressionEditor(changed, render) {
     }
     while (row.children.length > bars.length) row.lastChild.remove();
     const now = state.current ? chordIndex(state.track, state.current.bar) : -1;
+    const roles = progressionRoles(state.track, state.current?.bar ?? null);
     bars.forEach(({ chord }, i) => {
       const b = row.children[i];
       setText(b, chordName(chord));
+      setAttr(b, 'class', `chip role-${roles[i]}`); // Farbe nach Rolle
+      setAttr(b, 'data-degree', romanDegree(state.track.key, chord)); // Stufe darunter (CSS ::after, nicht im Namen)
       setAttr(b, 'aria-label', t('ui.removeChord', { chord: chordName(chord) }));
       if (b.disabled !== (bars.length === 1)) b.disabled = bars.length === 1;
       if (i === now) setAttr(b, 'aria-current', 'true');

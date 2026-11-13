@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Rack-Entwurf 10</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --rail:#1d1d1d; --rail-dot:#3a3a3a; --gap:#111;
+    --panel:#e9e9e6; --panel-edge:#d2d2ce; --ink:#2a2a2a; --ink-2:#6b6b68;
+    --teal:#18a2a6; --pink:#e3465e; --lcd:#161a14; --lcd-ink:#b9f26b; --lcd-ink-2:#6fe3e6;
+    --board:#f4f3ee;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:#0d0d0d;color:var(--ink);font-family:Barlow,system-ui,sans-serif}
+  .app{min-width:1500px;height:100vh;min-height:860px;display:flex;flex-direction:column;background:var(--gap)}
+  /* Schienen wie im Rack */
+  .rail{height:12px;background:var(--rail) radial-gradient(circle,var(--rail-dot) 2px,transparent 2.5px) 0 50%/16px 12px repeat-x;flex:none}
+  .shelf{display:flex;gap:3px;padding:3px;background:var(--gap);min-height:0}
+  .mod{background:var(--panel);border-radius:2px;position:relative;padding:18px 10px 10px;box-shadow:inset 0 0 0 1px var(--panel-edge);min-width:0}
+  .mod::before,.mod::after{content:"";position:absolute;top:5px;width:7px;height:7px;border-radius:50%;background:#cfcfcb;box-shadow:inset 0 0 0 1px #b8b8b4}
+  .mod::before{left:5px}.mod::after{right:5px}
+  .mod>.title{position:absolute;top:3px;right:18px;font-size:12px;color:#444;letter-spacing:.01em;display:flex;gap:6px;align-items:center}
+  .led{width:7px;height:7px;border-radius:50%;background:#bdbdb9;box-shadow:inset 0 0 0 1px rgba(0,0,0,.15)}
+  .led.on{background:var(--pink);box-shadow:0 0 6px var(--pink)}
+  .led.t.on{background:var(--teal);box-shadow:0 0 6px var(--teal)}
+  .led.blink{animation:blink var(--d,.6s) steps(2,start) infinite}
+  @keyframes blink{50%{background:#bdbdb9;box-shadow:none}}
+  .lcd{background:var(--lcd);color:var(--lcd-ink);font-family:"Share Tech Mono",monospace;border-radius:3px;padding:2px 6px;letter-spacing:.06em;white-space:nowrap;box-shadow:inset 0 0 0 2px #000}
+  .lbl{font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:#3c3c3a;text-align:center;font-weight:500}
+  .pill{display:inline-block;font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:#fff;background:var(--teal);padding:1px 5px;border-radius:2px;font-weight:600}
+  .pill.p{background:var(--pink)}
+  .kn{display:flex;flex-direction:column;align-items:center;gap:1px}
+  .kn svg{display:block}
+  .ends{display:flex;justify-content:space-between;width:100%;font-size:7.5px;gap:2px;color:var(--ink-2);margin-top:-4px;padding:0 1px}
+  .btn{width:16px;height:16px;border-radius:2px;background:#151515;box-shadow:0 0 0 2px #fff,0 0 0 3px #b9b9b5;display:inline-block;cursor:pointer;color:#ddd;font-size:10px;line-height:16px;text-align:center}
+  .push{width:30px;height:30px;border-radius:50%;background:#151515;box-shadow:0 0 0 3px #fff,0 0 0 4px #b9b9b5;cursor:pointer}
+  .row{display:flex;gap:8px;align-items:center}
+  .col{display:flex;flex-direction:column;gap:6px}
+  .dots{border-top:1.5px dotted #8f8f8b;margin:2px 4px}
+  .vdots{border-left:1.5px dotted #8f8f8b;align-self:stretch}
+
+  /* Kopfleiste */
+  .top{display:flex;align-items:center;gap:18px;padding:6px 14px;background:var(--panel);margin:3px 3px 0;border-radius:2px;box-shadow:inset 0 0 0 1px var(--panel-edge);flex:none}
+  .top .brand{font-size:15px;color:#444}
+  .top .grow{flex:1}
+  .sw{display:flex;align-items:center;gap:6px;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:#444;cursor:pointer;user-select:none}
+  .sw .track{width:34px;height:16px;border-radius:2px;background:#151515;position:relative;box-shadow:0 0 0 2px #fff,0 0 0 3px #b9b9b5}
+  .sw .track i{position:absolute;top:2px;left:2px;width:14px;height:12px;background:#d8d8d4;border-radius:1px;transition:left .15s}
+  .app:not(.focus) .sw .track i{left:18px}
+  .sw b{font-weight:500;opacity:.45}.app.focus .sw b.f,.app:not(.focus) .sw b.e{opacity:1}
+  .chipbtn{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;padding:4px 9px;background:#151515;color:#eee;border-radius:2px;cursor:pointer}
+
+  /* Visualisierung */
+  .viz{flex:1;display:flex;flex-direction:column;min-height:0}
+  .viz .shelf{flex:1}
+  .viz .shelf.top-row{flex:1.25}
+  .key{width:170px;display:flex;flex-direction:column;gap:8px;justify-content:center}
+  .key .big{font-size:58px;line-height:1;padding:4px 10px;text-align:center}
+  .app:not(.focus) .key .big{font-size:40px}
+  .key .next{color:var(--lcd-ink-2);font-size:30px;text-align:center}
+  .app:not(.focus) .key .next{font-size:22px}
+  .fbmod{flex:1;display:flex;flex-direction:column}
+  .fbmod .fb{flex:1;min-height:0}
+  .fbmod .head{position:absolute;top:2px;left:20px;display:flex;gap:10px;align-items:center}
+  .seg{display:flex;gap:6px;align-items:center;font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:#444}
+  .legend{display:flex;gap:14px;font-size:10px;color:#555;padding:4px 2px 0;flex-wrap:wrap}
+  .legend span{display:flex;align-items:center;gap:4px}
+  .app:not(.focus) .legend{display:none}
+  .wheelmod{width:250px;display:flex;flex-direction:column;align-items:center;gap:6px}
+  .app:not(.focus) .wheelmod{width:200px}
+  .wheel{flex:1;min-height:0;width:100%}
+  .prog{display:flex;gap:4px}
+  .prog .c{display:flex;flex-direction:column;align-items:center;font-family:"Share Tech Mono",monospace;font-size:14px;padding:3px 7px;border-radius:2px;background:#fff;box-shadow:inset 0 0 0 1px #b8b8b4;min-width:34px}
+  .prog .c small{font-family:Barlow;font-size:9px;color:var(--ink-2)}
+  .prog .c.now{background:var(--pink);color:#fff;box-shadow:none}.prog .c.now small{color:#ffe1e5}
+  .prog .c.hold{background:#f8d6dc;color:#9b1c33;box-shadow:inset 0 0 0 1.5px var(--pink)}.prog .c.hold small{color:#b8455a}
+  .prog .c.nx{background:var(--teal);color:#fff;box-shadow:none}.prog .c.nx small{color:#d6f6f7}
+  .song{flex:1;display:flex;flex-direction:column;gap:4px;padding-top:20px}
+  .song .info{position:absolute;top:3px;left:20px;font-size:12px;color:#444}
+  .grid{display:grid;grid-template-columns:78px 1fr;column-gap:8px;row-gap:3px;flex:1;min-height:0;position:relative}
+  .strip{display:flex;gap:2px;align-items:flex-end;height:44px}
+  .app:not(.focus) .strip{height:30px}
+  .strip div{font-size:10px;padding:2px 4px;color:#333;border-radius:1px;overflow:hidden;white-space:nowrap;cursor:pointer}
+  .strip div.sel{outline:2px solid #111;outline-offset:-2px}
+  .strip small{display:block;color:#555}
+  .p-verse{background:#c9dbd9}.p-chorus{background:#f0c0c7}.p-outro{background:#d8d4e2}.p-build{background:#f3dcc0}
+  .lanes{display:contents}
+  .ln{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:#444;display:flex;align-items:center;justify-content:flex-end;gap:5px}
+  .ln.muted{color:#aaa;text-decoration:line-through}
+  .cells{display:flex;gap:1px;min-height:6px}
+  .cells i{flex:1;background:var(--teal);border-radius:1px}
+  .cells.muted i{background:repeating-linear-gradient(45deg,#c9c9c5 0 2px,transparent 2px 4px)!important;opacity:1!important}
+  .playhead{position:absolute;top:-6px;bottom:0;width:2px;background:#111;pointer-events:none}
+  .playhead::before{content:"";position:absolute;top:0;left:-4px;border:5px solid transparent;border-top:6px solid #111}
+
+  /* Rack */
+  .rack{flex:none;transition:none}
+  .app.focus .rack{display:none}
+  .rack .shelf{height:336px;overflow-x:auto}
+  .rack .mod{flex:none;display:flex;flex-direction:column;gap:7px}
+  .voice{display:flex;align-items:center;gap:5px}
+  .voice .lcd{flex:1;font-size:11px;text-align:center;overflow:hidden;padding:2px 3px}
+  .tag{font-size:8px;color:var(--lcd);background:var(--lcd-ink);padding:0 3px;border-radius:1px;margin-right:4px;vertical-align:1px}
+  .tag.syn{background:#888;color:#111}
+  .sub{font-size:10px;color:var(--ink-2);text-align:center;margin-top:-4px}
+  .macros{display:flex;justify-content:space-between}
+  .details{display:grid;grid-template-columns:repeat(3,1fr);gap:4px 2px}
+  .details .lbl{font-size:8px;letter-spacing:.03em;text-transform:none;color:#555}
+  .foot{margin-top:auto;display:flex;justify-content:space-between;align-items:flex-end;border-top:1px solid #cfcfcb;padding-top:6px}
+  .mute{display:flex;flex-direction:column;align-items:center;gap:4px}
+  .kn[data-of].hl svg circle:first-of-type{filter:drop-shadow(0 0 3px var(--teal))}
+  .kn[data-of].hl.p svg circle:first-of-type{filter:drop-shadow(0 0 3px var(--pink))}
+  .mixer .ch{display:flex;flex-direction:column;align-items:center;gap:7px;width:34px}
+  .mixer .ch .lbl{font-size:8.5px}
+  .fader{position:relative;width:8px;height:150px;background:#151515;border-radius:2px;box-shadow:0 0 0 2px #fff,0 0 0 3px #b9b9b5}
+  .fader .cap{position:absolute;left:-8px;width:24px;height:12px;margin-bottom:-6px;background:#f6f6f3;border:1.5px solid #151515;border-radius:2px}
+  .fader .cap::after{content:"";position:absolute;left:3px;right:3px;top:4px;height:1.5px;background:#151515}
+  .meter{display:flex;flex-direction:column-reverse;gap:2px;width:4px;justify-content:flex-start}
+  .meter i{flex:1;background:#cfcfcb;border-radius:1px}
+  .meter i.on{background:var(--teal);box-shadow:0 0 3px var(--teal)}
+  .meter i.on.hot{background:var(--pink);box-shadow:0 0 3px var(--pink)}
+  .songwrap{display:flex;gap:10px;flex:1;min-height:0}
+  .songwrap .grid{flex:1}
+  .fpanel{display:flex;gap:10px;flex:none}
+  .fsel{width:118px;gap:5px}
+  .frow{display:flex;justify-content:space-around;margin-top:auto;padding-top:4px;border-top:1px dotted #8f8f8b}
+  .frow.tight{margin-top:0;border-top:0;padding-top:0}
+  .knobgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:0 4px;justify-items:center;margin-top:2px}
+  .selchip{background:#c9dbd9;padding:0 4px;border-radius:1px;color:#111}
+  .app.focus .fpanel,.app.focus .fdiv{display:none}
+  .strip div.sel{position:relative}
+  .strip div.sel::before,.strip div.sel::after{content:"";position:absolute;top:30%;bottom:30%;width:3px;background:#111;border-radius:1px;cursor:ew-resize}
+  .strip div.sel::before{left:2px}.strip div.sel::after{right:2px}
+  .strip div.locked{background-image:linear-gradient(135deg,transparent 0 calc(100% - 9px),#111 calc(100% - 9px))}
+  .ledsel{display:flex;flex-direction:column;gap:3px}
+  .ledsel span{display:flex;align-items:center;gap:6px;font-size:10px;color:#444}
+  .ledrow{display:flex;justify-content:space-between}
+  .ledrow span{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:9px;color:#444}
+  .notes{min-width:1500px;background:#f6f5f1;color:#222;padding:22px 28px 40px;font-size:14px;line-height:1.5}
+  .notes h2{font-weight:600;font-size:18px;margin:0 0 10px}
+  .notes ol{columns:2;column-gap:40px;margin:0;padding-left:20px}
+  .notes li{break-inside:avoid;margin-bottom:8px}
+  .notes b{font-weight:600}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+
+  <!-- Kopfleiste -->
+  <div class="top">
+    <div class="row"><span class="push" title="Start/Stop"></span><span class="lbl" style="text-align:left">stop<br><span class="led on" style="display:inline-block;margin-top:2px"></span></span></div>
+    <div class="col" style="gap:2px"><span class="lbl" style="text-align:left">takt</span><span class="lcd" style="font-size:18px">005 / 096</span></div>
+    <div class="col" style="gap:2px"><span class="lbl" style="text-align:left">teil</span><span class="lcd" style="font-size:18px">VERSE 1</span></div>
+    <div class="col" style="gap:2px"><span class="lbl" style="text-align:left">variante</span><div class="row" style="gap:7px"><span class="btn">‹</span><span class="lcd" style="font-size:18px">1385</span><span class="btn">›</span><span class="btn">⚄</span></div></div>
+    <span class="grow"></span>
+    <span class="brand">backingtrack generator</span>
+    <span class="grow"></span>
+    <label class="sw" id="sw"><b class="f">fokus</b><span class="track"><i></i></span><b class="e">einstellen</b></label>
+    <span class="chipbtn">profile</span>
+    <span class="seg">de <span class="led on"></span> en <span class="led"></span></span>
+  </div>
+
+  <!-- Visualisierung -->
+  <div class="viz">
+    <div class="shelf top-row">
+      <div class="mod key">
+        <span class="title">tonart</span>
+        <div class="lcd big">Am</div>
+        <div class="lbl">moll-pentatonik</div>
+        <div class="dots"></div>
+        <div class="lbl">nächster · in 3 schlägen</div>
+        <div class="lcd next">Dm</div>
+      </div>
+      <div class="mod fbmod">
+        <span class="title">griffbrett</span>
+        <div class="head seg"><span class="led t on"></span> namen <span class="led t"></span> stufen <span style="width:18px"></span><span id="spacing" style="cursor:pointer;display:flex;gap:6px;align-items:center"><span class="led t on" id="sp-real"></span> echte bünde <span class="led t" id="sp-even"></span> gleich breit</span></div>
+        <div class="fb" id="fb"></div>
+        <div class="legend" id="legend"></div>
+      </div>
+      <div class="mod wheelmod">
+        <span class="title">akkorde</span>
+        <svg class="wheel" id="wheel" viewBox="-100 -100 200 200"></svg>
+        <div class="prog">
+          <span class="c now">Am<small>i</small></span><span class="c hold">Am<small>i</small></span><span class="c nx">Dm<small>iv</small></span><span class="c">E<small>V</small></span>
+        </div>
+      </div>
+    </div>
+    <div class="shelf">
+      <div class="mod song">
+        <span class="info">song · 96 takte · auto (pop)</span>
+        <span class="title">form &amp; spuren</span>
+        <div class="songwrap">
+          <div class="fpanel">
+            <div class="col fsel">
+              <span class="lbl" style="text-align:left">ganzes lied</span>
+              <div class="voice"><span class="btn">‹</span><span class="lcd" style="font-size:10px">AUTO·POP</span><span class="btn">›</span></div>
+              <div class="voice"><span class="btn">−</span><span class="lcd" style="font-size:11px">96 T</span><span class="btn">+</span></div>
+              <div class="knobgrid">
+                <div class="kn" data-k="teal" data-s="22" data-v=".5" data-o="c" data-l="struktur"></div><div class="kn" data-k="pink" data-s="22" data-v=".46" data-o="c" data-l="dynamik"></div>
+                <div class="kn" data-k="black" data-s="22" data-v=".3" data-l="pausen"></div><div class="kn" data-k="black" data-s="22" data-v=".2" data-l="zufall"></div>
+              </div>
+              <div class="frow"><span class="col" style="align-items:center;gap:3px"><span class="row" style="gap:5px"><span class="push" style="width:18px;height:18px"></span></span><span class="lbl">würfeln</span></span><span class="col" style="align-items:center;gap:3px"><span class="row" style="gap:5px"><span class="push" style="width:18px;height:18px"></span></span><span class="lbl">+ teil</span></span></div>
+            </div>
+          </div>
+          <div class="vdots fdiv"></div>
+          <div class="grid" id="grid"></div>
+          <div class="vdots fdiv"></div>
+          <div class="fpanel" id="partpanel">
+            <div class="col fsel">
+              <span class="lbl" style="text-align:left">gewählt: <span class="selchip" id="selchip">teil 1</span></span>
+              <div class="voice"><span class="btn">‹</span><span class="lcd" style="font-size:11px" id="ptype">VERSE</span><span class="btn">›</span></div>
+              <div class="voice"><span class="btn">−</span><span class="lcd" style="font-size:11px" id="plen">16 T</span><span class="btn">+</span></div>
+              <div class="voice"><span class="btn">‹</span><span class="lcd" style="font-size:10px">→ FILL</span><span class="btn">›</span></div>
+              <div class="knobgrid">
+                <div class="kn" data-k="black" data-s="22" data-v=".7" data-o="c" data-l="pegel"></div><div class="kn" data-k="black" data-s="22" data-v=".42" data-o="c" data-l="dichte"></div>
+              </div>
+              <div class="frow"><span class="col" style="align-items:center;gap:3px"><span class="row" style="gap:5px"><span class="btn">‹</span><span class="btn">›</span></span><span class="lbl">schieben</span></span><span class="col" style="align-items:center;gap:3px"><span class="row" style="gap:5px"><span class="btn">⧉</span><span class="btn">×</span></span><span class="lbl">kopie·weg</span></span></div>
+              <div class="frow tight"><span class="col" style="align-items:center;gap:3px"><span class="row" style="gap:5px"><span class="led"></span><span class="btn"></span></span><span class="lbl">crash</span></span><span class="col" style="align-items:center;gap:3px"><span class="row" style="gap:5px"><span class="led on" id="plock"></span><span class="btn"></span></span><span class="lbl">sperre</span></span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Rack -->
+  <div class="rack">
+    <div class="rail"></div>
+    <div class="shelf" id="rack">
+
+      <!-- Harmonie -->
+      <div class="mod" style="width:200px">
+        <span class="title">harmonie</span>
+        <div class="row" style="justify-content:space-between">
+          <div class="col" style="gap:3px;align-items:center"><span class="lcd" style="font-size:20px;min-width:44px;text-align:center">A</span><span class="kn" data-o="n" data-k="black" data-s="26" data-v=".75"></span><span class="lbl">tonart</span></div>
+          <div class="col" style="gap:3px;align-items:center"><span class="lcd" style="font-size:14px;padding:5px 6px">MOLL PENT</span><span class="kn" data-o="n" data-k="black" data-s="26" data-v=".3"></span><span class="lbl">skala</span></div>
+        </div>
+        <div class="dots"></div>
+        <div class="lbl" style="text-align:left">akkordfarbe</div>
+        <div class="ledrow"><span><span class="led on"></span>3-klang</span><span><span class="led"></span>7er</span><span><span class="led"></span>erweitert</span><span><span class="led"></span>power</span><span class="btn" style="margin-top:4px"></span></div>
+        <div class="dots"></div>
+        <div class="lbl" style="text-align:left">progression</div>
+        <div class="prog" style="justify-content:space-between"><span class="c now">Am<small>i</small></span><span class="c hold">Am<small>i</small></span><span class="c nx">Dm<small>iv</small></span><span class="c">E<small>V</small></span><span class="btn" style="align-self:center">+</span></div>
+      </div>
+
+      <!-- Rhythmus -->
+      <div class="mod" style="width:124px">
+        <span class="title">rhythmus</span>
+        <span class="lcd" style="font-size:16px;text-align:center">100 BPM</span>
+        <div class="kn" data-o="n" data-k="white" data-s="50" data-v=".38"></div>
+        <div class="lbl" style="margin-top:-6px">tempo</div>
+        <div class="row" style="justify-content:space-between;align-items:flex-start">
+          <div class="ledsel"><span><span class="led on"></span>4/4</span><span><span class="led"></span>3/4</span><span><span class="led"></span>6/8</span><span><span class="led"></span>12/8</span><span><span class="led"></span>5/4</span></div>
+          <div class="col" style="align-items:center;gap:2px"><span class="kn" data-o="c" data-k="teal" data-s="32" data-v=".45"></span><span class="pill">komplex</span></div>
+        </div>
+        <div class="voice"><span class="btn">‹</span><span class="lcd" style="font-size:9.5px">BACKBEAT</span><span class="btn">›</span></div>
+        <div class="sub">groove</div>
+      </div>
+
+      <!-- Instrumente: werden aus Daten gebaut -->
+      <template id="inst"></template>
+    </div>
+    <div class="rail"></div>
+  </div>
+</div>
+
+<div class="notes">
+  <h2>Was der Entwurf zeigt</h2>
+  <ol>
+    <li><b>Fokus / Einstellen</b> oben rechts ist anklickbar. Im Fokus verschwindet das Rack, und Tonart, Griffbrett, Akkordkreis und Spuren werden groß.</li>
+    <li><b>Tonart-Modul:</b> aktuelle Tonart groß, darunter der <b>nächste Akkord</b> mit Countdown. Das ist der Blick „wo bin ich, was kommt“.</li>
+    <li><b>Akkorde:</b> Quintenzirkel (aktuell pink, nächster türkis, Leitertöne grau hinterlegt) plus die Progression mit Stufen (i, iv, V). Er sitzt jetzt neben dem Griffbrett statt unter dem Bildrand.</li>
+    <li><b>Form &amp; Spuren:</b> Formstreifen und darunter eine Spur je Instrument, auf derselben Takt-Achse. Die Deckkraft zeigt, wie dicht das Instrument spielt; gestreift heißt stumm. Die schwarze Ecke markiert gesperrte Teile.</li>
+    <li><b>Instrument-Module</b> sind alle gleich gebaut: Stimme im Display (SMP = Sample, SYN = Synth), zwei <b>Makro-Regler</b> mit beschrifteten Enden, darunter die Detailregler. Der farbige Bogen zeigt die Abweichung vom Ausgangswert: Regler mit Mitte (Makros, Komplex, Pan, Helligkeit …) zählen ab 12 Uhr, links türkis, rechts pink; Regler, die bei null beginnen (Fuzz, Raum, Pausen …), zählen ab dem linken Anschlag. Tonart, Skala und Tempo sind Wähler ohne Bogen. <b>Fahr mit der Maus über ein Makro</b>, dann leuchten die Regler auf, die es mitnimmt.</li>
+    <li><b>Mixer</b> als eigenes Modul: je Instrument ein Fader (oben = 100 %, lauter geht nicht), daneben eine Pegelanzeige, die zeigt, wer gerade wie laut spielt, darunter Pan und Stumm. Pan ist neu, das gibt es heute noch nicht.</li>
+    <li><b>Gesamtkanal</b> rechts im Mixer: Schalter <b>alle Synth ⇄ alle Samples</b> stellt mit einem Griff jedes Instrument um, dazu Hall, Echo, Helligkeit und der Gesamtpegel. Danach lässt sich jedes Instrument im eigenen Display einzeln umstellen.</li>
+    <li><b>Form direkt am Streifen</b> (neu in dieser Fassung): Beim Einstellen klappen links das Feld <b>ganzes Lied</b> (Vorlage, Größe, vier Regler, würfeln, Teil anfügen) und rechts das Feld <b>gewählter Teil</b> auf. <b>Klick auf einen Teil im Streifen</b>, dann zeigt das rechte Feld seine Werte; nur das Kästchen „teil N“ trägt die Farbe des Blocks. Die Griffe an den Kanten des gewählten Teils stehen für Länge ziehen. Im Fokus verschwinden beide Felder. Das Rack hat kein Form-Modul mehr.</li>
+    <li><b>Dichte:</b> enge Abstände wie im Rack, alles auf einer Fläche ohne Klappgruppen. Das Rack scrollt seitlich, falls das Fenster schmaler ist als alle Module.</li>
+    <li><b>Noch nicht drin:</b> Startseite mit Wortwolke, Profile-Fenster, schmale Bildschirme, englische Beschriftung. Die Detailregler-Auswahl je Instrument ist ein Platzhalter.</li>
+  </ol>
+</div>
+
+<script>
+// ---------- Regler ----------
+const P = (r, deg) => [Math.sin(deg * Math.PI / 180) * r, -Math.cos(deg * Math.PI / 180) * r];
+function arc(r, a, b) { const [x1, y1] = P(r, a), [x2, y2] = P(r, b); return `M${x1.toFixed(2)},${y1.toFixed(2)} A${r},${r} 0 ${Math.abs(b - a) > 180 ? 1 : 0} ${b > a ? 1 : 0} ${x2.toFixed(2)},${y2.toFixed(2)}`; }
+function knob(size, v, kind, origin = 'l') {
+  const r = size / 2, pad = 6, a = -135 + 270 * v, box = size + pad * 2;
+  let s = `<svg width="${box}" height="${box}" viewBox="${-r - pad} ${-r - pad} ${box} ${box}">`;
+  s += `<path d="${arc(r + 3.5, -135, 135)}" fill="none" stroke="#cfcfcb" stroke-width="1"/>`;
+  // Bogen vom Ausgangswert bis zur Zeigerspitze: Mitte (c) links türkis, rechts pink; linker Anschlag (l) pink; n: keiner
+  const o = origin === 'c' ? 0 : -135;
+  if (origin !== 'n' && Math.abs(a - o) > 1) s += `<path d="${arc(r + 3.5, Math.min(o, a), Math.max(o, a))}" fill="none" stroke="var(--${a < o ? 'teal' : 'pink'})" stroke-width="2.6" stroke-linecap="round"/>`;
+  const line = (c, r0, r1) => { const [x0, y0] = P(r * r0, a), [x1, y1] = P(r * r1, a); return `<line x1="${x0}" y1="${y0}" x2="${x1}" y2="${y1}" stroke="${c}" stroke-width="${Math.max(1.6, size / 18)}" stroke-linecap="round"/>`; };
+  if (kind === 'white') s += `<circle r="${r}" fill="#111"/><circle r="${r * .8}" fill="#fbfbf9"/>` + line('#111', .15, .98);
+  else if (kind === 'teal' || kind === 'pink') s += `<circle r="${r}" fill="#111"/><circle r="${r * .74}" fill="var(--${kind})"/>` + line('#fff', .1, .95);
+  else s += `<circle r="${r}" fill="#141414"/>` + line('#f2f2f2', .25, .95);
+  return s + '</svg>';
+}
+function paintKnobs(root = document) {
+  root.querySelectorAll('.kn[data-k]').forEach(el => {
+    el.innerHTML = knob(+el.dataset.s, +el.dataset.v, el.dataset.k, el.dataset.o) + (el.dataset.l ? `<span class="${el.dataset.small ? 'lbl' : 'lbl'}">${el.dataset.l}</span>` : '');
+  });
+}
+
+// ---------- Instrumente ----------
+const T = 'var(--teal)', K = 'var(--pink)';
+const INST = [
+  { id: 'drums', name: 'schlagzeug', voice: 'STANDARD', smp: 1, w: 140, blink: '.3s',
+    macros: [{ n: 'körper', a: 'boomy', b: 'punchy', v: .68, c: 'teal' }, { n: 'raum', a: 'trocken', b: 'weit', v: .3, c: 'pink' }],
+    det: [['Kick-Punch', .7, [0]], ['Kick-Länge', .4, [0]], ['Snare-Knack', .62, [0]], ['Snare-Ton', .5], ['Hat-Glanz', .55], ['Hat-Länge', .45], ['Raum', .3, [1]]] },
+  { id: 'bass', name: 'bass', voice: 'FINGER', smp: 1, w: 134, blink: '.6s',
+    macros: [{ n: 'ton', a: 'rund', b: 'resonant', v: .35, c: 'teal' }, { n: 'dreck', a: 'sauber', b: 'fuzz', v: .15, c: 'pink' }],
+    det: [['Sub', .2], ['Zupfen', .5], ['Rundung', .45, [0]], ['Grenzfreq.', .4, [0]], ['Resonanz', .4, [0]], ['Fuzz', .15, [1]]] },
+  { id: 'chords', name: 'akkorde', voice: 'CLEAN', smp: 1, w: 134, blink: '1.2s',
+    macros: [{ n: 'farbe', a: 'mellow', b: 'bissig', v: .55, c: 'teal' }, { n: 'bewegung', a: 'ruhig', b: 'chorus', v: .25, c: 'pink' }],
+    det: [['Helligkeit', .55, [0]], ['Länge', .5, [0]], ['Chorus', .25, [1]], ['Tremolo', 0], ['Overdrive', .1], ['Fuzz', 0]] },
+  { id: 'pad', name: 'pad', voice: 'STRINGS', smp: 1, w: 134, blink: '2.4s', off: 1,
+    macros: [{ n: 'luft', a: 'dicht', b: 'luftig', v: .6, c: 'teal' }, { n: 'bewegung', a: 'still', b: 'wogend', v: .4, c: 'pink' }],
+    det: [['Einsatz', .5], ['Grenzfreq.', .6, [0]], ['Schimmer', .4, [0]], ['Dichte', .4, [0]], ['LFO-Tempo', .45, [1]], ['LFO-Tiefe', .4, [1]]] },
+  { id: 'lead', name: 'lead', voice: 'FLÖTE', smp: 1, w: 124, blink: '1.8s', job: 'FILLS',
+    macros: [{ n: 'dreck', a: 'sauber', b: 'fuzz', v: .1, c: 'pink' }],
+    det: [['Overdrive', .1, [0]], ['Distortion', 0, [0]], ['Fuzz', 0, [0]]] },
+  { id: 'perc', name: 'percussion', voice: 'KIT', smp: 1, w: 100, job: 'MIX', muted: 1,
+    macros: [], det: [] },
+];
+function instrumentHTML(x) {
+  const macro = (m, i) => `<div class="col" style="align-items:center;gap:0;width:56px"><div class="kn macro" data-o="c" data-k="${m.c}" data-s="34" data-v="${m.v}" data-link="${x.id}-${i}"></div><div class="ends"><span>${m.a}</span><span>${m.b}</span></div><span class="pill ${m.c === 'pink' ? 'p' : ''}">${m.n}</span></div>`;
+  const ZERO = ['Raum', 'Sub', 'Fuzz', 'Overdrive', 'Distortion', 'Rundung', 'Chorus', 'Tremolo', 'Schimmer'];
+  const det = d => {
+    const mods = (d[2] || []).map(i => ({ amt: (i === 0 ? .16 : .12), c: x.macros[i]?.c === 'pink' ? K : T }));
+    const of = (d[2] || []).map(i => `${x.id}-${i}`).join(' ');
+    return `<div class="kn" data-o="${ZERO.includes(d[0]) ? 'l' : 'c'}" data-k="black" data-s="20" data-v="${d[1]}" data-m='${JSON.stringify(mods)}' ${of ? `data-of="${of}"` : ''}></div>`;
+  };
+  return `<div class="mod" style="width:${x.w}px">
+    <span class="title"><span class="led ${x.muted ? '' : 'on blink'}" style="--d:${x.blink}"></span>${x.name}</span>
+    <div class="voice"><span class="lcd"><span class="tag ${x.smp ? '' : 'syn'}">${x.smp ? 'SMP' : 'SYN'}</span>${x.voice}</span></div>
+    <div class="row" style="justify-content:space-between;margin-top:-3px"><span class="btn">‹</span><span class="lbl">stimme</span><span class="btn">›</span></div>
+    ${x.job ? `<div class="voice"><span class="lcd" style="font-size:10px;color:var(--lcd-ink-2)">${x.id === 'lead' ? 'JOB ' : 'PART '}${x.job}</span></div>` : ''}
+    ${x.macros.length ? `<div class="macros">${x.macros.map(macro).join('')}</div><div class="dots"></div>` : ''}
+    ${x.det.length ? `<div class="details">${x.det.map(d => `<div class="col" style="align-items:center;gap:0">${det(d)}<span class="lbl">${d[0]}</span></div>`).join('')}</div>` : `<div class="sub" style="margin-top:6px">nutzt den raum<br>vom schlagzeug</div>`}
+  </div>`;
+}
+// Kanal: Name, Fader 0..1 (oben = 100 % = normal), Pan, Aktivität, stumm
+const MIX = [['schlz', .8, .5, .9], ['bass', .75, .5, .7], ['akk', .7, .38, .6], ['pad', .55, .62, .4], ['lead', .6, .55, .5], ['perc', .5, .5, 0, 1]];
+const rack = document.getElementById('rack');
+const tpl = document.getElementById('inst');
+tpl.insertAdjacentHTML('beforebegin', INST.map(instrumentHTML).join('') + `
+  <div class="mod mixer" style="width:${MIX.length * 34 + 104}px;flex-direction:row;gap:0">
+    <span class="title">mixer</span>
+    ${MIX.map(([n, v, pan, act, muted]) => `<div class="ch">
+      <span class="lbl">${n}</span>
+      <div class="row" style="gap:5px;align-items:stretch"><div class="meter" data-act="${muted ? 0 : act}">${'<i></i>'.repeat(16)}</div><div class="fader"><span class="cap" style="bottom:${v * 100}%"></span></div></div>
+      <div class="kn" data-k="black" data-s="18" data-v="${pan}" data-o="c" data-l="pan"></div>
+      <div class="mute"><span class="led ${muted ? 'on' : ''}"></span><span class="btn"></span><span class="lbl">stumm</span></div>
+    </div>`).join('')}
+    <div class="vdots" style="margin:0 6px"></div>
+    <div class="ch" style="width:80px;gap:6px">
+      <span class="lbl">alle</span>
+      <div class="sw" style="font-size:8.5px;gap:4px"><b style="opacity:.45">syn</b><span class="track" style="width:30px;height:14px"><i style="left:14px;top:2px;width:12px;height:10px"></i></span><b style="opacity:1">smp</b></div>
+      <div class="row" style="gap:4px"><div class="kn" data-k="black" data-s="20" data-v=".5" data-o="c" data-l="hall"></div><div class="kn" data-k="black" data-s="20" data-v=".45" data-o="c" data-l="echo"></div></div>
+      <div class="kn" data-k="black" data-s="20" data-v=".5" data-o="c" data-l="hell"></div>
+      <div class="row" style="gap:5px;align-items:stretch;flex:1"><div class="meter" data-act="1">${'<i></i>'.repeat(10)}</div><div class="fader" style="height:auto"><span class="cap" style="bottom:85%"></span></div></div>
+      <span class="lbl">gesamt</span>
+    </div>
+  </div>`);
+tpl.remove();
+paintKnobs();
+// Pegelanzeigen: zeigen, wer gerade wie laut spielt (Attrappe)
+setInterval(() => document.querySelectorAll('.meter').forEach(m => {
+  const n = m.children.length, act = +m.dataset.act, lit = act ? Math.round(n * act * (.55 + .45 * Math.random())) : 0;
+  [...m.children].forEach((i, k) => { i.classList.toggle('on', k < lit); i.classList.toggle('hot', k >= n - 2 && k < lit); });
+}), 120);
+// Makro -> Detailregler hervorheben
+document.querySelectorAll('.kn.macro').forEach(m => {
+  const link = m.dataset.link, pink = m.dataset.k === 'pink';
+  const targets = () => document.querySelectorAll(`.kn[data-of~="${link}"]`);
+  m.addEventListener('mouseenter', () => targets().forEach(t => { t.classList.add('hl'); t.classList.toggle('p', pink); }));
+  m.addEventListener('mouseleave', () => targets().forEach(t => t.classList.remove('hl', 'p')));
+  m.style.cursor = 'grab';
+});
+
+// ---------- Griffbrett ----------
+const N = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
+const DEG = { A: '1', C: 'b3', D: '4', E: '5', G: 'b7', F: 'b6' };
+const STR = [4, 11, 7, 2, 9, 4];
+const SCALE = new Set(['A', 'C', 'D', 'E', 'G']), CUR = new Set(['A', 'C', 'E']), NXT = new Set(['D', 'F', 'A']);
+function noteSVG(name, x, y, r) {
+  const t = `<text x="${x}" y="${y + r * .36}" text-anchor="middle" font-family="Barlow" font-weight="600" font-size="${r * 1.0}"`;
+  const inS = SCALE.has(name), c = CUR.has(name), n = NXT.has(name);
+  if (c && n) return `<rect x="${x - r * .82}" y="${y - r * .82}" width="${r * 1.64}" height="${r * 1.64}" transform="rotate(45 ${x} ${y})" fill="var(--pink)" stroke="var(--teal)" stroke-width="2.4"/><circle cx="${x}" cy="${y}" r="${r * 1.32}" fill="none" stroke="var(--pink)" stroke-width="2"/>${t} fill="#fff">${name}</text>`;
+  if (c) return `<circle cx="${x}" cy="${y}" r="${r}" fill="var(--pink)"/>${t} fill="#fff">${name}</text>`;
+  if (n) return `<rect x="${x - r}" y="${y - r}" width="${2 * r}" height="${2 * r}" rx="3" fill="${inS ? 'var(--teal)' : '#eaf7f7'}" stroke="var(--teal)" stroke-width="2" ${inS ? '' : 'stroke-dasharray="3 2"'}/>${t} fill="${inS ? '#fff' : '#137c80'}">${name}</text>`;
+  if (inS) return `<circle cx="${x}" cy="${y}" r="${r * .9}" fill="#fff" stroke="#222" stroke-width="1.6"/>${t} fill="#222">${name}</text>`;
+  return '';
+}
+let REAL = true; // echte Bundabstände (wie die App heute) oder gleich breit
+const FRETS = 22;
+function drawFretboard() {
+  const box = document.getElementById('fb'); const W = box.clientWidth, H = box.clientHeight;
+  const x0 = 46, span = W - x0 - 8, top = 16, sh = (H - 54) / 5;
+  const MARK = [3, 5, 7, 9, 12, 15, 17, 19, 21];
+  const L = span / (1 - 2 ** (-FRETS / 12));
+  const wire = n => REAL ? x0 + L * (1 - 2 ** (-n / 12)) : x0 + n * span / FRETS;
+  const mid = f => (wire(f - 1) + wire(f)) / 2;
+  let s = `<svg width="${W}" height="${H}"><rect x="${x0}" y="${top - 8}" width="${span}" height="${sh * 5 + 16}" fill="var(--board)" stroke="#cfcfcb"/>`;
+  for (const f of MARK) s += `<rect x="${wire(f - 1)}" y="${top - 8}" width="${wire(f) - wire(f - 1)}" height="${sh * 5 + 16}" fill="#e6e4dc"/>`;
+  const dot = (x, y) => `<circle cx="${x}" cy="${y}" r="6.5" fill="#8d8b84"/>`;
+  for (const f of MARK.filter(f => f !== 12)) s += dot(mid(f), top + sh * 2.5);
+  s += dot(mid(12), top + sh * 1.5) + dot(mid(12), top + sh * 3.5);
+  for (let f = 1; f <= FRETS; f++) s += `<line x1="${wire(f)}" y1="${top - 8}" x2="${wire(f)}" y2="${top + sh * 5 + 8}" stroke="#a9a9a5" stroke-width="2"/><text x="${mid(f)}" y="${H - 2}" font-size="12" font-weight="600" fill="#3c3c3a" text-anchor="middle" font-family="Barlow">${MARK.includes(f) ? f : ''}</text>`;
+  s += `<rect x="${x0 - 3}" y="${top - 8}" width="6" height="${sh * 5 + 16}" fill="#111"/>`;
+  STR.forEach((o, i) => { s += `<line x1="${x0 - 30}" y1="${top + i * sh}" x2="${W - 8}" y2="${top + i * sh}" stroke="#5a5a57" stroke-width="${1 + i * .35}"/>`; });
+  STR.forEach((o, i) => { for (let f = 0; f <= FRETS; f++) {
+    const name = N[(o + f) % 12]; const x = f ? mid(f) : x0 - 22;
+    const fw = f ? wire(f) - wire(f - 1) : 40;
+    s += noteSVG(name, x, top + i * sh, Math.min(sh * .4, fw * .4, 15));
+  } });
+  box.innerHTML = s + '</svg>';
+}
+document.getElementById('legend').innerHTML = [
+  ['<circle cx="8" cy="8" r="6" fill="#fff" stroke="#222" stroke-width="1.5"/>', 'Skalenton'],
+  ['<circle cx="8" cy="8" r="6.5" fill="var(--pink)"/>', 'aktueller Akkord'],
+  ['<rect x="2" y="2" width="12" height="12" rx="2" fill="var(--teal)"/>', 'nächster Akkord'],
+  ['<rect x="3.5" y="3.5" width="9" height="9" transform="rotate(45 8 8)" fill="var(--pink)" stroke="var(--teal)" stroke-width="1.5"/>', 'in beiden (Grundton mit Ring)'],
+  ['<rect x="2" y="2" width="12" height="12" rx="2" fill="#eaf7f7" stroke="var(--teal)" stroke-dasharray="2 1.5"/>', 'Akkordton außerhalb der Skala'],
+].map(([g, t]) => `<span><svg width="16" height="16">${g}</svg>${t}</span>`).join('');
+
+// ---------- Quintenzirkel ----------
+function sector(r0, r1, a, b) { const [x1, y1] = P(r1, a), [x2, y2] = P(r1, b), [x3, y3] = P(r0, b), [x4, y4] = P(r0, a); return `M${x1},${y1} A${r1},${r1} 0 0 1 ${x2},${y2} L${x3},${y3} A${r0},${r0} 0 0 0 ${x4},${y4}Z`; }
+(function wheel() {
+  const MAJ = ['C', 'G', 'D', 'A', 'E', 'B', 'F#', 'Db', 'Ab', 'Eb', 'Bb', 'F'], MIN = ['Am', 'Em', 'Bm', 'F#m', 'C#m', 'G#m', 'Ebm', 'Bbm', 'Fm', 'Cm', 'Gm', 'Dm'];
+  const dia = new Set(['C', 'G', 'F', 'Am', 'Em', 'Dm']);
+  let s = '';
+  const ring = (list, r0, r1, fs) => list.forEach((n, i) => {
+    const a = i * 30 - 15, b = a + 30, mid = i * 30, [tx, ty] = P((r0 + r1) / 2, mid);
+    let fill = dia.has(n) ? '#d6d6d2' : '#f2f2ef', col = '#333', stroke = '#bdbdb9', sw = 1;
+    if (n === 'Am') { fill = 'var(--pink)'; col = '#fff'; }
+    if (n === 'Dm') { fill = 'var(--teal)'; col = '#fff'; }
+    if (n === 'E') { stroke = '#111'; sw = 2.2; }
+    s += `<path d="${sector(r0, r1, a, b)}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/><text x="${tx}" y="${ty + fs * .35}" font-size="${fs}" text-anchor="middle" fill="${col}" font-family="Barlow" font-weight="600">${n}</text>`;
+  });
+  ring(MAJ, 66, 97, 13); ring(MIN, 38, 66, 10.5);
+  s += `<circle r="36" fill="#161a14" stroke="#000" stroke-width="2"/><text y="-2" font-size="18" text-anchor="middle" fill="#b9f26b" font-family="Share Tech Mono">Am</text><text y="14" font-size="8" text-anchor="middle" fill="#6fe3e6" font-family="Share Tech Mono">→ Dm</text>`;
+  document.getElementById('wheel').innerHTML = s;
+})();
+
+// ---------- Form & Spuren ----------
+const PARTS = [['verse', 'Verse', 16, .75], ['verse', 'Verse', 8, .75], ['build', 'Build', 8, .85], ['chorus', 'Chorus', 8, 1], ['verse', 'Verse', 16, .75], ['chorus', 'Chorus', 16, 1], ['chorus', 'Chorus', 16, 1], ['outro', 'Outro', 8, .55]];
+const TOTAL = PARTS.reduce((s, p) => s + p[2], 0), NOW = 5;
+const LANES = [['schlagzeug', 1], ['bass', 1], ['akkorde', 1], ['pad', 1], ['lead', 1], ['percussion', 0]];
+const ACTIVE = { verse: [1, 1, 1, 0, 1, 1], build: [1, 1, 1, 1, 0, 1], chorus: [1, 1, 1, 1, 1, 1], outro: [0, 1, 1, 1, 0, 0] };
+const BASE = { verse: .45, build: .6, chorus: .9, outro: .3 };
+const grid = document.getElementById('grid');
+let h = `<div></div><div class="strip">${PARTS.map((p, i) => `<div data-i="${i}" class="p-${p[0]} ${i === 0 ? 'sel' : ''} ${i === 0 || i === 3 ? 'locked' : ''}" style="flex:${p[2]};height:${p[3] * 100}%">${p[1]}<small>${p[2]}</small></div>`).join('')}</div>`;
+LANES.forEach(([name, on], li) => {
+  let cells = '', bar = 0;
+  PARTS.forEach(([type, , len], pi) => {
+    for (let b = 0; b < len; b++, bar++) {
+      let d = ACTIVE[type][li] ? BASE[type] + .35 * Math.abs(Math.sin(li * 3.7 + bar * 1.31)) - .15 : 0;
+      if (li === 4 && type === 'verse' && b < len / 2) d = 0; // lead: Fills erst in der zweiten Hälfte
+      if (type === 'build') d *= .5 + b / len;
+      cells += `<i style="opacity:${Math.max(.07, Math.min(1, d)).toFixed(2)}"></i>`;
+    }
+  });
+  h += `<div class="ln ${on ? '' : 'muted'}"><span class="led ${on ? 'on blink' : ''}" style="--d:${['.3s', '.6s', '1.2s', '2.4s', '1.8s', '1s'][li]}"></span>${name}</div><div class="cells ${on ? '' : 'muted'}">${cells}</div>`;
+});
+grid.innerHTML = h + `<div class="playhead" id="ph"></div>`;
+function placeHead() { const strip = grid.querySelector('.strip'); const x = strip.offsetLeft + strip.offsetWidth * ((NOW - .5) / TOTAL); document.getElementById('ph').style.left = x + 'px'; }
+
+// Teil anklicken: rechtes Feld zeigt ihn
+const PCOL = { verse: '#c9dbd9', chorus: '#f0c0c7', outro: '#d8d4e2', build: '#f3dcc0' };
+grid.querySelectorAll('.strip div').forEach(d => d.addEventListener('click', () => {
+  grid.querySelectorAll('.strip div').forEach(x => x.classList.remove('sel')); d.classList.add('sel');
+  const p = PARTS[+d.dataset.i];
+  document.getElementById('ptype').textContent = p[1].toUpperCase();
+  document.getElementById('plen').textContent = p[2] + ' T';
+  const chip = document.getElementById('selchip'); chip.textContent = 'teil ' + (+d.dataset.i + 1); chip.style.background = PCOL[p[0]];
+  document.getElementById('plock').classList.toggle('on', d.classList.contains('locked'));
+}));
+// ---------- Fokus / Einstellen ----------
+const app = document.getElementById('app');
+document.getElementById('sw').addEventListener('click', () => { app.classList.toggle('focus'); requestAnimationFrame(() => { drawFretboard(); placeHead(); }); });
+new ResizeObserver(() => { drawFretboard(); placeHead(); }).observe(document.getElementById('fb'));
+drawFretboard(); placeHead();
+document.getElementById('spacing').addEventListener('click', () => { REAL = !REAL; document.getElementById('sp-real').classList.toggle('on', REAL); document.getElementById('sp-even').classList.toggle('on', !REAL); drawFretboard(); });
+</script>
+</body>
+</html>

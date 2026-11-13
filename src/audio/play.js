@@ -61,6 +61,7 @@ export function play(ctx, trackInput, { loops = 1, startBar = 0, levels, master,
   let rate = 1;
   let lastCtx = startCtx; // ctx-Zeit des zuletzt geplanten Ereignisses (ungeklemmt)
   const toCtx = (song) => anchor.ctx + (song - anchor.song) / rate;
+  let frozen = null; // Liedzeit beim Stopp
 
   let loop = 0;
   let next = 0;
@@ -108,8 +109,11 @@ export function play(ctx, trackInput, { loops = 1, startBar = 0, levels, master,
       if (e.type === 'chord') at(when, onBar && (() => onBar({ bar: ev.bar, chord: ev.chord })));
     }
   }
+  // Liedzeit in Sekunden beim Originaltempo, ab Liedanfang über Durchläufe weiter; vor dem Vorlauf = Startpunkt
+  const songTime = () => frozen ?? Math.max(startSec, anchor.song + (ctx.currentTime - anchor.ctx) * rate);
   function stop() {
     if (stopped) return;
+    frozen = songTime();
     stopped = true;
     clearInterval(scheduler);
     for (const id of timers) clearTimeout(id);
@@ -135,6 +139,7 @@ export function play(ctx, trackInput, { loops = 1, startBar = 0, levels, master,
   return {
     startPerf,
     stop,
+    songTime,
     // setMuted(true) heißt stumm. Neue und schon geplante Töne verstummen, Echo- und Hallfahnen klingen 1-2 s nach.
     setLayer(name, on) {
       if (!Object.hasOwn(instruments.layers, name)) throw new Error(`Unknown layer: ${name}`);

@@ -35,8 +35,7 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator('#go')).toHaveText(/\S/);
   await page.locator('#tune-btn').click();
   await expect(page.locator('#play')).toBeVisible();
-  if (!(await page.locator('#side-left').isVisible())) await page.locator('#toggle-left').click();
-  await expect(page.locator('#side-left')).toBeVisible();
+  await expect(page.locator('#rack')).toBeVisible(); // Feintuning öffnet den Zustand Einstellen
 });
 
 test.afterEach(() => {
@@ -44,25 +43,25 @@ test.afterEach(() => {
 });
 
 const meter = (page, key) => page.locator(`#meter-chips [data-meter="${key}"]`);
-const groove = (page, id) => page.locator(`#groove-chips [data-groove="${id}"]`);
+const chooseGroove = (page, id) => page.locator('#groove-select').selectOption(id);
+const grooveIds = (page) => page.locator('#groove-select option').evaluateAll((els) => els.map((el) => el.value));
 const complexity = (page) => page.locator('#complexity');
 const tempo = (page) => page.locator('#tuning-tempo');
 const progression = (page) => page.locator('#progression button');
 const pressedMeter = (page) => page.locator('#meter-chips [aria-pressed="true"]').getAttribute('data-meter');
-const pressedGroove = (page) => page.locator('#groove-chips [aria-pressed="true"]').getAttribute('data-groove');
+const pressedGroove = (page) => page.locator('#groove-select').inputValue();
 const sets = (page) => page.evaluate(() => window.__instrumentSets);
 const contexts = (page) => page.evaluate(() => window.__audioContexts);
 
-test('Gruppe Rhythmus: offen, links vor den Klang-Gruppen, fünf Taktarten, 4/4 und Standard-Groove gedrückt, Komplexität 50 %', async ({ page }) => {
-  const group = page.locator('details[data-group="rhythm"]');
-  await expect(group).toHaveJSProperty('open', true);
-  const order = await page.locator('#side-left details[data-group]').evaluateAll((els) => els.map((el) => el.dataset.group));
-  expect(order.indexOf('rhythm')).toBeGreaterThan(order.indexOf('tempo'));
-  expect(order.indexOf('rhythm')).toBeLessThan(order.indexOf('drums'));
+test('Modul Rhythmus: im Rack nach Harmonie und vor den Instrumenten, fünf Taktarten, 4/4 und Standard-Groove gedrückt, Komplexität 50 %', async ({ page }) => {
+  const order = await page.locator('#rack .rack-row > *').evaluateAll((els) => els.map((el) => el.id));
+  expect(order.indexOf('mod-rhythm')).toBe(order.indexOf('mod-harmony') + 1);
+  expect(order.indexOf('mod-rhythm')).toBeLessThan(order.indexOf('rack-instruments'));
+  await expect(page.locator('#mod-rhythm')).toBeVisible();
   expect(await page.locator('#meter-chips button').allTextContents()).toEqual(KEYS);
   expect(await pressedMeter(page)).toBe('4/4');
   expect(await pressedGroove(page)).toBe('straight');
-  expect(await page.locator('#groove-chips button').evaluateAll((els) => els.map((el) => el.dataset.groove))).toEqual(groovesFor('4/4'));
+  expect(await grooveIds(page)).toEqual(groovesFor('4/4'));
   await expect(complexity(page)).toHaveValue('50');
   await expect(page.locator('#complexity-out')).toHaveText('50 %');
 });
@@ -71,7 +70,7 @@ test('die Grooves folgen der Taktart, der Standard-Groove ist gewählt', async (
   for (const key of KEYS) {
     await meter(page, key).click();
     expect(await pressedMeter(page)).toBe(key);
-    expect(await page.locator('#groove-chips button').evaluateAll((els) => els.map((el) => el.dataset.groove))).toEqual(groovesFor(key));
+    expect(await grooveIds(page)).toEqual(groovesFor(key));
     expect(await pressedGroove(page)).toBe(DEFAULT_GROOVE[key]);
   }
 });
@@ -152,7 +151,7 @@ test('Groove und Komplexität wirken live: kein neuer Instrumentensatz, kein neu
   await page.locator('#play-go').click();
   await expect(page.locator('#play-go')).toHaveText('Stopp');
   expect(await sets(page)).toBe(1);
-  await groove(page, 'latin').click();
+  await chooseGroove(page, 'latin');
   expect(await pressedGroove(page)).toBe('latin');
   await complexity(page).fill('90');
   await expect(page.locator('#complexity-out')).toHaveText('90 %');
@@ -173,7 +172,7 @@ test('Taktartwechsel während der Wiedergabe startet im selben AudioContext neu'
 
 test('ein Stil-Klick lässt Taktart, Groove und Komplexität stehen', async ({ page }) => {
   await meter(page, '12/8').click();
-  await groove(page, 'slowBlues').click();
+  await chooseGroove(page, 'slowBlues');
   await complexity(page).fill('80');
   await chooseStyle(page, 'blues');
   expect(await pressedMeter(page)).toBe('12/8');
@@ -185,7 +184,10 @@ test('Tastatur und beide Sprachen ohne rohe Schlüssel', async ({ page }) => {
   await meter(page, '6/8').focus();
   await page.keyboard.press('Enter');
   expect(await pressedMeter(page)).toBe('6/8');
-  await groove(page, 'rock68').focus();
+  // Tasten ‹ › der LCD-Auswahl: ein Eintrag weiter
+  const index = (await grooveIds(page)).indexOf('rock68');
+  await page.locator('#groove-select').selectOption({ index: index - 1 });
+  await page.locator('#mod-rhythm .lcd-btn').last().focus();
   await page.keyboard.press('Enter');
   expect(await pressedGroove(page)).toBe('rock68');
   await complexity(page).focus();
@@ -193,21 +195,20 @@ test('Tastatur und beide Sprachen ohne rohe Schlüssel', async ({ page }) => {
   await expect(complexity(page)).toHaveValue('51');
   for (const lang of ['de', 'en']) {
     await page.locator(`[data-lang="${lang}"]`).click();
-    for (const text of await page.locator('details[data-group="rhythm"]').evaluate((el) => [...el.querySelectorAll('summary, h4, label, button, output')].map((n) => n.textContent.trim()))) {
+    for (const text of await page.locator('#mod-rhythm').evaluate((el) => [...el.querySelectorAll('h3, h4, label, button, output')].map((n) => n.textContent.trim()))) {
       expect(RAW_KEY.test(text), `${lang}: ${text}`).toBe(false);
     }
   }
-  await expect(page.locator('#groove-chips [data-groove="rock68"]')).toHaveText('Rock (6/8)');
+  await expect(page.locator('#groove-select option[value="rock68"]')).toHaveText('Rock (6/8)');
   expect(Object.keys(GROOVES)).toContain('rock68');
 });
 
 test('360 px: kein waagerechtes Scrollen, Chips mindestens 44 px hoch', async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 740 });
-  if (!(await page.locator('#side-left').isVisible())) await page.locator('#toggle-left').click();
-  await expect(page.locator('#side-left')).toBeVisible();
+  await expect(page.locator('#rack')).toBeVisible(); // Feintuning öffnet den Zustand Einstellen
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
-  expect(await page.locator('#side-left').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
-  for (const h of await page.locator('#meter-chips button, #groove-chips button').evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height))) {
+  expect(await page.locator('#mod-rhythm').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  for (const h of await page.locator('#meter-chips button, #groove-select, #mod-rhythm .lcd-btn').evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height))) {
     expect(h).toBeGreaterThanOrEqual(43.5);
   }
 });

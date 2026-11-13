@@ -51,7 +51,7 @@ async function openPlayPage(page) {
   await expect(page.locator('#play')).toBeVisible();
 }
 
-// Folge über die rechte Leiste setzen (bis auf einen entfernen, anfügen, den übrigen ersten entfernen); Tonart und Leiter bleiben
+// Folge im Modul Harmonie setzen (bis auf einen entfernen, anfügen, den übrigen ersten entfernen); Tonart und Leiter bleiben
 async function setProgression(page, names) {
   while (await progression(page).count() > 1) await progression(page).first().click();
   for (const name of names) await addChordByName(page, name);
@@ -61,7 +61,7 @@ async function setProgression(page, names) {
 
 async function setTempoFast(page) {
   await page.locator('#tuning-tempo').fill('200');
-  await expect(page.locator('#tuning-tempo-out')).toHaveText('200');
+  await expect(page.locator('#tuning-tempo-out')).toHaveText('200 bpm');
 }
 
 // Alles, was zu einem Takt gehört, in einem Zug gelesen: gehört garantiert zum selben render()
@@ -108,7 +108,10 @@ test.describe('Suche nach rohen Schlüsseln', () => {
     expect(await rawKeys(page)).toEqual([]);
     await page.evaluate(() => {
       document.getElementById('play-back').setAttribute('aria-label', 'view.fretboard');
-      document.getElementById('blocks').append(Object.assign(document.createElement('p'), { id: 'raw-probe', textContent: 'view.lanes' }));
+      // fest positioniert: ändert die Größe der Visualisierung nicht (das Griffbrett würde sonst neu aufgebaut und die Probe im SVG verschwinden)
+      const probe = Object.assign(document.createElement('p'), { id: 'raw-probe', textContent: 'view.lanes' });
+      probe.style.position = 'fixed';
+      document.getElementById('viz').append(probe);
       const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
       text.id = 'raw-probe-svg';
       text.textContent = 'ui.legendBoth';
@@ -147,7 +150,7 @@ for (const [locale, L] of Object.entries(TEXT)) {
       for (const snap of seen) {
         const name = PROGRESSION[(snap.bar - 1) % 4];
         const row = TABLE[name];
-        const want = { now: name, next: `${L.next}: ${row.next}`, roles: { d: row.d, e: row.e, f: row.f, gSharp: row.gSharp, a: row.a } };
+        const want = { now: name, next: row.next, roles: { d: row.d, e: row.e, f: row.f, gSharp: row.gSharp, a: row.a } };
         const got = { now: snap.now, next: snap.next, roles: snap.roles };
         if (JSON.stringify(got) !== JSON.stringify(want)) wrong.push({ bar: snap.bar, got, want });
       }
@@ -179,16 +182,13 @@ for (const [locale, L] of Object.entries(TEXT)) {
       await expect(page.locator('#start')).toBeVisible();
     });
 
-    test('Sprachwechsel bei offenen Leisten und laufender Wiedergabe: kein roher Schlüssel, Fokus bleibt auf dem Schalter', async ({ page }) => {
+    test('Sprachwechsel im Zustand Einstellen und laufender Wiedergabe: kein roher Schlüssel, Fokus bleibt auf dem Schalter', async ({ page }) => {
       await openPlayPage(page);
-      await expect(page.locator('#side-left')).toBeVisible();
-      await expect(page.locator('#side-right')).toBeVisible();
+      await expect(page.locator('#rack')).toBeVisible();
       await setProgression(page, PROGRESSION);
       await setTempoFast(page);
       await playGo(page).click();
       await expect(playGo(page)).toHaveText(L.stop);
-      await expect(page.locator('#views input[type="checkbox"]')).toHaveCount(2);
-      await expect(page.locator('#views')).toBeVisible();
       expect(await rawKeys(page), 'Ausgangssprache').toEqual([]);
 
       for (const lang of [L.other, L.lang]) {
@@ -199,9 +199,9 @@ for (const [locale, L] of Object.entries(TEXT)) {
         expect(await page.evaluate(() => document.activeElement?.dataset.lang ?? document.activeElement?.tagName), `Fokus nach Wechsel auf ${lang}`).toBe(lang);
         await expect(button).toHaveAttribute('aria-pressed', 'true');
         expect(await rawKeys(page), `Spielseite ${lang}`).toEqual([]);
-        // die Leisten sind weiter offen und gefüllt
-        await expect(page.locator('#views')).toBeVisible();
-        await expect(page.locator('#side-right #progression button')).toHaveCount(PROGRESSION.length);
+        // das Rack ist weiter sichtbar und gefüllt
+        await expect(page.locator('#rack')).toBeVisible();
+        await expect(page.locator('#rack #progression button')).toHaveCount(PROGRESSION.length);
       }
 
       // Wechsel mit der Maus auf der Startseite, während gespielt wird
@@ -218,7 +218,7 @@ for (const [locale, L] of Object.entries(TEXT)) {
       await expect(page.locator('#go')).toHaveText(L.go);
     });
 
-    test('Akkordwechsel bei offenen Leisten schreiben keine Knoten in die Leisten (Takt 2 bis 4: Am, Dm, E)', async ({ page }) => {
+    test('Akkordwechsel schreiben keine Knoten ins Rack (Takt 2 bis 4: Am, Dm, E)', async ({ page }) => {
       await openPlayPage(page);
       await setProgression(page, PROGRESSION);
       await setTempoFast(page);
@@ -230,12 +230,16 @@ for (const [locale, L] of Object.entries(TEXT)) {
         const watch = (target) => new MutationObserver((list) => {
           const bar = document.getElementById('play-position').textContent.match(/\d+/)?.[0] ?? '';
           for (const m of list) {
+            // die Aktivitäts-LEDs der Instrument-Module folgen den Ereignissen: sie wechseln mit dem Takt, wo eine Schicht ein- oder aussteigt
+            if (m.type === 'attributes' && m.attributeName === 'class' && m.target.matches('.led[data-activity]')) continue;
+            // ebenso die Rollenfarben der Folge (role-now ... role-later): sie wandern mit dem Takt
+            if (m.type === 'attributes' && m.attributeName === 'class' && m.target.parentElement?.id === 'progression') continue;
             if (m.type === 'attributes' && m.attributeName === 'aria-current') window.__asideCurrent++;
             else window.__asideLog.push({ target, bar, type: m.type, attribute: m.attributeName });
           }
         });
         const all = { attributes: true, childList: true, characterData: true, subtree: true };
-        for (const id of ['side-left', 'side-right']) watch(id).observe(document.getElementById(id), all);
+        for (const id of ['mod-harmony', 'mod-rhythm', 'mod-character', 'rack-instruments', 'form-song']) watch(id).observe(document.getElementById(id), all);
         window.__nextLog = [];
         new MutationObserver(() => window.__nextLog.push(document.getElementById('play-position').textContent.match(/\d+/)?.[0] ?? ''))
           .observe(document.getElementById('play-next'), { childList: true, characterData: true, subtree: true });
@@ -244,33 +248,25 @@ for (const [locale, L] of Object.entries(TEXT)) {
       await collect(page, (seen) => seen.at(-1)?.bar >= 5, 3 * BAR_TIMEOUT);
       const log = await page.evaluate(() => ({ aside: window.__asideLog, next: window.__nextLog, current: window.__asideCurrent }));
       expect(log.aside.filter((m) => ['2', '3', '4'].includes(m.bar))).toEqual([]);
-      // Gegenprobe: die Beobachter sind scharf (Kopfzeile ändert sich beim Wechsel auf Dm, aria-current wandert in der Leiste)
+      // Gegenprobe: die Beobachter sind scharf (Kopfzeile ändert sich beim Wechsel auf Dm, aria-current wandert in der Folge)
       expect(log.next).toContain('3');
       expect(log.current).toBeGreaterThan(2);
       await playGo(page).click();
     });
 
-    test('360 px: Schublade ohne waagerechtes Scrollen und im Fenster, danach das Griffbrett sichtbar', async ({ page }) => {
+    test('360 px: ohne waagerechtes Scrollen, das Griffbrett sichtbar im Fenster', async ({ page }) => {
       await page.setViewportSize({ width: 360, height: 740 });
       await page.locator('#go').click();
       await expect(page.locator('#play')).toBeVisible();
       await expect(playGo(page)).toHaveText(L.stop);
-      for (const side of ['left', 'right']) {
-        await page.locator(`#toggle-${side}`).click();
-        await expect(page.locator(`#side-${side}`)).toBeVisible();
-        const drawer = await page.locator(`#side-${side}`).boundingBox();
-        expect(drawer.x, side).toBeGreaterThanOrEqual(0);
-        expect(drawer.x + drawer.width, side).toBeLessThanOrEqual(360);
-        expect(drawer.y + drawer.height, side).toBeLessThanOrEqual(740);
-        expect(await noScrollX(page), `${side} offen`).toBe(true);
-        await page.keyboard.press('Escape');
-        await expect(page.locator(`#side-${side}`)).toBeHidden();
-        const block = await page.locator('section[data-view="fretboard"]').boundingBox();
-        await expect(page.locator('section[data-view="fretboard"]')).toBeVisible();
+      for (const mode of ['focus', 'setup']) {
+        await expect(page.locator('#play')).toHaveAttribute('data-mode', mode);
+        const block = await page.locator('#mod-fretboard').boundingBox();
         await expect(page.locator('#fretboard svg')).toBeVisible();
-        expect(block.x, side).toBeGreaterThanOrEqual(0);
-        expect(block.x + block.width, side).toBeLessThanOrEqual(360);
-        expect(await noScrollX(page), `${side} zu`).toBe(true);
+        expect(block.x, mode).toBeGreaterThanOrEqual(0);
+        expect(block.x + block.width, mode).toBeLessThanOrEqual(360);
+        expect(await noScrollX(page), mode).toBe(true);
+        await page.locator('#mode-switch').click();
       }
       await playGo(page).click();
       await expect(playGo(page)).toHaveText(L.go);
@@ -278,14 +274,14 @@ for (const [locale, L] of Object.entries(TEXT)) {
 
     test('alle drei Stile und alle vier Leitern auf der Spielseite: Leiterton auf jeder Saite, Akkord im Text, Startseite stimmt überein', async ({ page }) => {
       await openPlayPage(page);
-      const pressedText = (selector) => page.locator(`${selector} [aria-pressed="true"]`).first().textContent();
+      const shownOption = (selector) => page.locator(selector).evaluate((el) => el.selectedOptions[0].textContent);
       for (const style of ['funk', 'psych', 'dreamy']) {
         for (const scale of ['minorPentatonic', 'majorPentatonic', 'blues', 'dorian']) {
           const label = `${style} + ${scale}`;
           await chooseStyle(page, style);
-          await page.locator(`#side-scale-chips [data-scale="${scale}"]`).click();
+          await page.locator('#scale-select').selectOption(scale);
           expect(await currentStyle(page), label).toBe(style);
-          await expect(page.locator(`#side-scale-chips [data-scale="${scale}"]`), label).toHaveAttribute('aria-pressed', 'true');
+          await expect(page.locator('#scale-select'), label).toHaveValue(scale);
 
           // je Saite mindestens ein sichtbarer Leiterton
           const perString = await page.evaluate(() => [0, 1, 2, 3, 4, 5].map((s) => [...document.querySelectorAll(`#fretboard .fret-note[data-string="${s}"]`)]
@@ -299,8 +295,8 @@ for (const [locale, L] of Object.entries(TEXT)) {
 
           // zurück zur Startseite: Satz, Stil, Tempo, Folge und Auswahl im Popover zeigen dasselbe wie die Leisten
           const expected = {
-            key: await pressedText('#side-key-chips'),
-            scale: await pressedText('#side-scale-chips'),
+            key: await shownOption('#key-select'),
+            scale: await shownOption('#scale-select'),
             style: ({ de, en })[L.lang][`style.${await currentStyle(page)}`],
             tempo: await page.locator('#tuning-tempo-out').textContent(),
           };
@@ -365,12 +361,12 @@ test.describe('Randfälle der Folge', () => {
       for (const snap of seen) {
         const now = names[(snap.bar - 1) % 5];
         const next = names[snap.bar % 24 % 5]; // nach Takt 24 folgt wieder Takt 1, nicht der sechste Akkord
-        if (snap.now !== now || snap.next !== `Als Nächstes: ${next}`) wrong.push({ bar: snap.bar, now: snap.now, next: snap.next, want: [now, next] });
+        if (snap.now !== now || snap.next !== next) wrong.push({ bar: snap.bar, now: snap.now, next: snap.next, want: [now, next] });
       }
       expect(wrong).toEqual([]);
       const seam = seen.find((s) => s.bar === 24);
       expect(seam.now).toBe('F');
-      expect(seam.next).toBe('Als Nächstes: Am');
+      expect(seam.next).toBe('Am');
       await playGo(page).click();
     });
   });

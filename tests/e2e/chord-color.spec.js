@@ -31,8 +31,7 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator('#go')).toHaveText(/\S/);
   await page.locator('#tune-btn').click();
   await expect(page.locator('#play')).toBeVisible();
-  if (!(await page.locator('#side-right').isVisible())) await page.locator('#toggle-right').click();
-  await expect(page.locator('#side-right')).toBeVisible();
+  await expect(page.locator('#rack')).toBeVisible(); // Feintuning öffnet den Zustand Einstellen
 });
 
 test.afterEach(() => {
@@ -100,7 +99,7 @@ test('Variantenwechsel und Tonartwechsel behalten die Farbe', async ({ page }) =
   await color(page, 'sevenths').click();
   await page.locator('#variant-next').click();
   expect(await shown(page)).toEqual(expected(AM, await seedOf(page), 'sevenths'));
-  await page.locator('#side-key-chips').getByRole('button', { name: 'D', exact: true }).click();
+  await page.locator('#key-select').selectOption('D');
   expect(await shown(page)).toEqual(expected({ root: 'D', mode: 'minor' }, await seedOf(page), 'sevenths'));
   await expect(color(page, 'sevenths')).toHaveAttribute('aria-pressed', 'true');
 });

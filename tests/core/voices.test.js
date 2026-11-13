@@ -1,7 +1,7 @@
 // Stimmen-Register: Konsistenz über alle Einträge (neue Stimmen werden automatisch erfasst), Auflösung und Validierung.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { VOICES, VOICE_LAYERS, DEFAULT_VOICE, isVoice, voicesFor, completeVoices, resolveVoices, usesTimbreField } from '../../src/core/voices.js';
+import { VOICES, VOICE_LAYERS, DEFAULT_VOICE, isVoice, voicesFor, completeVoices, resolveVoices, usesTimbreField, setAllVoices, voiceKind } from '../../src/core/voices.js';
 import { DEFAULT_TIMBRE } from '../../src/core/timbre.js';
 import { validateTrack } from '../../src/index.js';
 import de from '../../src/i18n/de.js';
@@ -168,4 +168,16 @@ test('drums: Stimme synth/classic als Standard, alle Schlagzeugregler in uses, a
   assert.deepEqual(VOICES.drums.synth.uses, Object.keys(DEFAULT_TIMBRE.drums).map((f) => `drums.${f}`));
   assert.equal(usesTimbreField(undefined, 'drums.kickPunch'), true);
   assert.deepEqual(validateTrack(track({ bass: 'string' })).filter((e) => e.code === 'badVoice'), [], 'gespeicherter Track ohne voices.drums');
+});
+
+test('setAllVoices und voiceKind: alle Schichten auf Sample oder Synth, Art der Wahl', () => {
+  assert.deepEqual(setAllVoices({}, 'sample').bass, { id: 'sample', variant: 'finger' });
+  assert.deepEqual(setAllVoices({ bass: { id: 'sample', variant: 'pick' } }, 'synth').bass, { id: 'synth', variant: 'classic' });
+  const input = {};
+  assert.notEqual(setAllVoices(input, 'sample'), input);
+  assert.deepEqual(input, {});
+  assert.equal(voiceKind(setAllVoices({}, 'sample')), 'sample');
+  assert.equal(voiceKind({}), 'synth');
+  assert.equal(voiceKind({ bass: { id: 'sample', variant: 'pick' } }), 'mixed');
+  assert.equal(voiceKind({ bass: { id: 'string', variant: 'finger' } }), 'synth'); // Modell zählt als Synth
 });

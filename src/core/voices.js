@@ -87,3 +87,15 @@ export function usesTimbreField(voices, path) {
 
 /** Stimmenwahl eines Tracks (`track.voices`), aufgefüllt. */
 export const resolveVoices = (track) => completeVoices(track?.voices);
+
+/** Jede Schicht auf Sample (erste Variante) oder Synth (Standard). Neue Kopie; die bisherige Wahl spielt keine Rolle. */
+export function setAllVoices(_voices, kind) {
+  return Object.fromEntries(VOICE_LAYERS.map((layer) => [layer, kind === 'sample' ? { id: 'sample', variant: VOICES[layer].sample.variants[0] } : { ...DEFAULT_VOICE }]));
+}
+
+/** 'sample', wenn jede Schicht eine Sample-Stimme hat; 'synth', wenn keine; sonst 'mixed' (Saitenmodell zählt als Synth). */
+export function voiceKind(voices) {
+  const full = completeVoices(voices);
+  const samples = VOICE_LAYERS.filter((layer) => VOICES[layer][full[layer].id].kind === 'sample').length;
+  return samples === VOICE_LAYERS.length ? 'sample' : samples === 0 ? 'synth' : 'mixed';
+}

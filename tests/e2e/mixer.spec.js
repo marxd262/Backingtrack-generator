@@ -1,6 +1,7 @@
 // Mischpult und Variantenwechsel auf der Spielseite (echte Seite /ui/index.html, Echtzeit).
 import { test, expect } from '@playwright/test';
 import { progressionFor } from '../../src/core/progressions.js';
+import { openSetup } from './style-helpers.js';
 
 const BAR_TIMEOUT = 10_000; // ein Takt bei 200 bpm dauert 1,2 s; unter Last großzügig
 const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view|group|timbre|chord|chordGroup|chordColor|groove|meter)\.[A-Za-z.]+$/;
@@ -27,6 +28,15 @@ test.beforeEach(async ({ page }) => {
         window.__audioContexts++;
       }
     };
+    window.__valueWrites = {};
+    const valueDesc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+    Object.defineProperty(HTMLInputElement.prototype, 'value', {
+      ...valueDesc,
+      set(v) {
+        if (this.id.startsWith('mix-')) window.__valueWrites[this.id] = (window.__valueWrites[this.id] ?? 0) + 1;
+        valueDesc.set.call(this, v);
+      },
+    });
     window.__targets = [];
     window.__assigned = [];
     const target = AudioParam.prototype.setTargetAtTime;
@@ -53,10 +63,15 @@ test.afterEach(() => {
 
 const playGo = (page) => page.locator('#play-go');
 const position = (page) => page.locator('#play-position');
-const mixerBtn = (page) => page.locator('#mixer-btn');
-const pop = (page) => page.locator('#mixer-pop');
+const pop = (page) => page.locator('#mod-mixer');
+// Mixer im Rack zeigen: Zustand Einstellen (falls im Fokus) und ins Bild scrollen
+async function showMixer(page) {
+  await pop(page).scrollIntoViewIfNeeded();
+  await expect(pop(page)).toBeVisible();
+}
 const slider = (page, name) => page.locator(`#mix-${name}`);
-const mixMute = (page, name) => page.locator(`#mixer .mix-row:has(#mix-${name}) button`);
+const mixMute = (page, name) => page.locator(`#mixer button[data-mute="${name}"]`);
+const outputs = (page) => page.locator('#mixer .mix-ch output');
 const laneBtn = (page, name) => page.locator(`#lane-buttons [data-layer="${name}"]`);
 const contexts = (page) => page.evaluate(() => window.__audioContexts);
 const targets = (page) => page.evaluate(() => window.__targets);
@@ -65,10 +80,7 @@ const shownVariant = async (page) => Number((await page.locator('#play-variant')
 const noScrollX = (page) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
 const expectedChords = (seed) => progressionFor(AM, seed).map((c) => c.root + SYMBOLS[c.quality]);
 
-async function openPlayPage(page) {
-  await page.locator('#tune-btn').click();
-  await expect(page.locator('#play')).toBeVisible();
-}
+const openPlayPage = openSetup; // Rack und Mixer sind im Zustand Einstellen sichtbar
 
 // Wiedergabe bei 200 bpm (1,2 s je Takt)
 async function playFast(page) {
@@ -92,41 +104,37 @@ async function expectKeepsCounting(page, before, label) {
   for (const bar of shown) expect(bar, `${label}: ${shown}`).toBeGreaterThanOrEqual(before);
 }
 
-test('Mischpult-Knopf öffnet das Popover: 7 Regler, 6 Tasten, Namen deutsch und englisch, per Tastatur bedienbar', async ({ page }) => {
+test('Modul Mixer im Rack: 7 Fader, 6 Tasten, Schalter Alle Samples, Namen deutsch und englisch, per Tastatur bedienbar', async ({ page }) => {
   await openPlayPage(page);
-  await expect(mixerBtn(page)).toHaveAccessibleName('Mischpult');
-  await expect(mixerBtn(page)).toHaveAttribute('aria-expanded', 'false');
-  await expect(pop(page)).toBeHidden();
-  await mixerBtn(page).click();
-  await expect(pop(page)).toBeVisible();
-  await expect(mixerBtn(page)).toHaveAttribute('aria-expanded', 'true');
-  await expect(pop(page).locator('input[type="range"]')).toHaveCount(7);
-  await expect(pop(page).locator('button')).toHaveCount(6);
+  await expect(page.getByRole('region', { name: 'Mixer' })).toBeVisible();
+  await expect(page.locator('#mixer-btn')).toHaveCount(0); // kein Popover mehr
+  await showMixer(page);
+  // die Kanäle (Gesamt und 6 Schichten) im Mischpult; die Gesamt-Klangknöpfe daneben gehören zum Modul, aber nicht zu den Kanälen
+  await expect(page.locator('#mixer input.fader')).toHaveCount(7);
+  await expect(page.locator('#mixer button[data-mute]')).toHaveCount(6);
+  await expect(page.locator('#all-voices')).not.toHaveAttribute('role', /./); // Taste mit aria-pressed, kein Schalter (mixed ist bei role=switch ungültig)
+  await expect(page.locator('#all-voices')).toContainText('Alle Samples'); // sichtbare Beschriftung
   for (const [name, label] of [['master', 'Gesamt'], ['drums', 'Schlagzeug'], ['bass', 'Bass'], ['chords', 'Akkorde'], ['pad', 'Pad'], ['lead', 'Lead'], ['percussion', 'Percussion']]) {
     await expect(pop(page).getByRole('slider', { name: label, exact: true })).toHaveValue('100');
     await expect(slider(page, name)).toHaveAttribute('min', '0');
     await expect(slider(page, name)).toHaveAttribute('max', '100');
   }
   await expect(pop(page).getByRole('button', { name: 'Bass stumm', exact: true })).toHaveAttribute('aria-pressed', 'false');
-  await expect(page.locator('#mixer output')).toHaveText(Array(7).fill('100 %'));
+  await expect(outputs(page)).toHaveText(Array(7).fill('100 %'));
 
-  // Fokus beim Öffnen im Popover, Pfeiltasten ändern den Wert, Escape schließt und gibt den Fokus an den Knopf zurück
-  await expect(slider(page, 'master')).toBeFocused();
-  await page.keyboard.press('ArrowLeft');
+  // Pfeiltasten ändern den Wert
+  await slider(page, 'master').focus();
+  await page.keyboard.press('ArrowDown');
   await expect(slider(page, 'master')).toHaveValue('99');
-  await expect(page.locator('#mixer .mix-row').first().locator('output')).toHaveText('99 %');
-  await page.keyboard.press('Escape');
-  await expect(pop(page)).toBeHidden();
-  await expect(mixerBtn(page)).toBeFocused();
+  await expect(outputs(page).last()).toHaveText('99 %');
 
   await page.getByRole('button', { name: /^EN/i }).click();
-  await expect(mixerBtn(page)).toHaveAccessibleName('Mixer');
-  await mixerBtn(page).click();
+  await expect(page.locator('#mod-mixer-title')).toHaveText('Mixer');
   for (const [label, value] of [['Overall', '99'], ['Drums', '100'], ['Bass', '100'], ['Chords', '100'], ['Pad', '100']]) {
     await expect(pop(page).getByRole('slider', { name: label, exact: true })).toHaveValue(value);
   }
   await expect(pop(page).getByRole('button', { name: 'Drums muted', exact: true })).toBeVisible();
-  await expect(page.locator('#mixer .mix-row').first().locator('output')).toHaveText('99%');
+  await expect(outputs(page).last()).toHaveText('99%');
   const texts = await page.locator('#mixer, #variant-prev, #variant-next, #variant-random').evaluateAll((els) => els.flatMap((el) => [el.textContent, el.getAttribute('aria-label')]).filter(Boolean));
   for (const text of texts) expect(text).not.toMatch(RAW_KEY);
 });
@@ -138,7 +146,7 @@ test('Regler während der Wiedergabe: setLevel/setMaster wirken live, kein Neust
   expect(await contexts(page)).toBe(1);
   await recordPositions(page);
   const before = await shownBar(page);
-  await mixerBtn(page).click();
+  await showMixer(page);
   await page.evaluate(() => { window.__targets.length = 0; });
   await slider(page, 'bass').fill('50');
   await expect.poll(() => targets(page)).toContain(0.25); // Reglerstellung 0.5 -> Verstärkung 0.25
@@ -146,32 +154,31 @@ test('Regler während der Wiedergabe: setLevel/setMaster wirken live, kein Neust
   await expect.poll(() => targets(page)).toContain(0.3 * 0.3);
   await slider(page, 'drums').fill('0');
   await expect.poll(() => targets(page)).toContain(0);
-  await expect(page.locator('#mixer .mix-row').nth(2).locator('output')).toHaveText('50 %');
+  await expect(outputs(page).nth(1)).toHaveText('50 %');
   await expectKeepsCounting(page, before, 'Regler');
   expect(await contexts(page)).toBe(1);
   await expect(playGo(page)).toHaveText('Stopp');
 });
 
-test('Stummtaste im Mischpult und Schichtknopf zeigen immer denselben Zustand, in beide Richtungen', async ({ page }) => {
+test('Stummtaste im Mischpult und Spurname zeigen immer denselben Zustand; stumm schaltet nur das Mischpult', async ({ page }) => {
   await openPlayPage(page);
   await playFast(page);
   const same = async (name, expected) => {
-    await expect(laneBtn(page, name), `Schichtknopf ${name}`).toHaveAttribute('aria-pressed', String(expected));
-    await expect(mixMute(page, name), `Taste ${name}`).toHaveAttribute('aria-pressed', String(!expected)); // Stummtaste: gedrückt = stumm, also umgekehrt zum Schichtknopf
+    await expect(laneBtn(page, name), `Spurname ${name}`).toHaveAttribute('data-muted', String(!expected));
+    await expect(mixMute(page, name), `Taste ${name}`).toHaveAttribute('aria-pressed', String(!expected)); // Stummtaste: gedrückt = stumm
   };
   for (const name of LAYERS) await same(name, true);
-  await mixerBtn(page).click();
+  await showMixer(page);
   await mixMute(page, 'bass').click();
   await same('bass', false);
   await same('chords', true);
   await mixMute(page, 'bass').click();
   await same('bass', true);
-  await pop(page).evaluate((el) => el.hidePopover());
-  await laneBtn(page, 'pad').click();
+  await mixMute(page, 'pad').click();
   await same('pad', false);
-  await mixerBtn(page).click();
+  await laneBtn(page, 'pad').click({ force: true }); // der Spurname ist nur Anzeige: Klick ohne Wirkung
   await same('pad', false);
-  await laneBtn(page, 'pad').click({ force: true });
+  await mixMute(page, 'pad').click();
   await same('pad', true);
   // Stummschalten ändert die Reglerstellung nicht und startet nicht neu
   await expect(slider(page, 'pad')).toHaveValue('100');
@@ -180,7 +187,7 @@ test('Stummtaste im Mischpult und Schichtknopf zeigen immer denselben Zustand, i
 
 test('Mix überlebt das Neuladen, Stummschaltungen nicht; kaputter Speicher wird ignoriert; Anfangspegel gehen mit dem Start', async ({ page }) => {
   await openPlayPage(page);
-  await mixerBtn(page).click();
+  await showMixer(page);
   await slider(page, 'bass').fill('40');
   await slider(page, 'master').fill('70');
   await mixMute(page, 'chords').click();
@@ -188,13 +195,12 @@ test('Mix überlebt das Neuladen, Stummschaltungen nicht; kaputter Speicher wird
   await page.reload();
   await expect(page.locator('#go')).toHaveText(/\S/);
   await openPlayPage(page);
-  await mixerBtn(page).click();
+  await showMixer(page);
   await expect(slider(page, 'bass')).toHaveValue('40');
   await expect(slider(page, 'master')).toHaveValue('70');
   await expect(slider(page, 'drums')).toHaveValue('100');
   await expect(mixMute(page, 'chords')).toHaveAttribute('aria-pressed', 'false');
   // Start: die gespeicherten Pegel werden gleich beim Bau der Instrumente gesetzt (nicht erst per Rampe danach)
-  await page.keyboard.press('Escape');
   await page.evaluate(() => { window.__assigned.length = 0; window.__targets.length = 0; });
   await playGo(page).click();
   await expect(position(page)).toHaveText(/^Takt 1 von/, { timeout: BAR_TIMEOUT });
@@ -209,7 +215,7 @@ test('Mix überlebt das Neuladen, Stummschaltungen nicht; kaputter Speicher wird
     await page.reload();
     await expect(page.locator('#go')).toHaveText(/\S/);
     await openPlayPage(page);
-    await mixerBtn(page).click();
+    await showMixer(page);
     for (const name of ['master', ...LAYERS]) await expect(slider(page, name), `${garbage} ${name}`).toHaveValue('100');
   }
 });
@@ -260,10 +266,9 @@ test('Variantenknöpfe: vor, zurück, neu, Umbruch 9999 und 1, Fokus bleibt, nic
 test('Variante während der Wiedergabe: Neustart im laufenden Takt, Tags, Tempo, Mix und Stummschaltungen bleiben, ein AudioContext', async ({ page }) => {
   test.setTimeout(60_000);
   await openPlayPage(page);
-  await mixerBtn(page).click();
+  await showMixer(page);
   await slider(page, 'bass').fill('60');
   await mixMute(page, 'pad').click();
-  await page.keyboard.press('Escape');
   await playFast(page);
   await expect(position(page)).toHaveText(/^Takt 2 von/, { timeout: BAR_TIMEOUT });
   const tagsOf = () => page.locator('#tags button[aria-pressed="true"]').evaluateAll((els) => els.map((el) => `${el.dataset.category}.${el.dataset.tag}`).sort());
@@ -272,10 +277,10 @@ test('Variante während der Wiedergabe: Neustart im laufenden Takt, Tags, Tempo,
     tempo: document.getElementById('tuning-tempo').value,
     length: document.getElementById('length').value,
     mix: localStorage.getItem('backingtrack.mix'),
-    pad: document.querySelector('#lane-buttons [data-layer="pad"]').getAttribute('aria-pressed'),
+    pad: document.querySelector('#lane-buttons [data-layer="pad"]').getAttribute('data-muted'),
   }));
   const settingsBefore = await settings();
-  expect(settingsBefore.pad).toBe('false');
+  expect(settingsBefore.pad).toBe('true');
   await recordPositions(page);
   for (const id of ['variant-next', 'variant-prev', 'variant-random', 'variant-next']) {
     const before = await shownBar(page);
@@ -296,35 +301,113 @@ test('Variante während der Wiedergabe: Neustart im laufenden Takt, Tags, Tempo,
   await expect(playGo(page)).toHaveText('Los');
 });
 
-test('390 px: Kopfzeile und Mischpult passen ohne waagerechtes Scrollen', async ({ page }) => {
+test('390 px: Fader und Stummtasten im Rack bleiben groß genug zum Bedienen', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  // über Los: Feintuning öffnet hier die Klang-Schublade, und die macht die Kopfzeile inert
   await page.locator('#go').click();
   await expect(page.locator('#play')).toBeVisible();
   await playGo(page).click();
   expect(await noScrollX(page)).toBe(true);
-  await mixerBtn(page).click();
-  await expect(pop(page)).toBeVisible();
-  expect(await noScrollX(page)).toBe(true);
-  const box = await pop(page).boundingBox();
-  expect(box.x).toBeGreaterThanOrEqual(0);
-  expect(box.x + box.width).toBeLessThanOrEqual(390);
+  await page.locator('#mode-switch').click();
+  await expect(page.locator('#rack')).toBeVisible();
+  await showMixer(page);
   for (const name of ['master', ...LAYERS]) {
+    await slider(page, name).scrollIntoViewIfNeeded();
     const s = await slider(page, name).boundingBox();
-    expect(s.width, name).toBeGreaterThan(80);
-    expect(s.x + s.width, name).toBeLessThanOrEqual(box.x + box.width);
+    expect(s.height, name).toBeGreaterThanOrEqual(100);
+    expect(s.width, name).toBeGreaterThanOrEqual(24);
   }
   for (const name of LAYERS) {
+    await mixMute(page, name).scrollIntoViewIfNeeded();
     const b = await mixMute(page, name).boundingBox();
-    expect(b.x + b.width, name).toBeLessThanOrEqual(box.x + box.width);
     expect(b.width, name).toBeGreaterThanOrEqual(44);
+    expect(b.height, name).toBeGreaterThanOrEqual(44);
   }
-  await page.keyboard.press('Escape');
-  for (const id of ['variant-prev', 'variant-next', 'variant-random', 'mixer-btn']) {
+  for (const id of ['variant-prev', 'variant-next', 'variant-random', 'mode-switch']) {
     const b = await page.locator(`#${id}`).boundingBox();
     expect(b.x, id).toBeGreaterThanOrEqual(0);
     expect(b.x + b.width, id).toBeLessThanOrEqual(390);
     expect(b.width, id).toBeGreaterThanOrEqual(44);
     expect(b.height, id).toBeGreaterThanOrEqual(44);
   }
+});
+
+// Schalter "Alle Samples" (Task 4)
+const allVoices = (page) => page.locator('#all-voices');
+
+test('Alle Samples: schaltet jede Schicht auf Sample und zurück; ein Instrument zurück auf Synth ergibt gemischt', async ({ page }) => {
+  await openPlayPage(page);
+  await showMixer(page);
+  await expect(allVoices(page)).toHaveAttribute('aria-pressed', 'false');
+  await expect(allVoices(page)).toContainText('SYN');
+  await allVoices(page).click();
+  await expect(allVoices(page)).toHaveAttribute('aria-pressed', 'true');
+  await expect(allVoices(page)).toContainText('SMP');
+  for (const layer of ['drums', 'bass', 'chords', 'pad']) await expect(page.locator(`#voice-${layer}`)).toHaveValue(/^sample\//);
+  // ein Instrument zurück auf Synth
+  await page.locator('#voice-bass').selectOption('synth/classic');
+  await expect(allVoices(page)).toHaveAttribute('aria-pressed', 'mixed');
+  await expect(allVoices(page)).toContainText('Gemischt');
+  // bei gemischt schaltet der Klick auf Samples
+  await allVoices(page).click();
+  await expect(allVoices(page)).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#voice-bass')).toHaveValue('sample/finger');
+  // und wieder alles auf Synth
+  await allVoices(page).click();
+  await expect(allVoices(page)).toHaveAttribute('aria-pressed', 'false');
+  for (const layer of ['drums', 'bass', 'chords', 'pad']) await expect(page.locator(`#voice-${layer}`)).toHaveValue('synth/classic');
+});
+
+test('Alle Samples, Pack lädt nicht: Fehler im Display des Instruments, die übrigen werden bereit, Seite bleibt bedienbar', async ({ page }) => {
+  await page.route('**/assets/samples/bass-finger.*', (route) => route.fulfill({ status: 500, body: 'kaputt' }));
+  await openPlayPage(page);
+  await showMixer(page);
+  await allVoices(page).click();
+  await expect(page.locator('#voice-status-bass')).toHaveText('nicht verfügbar', { timeout: BAR_TIMEOUT });
+  for (const layer of ['drums', 'chords', 'pad']) await expect(page.locator(`#voice-status-${layer}`)).toHaveText('bereit', { timeout: 30_000 });
+  // Schalter bleibt bei Samples (die Wahl steht, nur das Pack fehlt) und ist bedienbar
+  await expect(allVoices(page)).toHaveAttribute('aria-pressed', 'true');
+  await allVoices(page).click();
+  await expect(allVoices(page)).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('#voice-status-bass')).toHaveText('');
+  await playGo(page).click();
+  await expect(position(page)).toHaveText(/^Takt 1 von/, { timeout: BAR_TIMEOUT });
+  await playGo(page).click();
+  // der 500er der Pack-Datei erscheint als Konsolenmeldung des Browsers: erwartet, aber nur dieser
+  expect(problems.length).toBeGreaterThan(0);
+  problems = problems.filter((p) => !/^console: Failed to load resource: .*status of 500/.test(p));
+});
+
+test('Fader springt während der Wiedergabe nicht: kein Schreiben ins Eingabefeld, weder nach Tastatur noch beim Ziehen', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 960 }); // Maßstab des Racks; bei 1280 x 720 ist es für die Maus zu niedrig
+  await openPlayPage(page);
+  await playFast(page);
+  await showMixer(page);
+  const writes = () => page.evaluate(() => window.__valueWrites['mix-drums'] ?? 0);
+  // per Tastatur auf 40: 6 x Bild-ab (je 10)
+  await slider(page, 'drums').focus();
+  for (let i = 0; i < 6; i++) await page.keyboard.press('PageDown');
+  await expect(slider(page, 'drums')).toHaveValue('40');
+  await expect(outputs(page).first()).toHaveText('40 %');
+  await page.evaluate(() => { window.__valueWrites = {}; });
+  const before = await shownBar(page);
+  // zwei Takte bei 200 bpm: render() läuft je Takt
+  await expect.poll(() => shownBar(page), { timeout: BAR_TIMEOUT * 2 }).toBeGreaterThanOrEqual(before + 2);
+  await expect(slider(page, 'drums')).toHaveValue('40');
+  expect(await writes(), 'Fader wird nur bei Änderung geschrieben').toBe(0);
+  // ziehen: Maus halten, während Takte vergehen
+  await slider(page, 'drums').scrollIntoViewIfNeeded(); // Maus braucht den Fader im Bild
+  const box = await slider(page, 'drums').boundingBox();
+  const thumbY = box.y + 6 + (1 - 0.4) * (box.height - 12); // Kappe bei Wert 40 (oben = 100)
+  await page.mouse.move(box.x + box.width / 2, thumbY);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height * 0.25, { steps: 5 });
+  const held = Number(await slider(page, 'drums').inputValue());
+  expect(held).toBeGreaterThan(55);
+  await page.evaluate(() => { window.__valueWrites = {}; });
+  const bar = await shownBar(page);
+  await expect.poll(() => shownBar(page), { timeout: BAR_TIMEOUT * 2 }).toBeGreaterThanOrEqual(bar + 2);
+  expect(Number(await slider(page, 'drums').inputValue())).toBe(held);
+  expect(await writes(), 'gezogener Fader wird nicht neu gesetzt').toBe(0);
+  await page.mouse.up();
+  await expect(playGo(page)).toHaveText('Stopp');
 });

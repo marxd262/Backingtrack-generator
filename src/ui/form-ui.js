@@ -67,6 +67,9 @@ export function limits(form, index) {
   return { canAdd, canCopy, canLonger, canShorter: bars > 1, canDelete: parts > 1, canLeft: index > 0, canRight: index < parts - 1, reasons };
 }
 
+/** Neue Länge in Takten aus einem Ziehen des Griffs: dx Pixel bei pxPerBar Pixeln je Takt, auf ganze Takte gerundet und auf min..max begrenzt. */
+export const barsFromDrag = (startBars, dx, pxPerBar, { min, max }) => (pxPerBar > 0 ? clamp(Math.round(startBars + dx / pxPerBar), min, max) : startBars);
+
 const replace = (form, sections) => ({ ...form, sections });
 // Feld setzen oder (undefined) entfernen; ein bearbeiteter Teil wird gesperrt
 const patched = (section, patch) => {

@@ -5,7 +5,7 @@ import { addChordByName } from './chord-helpers.js';
 
 const BAR_TIMEOUT = 10_000; // ein Takt bei 200 bpm dauert 1,2 s; unter Last großzügig
 const PROGRESSION = ['Bbdim', 'E', 'Dbm', 'B'];
-const WATCHED = ['play-go', 'play-position', 'toggle-left', 'toggle-right', 'fretboard'];
+const WATCHED = ['play-go', 'play-position', 'play-back', 'mode-switch', 'fretboard', 'play-next'];
 
 let problems;
 
@@ -27,7 +27,7 @@ test.afterEach(() => {
 const progression = (page) => page.locator('#progression button');
 const shownChords = async (page) => (await page.locator('#chords').textContent()).split(' – ').map((s) => s.trim());
 
-// Folge über die rechte Leiste setzen: bis auf einen Akkord entfernen, anfügen, den übrigen ersten entfernen
+// Folge im Modul Harmonie setzen: bis auf einen Akkord entfernen, anfügen, den übrigen ersten entfernen
 async function setProgression(page, names) {
   while (await progression(page).count() > 1) await progression(page).first().click();
   for (const name of names) await addChordByName(page, name);
@@ -48,16 +48,13 @@ const snapshot = (page, ids) => page.evaluate((list) => {
 for (const width of [1280, 360]) {
   test(`${width} px: Kopfzeile und Griffbrett bleiben über fünf Takte mit langen und kurzen Akkordnamen auf 1 px stehen`, async ({ page }) => {
     await page.locator('#tune-btn').click();
-    await page.locator('#side-key-chips').getByRole('button', { name: 'Ab', exact: true }).click();
-    await page.locator('#side-scale-chips [data-scale="minorPentatonic"]').click();
+    await page.locator('#key-select').selectOption('Ab');
+    await page.locator('#scale-select').selectOption('minorPentatonic');
     await setProgression(page, PROGRESSION);
     await page.locator('#tuning-tempo').fill('200');
-    await expect(page.locator('#tuning-tempo-out')).toHaveText('200');
+    await expect(page.locator('#tuning-tempo-out')).toHaveText('200 bpm');
     if (width === 360) {
       await page.setViewportSize({ width, height: 740 });
-      await expect(page.locator('#side-right')).toBeHidden(); // schmal bleibt nur eine Schublade, die linke
-      await page.keyboard.press('Escape');
-      await expect(page.locator('#side-left')).toBeHidden();
     }
     await page.locator('#play-go').click();
 
@@ -97,7 +94,7 @@ test('breiteste Akkordnamen passen in den reservierten Platz, in beiden Sprachen
       const roots = ['C', 'C#', 'Db', 'D', 'D#', 'Eb', 'E', 'F', 'F#', 'Gb', 'G', 'G#', 'Ab', 'A', 'A#', 'Bb', 'B'];
       const names = roots.flatMap((r) => [r, `${r}m`, `${r}dim`]);
       const found = [];
-      for (const [id, texts] of [['play-now', names], ['play-next', names.flatMap((n) => [`Als Nächstes: ${n}`, `Next: ${n}`])]]) {
+      for (const [id, texts] of [['play-now', names], ['play-next', names]]) {
         const el = document.getElementById(id);
         const saved = el.textContent;
         const reserved = (() => { el.textContent = 'x'; return el.getBoundingClientRect().width; })();

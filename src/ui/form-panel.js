@@ -1,13 +1,18 @@
-// Gruppe "Songform" in der linken Leiste: Vorlage (inkl. "Ohne Form"), Zielgröße (die frühere Längen-Auswahl) und die vier Regler
+// Feld "ganzes Lied" links im Modul Form & Spuren: Vorlage (inkl. "Ohne Form"), Zielgröße (die frühere Längen-Auswahl) als LCD-Auswahl und die vier Knöpfe
 // Struktur, Dynamik, Pausen, Zufall. Würfeln und Zustand stehen in state.js. Dynamik, Pausen und Zufall wirken live (applyLive);
 // Struktur würfelt beim Loslassen neu. Ändert sich die Gesamtlänge, startet eine laufende Wiedergabe an der gleichen Position neu.
 import { t } from '../index.js';
 import { TEMPLATE_IDS, TARGET_SIZES } from '../core/form-roll.js';
 import { FEEL_DEFAULTS, DYNAMICS_MAX } from '../core/form-types.js';
+import { createKnob } from './knob.js';
+import { createLcdSelect } from './lcd-select.js';
 import { $, state, setText, setAttr, formChoice, rollNewForm, setFormTemplate, setFormTarget, setFormFeel } from './state.js';
 
 const FEEL = ['structure', 'dynamics', 'pauses', 'randomness'];
 const MAX = { structure: 1, dynamics: DYNAMICS_MAX, pauses: 1, randomness: 1 };
+// Bogen am Knopf: Struktur und Dynamik ab 12 Uhr (links türkis, rechts pink), Pausen und Zufall ab dem linken Anschlag
+const ORIGIN = { structure: 'center', dynamics: 'center', pauses: 'start', randomness: 'start' };
+const KIND = { structure: 'teal', dynamics: 'pink', pauses: 'black', randomness: 'black' };
 
 export function initFormPanel({ render, restartIfPlaying, applyLive }) {
   // gleiche Gesamtlänge: live über setTrack, sonst Neustart an der gleichen Position
@@ -15,6 +20,7 @@ export function initFormPanel({ render, restartIfPlaying, applyLive }) {
 
   const template = $('form-template');
   for (const id of ['auto', ...TEMPLATE_IDS, 'off']) template.append(new Option('', id));
+  createLcdSelect(template, { prevKey: 'ui.lcdPrev', nextKey: 'ui.lcdNext' });
   template.addEventListener('change', () => {
     const before = state.track.length;
     setFormTemplate(template.value);
@@ -24,6 +30,7 @@ export function initFormPanel({ render, restartIfPlaying, applyLive }) {
 
   const target = $('length');
   for (const n of TARGET_SIZES) target.append(new Option('', String(n)));
+  createLcdSelect(target, { prevKey: 'ui.lcdPrev', nextKey: 'ui.lcdNext' });
   target.addEventListener('change', () => {
     const before = state.track.length;
     setFormTarget(Number(target.value));
@@ -34,6 +41,7 @@ export function initFormPanel({ render, restartIfPlaying, applyLive }) {
   const sliders = FEEL.map((name) => {
     const el = $(`form-${name}`);
     el.max = String(Math.round(MAX[name] * 100));
+    createKnob(el, { origin: ORIGIN[name], kind: KIND[name], resetValue: Math.round(FEEL_DEFAULTS[name] * 100) });
     let queued = false;
     el.addEventListener('input', () => {
       setFormFeel(name, Number(el.value) / 100);

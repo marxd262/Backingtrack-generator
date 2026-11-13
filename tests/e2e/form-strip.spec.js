@@ -19,8 +19,7 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator('#go')).toHaveText(/\S/);
   await page.locator('#tune-btn').click();
   await expect(page.locator('#play')).toBeVisible();
-  if (!(await page.locator('#side-left').isVisible())) await page.locator('#toggle-left').click();
-  await expect(page.locator('#side-left')).toBeVisible();
+  await expect(page.locator('#rack')).toBeVisible(); // Feintuning öffnet den Zustand Einstellen
 });
 
 test.afterEach(() => {
@@ -108,7 +107,7 @@ test('Tastatur: Pfeile, Pos1, Ende wählen den Teil, Enter und Leertaste wählen
   await page.keyboard.press('ArrowRight');
   expect(await selected()).toBe(1);
   await expect(parts(page).nth(1)).toBeFocused();
-  await expect(page.locator('#form-insp-title')).toHaveText('Strophe, Takte 5 bis 16');
+  await expect(page.locator('#part-chip')).toHaveAttribute('title', 'Strophe, Takte 5 bis 16');
   await page.keyboard.press('End');
   expect(await selected()).toBe(7);
   await page.keyboard.press('ArrowRight'); // am Ende bleibt es
@@ -124,8 +123,8 @@ test('Tastatur: Pfeile, Pos1, Ende wählen den Teil, Enter und Leertaste wählen
   await parts(page).nth(5).focus();
   await page.keyboard.press(' ');
   expect(await selected()).toBe(5);
-  await expect(page.locator('#form-insp-title')).toHaveText('Break, Takte 57 bis 64');
-  // nach dem Streifen kommen die Einstellungen
+  await expect(page.locator('#part-chip')).toHaveAttribute('title', 'Break, Takte 57 bis 64');
+  // nach dem Streifen kommen die Einstellungen (die Spurnamen sind nur Anzeige, die Tasten ‹ › am Display keine Tab-Halte)
   await page.keyboard.press('Tab');
   await expect(page.locator('#part-type')).toBeFocused();
   await page.keyboard.press('Tab');
@@ -140,9 +139,9 @@ test('Auswahl per Klick hebt den Teil hervor und zeigt dessen Einstellungen', as
   await expect(parts(page).nth(0)).toHaveCSS('outline-style', 'none');
   await expect(page.locator('#part-type')).toHaveValue('chorus');
   await expect(page.locator('#part-len-out')).toHaveText('16 Takte');
-  await expect(page.locator('#part-crash')).toBeChecked(); // Refrain: Crash als Standard
+  await expect(page.locator('#part-crash')).toHaveAttribute('aria-pressed', 'true'); // Refrain: Crash als Standard
   await pick(page, 1);
-  await expect(page.locator('#part-crash')).not.toBeChecked();
+  await expect(page.locator('#part-crash')).toHaveAttribute('aria-pressed', 'false');
   expect((await form(page)).sections.every((s) => !s.locked), 'Auswahl allein sperrt nichts').toBe(true);
 });
 
@@ -180,7 +179,7 @@ test('Länge ändern passt die Gesamtlänge, die Beschriftung des Teils und "Tak
   await expect(page.locator('#part-len-out')).toHaveText('13 Takte');
   await expect(parts(page).nth(1).locator('.form-part-bars')).toHaveText('13');
   await expect(parts(page).nth(1)).toHaveAttribute('aria-label', /^Strophe, 13 Takte, Takte 5 bis 17/);
-  await expect(page.locator('#form-insp-title')).toHaveText('Strophe, Takte 5 bis 17');
+  await expect(page.locator('#part-chip')).toHaveAttribute('title', 'Strophe, Takte 5 bis 17');
   expect((await form(page)).sections[1].locked).toBe(true);
   await page.locator('#part-shorter').click();
   await page.locator('#part-shorter').click();
@@ -248,7 +247,7 @@ test('Pegel, Dichte, Übergang und Crash wirken live ohne Neustart; "Standard" b
   await expect(page.locator('#part-density-out')).toHaveText('40 %');
   await live('Übergang', () => page.locator('#part-transition').selectOption('stop'));
   expect((await form(page)).sections[1].transition).toBe('stop');
-  await live('Crash', () => page.locator('#part-crash').check());
+  await live('Crash', () => page.locator('#part-crash').click());
   expect((await form(page)).sections[1].crash).toBe(true);
   await live('Zurücksetzen', () => page.locator('#part-level-reset').click());
   f = await form(page);
@@ -316,7 +315,7 @@ test('Löschen entfernt den gewählten Teil, die Auswahl rückt nach und die Lä
   expect(await trackLength(page)).toBe(88);
   await expect(parts(page)).toHaveCount(7);
   await expect(parts(page).nth(6)).toHaveAttribute('aria-selected', 'true');
-  await expect(page.locator('#form-insp-title')).toHaveText('Refrain, Takte 65 bis 88');
+  await expect(page.locator('#part-chip')).toHaveAttribute('title', 'Refrain, Takte 65 bis 88');
 });
 
 test('Nach links und nach rechts: Teil und Auswahl wandern, an den Rändern gesperrt', async ({ page }) => {
@@ -355,7 +354,7 @@ test('Teil hinzufügen: Strophe mit 8 Takten am Ende, gesperrt und gewählt', as
   expect(f.sections.at(-1)).toEqual({ type: 'verse', bars: 8, locked: true });
   expect(await trackLength(page)).toBe(20);
   await expect(parts(page).nth(2)).toHaveAttribute('aria-selected', 'true');
-  await expect(page.locator('#form-insp-title')).toHaveText('Strophe, Takte 13 bis 20');
+  await expect(page.locator('#part-chip')).toHaveAttribute('title', 'Strophe, Takte 13 bis 20');
 });
 
 test('Grenzen: bei 64 Teilen sind Hinzufügen und Kopie gesperrt, der Grund steht da; bei 512 Takten ebenso', async ({ page }) => {
@@ -409,12 +408,12 @@ test('Sprachwechsel beschriftet Streifen, Teilnamen, Einstellungen und Knöpfe n
   await setForm(page, FORM96);
   await pick(page, 3);
   await page.locator('[data-lang="en"]').first().click();
-  await expect(page.locator('#form-roll')).toHaveText('Roll again');
-  await expect(page.locator('#form-add')).toHaveText('Add part');
+  await expect(page.locator('#form-roll')).toHaveAccessibleName('Roll again');
+  await expect(page.locator('#form-add')).toHaveAccessibleName('Add part');
   await expect(strip(page)).toHaveAttribute('aria-label', 'Song parts');
   expect(await parts(page).locator('.form-part-name').allTextContents()).toEqual(['Intro', 'Verse', 'Build', 'Chorus', 'Verse', 'Break', 'Chorus', 'Outro']);
   await expect(parts(page).nth(3)).toHaveAttribute('aria-label', 'Chorus, 16 bars, bars 25 to 40');
-  await expect(page.locator('#form-insp-title')).toHaveText('Chorus, bars 25 to 40');
+  await expect(page.locator('#part-chip')).toHaveAttribute('title', 'Chorus, bars 25 to 40');
   await expect(page.locator('label[for="part-type"]')).toHaveText('Type');
   await expect(page.locator('#part-len-out')).toHaveText('16 bars');
   await expect(page.locator('#part-level-out')).toHaveText('Default (0 dB)');
@@ -422,10 +421,10 @@ test('Sprachwechsel beschriftet Streifen, Teilnamen, Einstellungen und Knöpfe n
   await expect(page.locator('#part-lock')).toHaveText('Lock');
   expect(await page.locator('#part-transition option').allTextContents()).toEqual(['none', 'Fill', 'Roll', 'Stop']);
   expect(await page.locator('#part-type option').allTextContents()).toEqual(['Intro', 'Verse', 'Build', 'Chorus', 'Break', 'Outro']);
-  for (const id of ['part-delete', 'part-left', 'part-right', 'part-copy']) await expect(page.locator(`#${id}`)).toHaveText(/^(Delete|Move left|Move right|Duplicate)$/);
+  for (const id of ['part-delete', 'part-left', 'part-right', 'part-copy']) await expect(page.locator(`#${id}`)).toHaveAccessibleName(/^(Delete|Move left|Move right|Duplicate)$/);
   expect(await page.locator('.lanes').innerText()).not.toMatch(RAW_KEY);
   await page.locator('[data-lang="de"]').first().click();
-  await expect(page.locator('#form-roll')).toHaveText('Neu würfeln');
+  await expect(page.locator('#form-roll')).toHaveAccessibleName('Neu würfeln');
   await expect(parts(page).nth(3).locator('.form-part-name')).toHaveText('Refrain');
 });
 
@@ -501,7 +500,6 @@ test('Verlauf: nur Fill-Marker sind Dreiecke, die Teilanfänge zeichnen keine', 
 
 test('360 px: kein waagerechtes Scrollen der Seite, Streifen scrollt in seinem Kasten, Bedienelemente mindestens 44 px', async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 800 });
-  while (await page.locator('.side-close:visible').count()) await page.locator('.side-close:visible').first().click();
   await setForm(page, FORM96);
   await expect(strip(page)).toBeVisible();
   await strip(page).scrollIntoViewIfNeeded();
@@ -547,7 +545,7 @@ test('Auswahl bleibt gültig: nach Würfeln, kürzerer Form und Ohne Form genau 
   await pick(page, count - 1);
   await setForm(page, [['intro', 4], ['verse', 8], ['chorus', 8]]);
   expect(await selectedIndexes(page)).toEqual({ selected: [2], tab: [2] });
-  await expect(page.locator('#form-insp-title')).toHaveText('Refrain, Takte 13 bis 20');
+  await expect(page.locator('#part-chip')).toHaveAttribute('title', 'Refrain, Takte 13 bis 20');
   // Länge ändern ändert die Auswahl nicht
   await page.locator('#part-longer').click();
   expect(await selectedIndexes(page)).toEqual({ selected: [2], tab: [2] });
@@ -557,7 +555,7 @@ test('Auswahl bleibt gültig: nach Würfeln, kürzerer Form und Ohne Form genau 
   const back = await selectedIndexes(page);
   expect(back.selected).toHaveLength(1);
   expect(back.tab).toEqual(back.selected);
-  await expect(page.locator('#form-insp-title')).toContainText('Takte');
+  await expect(page.locator('#part-chip')).toHaveAttribute('title', /Takte/);
 });
 
 test('Ausrichtung auch bei einer schiefen Form (1/1/1/64/1/3/25 Takte) bei 1280 und 601 px', async ({ page }) => {
@@ -565,7 +563,6 @@ test('Ausrichtung auch bei einer schiefen Form (1/1/1/64/1/3/25 Takte) bei 1280 
   const bars = odd.map(([, n]) => n);
   for (const width of [1280, 601]) {
     await page.setViewportSize({ width, height: 900 });
-    while (await page.locator('.side-close:visible').count()) await page.locator('.side-close:visible').first().click();
     await setForm(page, odd);
     const m = await page.evaluate(() => {
       const c = document.querySelector('#lanes').getBoundingClientRect();
@@ -647,7 +644,7 @@ test('Neu würfeln bei defekter Form behält die gewählte Vorlage', async ({ pa
   expect(f.sections.every((x) => x.bars === 12)).toBe(true);
 });
 
-test('Streifen und Einstellungen: Tooltip gleich Beschriftung, Pegel- und Dichte-Ausgabe sprechen nicht mit, ungesetzte Regler blass, Reihen kompakt', async ({ page }) => {
+test('Streifen und Einstellungen: Tooltip gleich Beschriftung, Pegel- und Dichte-Ausgabe sprechen nicht mit, ungesetzte Regler blass, Tasten in Reihen', async ({ page }) => {
   await setForm(page, FORM96);
   await pick(page, 1);
   expect(await parts(page).evaluateAll((els) => els.every((el) => el.title && el.title === el.getAttribute('aria-label')))).toBe(true);
@@ -655,17 +652,19 @@ test('Streifen und Einstellungen: Tooltip gleich Beschriftung, Pegel- und Dichte
   await expect(page.locator('#part-density-out')).toHaveAttribute('aria-live', 'off');
   await expect(page.locator('#part-len-out')).not.toHaveAttribute('aria-live', 'off');
   await expect(page.locator('#part-level')).toHaveClass(/\bunset\b/);
+  await expect(page.locator('.knob:has(#part-level)')).not.toHaveCSS('opacity', '1');
   await page.locator('#part-level').fill('-9');
   await expect(page.locator('#part-level')).not.toHaveClass(/\bunset\b/);
-  await expect(page.locator('#part-level')).toHaveCSS('opacity', '1');
-  // Zurücksetzen steht in der Reihe des Reglers, Sperren in der Reihe der Aktionen
+  await expect(page.locator('.knob:has(#part-level)')).toHaveCSS('opacity', '1');
+  // Zurücksetzen steht beim Knopf, Crash und Sperre in einer Reihe, schieben und kopieren/löschen in einer
   const rows = await page.evaluate(() => {
     const y = (id) => Math.round(document.getElementById(id).getBoundingClientRect().top);
-    return { level: y('part-level'), reset: y('part-level-reset'), lock: y('part-lock'), del: y('part-delete'), copy: y('part-copy') };
+    return { level: y('part-level'), reset: y('part-level-reset'), lock: y('part-lock'), crash: y('part-crash'), del: y('part-delete'), copy: y('part-copy'), left: y('part-left') };
   });
   expect(Math.abs(rows.reset - rows.level)).toBeLessThanOrEqual(30);
-  expect(rows.lock).toBe(rows.del);
-  expect(rows.lock).toBe(rows.copy);
+  expect(rows.lock).toBe(rows.crash);
+  expect(rows.del).toBe(rows.copy);
+  expect(rows.left).toBe(rows.copy);
 });
 
 test('Streifen: der spielende Teil trägt einen Balken in Tintenfarbe (genug Kontrast auf jedem Teil)', async ({ page }) => {
@@ -674,6 +673,124 @@ test('Streifen: der spielende Teil trägt einen Balken in Tintenfarbe (genug Kon
   await page.locator('#play-go').click();
   await expect(page.locator('#form-strip [aria-current="true"]')).toHaveCount(1, { timeout: BAR_TIMEOUT });
   const bar = await page.locator('#form-strip [aria-current="true"]').evaluate((el) => getComputedStyle(el, '::after').backgroundColor);
-  expect(bar).toBe('rgb(42, 38, 34)');
+  expect(bar).toBe('rgb(42, 42, 42)');
   await page.locator('#play-go').click();
+});
+
+// Griff am gewählten Teil ziehen: dxBars Taktbreiten (nach der Breite beim Anfassen) waagerecht, in Schritten
+async function dragGrip(page, dxBars, steps = 10) {
+  const grip = await page.locator('.part-grip').boundingBox();
+  const selected = await page.locator('#form-strip [aria-selected="true"]').boundingBox();
+  const bars = Number(await page.locator('#form-strip [aria-selected="true"] .form-part-bars').textContent());
+  const x = grip.x + grip.width / 2;
+  const y = grip.y + grip.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + dxBars * (selected.width / bars), y, { steps });
+  await page.mouse.up();
+}
+
+test('Griff: nur am gewählten Teil, an der rechten Kante, und er wandert mit der Auswahl', async ({ page }) => {
+  await setForm(page, FORM96);
+  await pick(page, 4);
+  await expect(page.locator('.part-grip')).toHaveCount(1);
+  await expect(page.locator('.part-grip')).toHaveAttribute('data-edge', 'end');
+  await expect(page.locator('.part-grip')).toHaveAttribute('aria-hidden', 'true');
+  const at = (i) => parts(page).nth(i).locator('.part-grip');
+  await expect(at(4)).toHaveCount(1);
+  const [grip, option] = await Promise.all([page.locator('.part-grip').boundingBox(), parts(page).nth(4).boundingBox()]);
+  expect(Math.abs(grip.x + grip.width - (option.x + option.width))).toBeLessThanOrEqual(1);
+  await pick(page, 6);
+  await expect(at(6)).toHaveCount(1);
+  await expect(at(4)).toHaveCount(0);
+  await expect(page.locator('.part-grip')).toHaveCount(1);
+});
+
+test('Griff ziehen: der Verse mit 16 Takten um 4 Taktbreiten nach rechts ergibt 20 Takte, gesperrt, Gesamtlänge stimmt', async ({ page }) => {
+  await setForm(page, FORM96);
+  await pick(page, 4);
+  await expect(page.locator('#part-len-out')).toHaveText('16 Takte');
+  expect((await form(page)).sections.some((s) => s.locked)).toBe(false);
+  await page.locator('#tuning-tempo').fill('200');
+  await page.locator('#play-go').click();
+  await expect(position(page)).toHaveText(/^Takt \d+ von 96$/, { timeout: BAR_TIMEOUT });
+  expect(await sets(page)).toBe(1);
+  await dragGrip(page, 4);
+  await expect(page.locator('#part-len-out')).toHaveText('20 Takte');
+  const f = await form(page);
+  expect(f.sections[4]).toMatchObject({ type: 'verse', bars: 20, locked: true });
+  expect(f.sections.filter((s) => s.locked)).toHaveLength(1);
+  expect(await trackLength(page)).toBe(100);
+  await expect(position(page)).toHaveText(/^Takt \d+ von 100$/, { timeout: BAR_TIMEOUT });
+  // ein Neustart für das ganze Ziehen, nicht einer je Takt
+  expect(await sets(page)).toBe(2);
+  expect(await contexts(page)).toBe(1);
+  await expect(parts(page).nth(4)).toHaveAttribute('aria-selected', 'true');
+  await page.locator('#play-go').click();
+});
+
+test('Griff ziehen: rundet auf ganze Takte, Grenzen 1 und 64, Zurückziehen; unter einem halben Takt ändert sich nichts', async ({ page }) => {
+  await setForm(page, [['intro', 8], ['verse', 16], ['chorus', 8]]);
+  await pick(page, 1);
+  await dragGrip(page, 0.4);
+  expect((await form(page)).sections[1]).toEqual({ type: 'verse', bars: 16 }); // nichts geändert, auch nicht gesperrt
+  await dragGrip(page, -1.6);
+  await expect(page.locator('#part-len-out')).toHaveText('14 Takte');
+  await dragGrip(page, 1.6);
+  await expect(page.locator('#part-len-out')).toHaveText('16 Takte');
+  await dragGrip(page, -400);
+  await expect(page.locator('#part-len-out')).toHaveText('1 Takt');
+  await expect(page.locator('#part-shorter')).toBeDisabled();
+  expect(await trackLength(page)).toBe(17);
+  await pick(page, 0); // Klicken wählt wieder, der Griff folgt
+  await dragGrip(page, 400);
+  await expect(page.locator('#part-len-out')).toHaveText('64 Takte');
+  expect((await form(page)).sections[0]).toMatchObject({ bars: 64, locked: true });
+});
+
+test('Teil wählen färbt nur das Schild "TEIL N" mit der Farbe des Blocks', async ({ page }) => {
+  await setForm(page, FORM96);
+  const chip = page.locator('#part-chip');
+  const bg = (loc) => loc.evaluate((el) => getComputedStyle(el).backgroundColor);
+  const clear = 'rgba(0, 0, 0, 0)';
+  const panel = await bg(page.locator('#mod-song'));
+  const seen = [];
+  for (const [i, text] of [[1, 'TEIL 2'], [3, 'TEIL 4'], [5, 'TEIL 6']]) {
+    await pick(page, i);
+    await expect(chip).toHaveText(text);
+    await expect(page.locator('#form-insp-title')).toHaveText(`gewählt: ${text}`);
+    await expect(chip).toHaveCSS('color', 'rgb(17, 17, 17)');
+    seen.push(await bg(chip));
+    if (i !== 5) expect(await bg(chip)).toBe(await bg(parts(page).nth(i))); // der Break ist im Streifen schraffiert, das Schild trägt seine Grundfarbe
+    for (const sel of ['#form-insp', '#form-insp-title', '#form-song', '#form-strip', '.insp-displays', '.insp-controls']) expect(await bg(page.locator(sel)), sel).toBe(clear);
+    expect(await bg(page.locator('#mod-song'))).toBe(panel);
+  }
+  expect(new Set(seen).size, 'Strophe, Refrain, Break verschieden').toBe(3);
+  await page.locator('[data-lang="en"]').first().click();
+  await expect(chip).toHaveText('PART 6');
+  await expect(page.locator('#form-insp-title')).toHaveText('selected: PART 6');
+});
+
+test('gesperrter Teil trägt die schwarze Ecke, nicht gesperrte keine', async ({ page }) => {
+  await setForm(page, [['intro', 4, { locked: true }], ['verse', 8]]);
+  const corner = (i) => parts(page).nth(i).evaluate((el) => { const c = getComputedStyle(el, '::before'); return c.content === 'none' ? null : c.borderRightColor; });
+  expect(await corner(0)).toBe('rgb(42, 42, 42)');
+  expect(await corner(1)).toBeNull();
+});
+
+test('Spurnamen stehen links vor den Spuren, sind nur Anzeige und zeigen Stumm aus dem Mischpult', async ({ page }) => {
+  const boxes = await page.evaluate(() => ['#lane-buttons', '#lanes'].map((s) => { const r = document.querySelector(s).getBoundingClientRect(); return { x: r.x, right: r.right, y: r.y }; }));
+  expect(boxes[0].right).toBeLessThanOrEqual(boxes[1].x + 1);
+  expect(Math.abs(boxes[0].y - boxes[1].y)).toBeLessThanOrEqual(1);
+  const first = page.locator('#lane-buttons [data-layer]').first();
+  expect(await page.locator('#lane-buttons button, #lane-buttons [tabindex]').count()).toBe(0); // kein Schalter, nicht fokussierbar
+  await expect(first).toHaveAttribute('data-muted', 'false');
+  await first.click({ force: true }); // Klick auf den Namen ändert nichts
+  await expect(first).toHaveAttribute('data-muted', 'false');
+  const mute = page.locator(`#mixer button[data-mute="${await first.getAttribute('data-layer')}"]`);
+  await mute.click();
+  await expect(first).toHaveAttribute('data-muted', 'true');
+  expect(await first.evaluate((el) => getComputedStyle(el).textDecorationLine)).toBe('line-through');
+  await mute.click();
+  await expect(first).toHaveAttribute('data-muted', 'false');
 });

@@ -380,7 +380,7 @@ test('ohne localStorage (Zugriff wirft) läuft die Seite weiter', async ({ page 
   await expect(go(page)).toHaveText('Stop');
   await go(page).click();
   await expect(go(page)).toHaveText('Go');
-  // Feintuning merkt die Leisten: ohne Speicher nur bis zum Neuladen, ohne Fehler
+  // Feintuning merkt den Zustand Einstellen: ohne Speicher nur bis zum Neuladen, ohne Fehler
   await page.locator('#tune-btn').click();
   await expect(page.locator('#play')).toBeVisible();
 });
@@ -460,3 +460,35 @@ test('jeder neue Stil: Auswahl setzt Tempo und Namen, Los startet ohne Fehler', 
   await expect(page.locator('#play')).toBeVisible();
   await expect(page.locator('#play-go')).toHaveText('Stopp');
 });
+
+// Spielseite im Zustand Einstellen (mit offenem Profil-Fenster) in beiden Sprachen: keine rohen Schlüssel, nirgends Text unter 11 px
+const RAW_KEY_PLAY = /^(ui|tag|style|err|layer|scale|mode|category|view|form|voice|job|timbre|groove|chordColor)\.[A-Za-z.]+$/;
+for (const lang of ['de', 'en']) {
+  test(`Spielseite (${lang}, Einstellen): keine rohen Schlüssel, kein sichtbarer Text unter 11 px`, async ({ page }) => {
+    await page.locator(`[data-lang="${lang}"]`).click();
+    await page.locator('#tune-btn').click();
+    await expect(page.locator('#rack')).toBeVisible();
+    await page.locator('#profiles-btn').click();
+    await expect(page.locator('#profiles-pop')).toBeVisible();
+    const found = await page.evaluate((source) => {
+      const re = new RegExp(source);
+      const raw = [];
+      const small = [];
+      const visible = (el) => {
+        const r = el.getBoundingClientRect();
+        const s = getComputedStyle(el);
+        return r.width > 1 && r.height > 1 && s.visibility !== 'hidden' && s.display !== 'none';
+      };
+      for (const el of document.querySelectorAll('#play *, #play ~ *')) {
+        if (el.closest('[hidden]') || el.tagName === 'OPTION' || el.tagName === 'STYLE' || el.tagName === 'SCRIPT' || !visible(el)) continue;
+        const own = [...el.childNodes].filter((n) => n.nodeType === 3 && n.textContent.trim()).map((n) => n.textContent.trim());
+        if (own.length && Number.parseFloat(getComputedStyle(el).fontSize) < 11) small.push(`${el.id || el.className || el.tagName}: ${own.join(' ')}`);
+        for (const text of own) if (re.test(text)) raw.push(text);
+        for (const attr of ['aria-label', 'title']) if (re.test(el.getAttribute(attr) ?? '')) raw.push(`${attr}=${el.getAttribute(attr)}`);
+      }
+      return { raw, small };
+    }, RAW_KEY_PLAY.source);
+    expect(found.raw).toEqual([]);
+    expect(found.small).toEqual([]);
+  });
+}

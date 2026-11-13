@@ -9,13 +9,21 @@ export function parseChord(name) {
   return { root: m[1], quality };
 }
 
-/** Fügt den Akkord über die Auswahl an. scope schränkt ein, z. B. '#side-right'. */
+/** Öffnet das Popover der Akkordauswahl (+ im Modul Harmonie), falls zu. */
+export async function openAddPop(page) {
+  const pop = page.locator('#add-pop');
+  if (!(await pop.evaluate((el) => el.matches(':popover-open')))) await page.locator('#add-btn').click();
+}
+
+/** Fügt den Akkord über die Auswahl an und schließt das Popover wieder (es läge sonst über Griffbrett und Rad). scope schränkt ein, z. B. '#mod-harmony'. */
 export async function addChordByName(page, name, scope = '') {
   const { root } = parseChord(name);
+  await openAddPop(page);
   const area = page.locator(`${scope} #add-chords`.trim());
   await area.locator('#add-roots button', { hasText: new RegExp(`^${root}$`) }).click();
   await openQualityGroup(page, parseChord(name).quality, scope);
   await area.locator('#add-qualities button', { hasText: new RegExp(`^${name}$`) }).click();
+  await page.locator('#add-pop').evaluate((el) => el.hidePopover());
 }
 
 /** Klappt die einklappbare Gruppe (Dreiklänge, Septakkorde, Erweiterungen) auf, in der die Akkordart steht, falls sie zu ist. */
