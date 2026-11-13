@@ -22,7 +22,7 @@ const centered = (timbre) => ({ ...timbre, master: { ...timbre?.master, width: 0
 // solo: nur diese Schicht hörbar, die anderen stumm geschaltet. mix: { levels, master } wie bei play (Reglerstellungen 0..1) und
 // tuning (Überschreibungen der Feinwerte, siehe tunables.js).
 async function renderLeft(trackInput, seconds, solo, limiter, mix) {
-  const events = buildEvents(trackInput); // prüft den Track samt Schlagworten
+  const events = buildEvents(trackInput, { timing: { amount: 0, tight: 1 } }); // prüft den Track samt Schlagworten; Timing wie vor Klang v2 (Mikrotiming aus), damit die Basiswerte gelten
   const ctx = new OfflineAudioContext(2, Math.ceil(SAMPLE_RATE * (OFFSET + seconds + TAIL)), SAMPLE_RATE);
   const { output, layers, whenReady } = createInstruments(ctx, { bpm: trackInput.bpm, limiter, timbre: centered(resolveTrackTimbre(trackInput)), voices: resolveVoices(trackInput), ...mix });
   await whenReady(); // Sample-Stimmen: erst laden, sonst klänge der Rückfall-Synth

@@ -7,8 +7,8 @@ const SECTION = 8; // Abschnittsgrenze alle 8 Takte, solange der Track keine Son
 const summaries = new WeakMap();
 
 /** Memo-Schlüssel des Verlaufs: alles, was den Ereignisstrom ändert. Tempo und Schichten fehlen (x-Achse sind Takte, stumme Spuren werden nur gedimmt). */
-export const laneKey = ({ key, bars, tags, seed, length, meter, groove, complexity, form, jobs, voices, variety }) =>
-  JSON.stringify([key, bars, tags, seed, length, meter, groove, complexity, form, jobs, voices, variety]);
+export const laneKey = ({ key, bars, tags, seed, length, meter, groove, complexity, loose, form, jobs, voices, variety }) =>
+  JSON.stringify([key, bars, tags, seed, length, meter, groove, complexity, loose, form, jobs, voices, variety]);
 
 // Je Takt: Startzeit, Anzahl Ereignisse je Schicht, Fill-Marker und Teilanfänge der Form. Einmal je Ereignisliste.
 function summarize(events) {

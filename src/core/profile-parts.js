@@ -32,7 +32,7 @@ const MAX_BARS = 512;
 const CAPTURE = {
   harmony: ({ track: t, scale, chordColor, chordColorFromStyle }) => ({ key: t.key, scale, bars: t.bars, chordColor, chordColorFromStyle, meter: t.meter }),
   tempo: ({ track: t }) => ({ bpm: t.bpm, meter: t.meter }), // bpm zählt den Puls dieser Taktart (applyParts rechnet um)
-  rhythm: ({ track: t }) => ({ groove: t.groove ?? null, complexity: t.complexity ?? null, length: t.length }),
+  rhythm: ({ track: t }) => ({ groove: t.groove ?? null, complexity: t.complexity ?? null, loose: t.loose ?? null, length: t.length }),
   style: ({ track: t, style }) => ({ style, tags: t.tags }),
   sound: ({ track: t }) => ({ timbre: t.timbre ?? {} }),
   // vollständig (auch die Standardwerte): Laden mischt je Schlüssel, ein leeres Objekt könnte den Standard nie zurückholen
@@ -122,6 +122,7 @@ function sanitize(raw) {
     rhythm(f, out) {
       if ('groove' in f) { if (f.groove === null || (typeof f.groove === 'string' && Object.hasOwn(GROOVES, f.groove))) out.groove = f.groove; else bad(); }
       if ('complexity' in f) { if (f.complexity === null || num01(f.complexity)) out.complexity = f.complexity; else bad(); }
+      if ('loose' in f) { if (f.loose === null || num01(f.loose)) out.loose = f.loose; else bad(); }
       if ('length' in f) { if (typeof f.length === 'number' && trackOk({ length: f.length }, 'badLength')) out.length = f.length; else bad(); }
     },
     style(f, out) {
@@ -229,7 +230,7 @@ export function applyParts(session, parts) {
   // bpm in der Taktart des Profils -> Taktart nach dem Laden (harmony ist schon angewendet); ohne meter (ältere Profile) wie gespeichert
   if (tempo && has(tempo, 'bpm')) t.bpm = has(tempo, 'meter') ? convertTempo(tempo.bpm, meterKey(tempo.meter), meterKey(t.meter)) : tempo.bpm;
   if (r) {
-    for (const k of ['groove', 'complexity']) if (has(r, k)) { if (r[k] === null) delete t[k]; else t[k] = r[k]; }
+    for (const k of ['groove', 'complexity', 'loose']) if (has(r, k)) { if (r[k] === null) delete t[k]; else t[k] = r[k]; }
     if (has(r, 'length')) t.length = r.length;
   }
   if (style) {

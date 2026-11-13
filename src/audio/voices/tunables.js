@@ -97,7 +97,7 @@ export const MIX_TUNABLES = deepFreeze({
     drums: spec(-1, 1, 0.05, 0), bass: spec(-1, 1, 0.05, 0), chords: spec(-1, 1, 0.05, 0.3), pad: spec(-1, 1, 0.05, -0.2),
     lead: spec(-1, 1, 0.05, 0), percussion: spec(-1, 1, 0.05, -0.4), kit: spec(0, 1, 0.05, 0.25),
   },
-  // Mikrotiming (Schritt 4, core/microtiming.js; Standardwerte von dort): amount 0 = aus, 1 = wie beschrieben; tight Rest des Zufalls je Note
+  // Mikrotiming (Schritt 4, core/microtiming.js; Standardwerte von dort): amount Faktor auf Lage und Drift (ohne Angabe aus dem Track-Feld loose, Standard 1,5); tight Rest des Zufalls je Note
   // (1 = ±7 ms wie bisher), layback Faktor auf die feste Lage je Instrument, drift Faktor auf den langsamen Drift. Wirkt beim Bauen des
   // Ereignisstroms (in der Hörprobe: nach Stopp und Start).
   'mix/timing': {

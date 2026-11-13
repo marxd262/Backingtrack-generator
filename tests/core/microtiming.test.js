@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildEvents } from '../../src/index.js';
 import { barTimeline, checkedTrack } from '../../src/core/timeline.js';
-import { applyMicrotiming, completeTiming, jitterScale, TIMING_DEFAULTS } from '../../src/core/microtiming.js';
+import { applyMicrotiming, completeTiming, jitterScale, amountOf, TIMING_DEFAULTS } from '../../src/core/microtiming.js';
 import { createRng } from '../../src/core/rng.js';
 
 const TRACK = {
@@ -13,17 +13,22 @@ const TRACK = {
   layers: { drums: true, bass: true, chords: true, pad: true },
   tags: { rhythm: ['straight'], development: ['fullFromStart'] },
 };
-const ON = { timing: { amount: 1 } };
+const ON = {}; // Standard: Lockerheit 0,5 = Stärke 1,5
+const OFF = { timing: { amount: 0, tight: 1 } }; // Strom wie vor Klang v2
 const mean = (a) => a.reduce((x, y) => x + y, 0) / a.length;
 
-test('amount 0: der Strom ist derselbe wie ohne Angabe', () => {
-  assert.deepEqual(buildEvents(TRACK, { timing: { amount: 0 } }), buildEvents(TRACK));
-  assert.equal(jitterScale(completeTiming({ amount: 0 })), 1);
+test('Lockerheit: 0,5 ist der Standard (Stärke 1,5), 0 heißt keine Lage und kein Drift, ungültig wirft', () => {
+  assert.deepEqual(buildEvents({ ...TRACK, loose: 0.5 }), buildEvents(TRACK));
+  assert.deepEqual([amountOf(0), amountOf(0.5), amountOf(1)], [0, 1.5, 2.5]);
+  assert.deepEqual(buildEvents({ ...TRACK, loose: 0 }), buildEvents(TRACK, { timing: { amount: 0 } }));
+  assert.notDeepEqual(buildEvents({ ...TRACK, loose: 1 }), buildEvents(TRACK));
+  assert.equal(jitterScale(completeTiming({ tight: 1 })), 1);
   assert.deepEqual(completeTiming({ amount: -1, tight: 'x' }), TIMING_DEFAULTS);
+  assert.throws(() => buildEvents({ ...TRACK, loose: 2 }), /badLoose/);
 });
 
-test('amount 1: gleiche Ereignisse, sortiert, im Takt, höchstens 20 ms vom alten Platz, reproduzierbar', () => {
-  const off = buildEvents(TRACK), on = buildEvents(TRACK, ON);
+test('Standard: gleiche Ereignisse, sortiert, im Takt, höchstens 20 ms vom alten Platz, reproduzierbar', () => {
+  const off = buildEvents(TRACK, OFF), on = buildEvents(TRACK, ON);
   assert.deepEqual(on, buildEvents(TRACK, ON));
   assert.equal(on.length, off.length);
   const bars = barTimeline(checkedTrack(TRACK));
@@ -38,12 +43,12 @@ test('amount 1: gleiche Ereignisse, sortiert, im Takt, höchstens 20 ms vom alte
   assert.notDeepEqual(on, off);
 });
 
-test('amount 1: die Backbeat-Snare liegt im Mittel hinter dem Raster, der Kick nicht; Akkordtöne eines Stabs bleiben zusammen', () => {
+test('Standard: die Backbeat-Snare liegt im Mittel hinter dem Raster, der Kick nicht; Akkordtöne eines Stabs bleiben zusammen', () => {
   const on = buildEvents(TRACK, ON), beat = 60 / TRACK.bpm;
   const late = (name) => mean(on.filter((e) => e.layer === 'drums' && e.name === name && e.vel >= 0.3 && Number.isInteger(e.beat * 2)).map((e) => e.t - (e.bar * 4 + e.beat) * beat));
   assert.ok(late('snare') > 0.003, `snare ${late('snare')}`);
   assert.ok(late('snare') > late('kick') + 0.002, `snare ${late('snare')} kick ${late('kick')}`);
-  const off = buildEvents(TRACK);
+  const off = buildEvents(TRACK, OFF);
   const stabs = (events) => new Set(events.filter((e) => e.layer === 'chords').map((e) => `${e.bar}|${e.beat}|${e.t}`)).size;
   assert.equal(stabs(on), stabs(off));
 });

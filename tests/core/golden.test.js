@@ -13,21 +13,22 @@ const preset = (id) => {
 const legacy = { id: 'x', title: 'y', key: { root: 'A', mode: 'minor' }, bpm: 90, bars: [bar('A', 'min'), bar('D', 'min'), bar('E', 'min'), bar('A', 'min')] };
 
 // Erzeugt 2026-11-07 nach der Fix-Welle (langsamer Aufbau: Bass und Schlagzeug zuerst)
+// neu erzeugt 2026-11-13 (Klang v2, Schritt 4: Mikrotiming ist Standard; gleiche Ereignisse, nur Zeiten und Notenlängen um Millisekunden anders)
 const GOLDEN = {
-  funk: { count: 1023, sha256: '5241492ce67ef82432375d135002a1084491a40dbe3caf8c05e7683cde6fce18' },
-  psych: { count: 909, sha256: '944acbbb64fbb3f2c785f9b1ab989c73a2acb19cfda4029bee0c129e86ecd2da' },
-  dreamy: { count: 578, sha256: 'c44e2bf2f38003c74082b2c156e62cc8381a7e778be10d38ae4a81396ea8242c' },
-  legacy: { count: 805, sha256: 'ca38d8bdc92a8372f65bc869b7f97de46e3cb894ca2e707ee8d50a5480c4f7a9' },
+  funk: { count: 1023, sha256: '757c90759da0f1cb20afe28dc8c9de15550d7885899a99d2abd2b3d657516ad4' },
+  psych: { count: 909, sha256: 'c24a47c1abdd027da8ccc32a560a1ad373a431de4c596be4a47ee16eb9a0899a' },
+  dreamy: { count: 578, sha256: '4365b1b3b5f880a4f930b4ba86d21dbf17c5ef9c27fa3449884b7f52be5fe68f' },
+  legacy: { count: 805, sha256: '046c56270553af1685fbc9140a639a7345830a8c8c2baf641c6ef9957da059e9' },
 };
 const tracks = { funk: preset('funk'), psych: preset('psych'), dreamy: preset('dreamy'), legacy };
 
 // Dieselben Tracks mit dem Schalter `variety` (Streuung, mehr Muster); aus dem Generator vor dem Umbau auf Taktarten und Grooves
 // aufgenommen (2026-11-09), damit "auch mit variety unverändert" prüfbar ist
 const GOLDEN_VARIETY = {
-  funk: { count: 1041, sha256: 'cfd54b0461145cf8f1d82564ecb900dd50c66237ae9c84e7fca25991b0704ec9' },
-  psych: { count: 925, sha256: '4d0526f80bee8494759cdcb458e31aa2dc00be511e24fc60528d4c82392143e9' },
-  dreamy: { count: 610, sha256: 'd61f386357b78cace014bba9d469500af4515eaa83ab10d90944b63025c9facd' },
-  legacy: { count: 846, sha256: '27633ecf4965712b5ba892e54c33e1bf7b87a57224f02b4df55fe505ca77108b' },
+  funk: { count: 1041, sha256: 'd21c72e89b63b4fae087d30ae919594814972c59c71df3ce164d6229716071a1' },
+  psych: { count: 925, sha256: '7d233762046fc2439a312b3793d85b3731b6bfcc486d07646c2ac9cacd2d6cb2' },
+  dreamy: { count: 610, sha256: '3a3363836029892ae2337af425bbb1a03cddc9bc6cfc4d9fc53042f02a34d9dc' },
+  legacy: { count: 846, sha256: 'fdc526243a82b3b14ec239ba3bdb4e0d8b88dde2a00b63be17b79e7a29e5c7bc' },
 };
 
 const HINT = 'Der Ereignisstrom für einen festen Seed hat sich geändert. War das eine gewollte Änderung am Generator, '

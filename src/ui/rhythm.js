@@ -30,17 +30,21 @@ export function initRhythm({ render, restartIfPlaying, applyLive }) {
     applyLive({ patterns: true });
     render();
   });
-  const slider = $('complexity');
-  createKnob(slider, { origin: 'center', kind: 'teal' });
+  // Komplexität und Lockerheit (Mikrotiming): Track-Felder 0..1, fehlend 0,5; beide tauschen den Ereignisstrom
   let queued = false;
-  slider.addEventListener('input', () => {
-    state.track.complexity = Number(slider.value) / 100;
-    render();
-    // beim Ziehen höchstens eine Neuberechnung des Ereignisstroms je Bild
-    if (!queued) {
-      queued = true;
-      requestAnimationFrame(() => { queued = false; applyLive({ patterns: true }); });
-    }
+  const sliders = ['complexity', 'loose'].map((field) => {
+    const slider = $(field);
+    createKnob(slider, { origin: 'center', kind: 'teal' });
+    slider.addEventListener('input', () => {
+      state.track[field] = Number(slider.value) / 100;
+      render();
+      // beim Ziehen höchstens eine Neuberechnung des Ereignisstroms je Bild
+      if (!queued) {
+        queued = true;
+        requestAnimationFrame(() => { queued = false; applyLive({ patterns: true }); });
+      }
+    });
+    return [field, slider];
   });
 
   return function renderRhythm() {
@@ -57,10 +61,12 @@ export function initRhythm({ render, restartIfPlaying, applyLive }) {
     }
     const current = grooveIdFor(state.track);
     if (grooveSelect.value !== current) grooveSelect.value = current;
-    const percent = String(Math.round((state.track.complexity ?? 0.5) * 100));
-    if (slider.value !== percent) slider.value = percent;
-    const shown = t('ui.percent', { n: percent });
-    setText($('complexity-out'), shown);
-    setAttr(slider, 'aria-valuetext', shown);
+    for (const [field, slider] of sliders) {
+      const percent = String(Math.round((state.track[field] ?? 0.5) * 100));
+      if (slider.value !== percent) slider.value = percent;
+      const shown = t('ui.percent', { n: percent });
+      setText($(`${field}-out`), shown);
+      setAttr(slider, 'aria-valuetext', shown);
+    }
   };
 }

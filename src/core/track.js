@@ -111,6 +111,8 @@ export function validateTrack(track) {
   if (t.groove != null && !(typeof t.groove === 'string' && Object.hasOwn(GROOVES, t.groove))) add('badGroove', { groove: show(t.groove) });
   // Komplexität: fehlend oder null gilt 0,5; sonst eine endliche Zahl von 0 bis 1
   if (t.complexity != null && !(Number.isFinite(t.complexity) && t.complexity >= 0 && t.complexity <= 1)) add('badComplexity', { complexity: show(t.complexity) });
+  // Lockerheit (Mikrotiming): fehlend oder null gilt 0,5; sonst eine endliche Zahl von 0 bis 1
+  if (t.loose != null && !(Number.isFinite(t.loose) && t.loose >= 0 && t.loose <= 1)) add('badLoose', { loose: show(t.loose) });
   checkVoices(t.voices, add);
   checkJobs(t.jobs, add);
   checkForm(t.form, add);

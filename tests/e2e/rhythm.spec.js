@@ -212,3 +212,14 @@ test('360 px: kein waagerechtes Scrollen, Chips mindestens 44 px hoch', async ({
     expect(h).toBeGreaterThanOrEqual(43.5);
   }
 });
+
+// Klang v2, Schritt 4: Lockerheit (Mikrotiming) neben der Komplexität
+test('Lockerheit: Knopf im Modul Rhythmus, Standard 50 %, ein neuer Wert steht in der Anzeige und im aria-valuetext', async ({ page }) => {
+  const loose = page.locator('#mod-rhythm #loose');
+  await expect(loose).toHaveValue('50');
+  await expect(page.locator('label[for="loose"]')).toHaveText('Lockerheit');
+  await loose.fill('80');
+  await expect(page.locator('#loose-out')).toHaveText('80 %');
+  await expect(loose).toHaveAttribute('aria-valuetext', '80 %');
+  await expect(complexity(page)).toHaveValue('50'); // der Nachbar bleibt
+});

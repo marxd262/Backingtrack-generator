@@ -42,7 +42,7 @@ test('captureParts: alle 10 Teile als tiefe Kopie', () => {
   assert.deepEqual(Object.keys(parts), PART_IDS);
   assert.deepEqual(parts.harmony, { key: { root: 'A', mode: 'minor' }, scale: 'blues', bars: s.track.bars, chordColor: 'sevenths', chordColorFromStyle: false, meter: [4, 4] });
   assert.deepEqual(parts.tempo, { bpm: 96, meter: [4, 4] }, 'bpm zählt den Puls dieser Taktart');
-  assert.deepEqual(parts.rhythm, { groove: 'straight', complexity: 0.7, length: 48 });
+  assert.deepEqual(parts.rhythm, { groove: 'straight', complexity: 0.7, loose: null, length: 48 });
   assert.deepEqual(parts.style, { style: 'funk', tags: s.track.tags });
   assert.deepEqual(parts.sound, { timbre: { master: { echo: 0.2 } } });
   // vollständige Stimmen- und Aufgabenwahl (nicht nur die gesetzten Einträge): sonst ließe sich der Standard nie wieder laden
@@ -67,7 +67,7 @@ test('captureParts: nicht gesetzte groove/complexity werden null; Auswahl der Te
   const t = track(); delete t.groove; delete t.complexity;
   const parts = captureParts(session({ track: t }), ['rhythm', 'tempo']);
   assert.deepEqual(Object.keys(parts), ['tempo', 'rhythm'], 'in PART_IDS-Reihenfolge');
-  assert.deepEqual(parts.rhythm, { groove: null, complexity: null, length: 48 });
+  assert.deepEqual(parts.rhythm, { groove: null, complexity: null, loose: null, length: 48 });
   assert.deepEqual(captureParts(session(), PART_PRESETS.none), {});
 });
 
