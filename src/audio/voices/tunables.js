@@ -2,6 +2,8 @@
 // `value` ist der ausgelieferte Standard. Die Hörprobe-Seite verstellt die Werte live (Tuning-Panel) und exportiert sie; was dort gut klingt,
 // wird hier als neuer Standard eingetragen. Stimmen lesen den Wert beim Anschlag über tunedValue.
 
+import { TIMING_DEFAULTS } from '../../core/microtiming.js';
+
 const deepFreeze = (o) => {
   for (const v of Object.values(o)) if (typeof v === 'object' && v !== null) deepFreeze(v);
   return Object.freeze(o);
@@ -94,6 +96,13 @@ export const MIX_TUNABLES = deepFreeze({
   'mix/pan': {
     drums: spec(-1, 1, 0.05, 0), bass: spec(-1, 1, 0.05, 0), chords: spec(-1, 1, 0.05, 0.3), pad: spec(-1, 1, 0.05, -0.2),
     lead: spec(-1, 1, 0.05, 0), percussion: spec(-1, 1, 0.05, -0.4), kit: spec(0, 1, 0.05, 0.25),
+  },
+  // Mikrotiming (Schritt 4, core/microtiming.js; Standardwerte von dort): amount 0 = aus, 1 = wie beschrieben; tight Rest des Zufalls je Note
+  // (1 = ±7 ms wie bisher), layback Faktor auf die feste Lage je Instrument, drift Faktor auf den langsamen Drift. Wirkt beim Bauen des
+  // Ereignisstroms (in der Hörprobe: nach Stopp und Start).
+  'mix/timing': {
+    amount: spec(0, 2, 0.05, TIMING_DEFAULTS.amount), tight: spec(0, 1, 0.05, TIMING_DEFAULTS.tight), layback: spec(0, 2, 0.05, TIMING_DEFAULTS.layback),
+    drift: spec(0, 2, 0.05, TIMING_DEFAULTS.drift),
   },
   // Gemeinsamer Raum (Schritt 3, nach Wissen gesetzt, nicht gehört): wet Faktor auf den Pegel des Raums (Klangregler master.roomWet; 0 = aus, für Messungen und A/B), tone Tiefpass des
   // Rückwegs in Hz; je Schicht der Sendeanteil 0..1 (Schlagzeug und Percussion voll, Bass fast trocken). Die Größe ist der Klangregler master.roomSize (Mitte 0,4 s).

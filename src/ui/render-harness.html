@@ -87,6 +87,7 @@ function start(id) {
     voices: state.voices,
   }, {
     loops: Infinity,
+    timing: state.tuning['mix/timing'],
     // die Instrumente festhalten, damit Feinwerte live wirken; die gewählten Stimmen kommen schon aus dem Track
     createInstruments: (c, options) => (instruments = createInstruments(c, { ...options, tuning: state.tuning })),
   });

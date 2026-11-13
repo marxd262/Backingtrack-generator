@@ -21,10 +21,10 @@ const FADE = 0.05;
  * startBar (ganze Zahl 0..length-1, Standard 0): beginnt mit diesem Takt; frühere Ereignisse entfallen, `bar` und `t` zählen ab
  * dort wie beim Durchspielen weiter, der angefangene Durchlauf zählt als erster. startPerf ist der Beginn des ersten gespielten Takts.
  * levels (je Schicht aus LAYER_IDS, je 0..1, fehlend 1) und master (0..1) sind die Reglerstellungen des Mischpults von Beginn an;
- * ungültig wirft RangeError (unbekannte Schicht Error) noch vor dem ersten Ton.
+ * ungültig wirft RangeError (unbekannte Schicht Error) noch vor dem ersten Ton. timing: Feinwerte des Mikrotimings (core/microtiming.js).
  */
-export function play(ctx, trackInput, { loops = 1, startBar = 0, levels, master, onEvent, onBar, onEnd, createInstruments = synthInstruments } = {}) {
-  let events = buildEvents(trackInput); // wirft bei ungültigem Track, bevor ein Knoten entsteht; setTrack tauscht ihn
+export function play(ctx, trackInput, { loops = 1, startBar = 0, levels, master, onEvent, onBar, onEnd, createInstruments = synthInstruments, timing } = {}) {
+  let events = buildEvents(trackInput, { timing }); // wirft bei ungültigem Track, bevor ein Knoten entsteht; setTrack tauscht ihn
   if (!(loops === Infinity || (Number.isInteger(loops) && loops >= 1))) {
     throw new RangeError(`loops must be an integer >= 1 or Infinity, got ${loops}`);
   }
@@ -162,7 +162,7 @@ export function play(ctx, trackInput, { loops = 1, startBar = 0, levels, master,
     // ein ungültiger Track wirft wie buildEvents. Groove und Komplexität bei gleicher Taktart tauschen den Strom.
     setTrack(newTrack) {
       if (stopped) return false;
-      const next2 = buildEvents({ ...newTrack, bpm });
+      const next2 = buildEvents({ ...newTrack, bpm }, { timing });
       const t2 = normalizeTrack({ ...newTrack, bpm });
       let sec = 0;
       for (let i = 0; i < t2.length; i++) sec += (t2.bars[chordIndex(t2, i)].beats * 60) / bpm;

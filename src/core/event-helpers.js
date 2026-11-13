@@ -10,7 +10,7 @@ const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
 /** Zeit eines Rasterschritts mit Swing und Jitter, bleibt in [Taktstart, Taktende). Zieht genau eine Zufallszahl. */
 export function at(b, step, rng, swing) {
   const shift = b.sub === 4 && step % 2 ? (swing * b.stepSec) / 3 : 0; // swing 1 = Triolen-Gefühl; im Triolen-Raster trägt das Raster es selbst
-  const t = b.start + step * b.stepSec + shift + (rng.next() * 2 - 1) * JITTER;
+  const t = b.start + step * b.stepSec + shift + (rng.next() * 2 - 1) * JITTER * (b.jitterScale ?? 1); // jitterScale: Mikrotiming (microtiming.js) verkleinert den Zufall
   return r6(clamp(t, b.start, b.end - END_GAP));
 }
 
