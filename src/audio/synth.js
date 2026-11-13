@@ -25,6 +25,9 @@ export const LAYER_AUDIO = Object.freeze(Object.fromEntries(Object.entries({
 }).map(([k, v]) => [k, Object.freeze(v)])));
 const MASTER = 0.6;
 
+// Lage der Schläge im Kit relativ zum Feinwert kit (Publikumssicht: Hi-Hat rechts, Standtom und Crash links); Kick und Snare bleiben in der Mitte
+const KIT_PAN = Object.freeze({ hat: 1, openHat: 1, crash: -1.2, tomHigh: 0.8, tomLow: -1.2 });
+
 const LEVEL_TC = 0.02; // Zeitkonstante der Pegelrampe (s), gegen Knacken
 
 /**
@@ -140,6 +143,29 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
   const volume = gainNode(masterLevel); // ganz am Ausgang, hinter dem Begrenzer
   (useLimiter ? limiterOut : shelf).connect(volume);
 
+  // Panorama (Klang v2, Feinwerte 'mix/pan'): Balance-Regler je Schicht hinter dem Trim (die Sendewege bleiben mono davor) und je Schlag im Kit.
+  // Links und rechts getrennt gewichtet, gleiche Leistung, in der Mitte exakt 1 (unveränderter Durchgang); Stereo-Eingänge behalten ihre Breite.
+  const balance = (dest) => {
+    const input = ctx.createGain(); input.channelCount = 2; input.channelCountMode = 'explicit';
+    const split = ctx.createChannelSplitter(2), merge = ctx.createChannelMerger(2), l = ctx.createGain(), r = ctx.createGain();
+    input.connect(split); split.connect(l, 0).connect(merge, 0, 0); split.connect(r, 1).connect(merge, 0, 1); merge.connect(dest);
+    return {
+      input,
+      set(pan, live) { // pan -1 (links) .. 1 (rechts)
+        const angle = ((Math.min(1, Math.max(-1, pan)) + 1) * Math.PI) / 4;
+        for (const [g, value] of [[l.gain, Math.SQRT2 * Math.cos(angle)], [r.gain, Math.SQRT2 * Math.sin(angle)]]) {
+          if (live) g.setTargetAtTime(value, ctx.currentTime, LEVEL_TC); else g.value = pan === 0 ? 1 : value;
+        }
+      },
+    };
+  };
+  const pans = {}, kitPans = {};
+  const applyPan = (tuning, live) => {
+    const v = (name) => tunedValue('mix/pan', name, tuning), width = v('width');
+    for (const [name, pan] of Object.entries(pans)) pan.set(width * v(name), live);
+    for (const [name, pan] of Object.entries(kitPans)) pan.set(width * v('kit') * KIT_PAN[name], live);
+  };
+
   const layers = {};
   const levelGains = {};
   const guitarFx = {};
@@ -148,7 +174,9 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
     // Schichtpegel vor dem Trim: Hall-, Raum- und Echo-Sendewege hängen hinter dem Trim und folgen ihm
     const level = levelGains[name] = gainNode(levels[name] ?? 1);
     const trim = ctx.createGain(); trim.gain.value = LAYER_AUDIO[name].trim;
-    mute.connect(level).connect(trim).connect(master);
+    pans[name] = balance(master);
+    mute.connect(level).connect(trim).connect(pans[name].input);
+    if (name === 'drums') for (const hit of Object.keys(KIT_PAN)) kitPans[hit] = balance(mute);
     // room: Teil der Schlagzeugsumme in den Hall, hinter mute und trim abgegriffen (Stummschalten schaltet den Sendeweg mit stumm)
     if (LAYER_AUDIO[name].room) trim.connect(roomSend);
     if (LAYER_AUDIO[name].echo) trim.connect(delay);
@@ -156,7 +184,7 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
     const fx = LAYERS[name].fx ? (guitarFx[name] = createGuitarFx(ctx, name, mute)) : null;
     layers[name] = {
       trigger(event, when) {
-        if (event.layer === name) voice(fx ? fx.input : mute, when, event);
+        if (event.layer === name) voice(fx ? fx.input : name === 'drums' && kitPans[event.name] ? kitPans[event.name].input : mute, when, event);
       },
       setMuted(on) {
         // kurze Rampe gegen Knacken, endet exakt auf 0 bzw. 1
@@ -170,6 +198,7 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
   // Regler der Verzerrer aus dem Klangmodell auf die Ketten übertragen (live; Rampen statt Sprünge)
   const applyFx = (options) => { for (const [name, fx] of Object.entries(guitarFx)) fx.set(fxChainParams(sound[name], name), options); };
   applyFx({ immediate: true });
+  applyPan(tuningState, false);
   return {
     output: volume,
     layers,
@@ -197,6 +226,7 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
     setTuning(next) {
       tuningState = isRecord(next) ? next : {};
       applyBus(tuningState, true);
+      applyPan(tuningState, true);
     },
     setTimbre(next) {
       sound = completeTimbre(next);
