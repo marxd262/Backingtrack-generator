@@ -12,7 +12,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 /** Je Schritt: Thema (Dateiname) und die Feinwerte, die die Änderung abschalten (A). Ein neuer Schritt trägt sich hier ein. */
 export const STEPS = {
   1: { name: 'bus', a: { 'mix/bus': { on: 0 } }, b: { 'mix/bus': { on: 1 } } }, // Urteil: A (alter Begrenzer) bleibt Standard
-  6: { name: 'strum', a: {}, b: { 'chords/sample/guitar': { strumUp: 2, strumTilt: 0.25 } } },
+  6: { name: 'strum', a: { 'chords/sample/guitar': { strumUp: 0, strumTilt: 0 } } },
   5: {
     name: 'human',
     a: {

@@ -18,7 +18,7 @@ export const GUITARS = VOICES.chords.sample.variants.filter((v) => v !== 'epiano
 /** Feinwert-Überschreibungen, die den Klang vor Stufe 1 wiederherstellen (alte Anschlagkurve, keine Helligkeit, Schleife, kein Zufall, alter Entzerrer und Pegel). */
 export const legacyTuning = (variant) => ({
   [`chords/sample/${variant}`]: {
-    velExp: 1, softHz: 20000, oneShot: 0, humanCents: 0, humanDb: 0, level: OLD_LEVEL[variant],
+    velExp: 1, softHz: 20000, oneShot: 0, humanCents: 0, humanDb: 0, strumUp: 0, strumTilt: 0, level: OLD_LEVEL[variant], // strumUp, strumTilt: Klang v2, Schritt 6
     ...(variant === 'guitar' ? { lowDb: 9, midDb: -12, highDb: -10 } : {}),
   },
 });

@@ -23,11 +23,11 @@ const HIT_HUMAN = { humanCents: spec(0, 30, 1, 6), humanDb: spec(0, 3, 0.1, 0.7)
 const KIT_HUMAN = { ...HIT_HUMAN, choke: spec(0, 1, 1, 1) };
 const BASS_HUMAN = { velExp: spec(0.5, 3, 0.05, 1.3), softHz: spec(800, 20000, 100, 2500), oneShot: spec(0, 1, 1, 0), humanCents: spec(0, 10, 0.5, 1.5), humanDb: spec(0, 3, 0.1, 0.6) };
 const NOTE_NEUTRAL = { velExp: spec(0.5, 3, 0.05, 1), softHz: spec(800, 20000, 100, 20000), oneShot: spec(0, 1, 1, 0), humanCents: spec(0, 10, 0.5, 0), humanDb: spec(0, 3, 0.1, 0) };
-// Strum der Sample-Gitarren (sample.js): strum Abstand der Akkordtöne in s. Klang v2, Schritt 6 (nach Wissen gesetzt, nicht gehört; shortcut: neutral
-// = aus, bis das Urteil nach Gehör da ist, dann die Werte aus scripts/render-step.mjs STEPS[6].b eintragen): strumUp 0 = immer Abschlag wie bisher,
+// Strum der Sample-Gitarren (sample.js): strum Abstand der Akkordtöne in s. Klang v2, Schritt 6 (Urteil des Nutzers 2026-11-14 an der Clean
+// Guitar: klingt um einiges besser, besonders im Funk): strumUp 0 = immer Abschlag wie bisher,
 // 1 = Aufschlag auf 16tel-Zwischenschlägen, 2 = Aufschlag auf allem außer den Zählzeiten (dann auch Strum-Zeit nach Anschlag und Notenlänge);
 // strumTilt = wie viel leiser die zuletzt angeschlagene Saite ist (0,25 = -2,5 dB)
-const STRUM = { strum: spec(0, 0.05, 0.002, 0.012), strumUp: spec(0, 2, 1, 0), strumTilt: spec(0, 0.6, 0.05, 0) };
+const STRUM = { strum: spec(0, 0.05, 0.002, 0.012), strumUp: spec(0, 2, 1, 2), strumTilt: spec(0, 0.6, 0.05, 0.25) };
 // Gemeinsame Namen der Saitenstimmen (Bedeutung: string-model.js STRING_DEFAULTS); die Startwerte sind nach bestem Wissen gesetzt und
 // werden in der Hörprobe nach Gehör verändert. level gleicht den Pegel an den klassischen Synth an (gemessen, siehe voices-string-sound.spec.js).
 export const TUNABLES = deepFreeze({
