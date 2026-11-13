@@ -12,6 +12,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 /** Je Schritt: Thema (Dateiname) und die Feinwerte, die die Änderung abschalten (A). Ein neuer Schritt trägt sich hier ein. */
 export const STEPS = {
   1: { name: 'bus', a: { 'mix/bus': { on: 0 } }, b: { 'mix/bus': { on: 1 } } }, // Urteil: A (alter Begrenzer) bleibt Standard
+  3: { name: 'room', a: {}, b: { 'mix/room': { wet: 1 } } },
   2: { name: 'pan', a: { 'mix/pan': { chords: 0, pad: 0, percussion: 0, kit: 0 } } },
 };
 export const CASES = [['rock', 120], ['funk', 100], ['psych', 90]];
@@ -117,8 +118,12 @@ async function main() {
     const sides = { A: [], B: [] };
     const fmt = (m) => `Spitze ${m.peak.toFixed(1)}  RMS ${m.rms.toFixed(1)}  Crest ${m.crest.toFixed(1)}  Seite/Mitte ${m.sideMid.toFixed(1)} dB`;
     for (const [style, bpm] of CASES) {
-      const pre = measure((await page.evaluate(renderInPage, [style, bpm, kind, {}, false])).map(decode));
-      console.log(`${style} ${bpm} (${kind})  vor der Summe: ${fmt(pre)}`);
+      const pres = [];
+      for (const tuning of [step.a, step.b ?? {}]) pres.push((await page.evaluate(renderInPage, [style, bpm, kind, tuning, false])).map(decode));
+      // was die Änderung hinzufügt oder wegnimmt: RMS von (B - A) gegen A, vor der Summenkette (dort ist die Mischung linear)
+      let diff = 0, ref = 0;
+      for (let i = 0; i < pres[0][0].length; i++) for (const c of [0, 1]) { diff += (pres[1][c][i] - pres[0][c][i]) ** 2; ref += pres[0][c][i] ** 2; }
+      console.log(`${style} ${bpm} (${kind})  vor der Summe (B): ${fmt(measure(pres[1]))}  Unterschied B-A ${(10 * Math.log10(diff / ref + 1e-12)).toFixed(1)} dB`);
       for (const [label, tuning] of [['A', step.a], ['B', step.b ?? {}]]) {
         const chans = (await page.evaluate(renderInPage, [style, bpm, kind, tuning, true])).map(decode);
         sides[label].push(chans);

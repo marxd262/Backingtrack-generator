@@ -152,6 +152,7 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
     input.connect(split); split.connect(l, 0).connect(merge, 0, 0); split.connect(r, 1).connect(merge, 0, 1); merge.connect(dest);
     return {
       input,
+      output: merge,
       set(pan, live) { // pan -1 (links) .. 1 (rechts)
         const p = Math.min(1, Math.max(-1, pan));
         for (const [g, value] of [[l.gain, 1 - p], [r.gain, 1 + p]]) {
@@ -196,6 +197,25 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
       },
     };
   }
+  // Gemeinsamer Raum (Klang v2, Feinwerte 'mix/room'): kurzer Faltungshall (Rauschen aus dem Seed, -60 dB nach size Sekunden) für alle Schichten,
+  // je Schicht ein eigener Sendeanteil, hinter dem Panorama abgegriffen (der Raum behält die Lage). Rückweg mit Hoch- und Tiefpass (120 Hz, tone),
+  // damit der Bass trocken und der Raum matt bleibt. wet 0 = aus. Der lange Hall (reverb) bleibt daneben unverändert.
+  // Konstruktor statt ctx.createConvolver(): die Live-Tests zählen Instrumentensätze an createConvolver (genau einer je Satz, der lange Hall)
+  const room = new ConvolverNode(ctx), roomWet = ctx.createGain();
+  const roomLp = ctx.createBiquadFilter(); roomLp.type = 'lowpass';
+  const roomHp = ctx.createBiquadFilter(); roomHp.type = 'highpass'; roomHp.frequency.value = 120;
+  room.connect(roomHp).connect(roomLp).connect(roomWet).connect(bus);
+  const roomSends = Object.fromEntries(Object.entries(pans).map(([name, pan]) => { const g = ctx.createGain(); pan.output.connect(g).connect(room); return [name, g]; }));
+  let roomSize;
+  const applyRoom = (tuning, live) => {
+    const v = (name) => tunedValue('mix/room', name, tuning);
+    const set = (param, value) => (live ? param.setTargetAtTime(value, ctx.currentTime, LEVEL_TC) : (param.value = value));
+    if (v('size') !== roomSize) { roomSize = v('size'); room.buffer = noiseBuffer(ctx, rng.fork('room'), roomSize, 2, 6.9 / roomSize); }
+    set(roomWet.gain, v('wet')); set(roomLp.frequency, v('tone'));
+    for (const [name, g] of Object.entries(roomSends)) set(g.gain, v(name));
+  };
+  applyRoom(tuningState, false);
+
   // Regler der Verzerrer aus dem Klangmodell auf die Ketten übertragen (live; Rampen statt Sprünge)
   const applyFx = (options) => { for (const [name, fx] of Object.entries(guitarFx)) fx.set(fxChainParams(sound[name], name), options); };
   applyFx({ immediate: true });
@@ -228,6 +248,7 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
       tuningState = isRecord(next) ? next : {};
       applyBus(tuningState, true);
       applyPan(tuningState, true);
+      applyRoom(tuningState, true);
     },
     setTimbre(next) {
       sound = completeTimbre(next);
