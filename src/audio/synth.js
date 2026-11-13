@@ -197,7 +197,7 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
       },
     };
   }
-  // Gemeinsamer Raum (Klang v2, Feinwerte 'mix/room'): kurzer Faltungshall (Rauschen aus dem Seed, -60 dB nach size Sekunden) für alle Schichten,
+  // Gemeinsamer Raum (Klang v2, Feinwerte 'mix/room'): kurzer Faltungshall (Rauschen aus dem Seed, -60 dB nach roomSize Sekunden, Klangregler master.roomSize) für alle Schichten,
   // je Schicht ein eigener Sendeanteil, hinter dem Panorama abgegriffen (der Raum behält die Lage). Rückweg mit Hoch- und Tiefpass (120 Hz, tone),
   // damit der Bass trocken und der Raum matt bleibt. wet 0 = aus. Der lange Hall (reverb) bleibt daneben unverändert.
   // Konstruktor statt ctx.createConvolver(): die Live-Tests zählen Instrumentensätze an createConvolver (genau einer je Satz, der lange Hall)
@@ -210,7 +210,7 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
   const applyRoom = (tuning, live) => {
     const v = (name) => tunedValue('mix/room', name, tuning);
     const set = (param, value) => (live ? param.setTargetAtTime(value, ctx.currentTime, LEVEL_TC) : (param.value = value));
-    if (v('size') !== roomSize) { roomSize = v('size'); room.buffer = noiseBuffer(ctx, rng.fork('room'), roomSize, 2, 6.9 / roomSize); }
+    if (mix.roomSize !== roomSize) { roomSize = mix.roomSize; room.buffer = noiseBuffer(ctx, rng.fork('room'), roomSize, 2, 6.9 / roomSize); }
     set(roomWet.gain, v('wet')); set(roomLp.frequency, v('tone'));
     for (const [name, g] of Object.entries(roomSends)) set(g.gain, v(name));
   };
@@ -260,6 +260,7 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
       ramp(echoWet.gain, mix.echoWet);
       ramp(roomSend.gain, drum.roomSend);
       applyPan(tuningState, true);
+      applyRoom(tuningState, true);
       applyFx();
     },
     // nach dem Stopp: hält die Quellen der Verzerrerketten an (sonst hielten sie den ganzen Graphen am Leben)

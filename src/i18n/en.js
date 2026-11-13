@@ -365,6 +365,7 @@ export default {
   'timbre.master.echo': 'Echo',
   'timbre.master.reverb': 'Reverb',
   'timbre.master.width': 'Width',
+  'timbre.master.roomSize': 'Room size',
   'ui.keyNext': 'next',
   'ui.countdownOne': 'in {n} beat',
   'ui.countdownMany': 'in {n} beats',

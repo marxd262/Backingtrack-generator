@@ -250,3 +250,15 @@ test('funk mit Lead (melody) und Percussion (mixed) zugleich: Summe vor dem Begr
   const r = await render(page, track('funk', { layers: { percussion: true }, jobs: { lead: 'melody', percussion: 'mixed' } }), SECONDS, { limiter: false });
   expect(r.peak, JSON.stringify(r)).toBeLessThan(1);
 });
+
+// Klang v2, Schritt 3: der gemeinsame Raum ist Standard (mix/room wet 1), die Messungen oben laufen ohne ihn (render.js). Gemessen 2026-11-13,
+// funk 8 s, vor der Summe: rms mit/ohne Raum siehe Fehlermeldung; der Raum ist hörbar da, hebt den Pegel aber nur wenig und lässt Luft.
+test('gemeinsamer Raum: hebt den Pegel leicht (unter 1 dB), Spitze vor der Summe bleibt unter der Grenze', async ({ page }) => {
+  test.setTimeout(120_000);
+  const dry = await render(page, track('funk'), 8, { limiter: false });
+  const wet = await render(page, track('funk'), 8, { limiter: false, tuning: { 'mix/room': { wet: 1 } } });
+  const label = JSON.stringify({ dry: dry.rms, wet: wet.rms, peak: wet.peak });
+  expect(wet.rms / dry.rms, label).toBeGreaterThan(1.001);
+  expect(wet.rms / dry.rms, label).toBeLessThan(1.12);
+  expect(wet.peak, label).toBeLessThan(PRE_PEAK_MAX);
+});

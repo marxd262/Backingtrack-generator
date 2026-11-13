@@ -175,7 +175,7 @@ test('Schlagzeug: jeder Schlag klingt wie vor dem Umzug in die Registry; Unbekan
     const out = {};
     for (const name of names) {
       const ctx = new OfflineAudioContext(1, 44100, 44100);
-      const { output, layers, whenReady } = createInstruments(ctx, { limiter: false });
+      const { output, layers, whenReady } = createInstruments(ctx, { limiter: false, tuning: { 'mix/room': { wet: 0 } } }); // ohne den gemeinsamen Raum (Klang v2), wie render.js
       await whenReady();
       output.connect(ctx.destination);
       layers.drums.trigger({ type: 'hit', layer: 'drums', name, vel: 0.8 }, 0.05);

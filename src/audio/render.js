@@ -1,5 +1,6 @@
 // Offline-Render mit Pegelmessung (läuft im Browser). Misst den linken Kanal wie __render in backing-demo.html, mit Panorama 0
-// (master.width), damit die Lage der Schichten im Stereobild nicht in die Pegel eingeht.
+// (master.width), damit die Lage der Schichten im Stereobild nicht in die Pegel eingeht, und ohne den gemeinsamen Raum (mix/room wet 0, außer
+// tuning setzt ihn): die Basiswerte halten Stimmen und Mischung fest, der Raum hat einen eigenen Test (levels.spec.js).
 import { buildEvents } from '../core/events.js';
 import { resolveTrackTimbre } from '../core/timbre.js';
 import { resolveVoices } from '../core/voices.js';
@@ -14,6 +15,7 @@ const LAYERS = LAYER_IDS;
 /** Schichten mit Tönen (renderNote); Schlagzeug und Percussion spielen Schläge. */
 export const NOTE_LAYERS = LAYERS.filter((l) => l !== 'drums' && l !== 'percussion');
 const FIRST = Math.round(SAMPLE_RATE * OFFSET); // Abtastwert des ersten Ereignisses
+const NO_ROOM = { 'mix/room': { wet: 0 } };
 const centered = (timbre) => ({ ...timbre, master: { ...timbre?.master, width: 0 } });
 
 // Rendert die ersten `seconds` Sekunden eines Tracks (Klang aus seinen Schlagworten), linker Kanal.
@@ -48,7 +50,7 @@ function levels(d) {
  * `limiter: false` misst die Mischung vor dem Begrenzer. `levels` und `master` setzen das Mischpult (siehe play), `tuning` die Feinwerte der Stimmen.
  */
 export async function renderOffline(trackInput, seconds, { limiter = true, levels: layerLevels, master, tuning } = {}) {
-  const mix = { levels: layerLevels, master, tuning };
+  const mix = { levels: layerLevels, master, tuning: { ...NO_ROOM, ...tuning } };
   const perLayer = {};
   for (const name of LAYERS) perLayer[name] = levels(await renderLeft(trackInput, seconds, name, limiter, mix));
   return { ...levels(await renderLeft(trackInput, seconds, undefined, limiter, mix)), perLayer };
@@ -60,7 +62,7 @@ export async function renderOffline(trackInput, seconds, { limiter = true, level
  */
 export async function compareRenders(trackA, trackB, seconds, { layer, limiter = true, levels: layerLevels, master, tuning } = {}) {
   if (layer !== undefined && !LAYERS.includes(layer)) throw new RangeError(`Unknown layer: ${JSON.stringify(layer)}`);
-  const mix = { levels: layerLevels, master, tuning };
+  const mix = { levels: layerLevels, master, tuning: { ...NO_ROOM, ...tuning } };
   const a = (await renderLeft(trackA, seconds, layer, limiter, mix)).subarray(FIRST);
   const b = (await renderLeft(trackB, seconds, layer, limiter, mix)).subarray(FIRST);
   const rmsA = rms(a);
@@ -85,7 +87,7 @@ export async function renderNote(layer, { midi, dur = 0.6, vel = 0.8, seconds = 
   const ctx = new OfflineAudioContext(1, Math.ceil(sampleRate * seconds), sampleRate);
   // ohne Echo und Hall, damit die Aufnahme nur die Note enthält (Analyse); ein übergebenes timbre kann sie wieder einschalten
   const sound = { ...timbre, master: { echo: 0, reverb: 0, ...timbre?.master } };
-  const { output, layers, whenReady } = createInstruments(ctx, { limiter: false, timbre: sound, voices, tuning });
+  const { output, layers, whenReady } = createInstruments(ctx, { limiter: false, timbre: sound, voices, tuning: { ...NO_ROOM, ...tuning } });
   await whenReady();
   output.connect(ctx.destination);
   for (const name of LAYERS) layers[name].setMuted(name !== layer);
