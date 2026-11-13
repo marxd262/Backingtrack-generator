@@ -98,7 +98,7 @@ export const MIX_TUNABLES = deepFreeze({
   // Gemeinsamer Raum (Schritt 3, nach Wissen gesetzt, nicht gehört): wet Pegel des Raums (0 = aus), size Länge in s (-60 dB), tone Tiefpass des
   // Rückwegs in Hz; je Schicht der Sendeanteil 0..1 (Schlagzeug und Percussion voll, Bass fast trocken)
   'mix/room': {
-    wet: spec(0, 4, 0.05, 0), size: spec(0.1, 1.2, 0.05, 0.45), tone: spec(1000, 16000, 100, 7000),
+    wet: spec(0, 4, 0.05, 0), size: spec(0.1, 1.2, 0.05, 0.35), tone: spec(1000, 16000, 100, 7000),
     drums: spec(0, 1, 0.05, 1), bass: spec(0, 1, 0.05, 0.15), chords: spec(0, 1, 0.05, 0.7), pad: spec(0, 1, 0.05, 0.4),
     lead: spec(0, 1, 0.05, 0.6), percussion: spec(0, 1, 0.05, 1),
   },
