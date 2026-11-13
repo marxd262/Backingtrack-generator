@@ -13,11 +13,11 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 export const STEPS = {
   1: { name: 'bus', a: { 'mix/bus': { on: 0 } }, b: { 'mix/bus': { on: 1 } } }, // Urteil: A (alter Begrenzer) bleibt Standard
   5: {
-    name: 'human', a: {},
-    b: {
-      'drums/sample/standard': { humanCents: 6, humanDb: 0.7, layerSpread: 0.08, choke: 1 },
-      'percussion/sample/studio': { humanCents: 6, humanDb: 0.7 },
-      'bass/sample/finger': { velExp: 1.3, softHz: 2500, humanCents: 1.5, humanDb: 0.6 },
+    name: 'human',
+    a: {
+      'drums/sample/standard': { humanCents: 0, humanDb: 0, layerSpread: 0, choke: 0 },
+      'percussion/sample/studio': { humanCents: 0, humanDb: 0, layerSpread: 0 },
+      'bass/sample/finger': { velExp: 1, softHz: 20000, humanCents: 0, humanDb: 0 },
     },
   },
   4: { name: 'groove', a: { 'mix/timing': { amount: 0, tight: 1 } } },

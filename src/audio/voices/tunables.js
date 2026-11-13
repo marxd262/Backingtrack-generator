@@ -14,13 +14,15 @@ const spec = (min, max, step, value) => ({ min, max, step, value });
 // früher), softHz Tiefpass bei leisem Anschlag (Anschlag 0,2; 20000 = aus), oneShot 1 spielt nie die kurze Endschleife (das Sample klingt am Ende
 // aus, 0 = Schleife wie früher), humanCents und humanDb zufällige Abweichung je Anschlag (gleichverteilt in ±, aus dem Seed der Stimme)
 const REALISM = { velExp: spec(0.5, 3, 0.05, 1.6), softHz: spec(800, 20000, 100, 3500), oneShot: spec(0, 1, 1, 1), humanCents: spec(0, 10, 0.5, 2.5), humanDb: spec(0, 3, 0.1, 0.8) };
-// Klang v2, Schritt 5 (nach Wissen gesetzt, nicht gehört; shortcut: alle neutral = aus, bis das Urteil nach Gehör da ist, dann die Werte aus
-// scripts/render-step.mjs STEPS[5].b eintragen). HIT_HUMAN für Schlagzeug-Kits und Percussion (sample-hits.js): humanCents/humanDb Zufall je Schlag,
-// layerSpread Streuung des Anschlags für die Zonenwahl (Pseudo-Round-Robin über benachbarte Anschlagstufen), choke 1 = geschlossene Hi-Hat würgt die
-// offene ab. NOTE_HUMAN für Bass und E-Piano: dieselben Namen wie REALISM, neutral (oneShot bleibt 0: die Schleife wird gebraucht).
-const HIT_HUMAN = { humanCents: spec(0, 30, 1, 0), humanDb: spec(0, 3, 0.1, 0), layerSpread: spec(0, 0.3, 0.01, 0) };
-const KIT_HUMAN = { ...HIT_HUMAN, choke: spec(0, 1, 1, 0) };
-const NOTE_HUMAN = { velExp: spec(0.5, 3, 0.05, 1), softHz: spec(800, 20000, 100, 20000), oneShot: spec(0, 1, 1, 0), humanCents: spec(0, 10, 0.5, 0), humanDb: spec(0, 3, 0.1, 0) };
+// Klang v2, Schritt 5 (Werte nach Wissen gesetzt; Urteil des Nutzers 2026-11-13 an Standard-Kit, Finger-Bass und Studio-Percussion: kein deutlicher
+// Unterschied, fühlt sich aber in allen drei Proben besser an). HIT_HUMAN für Schlagzeug-Kits und Percussion (sample-hits.js): humanCents/humanDb
+// Zufall je Schlag, layerSpread Streuung des Anschlags für die Zonenwahl (Pseudo-Round-Robin über benachbarte Anschlagstufen), choke 1 =
+// geschlossene Hi-Hat würgt die offene ab. BASS_HUMAN für die Bässe: dieselben Namen wie REALISM (oneShot bleibt 0: die Schleife wird gebraucht).
+// NOTE_NEUTRAL fürs E-Piano: dieselben Regler, aber neutral (aus), weil es in keiner Hörprobe vorkam. 0 bzw. velExp 1 und softHz 20000 = aus.
+const HIT_HUMAN = { humanCents: spec(0, 30, 1, 6), humanDb: spec(0, 3, 0.1, 0.7), layerSpread: spec(0, 0.3, 0.01, 0.08) };
+const KIT_HUMAN = { ...HIT_HUMAN, choke: spec(0, 1, 1, 1) };
+const BASS_HUMAN = { velExp: spec(0.5, 3, 0.05, 1.3), softHz: spec(800, 20000, 100, 2500), oneShot: spec(0, 1, 1, 0), humanCents: spec(0, 10, 0.5, 1.5), humanDb: spec(0, 3, 0.1, 0.6) };
+const NOTE_NEUTRAL = { velExp: spec(0.5, 3, 0.05, 1), softHz: spec(800, 20000, 100, 20000), oneShot: spec(0, 1, 1, 0), humanCents: spec(0, 10, 0.5, 0), humanDb: spec(0, 3, 0.1, 0) };
 // Gemeinsame Namen der Saitenstimmen (Bedeutung: string-model.js STRING_DEFAULTS); die Startwerte sind nach bestem Wissen gesetzt und
 // werden in der Hörprobe nach Gehör verändert. level gleicht den Pegel an den klassischen Synth an (gemessen, siehe voices-string-sound.spec.js).
 export const TUNABLES = deepFreeze({
@@ -36,8 +38,8 @@ export const TUNABLES = deepFreeze({
   },
   // Sample-Stimmen: level gleicht den Pegel an den klassischen Synth an (gemessen 2026-11-10, rms gegen den Synth bei level 1 und ohne zusätzliches Abklingen: bass finger 0.355, pick 0.350,
 // guitar 1.46, epiano 0.567, strings 0.519, warm 0.861; mit den ausgelieferten Werten einschließlich decay 0.99 bis 1.01); strum staffelt Akkordtöne
-  'bass/sample/finger': { level: spec(0.05, 8, 0.05, 4), decay: spec(0.2, 10, 0.1, 2.5), ...NOTE_HUMAN },
-  'bass/sample/pick': { level: spec(0.05, 8, 0.05, 4.65), decay: spec(0.2, 10, 0.1, 2), ...NOTE_HUMAN },
+  'bass/sample/finger': { level: spec(0.05, 8, 0.05, 4), decay: spec(0.2, 10, 0.1, 2.5), ...BASS_HUMAN },
+  'bass/sample/pick': { level: spec(0.05, 8, 0.05, 4.65), decay: spec(0.2, 10, 0.1, 2), ...BASS_HUMAN },
   // Gitarre: Entzerrer gegen die nasale Mitte des Presets. Gemessen (volle FFT, dB relativ zu 317 bis 635 Hz): ohne Entzerrung liegen 1,6 bis 3,2 kHz bei +2 bis 0
   // dB, Synth bei -10 bis -23, Saitenmodell bei -19 bis -35; mit den damaligen Werten (lowDb 9, midDb -12, highDb -10) bei -12 bis -16, die Tiefen unter 200 Hz fehlen im Preset und kommen teilweise zurück.
   // Seit Stufe 1 milder (lowDb 5, midDb -6, highDb -4): die Quelle hat nur 22 050 Hz, die Höhen fehlten sonst ganz.
@@ -50,7 +52,7 @@ export const TUNABLES = deepFreeze({
     lowDb: spec(-12, 12, 0.5, 5), midDb: spec(-12, 6, 0.5, -6), midHz: spec(500, 5000, 50, 2400), highDb: spec(-12, 6, 0.5, -4), highHz: spec(1500, 8000, 100, 2600),
     ...REALISM,
   },
-  'chords/sample/epiano': { level: spec(0.05, 8, 0.05, 2.25), decay: spec(0.2, 10, 0.1, 3), ...NOTE_HUMAN },
+  'chords/sample/epiano': { level: spec(0.05, 8, 0.05, 2.25), decay: spec(0.2, 10, 0.1, 3), ...NOTE_NEUTRAL },
   'pad/sample/strings': { level: spec(0.05, 8, 0.05, 1.95) },
   'pad/sample/warm': { level: spec(0.05, 8, 0.05, 1.15) },
   // Neue Varianten, gleiches Verfahren (gemessen 2026-11-10, Track aus voices-sample-sound.spec.js, 8 s, Schicht allein, ohne Begrenzer; Lead mit Job
@@ -59,7 +61,7 @@ export const TUNABLES = deepFreeze({
   // mit decay 2.5 (upright) und 1.5 (muted) bei level 1: 0.334 und 0.839; level = 1 / Verhältnis, mit den ausgelieferten Werten 0.98 bis 1.02.
   // Kits: die Balance der Schläge folgt der SoundFont, einzeln (rms je Schlag gegen den Synth-Schlag gleichen Namens, mit level) z. B. Snare 1.4
   // bis 2.9, Hi-Hat 0.5 bis 1.7, Shaker 2.3, Tamburin 2.9, Kuhglocke 0.55
-  'bass/sample/upright': { level: spec(0.05, 8, 0.05, 3), decay: spec(0.2, 10, 0.1, 2.5), ...NOTE_HUMAN },
+  'bass/sample/upright': { level: spec(0.05, 8, 0.05, 3), decay: spec(0.2, 10, 0.1, 2.5), ...BASS_HUMAN },
   'chords/sample/organ': { level: spec(0.05, 8, 0.05, 0.9) },
   'chords/sample/muted': { level: spec(0.05, 8, 0.05, 1.35), decay: spec(0.2, 10, 0.1, 1.5), ...REALISM },
   // Jazz- und Funk-Gitarre (gemessen 2026-11-11, Track wie oben, rms Sample / Synth bei level 1.7 und decay 3: jazz 0.398, funk 1.930, steel 0.341, nylon 0.907, twelve 0.262; level = 1.7 / Verhältnis; mit den ausgelieferten Werten 0.91 bis 1.02);
