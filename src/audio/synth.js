@@ -65,10 +65,12 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
   glue.knee.value = 0; limiter.knee.value = 0; limiter.ratio.value = 20; limiter.attack.value = 0.001; limiter.release.value = 0.1;
   glue.connect(glueOut).connect(limiter).connect(limiterOut);
   const autoMakeupDb = (threshold, ratio) => -0.6 * threshold * (1 - 1 / ratio);
+  let busOn; // on = 0 nimmt den Bus-Kompressor ganz aus dem Weg (exakt der alte Klang; auch mit Ratio 1 wäre er nicht bitgenau neutral)
   const applyBus = (tuning, live) => {
     const v = (name) => tunedValue('mix/bus', name, tuning);
     const set = (param, value) => (live ? param.setTargetAtTime(value, ctx.currentTime, LEVEL_TC) : (param.value = value));
     const on = v('on') >= 0.5, glueDb = on ? v('glueDb') : 0, ratio = on ? v('glueRatio') : 1, ceiling = on ? v('ceilingDb') : -10;
+    if (useLimiter && on !== busOn) { shelf.disconnect(); shelf.connect(on ? glue : limiter); busOn = on; }
     set(glue.threshold, glueDb); set(glue.ratio, ratio); set(glue.attack, v('glueAttack')); set(glue.release, v('glueRelease'));
     set(glueOut.gain, on ? 10 ** ((v('gainDb') - autoMakeupDb(glueDb, ratio)) / 20) : 1);
     set(limiter.threshold, ceiling);
@@ -76,7 +78,6 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
   };
   // Helligkeit: Hochregal auf der Summe (Trockenanteil und Hall); immer vorhanden, damit setTimbre es live verstellen kann (0 dB = neutral)
   const shelf = ctx.createBiquadFilter(); shelf.type = 'highshelf'; shelf.frequency.value = mix.shelfFreq; shelf.gain.value = mix.shelfDb;
-  if (useLimiter) shelf.connect(glue);
   const bus = shelf;
   master.connect(bus);
   master.connect(reverb).connect(reverbWet).connect(bus);

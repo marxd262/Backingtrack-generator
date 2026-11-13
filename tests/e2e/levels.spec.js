@@ -112,12 +112,11 @@ for (const id of ['funk', 'psych', 'dreamy']) {
 
 test('limiter: false misst wirklich vor dem Begrenzer (ohne dessen Nachverstärkung)', async ({ page }) => {
   test.setTimeout(120_000);
-  // gemessen funk 6 s: rms davor/danach 0.877 (Klang v2: die Summenkette hebt um gainDb 3 dB an, der Bus-Kompressor nimmt einen Teil zurück;
-  // mit dem alten Begrenzer ~0.63); wäre die Kette auch bei limiter: false im Weg, wäre das Verhältnis 1
+  // gemessen funk 6 s: rms davor/danach ~0.63; mit Begrenzer wäre das Verhältnis 1
   const pre = await render(page, track('funk'), 6, { limiter: false });
   const post = await render(page, track('funk'), 6);
-  expect(pre.rms / post.rms).toBeLessThan(0.95);
-  for (const layer of LAYERS) expect(pre.perLayer[layer].rms / post.perLayer[layer].rms, layer).toBeLessThan(0.95);
+  expect(pre.rms / post.rms).toBeLessThan(0.8);
+  for (const layer of LAYERS) expect(pre.perLayer[layer].rms / post.perLayer[layer].rms, layer).toBeLessThan(0.8);
 });
 
 test('gleiche Eingabe ergibt identischen Render', async ({ page }) => {
@@ -166,12 +165,11 @@ const BASE_TRACK = {
 };
 const BASELINE = {
   limiter: {
-    // neu aufgenommen 2026-11-13 (Klang v2, Schritt 1: Bus-Kompressor und Sicherheits-Begrenzer statt Begrenzer bei -10 dB; nicht gehört)
-    sum: { peak: 0.7679728865623474, rms: 0.15689360980411043 },
-    drums: { peak: 0.5367196202278137, rms: 0.06432637408367567 },
-    bass: { peak: 0.29858532547950745, rms: 0.13128402326026986 },
-    chords: { peak: 0.5460379719734192, rms: 0.08117334797658327 },
-    pad: { peak: 0.2527409791946411, rms: 0.05769855164237261 },
+    sum: { peak: 0.6924842596054077, rms: 0.21844540437901838 },
+    drums: { peak: 0.6449302434921265, rms: 0.09300502722750302 },
+    bass: { peak: 0.40817004442214966, rms: 0.17921658262486775 },
+    chords: { peak: 0.6502371430397034, rms: 0.12017539105571275 },
+    pad: { peak: 0.34489092230796814, rms: 0.07873770485969132 },
   },
   pre: {
     sum: { peak: 0.688706636428833, rms: 0.1318748606970193 },

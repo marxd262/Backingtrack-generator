@@ -1,5 +1,5 @@
 // A/B-Hörprobe je Schritt von "Klang v2" als Stereo-WAV (Entwicklerwerkzeug, niemand kann hier hören: der Nutzer vergleicht die Dateien).
-// Je Schritt ein Paar: A = Änderung aus (Feinwerte aus STEPS[n].a), B = Standard von heute. Gleicher Seed, gleiche Takte, drei Testfälle
+// Je Schritt ein Paar: A = Änderung aus (Feinwerte aus STEPS[n].a), B = Standard von heute (oder STEPS[n].b, wenn die Änderung nicht Standard wurde). Gleicher Seed, gleiche Takte, drei Testfälle
 // hintereinander (Rock 120, Funk 100, Psych 90; je 8 Takte, alle Schichten außer Lead, fullFromStart), dazwischen 1 s Stille.
 // Die lautere Datei wird auf das RMS der leiseren abgesenkt, damit nicht "lauter" mit "besser" verwechselt wird (Faktor steht in der Ausgabe).
 // Ausgabe: <ordner>/step<n>-<thema>-A.wav und -B.wav (16 Bit, stereo, 44,1 kHz), je Fall Messwerte und step<n>-<thema>.html zum Anhören
@@ -11,7 +11,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /** Je Schritt: Thema (Dateiname) und die Feinwerte, die die Änderung abschalten (A). Ein neuer Schritt trägt sich hier ein. */
 export const STEPS = {
-  1: { name: 'bus', a: { 'mix/bus': { on: 0 } } },
+  1: { name: 'bus', a: { 'mix/bus': { on: 0 } }, b: { 'mix/bus': { on: 1 } } }, // Urteil: A (alter Begrenzer) bleibt Standard
 };
 export const CASES = [['rock', 120], ['funk', 100], ['psych', 90]];
 
@@ -118,7 +118,7 @@ async function main() {
     for (const [style, bpm] of CASES) {
       const pre = measure((await page.evaluate(renderInPage, [style, bpm, kind, {}, false])).map(decode));
       console.log(`${style} ${bpm} (${kind})  vor der Summe: ${fmt(pre)}`);
-      for (const [label, tuning] of [['A', step.a], ['B', {}]]) {
+      for (const [label, tuning] of [['A', step.a], ['B', step.b ?? {}]]) {
         const chans = (await page.evaluate(renderInPage, [style, bpm, kind, tuning, true])).map(decode);
         sides[label].push(chans);
         console.log(`  ${label}: ${fmt(measure(chans))}`);

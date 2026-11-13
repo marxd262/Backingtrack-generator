@@ -86,7 +86,7 @@ export const TUNABLES = deepFreeze({
 // ceilingDb dessen Schwelle (dBFS). Eigene Tabelle, weil TUNABLES nur Stimmen des Registers enthält.
 export const MIX_TUNABLES = deepFreeze({
   'mix/bus': {
-    on: spec(0, 1, 1, 1), glueDb: spec(-40, 0, 0.5, -14), glueRatio: spec(1, 6, 0.1, 2), glueAttack: spec(0.001, 0.2, 0.001, 0.03),
+    on: spec(0, 1, 1, 0), glueDb: spec(-40, 0, 0.5, -14), glueRatio: spec(1, 6, 0.1, 2), glueAttack: spec(0.001, 0.2, 0.001, 0.03),
     glueRelease: spec(0.05, 1, 0.01, 0.25), gainDb: spec(-6, 12, 0.5, 3), ceilingDb: spec(-12, -0.5, 0.5, -2),
   },
 });
