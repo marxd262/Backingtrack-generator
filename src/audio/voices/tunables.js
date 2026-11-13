@@ -81,6 +81,16 @@ export const TUNABLES = deepFreeze({
   },
 });
 
+// Feinwerte der Summe (Klang v2, synth.js; nach Wissen gesetzt, nicht gehört). 'mix/bus': on 0 = alter Begrenzer (-10 dB, Ratio 20), 1 = neue Kette;
+// glueDb/glueRatio/glueAttack/glueRelease Bus-Kompressor (Schwelle dB, Ratio 1 = aus, Zeiten in s), gainDb Pegel vor dem Sicherheits-Begrenzer,
+// ceilingDb dessen Schwelle (dBFS). Eigene Tabelle, weil TUNABLES nur Stimmen des Registers enthält.
+export const MIX_TUNABLES = deepFreeze({
+  'mix/bus': {
+    on: spec(0, 1, 1, 1), glueDb: spec(-40, 0, 0.5, -14), glueRatio: spec(1, 6, 0.1, 2), glueAttack: spec(0.001, 0.2, 0.001, 0.03),
+    glueRelease: spec(0.05, 1, 0.01, 0.25), gainDb: spec(-6, 12, 0.5, 3), ceilingDb: spec(-12, -0.5, 0.5, -2),
+  },
+});
+
 const isRecord = (x) => typeof x === 'object' && x !== null && !Array.isArray(x);
 
 /**
@@ -88,7 +98,7 @@ const isRecord = (x) => typeof x === 'object' && x !== null && !Array.isArray(x)
  * Unbekannter Schlüssel oder Name ergibt NaN (wirft nicht); ungültige Überschreibungen zählen nicht.
  */
 export function tunedValue(key, name, tuning) {
-  const spec = TUNABLES[key]?.[name];
+  const spec = (TUNABLES[key] ?? MIX_TUNABLES[key])?.[name];
   if (!spec) return NaN;
   const over = isRecord(tuning) && isRecord(tuning[key]) ? tuning[key][name] : undefined;
   const v = Number.isFinite(over) ? over : spec.value;

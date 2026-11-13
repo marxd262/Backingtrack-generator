@@ -8,6 +8,7 @@ import { createGuitarFx } from './guitar-fx.js';
 import { fxChainParams } from './fx-params.js';
 import { noiseBuffer, gain } from './nodes.js';
 import { createVoice } from './voices/index.js';
+import { tunedValue } from './voices/tunables.js';
 import { completeVoices, VOICE_LAYERS } from '../core/voices.js';
 import { LAYERS, LAYER_IDS } from '../core/layers.js';
 
@@ -56,16 +57,26 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
   // Hall: Rauschen aus dem Seed, exponentiell abklingend (2 s), als Impulsantwort
   const reverb = ctx.createConvolver(); reverb.buffer = noiseBuffer(ctx, rng.fork('reverb'), 2, 2, 3);
   const reverbWet = ctx.createGain(); reverbWet.gain.value = mix.reverbWet;
-  // Begrenzer: harte Kennlinie, kurze Ansprache; Chrome hebt automatisch nach, -10 dB ergeben gemessene Spitzen um 0,70.
-  // limiter: false (nur für Pegeltests) ersetzt ihn durch eine neutrale Summe, gemessen wird dann die Mischung davor.
-  const limiter = useLimiter ? ctx.createDynamicsCompressor() : ctx.createGain();
-  if (useLimiter) {
-    limiter.threshold.value = -10; limiter.knee.value = 0; limiter.ratio.value = 20;
-    limiter.attack.value = 0.001; limiter.release.value = 0.1;
-  }
+  // Summe (Klang v2, Feinwerte 'mix/bus' in tunables.js): sanfter Bus-Kompressor (Klebstoff) -> Ausgleich -> Sicherheits-Begrenzer knapp unter
+  // 0 dBFS -> Ausgleich. Der DynamicsCompressor hebt automatisch nach (bei Knie 0: -0,6 * Schwelle * (1 - 1/Ratio) dB, gemessen 5,8 dB beim alten
+  // Begrenzer); die Ausgleichsstufen nehmen das zurück, damit Leises nicht angehoben wird. on = 0: alter Begrenzer (-10 dB, Ratio 20, mit Anhebung).
+  // limiter: false (nur für Pegeltests) lässt die ganze Kette weg, gemessen wird dann die Mischung davor.
+  const glue = ctx.createDynamicsCompressor(), glueOut = ctx.createGain(), limiter = ctx.createDynamicsCompressor(), limiterOut = ctx.createGain();
+  glue.knee.value = 0; limiter.knee.value = 0; limiter.ratio.value = 20; limiter.attack.value = 0.001; limiter.release.value = 0.1;
+  glue.connect(glueOut).connect(limiter).connect(limiterOut);
+  const autoMakeupDb = (threshold, ratio) => -0.6 * threshold * (1 - 1 / ratio);
+  const applyBus = (tuning, live) => {
+    const v = (name) => tunedValue('mix/bus', name, tuning);
+    const set = (param, value) => (live ? param.setTargetAtTime(value, ctx.currentTime, LEVEL_TC) : (param.value = value));
+    const on = v('on') >= 0.5, glueDb = on ? v('glueDb') : 0, ratio = on ? v('glueRatio') : 1, ceiling = on ? v('ceilingDb') : -10;
+    set(glue.threshold, glueDb); set(glue.ratio, ratio); set(glue.attack, v('glueAttack')); set(glue.release, v('glueRelease'));
+    set(glueOut.gain, on ? 10 ** ((v('gainDb') - autoMakeupDb(glueDb, ratio)) / 20) : 1);
+    set(limiter.threshold, ceiling);
+    set(limiterOut.gain, on ? 10 ** (-autoMakeupDb(ceiling, 20) / 20) : 1);
+  };
   // Helligkeit: Hochregal auf der Summe (Trockenanteil und Hall); immer vorhanden, damit setTimbre es live verstellen kann (0 dB = neutral)
   const shelf = ctx.createBiquadFilter(); shelf.type = 'highshelf'; shelf.frequency.value = mix.shelfFreq; shelf.gain.value = mix.shelfDb;
-  shelf.connect(limiter);
+  if (useLimiter) shelf.connect(glue);
   const bus = shelf;
   master.connect(bus);
   master.connect(reverb).connect(reverbWet).connect(bus);
@@ -86,6 +97,7 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
   const layerParams = { drums: drum, bass, chords: chord, pad, lead: {} };
   let chosen = completeVoices(voices);
   let tuningState = isRecord(tuning) ? tuning : {};
+  applyBus(tuningState, false);
   const impl = {}, built = {};
   // Ladezustand der Stimmen (Samples laden ihr Pack beim Anlegen): 'none' (nichts zu laden), 'loading', 'ready', 'error'. Jede gebaute
   // Stimme hat eine eigene Nummer, damit eine überholte (schon gewechselte) Stimme den Zustand der neuen nicht überschreibt.
@@ -125,7 +137,7 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
   };
   const gainNode = (v) => { const g = ctx.createGain(); g.gain.value = sliderGain(v); return g; };
   const volume = gainNode(masterLevel); // ganz am Ausgang, hinter dem Begrenzer
-  limiter.connect(volume);
+  (useLimiter ? limiterOut : shelf).connect(volume);
 
   const layers = {};
   const levelGains = {};
@@ -183,6 +195,7 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
     // Feinwerte der Stimmen überschreiben ({ 'bass/string/finger': { name: Wert } }, siehe voices/tunables.js); wirkt auf neue Töne
     setTuning(next) {
       tuningState = isRecord(next) ? next : {};
+      applyBus(tuningState, true);
     },
     setTimbre(next) {
       sound = completeTimbre(next);

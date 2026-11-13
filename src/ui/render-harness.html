@@ -50,7 +50,8 @@ import { createInstruments } from '../audio/synth.js';
 import { play } from '../audio/play.js';
 import { STYLE_PRESETS } from '../core/tags.js';
 import { VOICES, VOICE_LAYERS, completeVoices } from '../core/voices.js';
-import { TUNABLES } from '../audio/voices/tunables.js';
+import { TUNABLES as VOICE_TUNABLES, MIX_TUNABLES } from '../audio/voices/tunables.js';
+const TUNABLES = { ...VOICE_TUNABLES, ...MIX_TUNABLES };
 import { loadPack } from '../audio/voices/sampler.js';
 import de from '../i18n/de.js';
 
@@ -172,8 +173,7 @@ for (const layer of VOICE_LAYERS) {
 function renderTuning() {
   const box = document.getElementById('tuning');
   box.replaceChildren();
-  for (const layer of VOICE_LAYERS) {
-    const key = tuneKey(layer);
+  for (const key of [...VOICE_LAYERS.map(tuneKey), ...Object.keys(MIX_TUNABLES)]) {
     const table = TUNABLES[key];
     if (!table) continue;
     box.append(el('h4', { textContent: key }));
@@ -198,8 +198,7 @@ renderTuning();
 
 document.getElementById('export').addEventListener('click', () => {
   const out = {};
-  for (const layer of VOICE_LAYERS) {
-    const key = tuneKey(layer);
+  for (const key of [...VOICE_LAYERS.map(tuneKey), ...Object.keys(MIX_TUNABLES)]) {
     if (!TUNABLES[key]) continue;
     out[key] = Object.fromEntries(Object.entries(TUNABLES[key]).map(([n, spec]) => [n, state.tuning[key]?.[n] ?? spec.value]));
   }
