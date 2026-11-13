@@ -175,7 +175,8 @@ for (const [layer, variant, notes, checkPitch, cents = 15] of SAMPLES) {
           const inst = createInstruments(ctx, { limiter: false, voices: { [layerName]: { id: 'sample', variant: variantName } }, tuning: { [tunableKey]: { ...extra, [name]: value } }, timbre: { master: { echo: 0, reverb: 0 } } });
           await inst.whenReady();
           inst.output.connect(ctx.destination);
-          for (const n of layerName === 'bass' ? [40] : chord) inst.layers[layerName].trigger({ type: 'note', layer: layerName, midi: n, dur, vel: 0.8 }, 0.05);
+          // Akkordtöne wie aus events.js: strum = [Index, Anzahl], neben dem Schlag (beat 0,5), damit strumUp und strumTilt wirken können
+          for (const [i, n] of (layerName === 'bass' ? [40] : chord).entries()) inst.layers[layerName].trigger({ type: 'note', layer: layerName, midi: n, dur, vel: 0.8, ...(layerName === 'chords' ? { beat: 0.5, strum: [i, chord.length] } : {}) }, 0.05);
           return (await ctx.startRendering()).getChannelData(0);
         };
         const a = await run(min), b = await run(max);

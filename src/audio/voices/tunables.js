@@ -23,6 +23,11 @@ const HIT_HUMAN = { humanCents: spec(0, 30, 1, 6), humanDb: spec(0, 3, 0.1, 0.7)
 const KIT_HUMAN = { ...HIT_HUMAN, choke: spec(0, 1, 1, 1) };
 const BASS_HUMAN = { velExp: spec(0.5, 3, 0.05, 1.3), softHz: spec(800, 20000, 100, 2500), oneShot: spec(0, 1, 1, 0), humanCents: spec(0, 10, 0.5, 1.5), humanDb: spec(0, 3, 0.1, 0.6) };
 const NOTE_NEUTRAL = { velExp: spec(0.5, 3, 0.05, 1), softHz: spec(800, 20000, 100, 20000), oneShot: spec(0, 1, 1, 0), humanCents: spec(0, 10, 0.5, 0), humanDb: spec(0, 3, 0.1, 0) };
+// Strum der Sample-Gitarren (sample.js): strum Abstand der Akkordtöne in s. Klang v2, Schritt 6 (nach Wissen gesetzt, nicht gehört; shortcut: neutral
+// = aus, bis das Urteil nach Gehör da ist, dann die Werte aus scripts/render-step.mjs STEPS[6].b eintragen): strumUp 0 = immer Abschlag wie bisher,
+// 1 = Aufschlag auf 16tel-Zwischenschlägen, 2 = Aufschlag auf allem außer den Zählzeiten (dann auch Strum-Zeit nach Anschlag und Notenlänge);
+// strumTilt = wie viel leiser die zuletzt angeschlagene Saite ist (0,25 = -2,5 dB)
+const STRUM = { strum: spec(0, 0.05, 0.002, 0.012), strumUp: spec(0, 2, 1, 0), strumTilt: spec(0, 0.6, 0.05, 0) };
 // Gemeinsame Namen der Saitenstimmen (Bedeutung: string-model.js STRING_DEFAULTS); die Startwerte sind nach bestem Wissen gesetzt und
 // werden in der Hörprobe nach Gehör verändert. level gleicht den Pegel an den klassischen Synth an (gemessen, siehe voices-string-sound.spec.js).
 export const TUNABLES = deepFreeze({
@@ -48,7 +53,7 @@ export const TUNABLES = deepFreeze({
   // twelve 6.5): guitar 1.147, muted 0.885, jazz 0.869, funk 0.918, steel 0.892, nylon 0.873, twelve 0.885; level = altes level / Verhältnis,
   // auf 0.05 gerundet; mit den ausgelieferten Werten 0.991 bis 1.020
   'chords/sample/guitar': {
-    level: spec(0.05, 8, 0.05, 1.5), decay: spec(0.2, 10, 0.1, 3), strum: spec(0, 0.05, 0.002, 0.012),
+    level: spec(0.05, 8, 0.05, 1.5), decay: spec(0.2, 10, 0.1, 3), ...STRUM,
     lowDb: spec(-12, 12, 0.5, 5), midDb: spec(-12, 6, 0.5, -6), midHz: spec(500, 5000, 50, 2400), highDb: spec(-12, 6, 0.5, -4), highHz: spec(1500, 8000, 100, 2600),
     ...REALISM,
   },
@@ -66,16 +71,16 @@ export const TUNABLES = deepFreeze({
   'chords/sample/muted': { level: spec(0.05, 8, 0.05, 1.35), decay: spec(0.2, 10, 0.1, 1.5), ...REALISM },
   // Jazz- und Funk-Gitarre (gemessen 2026-11-11, Track wie oben, rms Sample / Synth bei level 1.7 und decay 3: jazz 0.398, funk 1.930, steel 0.341, nylon 0.907, twelve 0.262; level = 1.7 / Verhältnis; mit den ausgelieferten Werten 0.91 bis 1.02);
   // strum wie bei der Clean Guitar, ohne Entzerrer (Klang unbeurteilt, nicht gehört)
-  'chords/sample/jazz': { level: spec(0.05, 8, 0.05, 4.9), decay: spec(0.2, 10, 0.1, 3), strum: spec(0, 0.05, 0.002, 0.012), ...REALISM },
-  'chords/sample/steel': { level: spec(0.05, 8, 0.05, 5.6), decay: spec(0.2, 10, 0.1, 3), strum: spec(0, 0.05, 0.002, 0.012), ...REALISM },
-  'chords/sample/nylon': { level: spec(0.05, 8, 0.05, 2.1), decay: spec(0.2, 10, 0.1, 3), strum: spec(0, 0.05, 0.002, 0.012), ...REALISM },
-  'chords/sample/twelve': { level: spec(0.05, 8, 0.05, 7.35), decay: spec(0.2, 10, 0.1, 3), strum: spec(0, 0.05, 0.002, 0.012), ...REALISM },
-  'chords/sample/funk': { level: spec(0.05, 8, 0.05, 1), decay: spec(0.2, 10, 0.1, 3), strum: spec(0, 0.05, 0.002, 0.012), ...REALISM },
+  'chords/sample/jazz': { level: spec(0.05, 8, 0.05, 4.9), decay: spec(0.2, 10, 0.1, 3), ...STRUM, ...REALISM },
+  'chords/sample/steel': { level: spec(0.05, 8, 0.05, 5.6), decay: spec(0.2, 10, 0.1, 3), ...STRUM, ...REALISM },
+  'chords/sample/nylon': { level: spec(0.05, 8, 0.05, 2.1), decay: spec(0.2, 10, 0.1, 3), ...STRUM, ...REALISM },
+  'chords/sample/twelve': { level: spec(0.05, 8, 0.05, 7.35), decay: spec(0.2, 10, 0.1, 3), ...STRUM, ...REALISM },
+  'chords/sample/funk': { level: spec(0.05, 8, 0.05, 1), decay: spec(0.2, 10, 0.1, 3), ...STRUM, ...REALISM },
   // Freepats FSBS Clean und Jazz (Stufe 2, CC0, 44,1 kHz, eine Anschlagstufe): Feinwerte wie die anderen Gitarren, ohne Entzerrer. Pegel gleiches
   // Verfahren (gemessen 2026-11-12, Track aus voices-sample-sound.spec.js, 8 s, Schicht allein, ohne Begrenzer): rms Sample / Synth bei level 1:
   // freepats 1.337, freepatsjazz 1.649; level = 1 / Verhältnis, auf 0.05 gerundet; mit den ausgelieferten Werten freepats 1.004, freepatsjazz 0.991
-  'chords/sample/freepats': { level: spec(0.05, 8, 0.05, 0.75), decay: spec(0.2, 10, 0.1, 3), strum: spec(0, 0.05, 0.002, 0.012), ...REALISM },
-  'chords/sample/freepatsjazz': { level: spec(0.05, 8, 0.05, 0.6), decay: spec(0.2, 10, 0.1, 3), strum: spec(0, 0.05, 0.002, 0.012), ...REALISM },
+  'chords/sample/freepats': { level: spec(0.05, 8, 0.05, 0.75), decay: spec(0.2, 10, 0.1, 3), ...STRUM, ...REALISM },
+  'chords/sample/freepatsjazz': { level: spec(0.05, 8, 0.05, 0.6), decay: spec(0.2, 10, 0.1, 3), ...STRUM, ...REALISM },
   'lead/sample/flute': { level: spec(0.05, 8, 0.05, 2.4) },
   'lead/sample/sax': { level: spec(0.05, 8, 0.05, 1.3) },
   'lead/sample/synth': { level: spec(0.05, 8, 0.05, 4.3) },

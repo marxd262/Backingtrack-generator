@@ -129,7 +129,8 @@ function playChords(b, v, rng, params, _fill, g) {
     if (!v.stabs.includes(p) && !(g.chords.offbeatStabs.includes(p) && rng.next() < 0.5 * params.syncopation)) continue;
     const t = at(b, s, rng, params.swing);
     const vel = humanVel(0.8, rng);
-    for (const m of tones) out.push(note(b, 'chords', s, t, m, vel, len));
+    // strum: [Index, Anzahl] des Tons im Stab, damit die Stimme die Anschlagrichtung wählen kann (Aufschlag = umgekehrte Reihenfolge)
+    for (const [i, m] of tones.entries()) out.push({ ...note(b, 'chords', s, t, m, vel, len), strum: [i, tones.length] });
   }
   return out;
 }

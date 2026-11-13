@@ -42,7 +42,7 @@ export function sampleVoice(packId, layer, ctx, { getTimbre, tuned, classic, set
     const pack = current();
     if (!pack) { classic(out, t, e); return; }
     const timbre = getTimbre();
-    let timeScale = 1, filter = 20000, when = t;
+    let timeScale = 1, filter = 20000, when = t, strumGain = 1;
     if (layer === 'bass') filter = brightnessHz(timbre.cutoff);
     else if (layer === 'chords') {
       filter = brightnessHz(timbre.brightness);
@@ -51,7 +51,21 @@ export function sampleVoice(packId, layer, ctx, { getTimbre, tuned, classic, set
         const song = Number.isFinite(e.t) ? e.t : t;
         strumIndex = Math.abs(song - lastSong) < 0.001 ? strumIndex + 1 : 0;
         lastSong = song;
-        when = t + strumIndex * tuned('strum');
+        // Klang v2, Schritt 6 (strumUp >= 1, braucht e.strum = [Index, Anzahl] aus events.js): Aufschlag (höchster Ton zuerst) neben dem Schlag
+        // (1: nur auf 16tel-Zwischenschlägen, 2: auf allem außer den Zählzeiten), Strum schneller bei kräftigem Anschlag und höchstens 20 % der
+        // Notenlänge (kurze Noten = schnelles Tempo). Unabhängig davon: die später angeschlagenen Saiten um strumTilt leiser
+        let pos = strumIndex, step = tuned('strum');
+        const n = Array.isArray(e.strum) ? e.strum[1] : 0;
+        if (n > 1) {
+          if (tuned('strumUp') >= 1) {
+            const frac = e.beat - Math.floor(e.beat);
+            const up = tuned('strumUp') >= 2 ? frac > 1e-6 : Math.abs(frac * 2 - Math.round(frac * 2)) > 1e-6;
+            pos = up ? n - 1 - e.strum[0] : e.strum[0];
+            step = Math.min(step * (1.6 - Math.min(1, Math.max(0, e.vel))), (0.2 * e.dur) / (n - 1));
+          }
+          if (tuned('strumTilt') > 0) strumGain = 1 - tuned('strumTilt') * (pos / (n - 1));
+        }
+        when = t + pos * step;
       }
     } else if (layer === 'pad') {
       filter = brightnessHz(timbre.cutoff);
@@ -59,7 +73,7 @@ export function sampleVoice(packId, layer, ctx, { getTimbre, tuned, classic, set
     }
     // Entzerrer nur bei Stimmen mit entsprechenden Feinwerten (Gitarre); sonst ist tuned() NaN
     const eq = Number.isFinite(tuned('midDb')) ? { lowDb: tuned('lowDb'), midDb: tuned('midDb'), midHz: tuned('midHz'), highDb: tuned('highDb'), highHz: tuned('highHz') } : null;
-    let gain = tuned('level'), cents = 0, oneShot = false;
+    let gain = tuned('level') * strumGain, cents = 0, oneShot = false;
     if (Number.isFinite(tuned('velExp'))) { // Natürlichkeit nur bei Stimmen mit diesen Feinwerten (Gitarren), sonst bleibt alles wie zuvor
       const pitch = rng.next(), loud = rng.next(); // immer beide ziehen, auch bei 0, damit die Folge gleich bleibt
       cents = (2 * pitch - 1) * tuned('humanCents');
