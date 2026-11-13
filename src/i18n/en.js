@@ -364,6 +364,7 @@ export default {
   'timbre.master.brightness': 'Brightness',
   'timbre.master.echo': 'Echo',
   'timbre.master.reverb': 'Reverb',
+  'timbre.master.width': 'Width',
   'ui.keyNext': 'next',
   'ui.countdownOne': 'in {n} beat',
   'ui.countdownMany': 'in {n} beats',

@@ -14,7 +14,7 @@ export const DEFAULT_TIMBRE = deepFreeze({
   chords: { brightness: 0.5, length: 0.5, chorus: 0, tremolo: 0, fuzz: 0, overdrive: 0, distortion: 0 },
   pad: { attack: 0.5, cutoff: 0.5, lfoSpeed: 0.5, lfoDepth: 0.5, shimmer: 0, thickness: 0.5, fuzz: 0, overdrive: 0, distortion: 0 },
   lead: { fuzz: 0, overdrive: 0, distortion: 0 },
-  master: { brightness: 0.5, echo: 0.5, reverb: 0.5 },
+  master: { brightness: 0.5, echo: 0.5, reverb: 0.5, width: 0.5 },
 });
 
 const clamp01 = (x) => Math.min(1, Math.max(0, x));

@@ -1,4 +1,5 @@
-// Offline-Render mit Pegelmessung (läuft im Browser). Misst den linken Kanal wie __render in backing-demo.html.
+// Offline-Render mit Pegelmessung (läuft im Browser). Misst den linken Kanal wie __render in backing-demo.html, mit Panorama 0
+// (master.width), damit die Lage der Schichten im Stereobild nicht in die Pegel eingeht.
 import { buildEvents } from '../core/events.js';
 import { resolveTrackTimbre } from '../core/timbre.js';
 import { resolveVoices } from '../core/voices.js';
@@ -13,6 +14,7 @@ const LAYERS = LAYER_IDS;
 /** Schichten mit Tönen (renderNote); Schlagzeug und Percussion spielen Schläge. */
 export const NOTE_LAYERS = LAYERS.filter((l) => l !== 'drums' && l !== 'percussion');
 const FIRST = Math.round(SAMPLE_RATE * OFFSET); // Abtastwert des ersten Ereignisses
+const centered = (timbre) => ({ ...timbre, master: { ...timbre?.master, width: 0 } });
 
 // Rendert die ersten `seconds` Sekunden eines Tracks (Klang aus seinen Schlagworten), linker Kanal.
 // solo: nur diese Schicht hörbar, die anderen stumm geschaltet. mix: { levels, master } wie bei play (Reglerstellungen 0..1) und
@@ -20,7 +22,7 @@ const FIRST = Math.round(SAMPLE_RATE * OFFSET); // Abtastwert des ersten Ereigni
 async function renderLeft(trackInput, seconds, solo, limiter, mix) {
   const events = buildEvents(trackInput); // prüft den Track samt Schlagworten
   const ctx = new OfflineAudioContext(2, Math.ceil(SAMPLE_RATE * (OFFSET + seconds + TAIL)), SAMPLE_RATE);
-  const { output, layers, whenReady } = createInstruments(ctx, { bpm: trackInput.bpm, limiter, timbre: resolveTrackTimbre(trackInput), voices: resolveVoices(trackInput), ...mix });
+  const { output, layers, whenReady } = createInstruments(ctx, { bpm: trackInput.bpm, limiter, timbre: centered(resolveTrackTimbre(trackInput)), voices: resolveVoices(trackInput), ...mix });
   await whenReady(); // Sample-Stimmen: erst laden, sonst klänge der Rückfall-Synth
   output.connect(ctx.destination);
   if (solo) for (const name of LAYERS) layers[name].setMuted(name !== solo);

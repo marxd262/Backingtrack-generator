@@ -143,8 +143,9 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
   const volume = gainNode(masterLevel); // ganz am Ausgang, hinter dem Begrenzer
   (useLimiter ? limiterOut : shelf).connect(volume);
 
-  // Panorama (Klang v2, Feinwerte 'mix/pan'): Balance-Regler je Schicht hinter dem Trim (die Sendewege bleiben mono davor) und je Schlag im Kit.
-  // Links und rechts getrennt gewichtet, gleiche Leistung, in der Mitte exakt 1 (unveränderter Durchgang); Stereo-Eingänge behalten ihre Breite.
+  // Panorama (Klang v2, Lagen: Feinwerte 'mix/pan', Breite: Klangregler master.width): Balance-Regler je Schicht hinter dem Trim (die Sendewege bleiben mono davor) und je Schlag im Kit.
+  // Links und rechts linear gegenläufig gewichtet (1 - pan, 1 + pan): die Mono-Summe bleibt exakt gleich (Handy-Lautsprecher), die Leistung steigt
+  // nur leicht (+0,4 dB bei 0,3); in der Mitte exakt 1 (unveränderter Durchgang); Stereo-Eingänge behalten ihre Breite.
   const balance = (dest) => {
     const input = ctx.createGain(); input.channelCount = 2; input.channelCountMode = 'explicit';
     const split = ctx.createChannelSplitter(2), merge = ctx.createChannelMerger(2), l = ctx.createGain(), r = ctx.createGain();
@@ -152,18 +153,18 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
     return {
       input,
       set(pan, live) { // pan -1 (links) .. 1 (rechts)
-        const angle = ((Math.min(1, Math.max(-1, pan)) + 1) * Math.PI) / 4;
-        for (const [g, value] of [[l.gain, Math.SQRT2 * Math.cos(angle)], [r.gain, Math.SQRT2 * Math.sin(angle)]]) {
-          if (live) g.setTargetAtTime(value, ctx.currentTime, LEVEL_TC); else g.value = pan === 0 ? 1 : value;
+        const p = Math.min(1, Math.max(-1, pan));
+        for (const [g, value] of [[l.gain, 1 - p], [r.gain, 1 + p]]) {
+          if (live) g.setTargetAtTime(value, ctx.currentTime, LEVEL_TC); else g.value = value;
         }
       },
     };
   };
   const pans = {}, kitPans = {};
   const applyPan = (tuning, live) => {
-    const v = (name) => tunedValue('mix/pan', name, tuning), width = v('width');
-    for (const [name, pan] of Object.entries(pans)) pan.set(width * v(name), live);
-    for (const [name, pan] of Object.entries(kitPans)) pan.set(width * v('kit') * KIT_PAN[name], live);
+    const v = (name) => tunedValue('mix/pan', name, tuning);
+    for (const [name, pan] of Object.entries(pans)) pan.set(mix.width * v(name), live);
+    for (const [name, pan] of Object.entries(kitPans)) pan.set(mix.width * v('kit') * KIT_PAN[name], live);
   };
 
   const layers = {};
@@ -237,6 +238,7 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
       ramp(fb.gain, mix.echoFeedback);
       ramp(echoWet.gain, mix.echoWet);
       ramp(roomSend.gain, drum.roomSend);
+      applyPan(tuningState, true);
       applyFx();
     },
     // nach dem Stopp: hält die Quellen der Verzerrerketten an (sonst hielten sie den ganzen Graphen am Leben)

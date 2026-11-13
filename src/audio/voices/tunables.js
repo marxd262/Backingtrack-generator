@@ -89,10 +89,10 @@ export const MIX_TUNABLES = deepFreeze({
     on: spec(0, 1, 1, 0), glueDb: spec(-40, 0, 0.5, -14), glueRatio: spec(1, 6, 0.1, 2), glueAttack: spec(0.001, 0.2, 0.001, 0.03),
     glueRelease: spec(0.05, 1, 0.01, 0.25), gainDb: spec(-6, 12, 0.5, 3), ceilingDb: spec(-12, -0.5, 0.5, -2),
   },
-  // Panorama (Schritt 2, nach Wissen gesetzt, nicht gehört): width 0 = aus (alles Mitte), 1 = Lagen wie angegeben; je Schicht -1 (links) .. 1 (rechts),
+  // Panorama (Schritt 2, nach Wissen gesetzt, nicht gehört): je Schicht -1 (links) .. 1 (rechts), mal Klangregler master.width (Mitte = 1, ganz links = mono, ganz rechts = doppelt),
   // Publikumssicht; kit spreizt Hi-Hat, Toms und Crash um die Schlagzeug-Lage (Faktoren KIT_PAN in synth.js)
   'mix/pan': {
-    width: spec(0, 1, 0.05, 0), drums: spec(-1, 1, 0.05, 0), bass: spec(-1, 1, 0.05, 0), chords: spec(-1, 1, 0.05, 0.3), pad: spec(-1, 1, 0.05, -0.2),
+    drums: spec(-1, 1, 0.05, 0), bass: spec(-1, 1, 0.05, 0), chords: spec(-1, 1, 0.05, 0.3), pad: spec(-1, 1, 0.05, -0.2),
     lead: spec(-1, 1, 0.05, 0), percussion: spec(-1, 1, 0.05, -0.4), kit: spec(0, 1, 0.05, 0.25),
   },
 });

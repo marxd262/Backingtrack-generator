@@ -265,9 +265,10 @@ const GROUPS = {
       echoFeedback: 0.38,
       echoTone: 2400,
       reverbWet: 0.15,
+      width: 1,
     },
-    ranges: { level: [0.68, 1], shelfDb: [-15, 9], shelfFreq: [800, 800], echoWet: [0, 1], echoFeedback: [0.1, 0.7], echoTone: [2400, 2400], reverbWet: [0, 0.6] },
-    effects: [['brightness', 'shelfDb', 1], ['echo', 'echoWet', 1], ['echo', 'echoFeedback', 1], ['reverb', 'reverbWet', 1]],
+    ranges: { level: [0.68, 1], shelfDb: [-15, 9], shelfFreq: [800, 800], echoWet: [0, 1], echoFeedback: [0.1, 0.7], echoTone: [2400, 2400], reverbWet: [0, 0.6], width: [0, 2] },
+    effects: [['brightness', 'shelfDb', 1], ['echo', 'echoWet', 1], ['echo', 'echoFeedback', 1], ['reverb', 'reverbWet', 1], ['width', 'width', 1]],
   },
 };
 

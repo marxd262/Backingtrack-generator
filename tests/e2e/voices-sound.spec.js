@@ -165,8 +165,10 @@ test('Schlagzeug: der Crash klingt, ist endlich, übersteuert nicht und hallt l�
 // den Standardklang (Timbre) fest: ändert sich einer davon, ändern sich diese Zahlen)
 test('Schlagzeug: jeder Schlag klingt wie vor dem Umzug in die Registry; Unbekanntes bleibt stumm', async ({ page }) => {
   const expected = {
-    kick: [0.278121, 53.1729], snare: [0.191694, 4.2092], hat: [0.125049, 1.4005], openHat: [0.14075, 8.2259],
-    tomHigh: [0.216292, 31.4266], tomMid: [0.216292, 31.5652], tomLow: [0.216292, 31.4567], nope: [0, 0],
+    // Hi-Hat und Toms neu aufgenommen 2026-11-13 (Klang v2, Schritt 2: sie liegen seitlich im Kit, der Stereo-Hall bekommt die Lage mit; vorher
+    // hat 0.125049/1.4005, openHat 0.14075/8.2259, tomHigh 0.216292/31.4266, tomLow 0.216292/31.4567). Kick, Snare, tomMid unverändert.
+    kick: [0.278121, 53.1729], snare: [0.191694, 4.2092], hat: [0.125194, 1.4009], openHat: [0.140961, 8.2290],
+    tomHigh: [0.216382, 31.4012], tomMid: [0.216292, 31.5652], tomLow: [0.216156, 31.4345], nope: [0, 0],
   };
   const got = await page.evaluate(async (names) => {
     const { createInstruments } = await import('/audio/synth.js');

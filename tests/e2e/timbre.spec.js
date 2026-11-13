@@ -70,8 +70,8 @@ const currentTags = (page) => page.locator('#tags button[aria-pressed="true"]').
   return tags;
 });
 
-test('37 Knöpfe in 5 Modulen und im Mixer, alle beschriftet ohne rohen Schlüsselnamen; ein Modul je Schicht in Reihenfolge', async ({ page }) => {
-  expect(FIELDS).toHaveLength(37);
+test('38 Knöpfe in 5 Modulen und im Mixer, alle beschriftet ohne rohen Schlüsselnamen; ein Modul je Schicht in Reihenfolge', async ({ page }) => {
+  expect(FIELDS).toHaveLength(38);
   expect(await page.locator('.instrument').evaluateAll((els) => els.map((e) => e.dataset.layer))).toEqual(LAYER_IDS);
   for (const [g, fields] of Object.entries(DEFAULT_TIMBRE)) {
     await expect(group(page, g), g).toHaveCount(1);
