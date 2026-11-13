@@ -366,6 +366,7 @@ export default {
   'timbre.master.reverb': 'Hall',
   'timbre.master.width': 'Panorama',
   'timbre.master.roomSize': 'Raumgröße',
+  'timbre.master.roomWet': 'Raumanteil',
   'ui.keyNext': 'nächster',
   'ui.countdownOne': 'in {n} Schlag',
   'ui.countdownMany': 'in {n} Schlägen',

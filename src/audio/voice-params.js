@@ -105,7 +105,7 @@ export function padParams({ attack, cutoff, lfoSpeed, lfoDepth, shimmer, thickne
 }
 
 /** Summe: Timbre['master'] (Felder 0..1) -> Parameter für die Summenkette in synth.js (neues Objekt je Aufruf). */
-export function masterParams({ brightness, echo, reverb, width, roomSize }) {
+export function masterParams({ brightness, echo, reverb, width, roomSize, roomWet }) {
   const shelfDb = lin(brightness, -15, 0, 9);
   return {
     shelfDb, // Hochregal in dB; 0 = neutral (der Knoten ist immer da, damit setTimbre ihn live verstellen kann)
@@ -116,6 +116,7 @@ export function masterParams({ brightness, echo, reverb, width, roomSize }) {
     echoTone: 2400,
     reverbWet: lin(reverb, 0, 0.15, 0.6),
     roomSize: lin(roomSize, 0.15, 0.4, 1), // Nachklang des gemeinsamen Raums in s (bis -60 dB)
+    roomWet: lin(roomWet, 0, 1, 2.5), // Pegel des gemeinsamen Raums: 0 = aus, Mitte = Standard; mal Feinwert 'mix/room' wet
     width: 2 * width, // Faktor auf die Panorama-Lagen (tunables.js 'mix/pan'): 0 = mono, 1 = Lagen wie gesetzt, 2 = doppelt so breit
   };
 }
