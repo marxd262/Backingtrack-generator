@@ -2,7 +2,8 @@
 // Je Schritt ein Paar: A = Änderung aus (Feinwerte aus STEPS[n].a), B = Standard von heute. Gleicher Seed, gleiche Takte, drei Testfälle
 // hintereinander (Rock 120, Funk 100, Psych 90; je 8 Takte, alle Schichten außer Lead, fullFromStart), dazwischen 1 s Stille.
 // Die lautere Datei wird auf das RMS der leiseren abgesenkt, damit nicht "lauter" mit "besser" verwechselt wird (Faktor steht in der Ausgabe).
-// Ausgabe: <ordner>/step<n>-<thema>-A.wav und -B.wav (16 Bit, stereo, 44,1 kHz) und je Fall Messwerte.
+// Ausgabe: <ordner>/step<n>-<thema>-A.wav und -B.wav (16 Bit, stereo, 44,1 kHz), je Fall Messwerte und step<n>-<thema>.html zum Anhören
+// (Doppelklick; beide Dateien laufen synchron, Leertaste schaltet um).
 // Aufruf: node scripts/render-step.mjs <n> [sample|synth] [ausgabeordner]   (Standard: sample, .superpowers/audio-ab)
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -58,6 +59,28 @@ async function renderInPage([style, bpm, kind, tuning, limiter]) {
     return btoa(bin);
   });
 }
+
+/** Hörseite zum Paar: beide Dateien laufen synchron, nur eine ist hörbar; Leertaste schaltet ohne Unterbrechung um. */
+const abPage = (base) => {
+  let at = 0;
+  const jumps = CASES.map(([style, bpm]) => { const b = `<button onclick="seek(${at.toFixed(1)})">${style} ${bpm}</button>`; at += 0.1 + (8 * 4 * 60) / bpm + 2 + 1; return b; }).join(' '); // 8 Takte wie BARS in renderInPage
+  return `<!doctype html><meta charset="utf-8"><title>${base}</title>
+<style>body{font:16px system-ui;max-width:640px;margin:40px auto}#now{font-size:96px;font-weight:700;margin:16px 0}button{font-size:16px;padding:8px 14px}input{width:100%}</style>
+<h1>${base}</h1><div id="now">A</div>
+<p><button id="play">Start / Pause</button> <button id="toggle">A / B umschalten (Leertaste)</button></p>
+<p>${jumps}</p><input id="pos" type="range" min="0" max="1" step="0.001" value="0">
+<audio id="a" src="${base}-A.wav" preload="auto"></audio><audio id="b" src="${base}-B.wav" preload="auto" muted></audio>
+<script>
+const a = document.getElementById('a'), b = document.getElementById('b'), pos = document.getElementById('pos'), now = document.getElementById('now');
+const seek = (t) => { a.currentTime = b.currentTime = t; };
+const toggle = () => { b.currentTime = a.currentTime; a.muted = !a.muted; b.muted = !a.muted; now.textContent = a.muted ? 'B' : 'A'; };
+document.getElementById('play').onclick = () => { if (a.paused) { b.currentTime = a.currentTime; a.play(); b.play(); } else { a.pause(); b.pause(); } };
+document.getElementById('toggle').onclick = toggle;
+addEventListener('keydown', (e) => { if (e.code === 'Space') { e.preventDefault(); toggle(); } });
+a.ontimeupdate = () => { pos.value = a.currentTime / a.duration || 0; };
+pos.oninput = () => seek(pos.value * a.duration);
+</script>`;
+};
 
 const decode = (b64) => { const b = Buffer.from(b64, 'base64'); return new Float32Array(b.buffer, b.byteOffset, b.length / 4); };
 const db = (x) => 20 * Math.log10(Math.max(x, 1e-9));
@@ -122,6 +145,9 @@ async function main() {
       await writeFile(file, wav(Buffer.from(int16.buffer)));
       console.log(`${file}  ${(l.length / RATE).toFixed(1)} s  Pegelangleich ${db(scale).toFixed(1)} dB  übersteuerte Werte ${clipped}`);
     }
+    const html = join(outDir, `step${n}-${step.name}.html`);
+    await writeFile(html, abPage(`step${n}-${step.name}`));
+    console.log(`Anhören: ${html}`);
     if (errors.length) { console.error(errors.join('\n')); process.exitCode = 1; }
   } finally {
     await browser?.close();
