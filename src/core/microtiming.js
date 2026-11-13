@@ -5,7 +5,7 @@
 //   3. langsamer Drift je Spieler (DRIFT_MS): zwei Sinusschwingungen (etwa 7–11 s und 2,5–4 s) mit Phasen aus dem Seed statt Zufall je Note;
 //      alle Schläge des Schlagzeugs teilen einen Drift (ein Schlagzeuger), Töne mit gleicher Zeit (Akkord-Stab) bleiben zusammen
 // Dazu reicht der Schritt das Feld `art` (Artikulation, kommt später) durch und reagiert darauf (ART: Dead Notes leiser und kürzer).
-// Die Stärke kommt aus dem Track-Feld `loose` (Regler "Lockerheit", 0..1, fehlend 0,5): amountOf. Urteil des Nutzers (2026-11-13): Stärke 1 kaum
+// Die Stärke kommt aus dem Track-Feld `loose` (Regler "Lockerheit", 0..1, fehlend 0,5): timingOf. Urteil des Nutzers (2026-11-13): Stärke 1 kaum
 // hörbar, 2 etwas zu viel (Instrumente lösen sich voneinander), Standard dazwischen (1,5). Die Lagen selbst sind nach Wissen gesetzt.
 // Feinwerte: amount (Faktor auf Lage und Drift), tight (Rest des Zufalls je Note; amount 0 und tight 1 = Strom wie vor Klang v2), layback, drift.
 import { r6 } from './timeline.js';
@@ -13,8 +13,13 @@ import { roundVel, byTime } from './event-helpers.js';
 
 export const TIMING_DEFAULTS = Object.freeze({ amount: 1.5, tight: 0.3, layback: 1, drift: 1 });
 
-/** Regler "Lockerheit" (0..1) -> Stärke: 0 = alle auf dem Punkt (nur der kleine Zufall), 0,5 = 1,5 (Standard), 1 = 2,5. */
-export const amountOf = (loose) => (loose < 0.5 ? 3 * loose : 1.5 + 2 * (loose - 0.5));
+/**
+ * Regler "Lockerheit" (0..1) -> Stärke und Zufall je Note: 0 = exakt auf dem Raster (amount 0, tight 0), 0,5 = Standard (1,5 und 0,3),
+ * 1 = sehr locker (5 und 1: z. B. Rock-Snare 25 ms hinten, Drift bis 25 ms, Zufall ±7 ms). Der Nutzer wollte deutliche Extreme.
+ */
+export const timingOf = (loose) => (loose < 0.5
+  ? { amount: 3 * loose, tight: 0.6 * loose }
+  : { amount: 1.5 + 7 * (loose - 0.5), tight: 0.3 + 1.4 * (loose - 0.5) });
 
 // Lage in ms je Stil (Schlagwort der Gruppe rhythm: swing, funky, sonst straight). ghost = Snare mit vel < 0,3. Fehlende Namen: 0.
 const OFFSETS_MS = Object.freeze({

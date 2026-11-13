@@ -14,7 +14,7 @@ import { at, note, humanVel, byTime } from './event-helpers.js';
 import { postProcess } from './form-post.js';
 import { leadPlayer } from './lead.js';
 import { percussionPlayer } from './percussion.js';
-import { applyMicrotiming, completeTiming, jitterScale, amountOf } from './microtiming.js';
+import { applyMicrotiming, completeTiming, jitterScale, timingOf } from './microtiming.js';
 
 /** Schlagzeug-Vokabular (Task 6 ordnet jedem Namen eine Stimme zu); Geisternoten sind `snare` mit vel < 0.3. */
 export const DRUM_NAMES = ['kick', 'snare', 'hat', 'openHat', 'tomHigh', 'tomMid', 'tomLow', 'crash'];
@@ -170,7 +170,7 @@ export function buildEvents(input, { timing } = {}) {
   const form = track.form ?? null;
   const { sections } = form ? buildFormArrangement(track) : buildArrangement(track, params, master.fork('arrangement'));
   const bars = barTimeline(track);
-  const feel = completeTiming({ amount: amountOf(track.loose ?? 0.5), ...timing });
+  const feel = completeTiming({ ...timingOf(track.loose ?? 0.5), ...timing });
   for (const b of bars) b.jitterScale = jitterScale(feel);
 
   const events = bars.map((b) => ({ t: r6(b.start), bar: b.index, beat: 0, type: 'chord', chord: { ...b.chord } }));

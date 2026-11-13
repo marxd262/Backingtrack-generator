@@ -97,11 +97,11 @@ export const MIX_TUNABLES = deepFreeze({
     drums: spec(-1, 1, 0.05, 0), bass: spec(-1, 1, 0.05, 0), chords: spec(-1, 1, 0.05, 0.3), pad: spec(-1, 1, 0.05, -0.2),
     lead: spec(-1, 1, 0.05, 0), percussion: spec(-1, 1, 0.05, -0.4), kit: spec(0, 1, 0.05, 0.25),
   },
-  // Mikrotiming (Schritt 4, core/microtiming.js; Standardwerte von dort): amount Faktor auf Lage und Drift (ohne Angabe aus dem Track-Feld loose, Standard 1,5); tight Rest des Zufalls je Note
+  // Mikrotiming (Schritt 4, core/microtiming.js; Standardwerte von dort): amount Faktor auf Lage und Drift, tight Rest des Zufalls je Note (beide ohne Angabe aus dem Track-Feld loose, Standard 1,5 und 0,3)
   // (1 = ±7 ms wie bisher), layback Faktor auf die feste Lage je Instrument, drift Faktor auf den langsamen Drift. Wirkt beim Bauen des
   // Ereignisstroms (in der Hörprobe: nach Stopp und Start).
   'mix/timing': {
-    amount: spec(0, 2, 0.05, TIMING_DEFAULTS.amount), tight: spec(0, 1, 0.05, TIMING_DEFAULTS.tight), layback: spec(0, 2, 0.05, TIMING_DEFAULTS.layback),
+    amount: spec(0, 5, 0.05, TIMING_DEFAULTS.amount), tight: spec(0, 1, 0.05, TIMING_DEFAULTS.tight), layback: spec(0, 2, 0.05, TIMING_DEFAULTS.layback),
     drift: spec(0, 2, 0.05, TIMING_DEFAULTS.drift),
   },
   // Gemeinsamer Raum (Schritt 3, nach Wissen gesetzt, nicht gehört): wet Faktor auf den Pegel des Raums (Klangregler master.roomWet; 0 = aus, für Messungen und A/B), tone Tiefpass des

@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildEvents } from '../../src/index.js';
 import { barTimeline, checkedTrack } from '../../src/core/timeline.js';
-import { applyMicrotiming, completeTiming, jitterScale, amountOf, TIMING_DEFAULTS } from '../../src/core/microtiming.js';
+import { applyMicrotiming, completeTiming, jitterScale, timingOf, TIMING_DEFAULTS } from '../../src/core/microtiming.js';
 import { createRng } from '../../src/core/rng.js';
 
 const TRACK = {
@@ -17,10 +17,14 @@ const ON = {}; // Standard: Lockerheit 0,5 = Stärke 1,5
 const OFF = { timing: { amount: 0, tight: 1 } }; // Strom wie vor Klang v2
 const mean = (a) => a.reduce((x, y) => x + y, 0) / a.length;
 
-test('Lockerheit: 0,5 ist der Standard (Stärke 1,5), 0 heißt keine Lage und kein Drift, ungültig wirft', () => {
+test('Lockerheit: 0,5 ist der Standard, 0 liegt exakt auf dem Raster, 1 ist sehr locker, ungültig wirft', () => {
   assert.deepEqual(buildEvents({ ...TRACK, loose: 0.5 }), buildEvents(TRACK));
-  assert.deepEqual([amountOf(0), amountOf(0.5), amountOf(1)], [0, 1.5, 2.5]);
-  assert.deepEqual(buildEvents({ ...TRACK, loose: 0 }), buildEvents(TRACK, { timing: { amount: 0 } }));
+  assert.deepEqual([timingOf(0), timingOf(0.5), timingOf(1)], [{ amount: 0, tight: 0 }, { amount: 1.5, tight: 0.3 }, { amount: 5, tight: 1 }]);
+  assert.deepEqual({ amount: TIMING_DEFAULTS.amount, tight: TIMING_DEFAULTS.tight }, timingOf(0.5));
+  const beat = 60 / TRACK.bpm, off = (e) => Math.abs(e.t - (e.bar * 4 + e.beat) * beat);
+  const drums = (loose) => buildEvents({ ...TRACK, loose }).filter((e) => e.layer === 'drums');
+  assert.ok(drums(0).every((e) => off(e) < 1e-6), 'bei 0 liegt jeder Schlag auf dem Raster');
+  assert.ok(Math.max(...drums(1).map(off)) > 0.02, 'bei 1 weit weg vom Raster');
   assert.notDeepEqual(buildEvents({ ...TRACK, loose: 1 }), buildEvents(TRACK));
   assert.equal(jitterScale(completeTiming({ tight: 1 })), 1);
   assert.deepEqual(completeTiming({ amount: -1, tight: 'x' }), TIMING_DEFAULTS);
@@ -63,5 +67,21 @@ test('art: wird durchgereicht; dead und mute machen leiser und kürzer, auch bei
     assert.equal(dead.art, 'dead');
     assert.ok(dead.vel < e.vel && dead.dur < e.dur, JSON.stringify(dead));
     assert.equal(run('slide', amount).vel, e.vel);
+  }
+});
+
+test('Lockerheit 0 und 1: sortiert, im Takt, Bass und Lead einstimmig, keine negative Dauer (Stile, Seeds)', () => {
+  for (const rhythm of [['straight'], ['funky'], ['swing']]) for (const seed of [1, 2, 3, 4, 5]) for (const loose of [0, 1]) {
+    const track = { ...TRACK, seed, loose, layers: { ...TRACK.layers, lead: true, percussion: true }, jobs: { lead: 'melody', percussion: 'mixed' }, tags: { rhythm, development: ['fullFromStart'] } };
+    const events = buildEvents(track), bars = barTimeline(checkedTrack(track)), label = `${rhythm} s=${seed} loose=${loose}`;
+    for (let i = 1; i < events.length; i++) assert.ok(events[i].t >= events[i - 1].t, `${label}: sortiert`);
+    for (const e of events.filter((x) => x.layer)) {
+      assert.ok(e.t >= bars[e.bar].start && e.t < bars[e.bar].end, `${label}: im Takt ${JSON.stringify(e)}`);
+      if (e.dur !== undefined) assert.ok(e.dur >= 0 && e.t + e.dur <= bars[e.bar].end + 1e-6, `${label}: Dauer ${JSON.stringify(e)}`);
+    }
+    for (const layer of ['bass', 'lead']) {
+      const notes = events.filter((e) => e.layer === layer);
+      for (let i = 1; i < notes.length; i++) assert.ok(notes[i - 1].t + notes[i - 1].dur <= notes[i].t + 1e-6, `${label}: ${layer} einstimmig bei ${i}`);
+    }
   }
 });
