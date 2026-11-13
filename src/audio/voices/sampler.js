@@ -136,4 +136,5 @@ export function playNote(ctx, out, t, { pack, midi, dur, vel, zone = pickZone(pa
   node.connect(out);
   src.start(t);
   src.stop(noteEnd + release + 0.05);
+  return g; // Hüllkurve der Note, damit der Aufrufer sie vorzeitig abwürgen kann (Hi-Hat-Choke, sample-hits.js)
 }

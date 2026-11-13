@@ -81,19 +81,27 @@ test('Freepats-Gitarren (Stufe 2): im Register, mit Umsetzung, Pack aus der FSBS
 });
 const REALISM = { velExp: [0.5, 3, 1.6], softHz: [800, 20000, 3500], oneShot: [0, 1, 1], humanCents: [0, 10, 2.5], humanDb: [0, 3, 0.8] };
 
-test('Gitarren-Samples: die fünf Feinwerte der Natürlichkeit mit ihren Standardwerten; andere Sample-Stimmen haben sie nicht', () => {
+test('Gitarren-Samples: die fünf Feinwerte der Natürlichkeit mit ihren Standardwerten; welche anderen Sample-Stimmen sie haben', () => {
   for (const variant of GUITARS) {
     const table = TUNABLES[`chords/sample/${variant}`];
     for (const [name, [min, max, value]] of Object.entries(REALISM)) {
       assert.deepEqual([table[name]?.min, table[name]?.max, table[name]?.value], [min, max, value], `${variant}.${name}`);
     }
   }
+  // Klang v2, Schritt 5: Bass und E-Piano haben dieselben Namen (Anschlagkurve usw.), Schlagzeug-Kits und Percussion die Zufallsabweichung je
+  // Schlag (humanCents, humanDb, layerSpread; Kits dazu choke); Pad, Lead und Orgel haben nichts davon
+  const withCurve = [], withHuman = [];
   for (const layer of VOICE_LAYERS) {
     for (const variant of VOICES[layer].sample?.variants ?? []) {
-      if (layer === 'chords' && GUITARS.includes(variant)) continue;
-      for (const name of Object.keys(REALISM)) assert.ok(!TUNABLES[`${layer}/sample/${variant}`]?.[name], `${layer}/sample/${variant}.${name}`);
+      const table = TUNABLES[`${layer}/sample/${variant}`];
+      if (table?.velExp) withCurve.push(`${layer}/${variant}`);
+      if (table?.humanDb) withHuman.push(`${layer}/${variant}`);
+      if (layer === 'drums') assert.ok(table.layerSpread && table.choke, `${layer}/${variant}: layerSpread, choke`);
     }
   }
+  const others = ['bass/finger', 'bass/pick', 'bass/upright', 'chords/epiano'];
+  assert.deepEqual(withCurve.sort(), [...GUITARS.map((v) => `chords/${v}`), ...others].sort());
+  assert.deepEqual(withHuman.sort(), [...withCurve, ...VOICES.drums.sample.variants.map((v) => `drums/${v}`), ...VOICES.percussion.sample.variants.map((v) => `percussion/${v}`)].sort());
 });
 
 test('Clean Guitar: milderer Entzerrer (Standardwerte); die anderen Gitarren ohne Entzerrer', () => {

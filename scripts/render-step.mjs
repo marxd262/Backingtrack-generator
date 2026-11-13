@@ -12,6 +12,14 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 /** Je Schritt: Thema (Dateiname) und die Feinwerte, die die Änderung abschalten (A). Ein neuer Schritt trägt sich hier ein. */
 export const STEPS = {
   1: { name: 'bus', a: { 'mix/bus': { on: 0 } }, b: { 'mix/bus': { on: 1 } } }, // Urteil: A (alter Begrenzer) bleibt Standard
+  5: {
+    name: 'human', a: {},
+    b: {
+      'drums/sample/standard': { humanCents: 6, humanDb: 0.7, layerSpread: 0.08, choke: 1 },
+      'percussion/sample/studio': { humanCents: 6, humanDb: 0.7 },
+      'bass/sample/finger': { velExp: 1.3, softHz: 2500, humanCents: 1.5, humanDb: 0.6 },
+    },
+  },
   4: { name: 'groove', a: { 'mix/timing': { amount: 0, tight: 1 } } },
   3: { name: 'room', a: { 'mix/room': { wet: 0 } } },
   2: { name: 'pan', a: { 'mix/pan': { chords: 0, pad: 0, percussion: 0, kit: 0 } } },
