@@ -10,7 +10,6 @@
 import { r6 } from './timeline.js';
 import { byTime, roundVel } from './event-helpers.js';
 import { chordTones, diatonicChords, noteToPc } from './music.js';
-import { CHORDS } from './chords.js';
 import { grooveIdFor } from './grooves.js';
 import { phrasesOf } from './form-arrange.js';
 import { densityAt } from './form-types.js';
@@ -128,11 +127,11 @@ const DRUM_PROFILES = {
 // hammer (Folgeton im Abstand von 1 bis 2 Halbtönen ohne Anschlag, in Fill-Takten oder bei energy ab 0,6)
 const BASS_B = { shuffle: { slideOff: 0.2, hammer: 0.2 }, slowBlues: { slideOff: 0.2 }, rock: { slideOff: 0.3, palmMute: 0.5 }, funk: { octavePop: 0.3, hammer: 0.2 } };
 // Gitarre, Priorität B: slideChord (Stab auf einer Zählzeit rutscht von einem Bund daneben an), embellish (gehaltener Akkord: Sekunde oder Quarte,
-// nach einem Achtel Hammer-on auf die Terz), boomChick (Muster: Basston auf 1 und 3, Anschlag auf 2 und 4), boogie (Riff Quinte-Sexte-Septime auf
-// den tiefen Saiten, je Phrase, nur im Triolen-Raster)
+// nach einem Achtel Hammer-on auf die Terz), boogie (Riff Quinte-Sexte-Septime auf den tiefen Saiten, je Phrase, nur im Triolen-Raster).
+// Boom-Chick (Country) ist wieder entfernt: Urteil des Nutzers "das Standardmuster ist besser" (stand in Commit d2e0004)
 const GUITAR_B = {
   funk: { slideChord: 0.2 }, shuffle: { slideChord: 0.15, boogie: 0.5 }, slowBlues: { slideChord: 0.25 }, rock: { embellish: 0.15 },
-  ballad: { embellish: 0.15 }, country: { boomChick: true, embellish: 0.2 },
+  ballad: { embellish: 0.15 }, country: { embellish: 0.2 },
 };
 // Tasten je Profil: pedal (Wahrscheinlichkeit je Takt; Ballade immer, Rock und Blues teilweise), staccato (kurze Stabs)
 const KEY_PROFILES = { ballad: { pedal: 1 }, rock: { pedal: 0.5 }, shuffle: { pedal: 0.5 }, slowBlues: { pedal: 0.5 }, funk: { staccato: true } };
@@ -377,8 +376,8 @@ const RULES = {
     }
   },
 
-  // Rhythmusgitarre, Priorität B (SPEC_PHASE3 5.3), läuft nach den A-Regeln; nur Sample-Gitarren. Die Muster boomChick und boogie ersetzen die
-  // Stäbe ihres Takts (nie den Takt vor einem Stopp), die Verzierungen greifen nur an Stäben ohne Artikulation (embellish auch an letRing).
+  // Rhythmusgitarre, Priorität B (SPEC_PHASE3 5.3), läuft nach den A-Regeln; nur Sample-Gitarren. Das Muster boogie ersetzt die
+  // Stäbe seines Takts (nie den Takt vor einem Stopp), die Verzierungen greifen nur an Stäben ohne Artikulation (embellish auch an letRing).
   chordsB(out, { track, bars, ctx, profile, tempo, p, roll, slotTime }) {
     const voice = track.voices?.chords, P = GUITAR_B[profile] ?? {};
     if (voice?.id !== 'sample' || !GUITARS.has(voice.variant)) return;
@@ -396,12 +395,6 @@ const RULES = {
         t: slotTime(b, s), bar: index, beat: s / b.sub, type: 'note', layer: 'chords', midi, vel: more?.vel ?? vel, dur: r6(steps * b.stepSec),
         ...(midis.length > 1 && { strum: [i, midis.length] }), ...(more?.art && { art: more.art }),
       }));
-      if (P.boomChick && b.beats === 4 && !c.stop) { // Wechselbass Grundton und Quinte auf 1 und 3, kurzer Anschlag auf 2 und 4
-        clear();
-        play(0, [low], b.sub); play(2 * b.sub, [low + CHORDS[b.chord.quality].fifth], b.sub);
-        for (const beat of [1, 3]) play(beat * b.sub, tones, b.sub / 2);
-        continue;
-      }
       if (P.boogie && b.sub === 3 && !c.stop && roll(phrase, 'chordsB', 'boogie') < p(P.boogie, 'chordsB')) { // je Schlag zwei Shuffle-Achtel auf Grundton plus Quinte, Sexte, Septime, Sexte
         clear();
         const art = roll(phrase, 'chordsB', 'boogieMute') < 0.5 ? 'palmMute' : undefined;

@@ -378,17 +378,11 @@ test('Bass B (aus bis eingeschaltet): Oktav-Pop nur auf "+" und a und bis MIDI 5
 });
 
 // ---- Gitarre, Priorität B ----
-test('Gitarre B (aus bis eingeschaltet): Country spielt Boom-Chick, der Blues-Shuffle das Boogie-Riff je Phrase, slideChord nur auf Zählzeiten um einen Bund, embellish löst nach einem Achtel in die Terz auf', () => {
+test('Gitarre B (aus bis eingeschaltet): der Blues-Shuffle spielt das Boogie-Riff je Phrase, slideChord nur auf Zählzeiten um einen Bund, embellish löst nach einem Achtel in die Terz auf', () => {
   const count = { boogie: 0, slideChord: 0, embellish: 0 };
   for (const seed of SEEDS) {
-    const country = mk('country', { seed }), on = chordsOf(country, { chordsB: 1 }), beat = 60 / country.bpm;
+    const country = mk('country', { seed });
     assert.deepEqual(chordsOf(country, {}), chordsOf(country, { chordsB: 0 }));
-    for (let bar = 0; bar < 8; bar++) {
-      const inBar = on.filter((e) => e.bar === bar), root = { A: 9, D: 2, E: 4 }[['A', 'A', 'D', 'E'][bar % 4]];
-      assert.deepEqual(inBar.filter((e) => !e.strum).map((e) => [e.beat, e.midi % 12]), [[0, root], [2, (root + 7) % 12]], `Takt ${bar}: Wechselbass`);
-      assert.deepEqual([...new Set(inBar.filter((e) => e.strum).map((e) => e.beat))], [1, 3], `Takt ${bar}: Anschlag auf 2 und 4`);
-      assert.ok(inBar.every((e) => e.midi >= 40 && e.dur <= beat + 1e-6));
-    }
     const shuffle = mk('blues', { seed, ornaments: 1, meter: [12, 8], groove: 'shuffle' }), riff = chordsOf(shuffle, { chordsB: 1 });
     for (const phrase of [0, 4]) {
       const bars = [0, 1, 2, 3].map((k) => riff.filter((e) => e.bar === phrase + k)), boogie = bars.map((list) => list.length > 0 && list.every((e) => e.strum?.[1] === 2));

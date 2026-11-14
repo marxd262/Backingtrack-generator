@@ -21,7 +21,7 @@ export const STEPS = {
   21: { name: 'all', cases: 'art', a: {}, b: { 'mix/art': { drums: 1, keys: 1, pad: 1, lead: 1, band: 1, bassB: 1, chordsB: 1, keysB: 1, drumsB: 1 } } },
   19: { name: 'keysb', cases: 'art', extra: { voices: { chords: { id: 'sample', variant: 'epiano' } } }, a: {}, b: { 'mix/art': { keysB: 1 } } }, // Tasten B: roll, crush, bark
   20: { name: 'drumsb', cases: 'art', a: {}, b: { 'mix/art': { drumsB: 1 } } }, // Schlagzeug B: Flams
-  18: { name: 'guitarb', cases: 'art', a: {}, b: { 'mix/art': { chordsB: 1 } } }, // Gitarre Priorität B: slideChord, embellish, boomChick, boogie
+  18: { name: 'guitarb', cases: 'art', a: {}, b: { 'mix/art': { chordsB: 1 } } }, // Gitarre Priorität B: slideChord, embellish, boogie
   17: { name: 'bassb', cases: 'art', a: {}, b: { 'mix/art': { bassB: 1 } } }, // Bass Priorität B: slideOff, palmMute, octavePop, hammer/pull
   15: { name: 'band', cases: 'art', a: {}, b: { 'mix/art': { band: 1 } } }, // Band-Regeln für Bass und Gitarre (Fill-Takte, Slide in den Refrain)
   14: { name: 'pad', cases: 'art', a: {}, b: { 'mix/art': { pad: 1 } } },
@@ -69,7 +69,7 @@ export const ART_CASES = [
   ['dreamy', 70, { tags: { synths: ['arpeggio', 'widePad', 'warm'] }, voices: { chords: { id: 'sample', variant: 'steel' } } }],
   // seit Schritt 12: Reggae mit Stopp vor dem Break und Refrain danach (Side-Stick, Crash-Choke, Ride mit getretener Hi-Hat)
   ['reggae', 76, { track: { form: { sections: [{ type: 'verse', bars: 4 }, { type: 'break', bars: 2 }, { type: 'chorus', bars: 4 }] } } }],
-  // seit Schritt 18: Country mit Stahlsaiten-Gitarre (boomChick)
+  // seit Schritt 18: Country mit Stahlsaiten-Gitarre
   ['country', 112, { voices: { chords: { id: 'sample', variant: 'steel' } } }],
 ];
 
