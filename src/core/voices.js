@@ -26,6 +26,8 @@ export const VOICES = deepFreeze({
     synth: { kind: 'synth', variants: ['classic'], uses: ['chords.brightness', 'chords.length', 'chords.chorus', 'chords.tremolo'] },
     string: { kind: 'model', hidden: true, variants: ['electric'], uses: ['chords.brightness', 'chords.length'] },
     epiano: { kind: 'synth', variants: ['rhodes'], uses: ['chords.brightness', 'chords.length', 'chords.tremolo'] },
+    // Tonewheel-Orgel mit Leslie (audio/voices/organ.js); die Varianten sind Zugriegel-Presets. Versteckt, bis der Nutzer sie gehört hat
+    organ: { kind: 'synth', hidden: true, variants: ['jazz', 'rock', 'gospel', 'ballad'], uses: [] },
     sample: { kind: 'sample', variants: ['guitar', 'epiano', 'organ', 'muted', 'jazz', 'funk', 'steel', 'nylon', 'twelve', 'freepats', 'freepatsjazz'], uses: ['chords.brightness', 'chords.length'] },
   },
   pad: {

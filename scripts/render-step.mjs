@@ -189,11 +189,12 @@ export function measure([l, r]) {
   return { peak: db(peak), rms: db(rms), crest: db(peak / rms), sideMid: db(Math.sqrt(side / mid)), linRms: rms };
 }
 
-async function main() {
+/** steps, render (läuft im Browser) und casesOf lassen sich ersetzen: scripts/render-organ.mjs rendert so seine eigenen Schritte und Fälle. */
+export async function main(steps = STEPS, render = renderInPage, casesOf = (step) => (step.cases === 'art' ? ART_CASES : CASES)) {
   const { chromium } = await import('@playwright/test');
   const { start } = await import('./serve.js');
-  const n = process.argv[2], step = STEPS[n];
-  if (!step) throw new Error(`Unbekannter Schritt ${n}; bekannt: ${Object.keys(STEPS).join(', ')}`);
+  const n = process.argv[2], step = steps[n];
+  if (!step) throw new Error(`Unbekannter Schritt ${n}; bekannt: ${Object.keys(steps).join(', ')}`);
   const kind = process.argv[3] ?? 'sample';
   const outDir = resolve(process.argv[4] ?? fileURLToPath(new URL('../.superpowers/audio-ab', import.meta.url)));
   await mkdir(outDir, { recursive: true });
@@ -209,18 +210,18 @@ async function main() {
     await page.waitForFunction(() => typeof window.__render === 'function');
     const sides = { A: [], B: [] };
     const fmt = (m) => `Spitze ${m.peak.toFixed(1)}  RMS ${m.rms.toFixed(1)}  Crest ${m.crest.toFixed(1)}  Seite/Mitte ${m.sideMid.toFixed(1)} dB`;
-    const cases = step.cases === 'art' ? ART_CASES : CASES;
+    const cases = casesOf(step);
     for (const [style, bpm, own] of cases) {
       // Zusätze des Schritts (Stimmen, Track-Felder) gelten in allen Fällen
       const extra = step.extra ? { ...own, voices: { ...own?.voices, ...step.extra.voices }, track: { ...own?.track, ...step.extra.track } } : own;
       const pres = [];
-      for (const tuning of [step.a, step.b ?? {}]) pres.push((await page.evaluate(renderInPage, [style, bpm, kind, tuning, false, extra])).chans.map(decode));
+      for (const tuning of [step.a, step.b ?? {}]) pres.push((await page.evaluate(render, [style, bpm, kind, tuning, false, extra])).chans.map(decode));
       // was die Änderung hinzufügt oder wegnimmt: RMS von (B - A) gegen A, vor der Summenkette (dort ist die Mischung linear)
       let diff = 0, ref = 0;
       for (let i = 0; i < pres[0][0].length; i++) for (const c of [0, 1]) { diff += (pres[1][c][i] - pres[0][c][i]) ** 2; ref += pres[0][c][i] ** 2; }
-      console.log(`${style} ${bpm} (${kind})  vor der Summe (B): ${fmt(measure(pres[1]))}  Unterschied B-A ${(10 * Math.log10(diff / ref + 1e-12)).toFixed(1)} dB`);
+      console.log(`${style} ${bpm} (${kind})  vor der Summe (B): ${fmt(measure(pres[1]))}  RMS A ${measure(pres[0]).rms.toFixed(2)} B ${measure(pres[1]).rms.toFixed(2)}  Unterschied B-A ${(10 * Math.log10(diff / ref + 1e-12)).toFixed(1)} dB`);
       for (const [label, tuning] of [['A', step.a], ['B', step.b ?? {}]]) {
-        const { chans: raw, arts } = await page.evaluate(renderInPage, [style, bpm, kind, tuning, true, extra]), chans = raw.map(decode);
+        const { chans: raw, arts } = await page.evaluate(render, [style, bpm, kind, tuning, true, extra]), chans = raw.map(decode);
         sides[label].push(chans);
         console.log(`  ${label}: ${fmt(measure(chans))}${Object.keys(arts).length ? `  Artikulationen: ${Object.entries(arts).sort().map(([k, v]) => `${k} ${v}`).join(', ')}` : ''}`);
       }

@@ -3,6 +3,7 @@
 import { classicVoice } from './classic.js';
 import { stringVoice } from './string.js';
 import { epianoVoice } from './epiano.js';
+import { organVoice } from './organ.js';
 import { sampleVoice } from './sample.js';
 import { sampleHitVoice, HIT_KEYS } from './sample-hits.js';
 import { drumKitVoice } from './drums.js';
@@ -24,6 +25,7 @@ const IMPLS = {
   bass: { 'synth/classic': classicVoice, 'string/finger': stringVoice, 'sample/finger': sample('finger'), 'sample/pick': sample('pick'), 'sample/upright': sample('upright') },
   chords: {
     'synth/classic': classicVoice, 'string/electric': stringVoice, 'epiano/rhodes': epianoVoice,
+    'organ/jazz': organVoice, 'organ/rock': organVoice, 'organ/gospel': organVoice, 'organ/ballad': organVoice,
     'sample/guitar': sample('guitar'), 'sample/epiano': sample('epiano'), 'sample/organ': sample('organ'), 'sample/muted': sample('muted'), 'sample/jazz': sample('jazz'), 'sample/funk': sample('funk'), 'sample/steel': sample('steel'), 'sample/nylon': sample('nylon'), 'sample/twelve': sample('twelve'),
     'sample/freepats': sample('freepats'), 'sample/freepatsjazz': sample('freepatsjazz'),
   },
