@@ -40,6 +40,9 @@ export const STEPS = {
   // Lead-Gitarre (lead/sample/guitar): A = ohne die Lead-Regeln (keine Techniken), B = Standard (bend, vibrato, slideIn, hammer/pull). 24 Melodie, 25 Frage und Antwort
   24: { name: 'leadguitar', cases: 'art', a: { 'mix/art': { lead: 0 } }, extra: { voices: { lead: { id: 'sample', variant: 'guitar' } }, track: { layers: { drums: true, bass: true, chords: true, pad: true, lead: true, percussion: true }, jobs: { lead: 'melody', percussion: 'mixed' } } } },
   25: { name: 'leadguitar2', cases: 'art', a: { 'mix/art': { lead: 0 } }, extra: { voices: { lead: { id: 'sample', variant: 'guitar' } }, track: { layers: { drums: true, bass: true, chords: true, pad: true, lead: true, percussion: true }, jobs: { lead: 'callResponse', percussion: 'mixed' } } } },
+  // Zeiten von Bend und Vibrato an der Lead-Gitarre: A = fest wie zuerst gehört (Bend 40 ms halten und 180 ms ziehen, Vibrato nach 0,22 s; der Schlüssel
+  // 'demo/fixedtime' ist kein Feinwert, er überschreibt artTime im Render), B = Standard (aus Raster und Notenlänge)
+  27: { name: 'bendtime', cases: 'art', a: { 'demo/fixedtime': { vibrato: 0.22 } }, b: {}, extra: { voices: { lead: { id: 'sample', variant: 'guitar' } }, track: { layers: { drums: true, bass: true, chords: true, pad: true, lead: true, percussion: true }, jobs: { lead: 'melody', percussion: 'mixed' } } } },
   // Lead-Aufgabe riff auf der Lead-Gitarre: A = ohne Lead (der Schlüssel 'demo/mute' ist kein Feinwert, er nimmt die Schicht aus dem Render), B = mit Riff
   26: { name: 'riff', cases: 'art', a: { 'demo/mute': { layer: 'lead' } }, b: {}, extra: { voices: { lead: { id: 'sample', variant: 'guitar' } }, track: { layers: { drums: true, bass: true, chords: true, pad: true, lead: true, percussion: true }, jobs: { lead: 'riff', percussion: 'mixed' } } } },
   // Artikulationen (Vorbereitung Phase 3): keine Regeln, nur eine feste Demo-Verteilung in renderInPage; der Schlüssel 'demo/art' ist kein Feinwert,
@@ -118,6 +121,7 @@ async function renderInPage([style, bpm, kind, tuning, limiter, extra]) {
   if (demo) { track.layers.lead = true; track.jobs.lead = 'melody'; track.voices.chords = { id: 'sample', variant: 'freepats' }; }
   const events = buildEvents(track, { timing: tuning['mix/timing'], ornaments: tuning['mix/art'] });
   if (tuning['demo/mute']) for (let i = events.length - 1; i >= 0; i--) if (events[i].layer === tuning['demo/mute'].layer) events.splice(i, 1);
+  if (tuning['demo/fixedtime']) for (const e of events) { if (e.art === 'bend') delete e.artTime; else if (e.art === 'vibrato') e.artTime = tuning['demo/fixedtime'].vibrato; }
   if (tuning['demo/vib']) for (const e of events) if (e.art === 'vibrato') e.artRate = tuning['demo/vib'].rate;
   if (demo) { // die Lead-Linie spielt eine Gitarre (Bends sind eine Gitarren-Technik): Lead-Noten auf die Akkord-Schicht legen, die Akkorde selbst entfallen
     for (let i = events.length - 1; i >= 0; i--) if (events[i].layer === 'chords') events.splice(i, 1);

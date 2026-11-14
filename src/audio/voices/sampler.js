@@ -70,10 +70,11 @@ const MAX_RELEASE = 2; // s, die Presets haben bis zu 4,5 s (Pads würden in den
  *   slideIn gleitet in `artTime` s (Standard 0,08) von `artSemi` Halbtönen daneben (Standard -2) auf den Ton; der Ton beginnt so viel früher,
  *           dass er zum Zeitpunkt `t` ankommt (Regel: der Zielton kommt pünktlich). Reicht die Zeit bis `t` nicht (Planer mit 100 ms Vorausschau,
  *           allererster Ton), wird der Vorlauf kürzer; unter 20 ms beginnt der Slide auf dem Schlag
- *   bend    beginnt `artSemi` Halbtöne daneben (Standard -2), hält kurz (höchstens 40 ms) und zieht in höchstens 180 ms weich auf den Ton;
+ *   bend    beginnt `artSemi` Halbtöne daneben (Standard -2), hält kurz (höchstens 40 ms) und zieht weich auf den Ton; `artTime` = Zeit vom
+ *           Anschlag bis der Zielton erreicht ist (die Regeln setzen sie aus Raster und Notenlänge; höchstens die halbe Dauer), ohne sie höchstens 180 ms Zug;
  *           `artTone` (dB je Halbton, Standard 9, 0 = aus): ein Höhenregal ab 1800 Hz läuft mit, von -artTone·Halbtöne/2 auf +artTone·Halbtöne/2 dB
  *           (Urteil des Nutzers: 3 zu schwach, 9 besser). bend und vibrato spielen ohne das zusätzliche Abklingen der Stimme (naturalDecay)
- *   vibrato Einsatz nach `artTime` s (Standard 0,2, spätestens bei 40 % der Dauer), `artRate` Hz (Standard 5,5), Tiefe |artSemi| Halbtöne (Standard 0,15 = ±15 Cent),
+ *   vibrato Einsatz nach `artTime` s (Standard 0,2, spätestens bei 40 % der Dauer; die Regeln setzen ihn aus Raster und Notenlänge), `artRate` Hz (Standard 5,5), Tiefe |artSemi| Halbtöne (Standard 0,15 = ±15 Cent),
  *           schwillt in 0,25 s an (nur Noten ab 0,3 s; Werte aus den Regeln statt ±25 Cent ab 30 %)
  *   scoop, slideChord   wie slideIn (kleiner Abstand, z. B. -0,5 bis -1 Halbton)
  *   fall, slideOff   rutscht in den letzten `artTime` s (Standard 0,2, höchstens 60 % der Dauer) um `artSemi` Halbtöne (Standard -2) ab und blendet dabei aus
@@ -160,7 +161,8 @@ export function playNote(ctx, out, t, { pack, midi, dur, vel, art, zone = pickAr
     node = node.connect(lp);
   }
   const span = noteEnd - t, semis = Number.isFinite(artSemi) ? artSemi : -2, from = rate * 2 ** (semis / 12);
-  const bendStart = t + Math.min(0.04, 0.1 * span), bendTime = Math.min(0.18, 0.35 * span), ease = (x) => x * x * (3 - 2 * x);
+  const hold = Math.min(0.04, 0.1 * span), bendStart = t + hold, ease = (x) => x * x * (3 - 2 * x);
+  const bendTime = art === 'bend' && Number.isFinite(artTime) ? Math.max(0.02, Math.min(artTime, 0.5 * span) - hold) : Math.min(0.18, 0.35 * span);
   if (art === 'bend' && artTone > 0) { // Klangfarbe folgt dem Bend (Idee des Nutzers): die schlaffe Saite dunkler, die gespannte heller, zeitgleich mit der Tonhöhe
     const shelf = ctx.createBiquadFilter(), depth = (artTone * Math.abs(semis)) / 2, curve = new Float32Array(32);
     shelf.type = 'highshelf'; shelf.frequency.value = 1800;

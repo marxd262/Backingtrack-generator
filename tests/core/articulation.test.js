@@ -321,6 +321,7 @@ test('Pad: swell zu Beginn eines Teils (0,3 bis 1,5 s, höchstens die halbe Note
 });
 
 // ---- Lead ----
+const onGrid = (x, step) => Math.abs(x / step - Math.round(x / step)) < 1e-3; // ganze Rasterschritte
 test('Lead: abschaltbar; fall nur am Saxofon und am Phrasenende, vibrato nur auf Noten ab einem Schlag, scoop höchstens ein Halbton von unten; Gitarre: bend auf langen Noten aus der Skala, slideIn statt scoop, hammer/pull gebunden', () => {
   const count = {};
   for (const variant of ['sax', 'flute', 'guitar']) for (const seed of SEEDS) {
@@ -332,9 +333,13 @@ test('Lead: abschaltbar; fall nur am Saxofon und am Phrasenende, vibrato nur auf
     on.forEach((n, i) => {
       if (n.art) count[n.art] = (count[n.art] ?? 0) + 1;
       if (n.art === 'fall') assert.ok(variant === 'sax' && (!on[i + 1] || on[i + 1].t - (n.t + n.dur) >= beat - 1e-6) && n.artSemi <= -2 && n.artSemi >= -5 && n.artTime >= 0.15 && n.artTime <= 0.3, JSON.stringify(n));
-      if (n.art === 'vibrato') assert.ok(n.dur >= beat && n.artSemi >= 0.1 && n.artSemi <= 0.2 && n.artTime >= 0.15 && n.artTime <= 0.3 && n.artRate === 5.5, JSON.stringify(n)); // Rock 120: 5,5 Hz
+      const step = beat / 4; // Rock: 16tel-Raster
+      // Einsatz des Vibratos: 25 bis 40 % der Note auf ganze Rasterschritte, mindestens einer, höchstens ein Schlag
+      if (n.art === 'vibrato') assert.ok(n.dur >= beat && n.artSemi >= 0.1 && n.artSemi <= 0.2 && onGrid(n.artTime, step) && n.artTime >= step - 1e-6 && n.artTime <= beat + 1e-6 && n.artTime <= 0.4 * n.dur + step / 2 && n.artRate === 5.5, JSON.stringify(n)); // Rock 120: 5,5 Hz
       if (n.art === 'scoop') assert.ok(variant !== 'guitar' && n.artSemi <= -0.5 && n.artSemi >= -1 && n.artTime >= 0.05 && n.artTime <= 0.1, JSON.stringify(n));
       if (['bend', 'slideIn', 'hammer', 'pull'].includes(n.art)) assert.equal(variant, 'guitar', n.art);
+      // Zugzeit des Bends: 15 bis 30 % der Note auf ganze Rasterschritte; ein Ton ab drei Schlägen wird mindestens zwei Schritte lang gezogen
+      if (n.art === 'bend') assert.ok(onGrid(n.artTime, step) && n.artTime >= step - 1e-6 && n.artTime <= Math.min(0.6, beat) + 1e-6 && n.artTime <= 0.3 * n.dur + step / 2 && (n.dur < 3 * beat || n.artTime >= 2 * step - 1e-6), JSON.stringify(n));
       if (n.art === 'bend') assert.ok(n.dur >= beat && [-1, -2].includes(n.artSemi) && (n.artSemi === -1 || [9, 11, 0, 2, 4, 5, 7].includes((n.midi - 2) % 12)), JSON.stringify(n)); // A-Moll
       if (n.art === 'slideIn') assert.ok([-1, -2].includes(n.artSemi) && n.artTime >= 0.05 && n.artTime <= 0.1, JSON.stringify(n));
       if (n.art === 'hammer' || n.art === 'pull') {
