@@ -15,6 +15,11 @@ export const STEPS = {
   // er lässt in beiden Renders eine Gitarre (FreePats) die Lead-Linie statt der Akkorde spielen und schaltet in B die Artikulationen ein
   7: { name: 'art', a: { 'demo/art': { on: 0 } }, b: { 'demo/art': { on: 1 } } },
   // Frage des Nutzers: braucht der Bend einen mitlaufenden EQ? Beide Seiten mit Artikulationen und über Verzerrer und Box (drive), B dazu mit bendTone (dB je Halbton)
+  // Urteil des Nutzers: dem Bend fehlt Sustain. B: zusätzliches Abklingen der Gitarre fast aus (decay 10) und Distortion dazu (verdichtet, hält den Ton)
+  9: {
+    name: 'sustain', a: { 'demo/art': { on: 1, drive: 0.5, bendTone: 3 } },
+    b: { 'demo/art': { on: 1, drive: 0.5, distortion: 0.5, bendTone: 3 }, 'chords/sample/freepats': { decay: 10 } },
+  },
   8: { name: 'bendeq', a: { 'demo/art': { on: 1, drive: 0.5, bendTone: 0 } }, b: { 'demo/art': { on: 1, drive: 0.5, bendTone: 3 } } },
   1: { name: 'bus', a: { 'mix/bus': { on: 0 } }, b: { 'mix/bus': { on: 1 } } }, // Urteil: A (alter Begrenzer) bleibt Standard
   6: { name: 'strum', a: { 'chords/sample/guitar': { strumUp: 0, strumTilt: 0 } } },
@@ -81,7 +86,7 @@ async function renderInPage([style, bpm, kind, tuning, limiter]) {
   }
   const total = (BARS * 4 * 60) / bpm;
   const ctx = new OfflineAudioContext(2, Math.ceil(RATE * (OFFSET + total + 2)), RATE);
-  const { output, layers, whenReady } = createInstruments(ctx, { bpm, limiter, timbre: demo?.drive ? { ...resolveTrackTimbre(track), chords: { ...resolveTrackTimbre(track).chords, overdrive: demo.drive } } : resolveTrackTimbre(track), voices: resolveVoices(track), tuning });
+  const { output, layers, whenReady } = createInstruments(ctx, { bpm, limiter, timbre: demo?.drive ? { ...resolveTrackTimbre(track), chords: { ...resolveTrackTimbre(track).chords, overdrive: demo.drive, distortion: demo.distortion ?? 0 } } : resolveTrackTimbre(track), voices: resolveVoices(track), tuning });
   await whenReady();
   output.connect(ctx.destination);
   for (const e of events) if (e.layer && e.t < total) layers[e.layer].trigger(e, OFFSET + e.t);
