@@ -14,6 +14,8 @@ export const STEPS = {
   // Artikulationen (Vorbereitung Phase 3): keine Regeln, nur eine feste Demo-Verteilung in renderInPage; der Schlüssel 'demo/art' ist kein Feinwert,
   // er lässt in beiden Renders eine Gitarre (FreePats) die Lead-Linie statt der Akkorde spielen und schaltet in B die Artikulationen ein
   7: { name: 'art', a: { 'demo/art': { on: 0 } }, b: { 'demo/art': { on: 1 } } },
+  // Frage des Nutzers: braucht der Bend einen mitlaufenden EQ? Beide Seiten mit Artikulationen und über Verzerrer und Box (drive), B dazu mit bendTone (dB je Halbton)
+  8: { name: 'bendeq', a: { 'demo/art': { on: 1, drive: 0.5, bendTone: 0 } }, b: { 'demo/art': { on: 1, drive: 0.5, bendTone: 3 } } },
   1: { name: 'bus', a: { 'mix/bus': { on: 0 } }, b: { 'mix/bus': { on: 1 } } }, // Urteil: A (alter Begrenzer) bleibt Standard
   6: { name: 'strum', a: { 'chords/sample/guitar': { strumUp: 0, strumTilt: 0 } } },
   5: {
@@ -73,13 +75,13 @@ async function renderInPage([style, bpm, kind, tuning, limiter]) {
       notes.forEach((e, i) => {
         const step = i ? e.midi - notes[i - 1].midi : 0;
         if (layer === 'bass') e.art = e.dur < 0.13 ? 'dead' : step === 1 || step === 2 ? 'hammer' : i % 4 === 3 ? 'slide' : undefined;
-        else e.art = e.dur >= 0.45 ? (i % 2 ? 'bend' : 'vibrato') : i % 3 === 2 ? 'slide' : undefined;
+        else { e.art = e.dur >= 0.45 ? (i % 2 ? 'bend' : 'vibrato') : i % 3 === 2 ? 'slide' : undefined; e.artTone = demo.bendTone; }
       });
     }
   }
   const total = (BARS * 4 * 60) / bpm;
   const ctx = new OfflineAudioContext(2, Math.ceil(RATE * (OFFSET + total + 2)), RATE);
-  const { output, layers, whenReady } = createInstruments(ctx, { bpm, limiter, timbre: resolveTrackTimbre(track), voices: resolveVoices(track), tuning });
+  const { output, layers, whenReady } = createInstruments(ctx, { bpm, limiter, timbre: demo?.drive ? { ...resolveTrackTimbre(track), chords: { ...resolveTrackTimbre(track).chords, overdrive: demo.drive } } : resolveTrackTimbre(track), voices: resolveVoices(track), tuning });
   await whenReady();
   output.connect(ctx.destination);
   for (const e of events) if (e.layer && e.t < total) layers[e.layer].trigger(e, OFFSET + e.t);

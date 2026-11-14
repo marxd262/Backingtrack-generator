@@ -67,12 +67,13 @@ const MAX_RELEASE = 2; // s, die Presets haben bis zu 4,5 s (Pads würden in den
  * Schleife: das Sample klingt an seinem Ende aus (Zonen ohne Schleife bleiben unverändert); reicht die Note bis dahin, beginnt das Ausklingen spätestens `fadeOut` (s) vor dem Ende und endet mit ihm.
  * `art` (Artikulation, Vorbereitung Phase 3; gerechnet, solange es keine eigenen Samples gibt; nach Wissen gesetzt, nicht gehört; Unbekanntes wirkt nicht):
  *   slide   gleitet in 80 ms von `artSemi` Halbtönen daneben (Standard -2) auf den Ton
- *   bend    beginnt `artSemi` Halbtöne daneben (Standard -2), hält kurz (höchstens 40 ms) und zieht in höchstens 180 ms weich auf den Ton
+ *   bend    beginnt `artSemi` Halbtöne daneben (Standard -2), hält kurz (höchstens 40 ms) und zieht in höchstens 180 ms weich auf den Ton;
+ *           `artTone` (dB je Halbton, Standard 0 = aus, Versuch): ein Höhenregal ab 1800 Hz läuft mit, von -artTone·Halbtöne/2 auf +artTone·Halbtöne/2 dB
  *   vibrato ab 30 % der Dauer 5,5 Hz, bis ±25 Cent (nur Noten ab 0,3 s)
  *   hammer  ohne Anschlag: das Sample beginnt 30 ms später, Einsatz mindestens 20 ms, 15 % leiser
  *   dead    höchstens 50 ms lang, Tiefpass 900 Hz;   mute  Tiefpass 1600 Hz, Abklingen höchstens 0,5 s
  */
-export function playNote(ctx, out, t, { pack, midi, dur, vel, zone = pickZone(pack.meta.zones, midi, vel), gain = 1, timeScale = 1, filter = 20000, naturalDecay = 0, eq = null, cents = 0, oneShot = false, fadeOut = 0.15, art, artSemi }) {
+export function playNote(ctx, out, t, { pack, midi, dur, vel, zone = pickZone(pack.meta.zones, midi, vel), gain = 1, timeScale = 1, filter = 20000, naturalDecay = 0, eq = null, cents = 0, oneShot = false, fadeOut = 0.15, art, artSemi, artTone = 0 }) {
   if (!zone) return;
   if (art === 'dead') { dur = Math.min(dur, 0.05); filter = Math.min(filter, 900); }
   if (art === 'mute') { filter = Math.min(filter, 1600); naturalDecay = naturalDecay > 0 ? Math.min(naturalDecay, 0.5) : 0.5; }
@@ -142,15 +143,24 @@ export function playNote(ctx, out, t, { pack, midi, dur, vel, zone = pickZone(pa
     lp.frequency.value = filter;
     node = node.connect(lp);
   }
+  const span = noteEnd - t, semis = Number.isFinite(artSemi) ? artSemi : -2, from = rate * 2 ** (semis / 12);
+  const bendStart = t + Math.min(0.04, 0.1 * span), bendTime = Math.min(0.18, 0.35 * span), ease = (x) => x * x * (3 - 2 * x);
+  if (art === 'bend' && artTone > 0) { // Klangfarbe folgt dem Bend (Idee des Nutzers): die schlaffe Saite dunkler, die gespannte heller, zeitgleich mit der Tonhöhe
+    const shelf = ctx.createBiquadFilter(), depth = (artTone * Math.abs(semis)) / 2, curve = new Float32Array(32);
+    shelf.type = 'highshelf'; shelf.frequency.value = 1800;
+    for (let i = 0; i < 32; i++) curve[i] = depth * (2 * ease(i / 31) - 1);
+    shelf.gain.setValueAtTime(-depth, t);
+    shelf.gain.setValueCurveAtTime(curve, bendStart, bendTime);
+    node = node.connect(shelf);
+  }
   node.connect(out);
   // Tonhöhen-Artikulationen über die Abspielgeschwindigkeit
-  const span = noteEnd - t, from = rate * 2 ** ((Number.isFinite(artSemi) ? artSemi : -2) / 12);
   if (art === 'slide') { src.playbackRate.setValueAtTime(from, t); src.playbackRate.exponentialRampToValueAtTime(rate, t + Math.min(0.08, span / 2)); }
   if (art === 'bend') { // weicher Verlauf (langsam los, schnell durch die Mitte, langsam ankommen) wie ein gezogener Finger, statt einer geraden Rampe
     const curve = new Float32Array(32);
-    for (let i = 0; i < 32; i++) { const x = i / 31; curve[i] = from * (rate / from) ** (x * x * (3 - 2 * x)); }
+    for (let i = 0; i < 32; i++) curve[i] = from * (rate / from) ** ease(i / 31);
     src.playbackRate.setValueAtTime(from, t);
-    src.playbackRate.setValueCurveAtTime(curve, t + Math.min(0.04, 0.1 * span), Math.min(0.18, 0.35 * span));
+    src.playbackRate.setValueCurveAtTime(curve, bendStart, bendTime);
   }
   if (art === 'vibrato' && span >= 0.3) {
     const length = 0.7 * span, curve = new Float32Array(Math.ceil(length * 200));
