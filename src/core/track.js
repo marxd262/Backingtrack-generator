@@ -113,6 +113,8 @@ export function validateTrack(track) {
   if (t.complexity != null && !(Number.isFinite(t.complexity) && t.complexity >= 0 && t.complexity <= 1)) add('badComplexity', { complexity: show(t.complexity) });
   // Lockerheit (Mikrotiming): fehlend oder null gilt 0,5; sonst eine endliche Zahl von 0 bis 1
   if (t.loose != null && !(Number.isFinite(t.loose) && t.loose >= 0 && t.loose <= 1)) add('badLoose', { loose: show(t.loose) });
+  // Verzierungen (Artikulations-Schicht): fehlend oder null gilt 0,5; sonst eine endliche Zahl von 0 bis 1
+  if (t.ornaments != null && !(Number.isFinite(t.ornaments) && t.ornaments >= 0 && t.ornaments <= 1)) add('badOrnaments', { ornaments: show(t.ornaments) });
   checkVoices(t.voices, add);
   checkJobs(t.jobs, add);
   checkForm(t.form, add);

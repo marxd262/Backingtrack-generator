@@ -15,6 +15,7 @@ import { postProcess } from './form-post.js';
 import { leadPlayer } from './lead.js';
 import { percussionPlayer } from './percussion.js';
 import { applyMicrotiming, completeTiming, jitterScale, timingOf } from './microtiming.js';
+import { articulate, completeArt } from './articulation.js';
 
 /** Schlagzeug-Vokabular (Task 6 ordnet jedem Namen eine Stimme zu); Geisternoten sind `snare` mit vel < 0.3. */
 export const DRUM_NAMES = ['kick', 'snare', 'hat', 'openHat', 'tomHigh', 'tomMid', 'tomLow', 'crash'];
@@ -157,8 +158,9 @@ const PLAYERS = {
 /**
  * Track -> Ereignisse sortiert nach t (bei Gleichstand chord, marker, Rest). Wirft bei ungültigem Track.
  * `timing`: Feinwerte des Mikrotimings (microtiming.js: amount, tight, layback, drift); fehlend gilt der Standard, die Stärke kommt aus track.loose.
+ * `ornaments`: Feinwerte der Artikulations-Schicht (articulation.js: on, bass, chords); fehlend gilt der Standard (aus), die Stärke kommt aus track.ornaments.
  */
-export function buildEvents(input, { timing } = {}) {
+export function buildEvents(input, { timing, ornaments } = {}) {
   const track = checkedTrack(input);
   const master = createRng(track.seed);
   let params = resolveTags(track.tags, master.fork('tags'));
@@ -206,5 +208,6 @@ export function buildEvents(input, { timing } = {}) {
   events.sort(byTime);
   // Songform: Pegel, Wirbel, Stopps, Pausen und Crash auf dem fertigen Strom (eigener Zufallszweig, Tracks ohne Form bleiben unberührt)
   const done = form ? postProcess(events, track, bars, sections, master.fork('form')) : events;
-  return applyMicrotiming(done, track, bars, master.fork('timing'), feel);
+  const played = articulate(done, { track, bars, sections, params, rng: master.fork('art'), options: completeArt(ornaments) });
+  return applyMicrotiming(played, track, bars, master.fork('timing'), feel);
 }

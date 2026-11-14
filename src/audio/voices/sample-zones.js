@@ -22,6 +22,16 @@ export function pickZone(zones, midi, vel01) {
   return best;
 }
 
+/**
+ * Zone für eine Artikulation: hat das Pack Zonen mit diesem `art` (eigene Sample-Gruppe, Format 2 aus SPEC_PHASE2), eine davon; sonst eine
+ * normale Zone (ohne `art`), die Stimme rechnet die Artikulation dann selbst. Die heutigen Packs haben keine `art`-Zonen.
+ */
+export function pickArtZone(zones, midi, vel01, art) {
+  if (!Array.isArray(zones)) return null;
+  const own = art ? zones.filter((z) => z.art === art) : [];
+  return pickZone(own.length ? own : zones.filter((z) => !z.art), midi, vel01);
+}
+
 /** Abspielgeschwindigkeit, damit das Sample der Zone auf der Taste `midi` erklingt (Grundton und Feinstimmung der Zone). */
 export const playbackRate = (zone, midi) => 2 ** (((midi - zone.rootKey) * 100 + zone.tuneCents) / 1200);
 

@@ -1,5 +1,5 @@
 // Mikrotiming (Klang v2, Schritt 4): aus = unveränderter Strom; an = gleiche Ereignisse, im Takt, sortiert, reproduzierbar, Snare hinter dem Kick,
-// Akkordtöne bleiben zusammen; das Feld `art` wird durchgereicht und wirkt.
+// Akkordtöne bleiben zusammen; das Feld `art` wird durchgereicht.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildEvents } from '../../src/index.js';
@@ -57,7 +57,7 @@ test('Standard: die Backbeat-Snare liegt im Mittel hinter dem Raster, der Kick n
   assert.equal(stabs(on), stabs(off));
 });
 
-test('art: wird durchgereicht; dead und mute machen leiser und kürzer, auch bei amount 0', () => {
+test('art: wird durchgereicht, Lautstärke und Notenende bleiben (die setzt articulation.js)', () => {
   const bars = barTimeline(checkedTrack(TRACK));
   const e = { t: 0.3, bar: 0, beat: 0.5, type: 'note', layer: 'bass', midi: 40, vel: 0.8, dur: 0.2 };
   const run = (art, amount) => applyMicrotiming([{ ...e, art }], TRACK, bars, createRng(1), completeTiming({ amount }))[0];
@@ -65,8 +65,8 @@ test('art: wird durchgereicht; dead und mute machen leiser und kürzer, auch bei
   for (const amount of [0, 1]) {
     const dead = run('dead', amount);
     assert.equal(dead.art, 'dead');
-    assert.ok(dead.vel < e.vel && dead.dur < e.dur, JSON.stringify(dead));
-    assert.equal(run('slide', amount).vel, e.vel);
+    assert.equal(dead.vel, e.vel);
+    assert.ok(Math.abs(dead.t + dead.dur - e.t - e.dur) < 1e-5, JSON.stringify(dead));
   }
 });
 

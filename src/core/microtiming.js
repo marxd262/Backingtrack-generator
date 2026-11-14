@@ -4,12 +4,12 @@
 //   2. feste Lage je Instrument und Stil (OFFSETS_MS): z. B. Backbeat-Snare hinten, im Funk die Akkorde vorn
 //   3. langsamer Drift je Spieler (DRIFT_MS): zwei Sinusschwingungen (etwa 7–11 s und 2,5–4 s) mit Phasen aus dem Seed statt Zufall je Note;
 //      alle Schläge des Schlagzeugs teilen einen Drift (ein Schlagzeuger), Töne mit gleicher Zeit (Akkord-Stab) bleiben zusammen
-// Dazu reicht der Schritt das Feld `art` (Artikulation, kommt später) durch und reagiert darauf (ART: Dead Notes leiser und kürzer).
+// Das Feld `art` und die übrigen Felder der Artikulations-Schicht (articulation.js, läuft davor) werden durchgereicht.
 // Die Stärke kommt aus dem Track-Feld `loose` (Regler "Lockerheit", 0..1, fehlend 0,5): timingOf. Urteil des Nutzers (2026-11-13): Stärke 1 kaum
 // hörbar, 2 etwas zu viel (Instrumente lösen sich voneinander), Standard dazwischen (1,5). Die Lagen selbst sind nach Wissen gesetzt.
 // Feinwerte: amount (Faktor auf Lage und Drift), tight (Rest des Zufalls je Note; amount 0 und tight 1 = Strom wie vor Klang v2), layback, drift.
 import { r6 } from './timeline.js';
-import { roundVel, byTime } from './event-helpers.js';
+import { byTime } from './event-helpers.js';
 
 export const TIMING_DEFAULTS = Object.freeze({ amount: 1.5, tight: 0.3, layback: 1, drift: 1 });
 
@@ -29,8 +29,6 @@ const OFFSETS_MS = Object.freeze({
 });
 // größte Abweichung des Drifts in ms je Schicht
 const DRIFT_MS = Object.freeze({ drums: 2, bass: 4, chords: 5, lead: 5, percussion: 4 });
-// Reaktion auf Artikulationen: Faktor auf Lautstärke und Dauer
-const ART = Object.freeze({ dead: { vel: 0.6, dur: 0.4 }, mute: { vel: 0.85, dur: 0.5 } });
 const END_GAP = 0.001; // wie event-helpers.js: Abstand zum Taktende
 
 /** Füllt die Feinwerte auf; nur endliche Zahlen >= 0 zählen. */
@@ -55,16 +53,13 @@ export function applyMicrotiming(events, track, bars, rng, timing) {
     return [layer, (t) => ms * (0.6 * Math.sin((2 * Math.PI * t) / p1 + f1) + 0.4 * Math.sin((2 * Math.PI * t) / p2 + f2))];
   }));
   const out = events.map((e) => {
-    let x = e;
-    const art = ART[e.art];
-    if (art && Number.isFinite(e.vel)) x = { ...x, vel: roundVel(e.vel * art.vel), ...(Number.isFinite(e.dur) ? { dur: r6(e.dur * art.dur) } : {}) };
     const b = bars[e.bar];
-    if (!(timing.amount > 0) || !e.layer || !b || !Number.isFinite(e.beat)) return x;
+    if (!(timing.amount > 0) || !e.layer || !b || !Number.isFinite(e.beat)) return e;
     const name = e.layer === 'drums' ? (e.name === 'snare' && e.vel < 0.3 ? 'ghost' : e.name) : e.layer;
     const ms = timing.amount * (timing.layback * (offsets[name] ?? 0) + timing.drift * (drifts[e.layer]?.(e.t) ?? 0));
     const t = r6(Math.min(b.end - END_GAP, Math.max(b.start, e.t + ms / 1000)));
     // das Ende der Note bleibt, wo es war (Stopps und Taktgrenzen gelten weiter); nur der Einsatz wandert
-    return { ...x, t, ...(Number.isFinite(x.dur) ? { dur: r6(Math.max(END_GAP, e.t + x.dur - t)) } : {}) };
+    return { ...e, t, ...(Number.isFinite(e.dur) ? { dur: r6(Math.max(END_GAP, e.t + e.dur - t)) } : {}) };
   });
   out.sort(byTime);
   for (const layer of MONO) {

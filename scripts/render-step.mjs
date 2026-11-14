@@ -79,8 +79,8 @@ async function renderInPage([style, bpm, kind, tuning, limiter]) {
       const notes = events.filter((e) => e.layer === layer && e.type === 'note');
       notes.forEach((e, i) => {
         const step = i ? e.midi - notes[i - 1].midi : 0;
-        if (layer === 'bass') e.art = e.dur < 0.13 ? 'dead' : step === 1 || step === 2 ? 'hammer' : i % 4 === 3 ? 'slide' : undefined;
-        else { e.art = e.dur >= 0.45 ? (i % 2 ? 'bend' : 'vibrato') : i % 3 === 2 ? 'slide' : undefined; e.artTone = demo.bendTone; }
+        if (layer === 'bass') e.art = e.dur < 0.13 ? 'dead' : step === 1 || step === 2 ? 'hammer' : i % 4 === 3 ? 'slideIn' : undefined;
+        else { e.art = e.dur >= 0.45 ? (i % 2 ? 'bend' : 'vibrato') : i % 3 === 2 ? 'slideIn' : undefined; e.artTone = demo.bendTone; }
       });
     }
   }

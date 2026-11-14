@@ -57,9 +57,10 @@ export function sampleVoice(packId, layer, ctx, { getTimbre, tuned, classic, set
         let pos = strumIndex, step = tuned('strum');
         const n = Array.isArray(e.strum) ? e.strum[1] : 0;
         if (n > 1) {
-          if (tuned('strumUp') >= 1) {
+          const strumUp = e.strumUp ?? tuned('strumUp'); // die Artikulations-Schicht setzt die Spielweise je Stab (Stil-Profil), sonst gilt der Feinwert
+          if (strumUp >= 1) {
             const frac = e.beat - Math.floor(e.beat);
-            const up = tuned('strumUp') >= 2 ? frac > 1e-6 : Math.abs(frac * 2 - Math.round(frac * 2)) > 1e-6;
+            const up = strumUp >= 2 ? frac > 1e-6 : Math.abs(frac * 2 - Math.round(frac * 2)) > 1e-6;
             pos = up ? n - 1 - e.strum[0] : e.strum[0];
             step = Math.min(step * (1.6 - Math.min(1, Math.max(0, e.vel))), (0.2 * e.dur) / (n - 1));
           }
@@ -82,6 +83,6 @@ export function sampleVoice(packId, layer, ctx, { getTimbre, tuned, classic, set
       filter = Math.min(filter, velocityBrightnessHz(e.vel, tuned('softHz')));
       oneShot = tuned('oneShot') >= 0.5;
     }
-    playNote(ctx, out, when, { pack, midi: e.midi, dur: e.dur, vel: e.vel, gain, timeScale, filter, naturalDecay: tuned('decay'), eq, cents, oneShot, art: e.art, artSemi: e.artSemi, artTone: e.artTone });
+    playNote(ctx, out, when, { pack, midi: e.midi, dur: e.dur, vel: e.vel, gain, timeScale, filter, naturalDecay: tuned('decay'), eq, cents, oneShot, art: e.art, artSemi: e.artSemi, artTime: e.artTime, artTone: e.artTone, ring: e.ring === true });
   };
 }

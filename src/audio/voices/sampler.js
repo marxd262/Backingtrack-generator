@@ -1,6 +1,6 @@
 // Sampler: lädt Sample-Packs (siehe scripts/extract-samples.mjs) und spielt Noten daraus. Kein eigener Zustand außer den Zwischenspeichern;
 // die Stimme (sample.js) entscheidet, wann geladen wird und was bis dahin spielt.
-import { pickZone, playbackRate, dbToGain, zoneGain } from './sample-zones.js';
+import { pickArtZone, playbackRate, dbToGain, zoneGain } from './sample-zones.js';
 
 const LOAD_TIMEOUT_MS = 30_000;
 const loading = new Map(); // id -> Promise<Pack> (laufende und fertige Ladevorgänge, je Seite einmal)
@@ -65,19 +65,23 @@ const MAX_RELEASE = 2; // s, die Presets haben bis zu 4,5 s (Pads würden in den
  * mit weniger als 0,05 dB entfallen; davor ein Hochpass bei 50 Hz. Nach dem Ausklingen stoppt die Quelle. `zone` (optional) spielt diese Zone statt
  * der nach Ton und Anschlag gewählten (Schläge: sample-hits.js). `cents` verstimmt zusätzlich. `oneShot` spielt nie die Schleife einer Zone mit
  * Schleife: das Sample klingt an seinem Ende aus (Zonen ohne Schleife bleiben unverändert); reicht die Note bis dahin, beginnt das Ausklingen spätestens `fadeOut` (s) vor dem Ende und endet mit ihm.
- * `art` (Artikulation, Vorbereitung Phase 3; gerechnet, solange es keine eigenen Samples gibt; nach Wissen gesetzt, nicht gehört; Unbekanntes wirkt nicht):
- *   slide   gleitet in 80 ms von `artSemi` Halbtönen daneben (Standard -2) auf den Ton
+ * `art` (Artikulation, Namen aus SPEC_PHASE3 Abschnitt 2; nach Wissen gesetzt, nicht gehört). Reihenfolge: hat das Pack Zonen mit diesem `art`
+ * (eigene Sample-Gruppe), spielt eine davon ohne die gerechnete Variante; sonst wird gerechnet; Unbekanntes spielt normal:
+ *   slideIn gleitet in `artTime` s (Standard 0,08) von `artSemi` Halbtönen daneben (Standard -2) auf den Ton
  *   bend    beginnt `artSemi` Halbtöne daneben (Standard -2), hält kurz (höchstens 40 ms) und zieht in höchstens 180 ms weich auf den Ton;
  *           `artTone` (dB je Halbton, Standard 9, 0 = aus): ein Höhenregal ab 1800 Hz läuft mit, von -artTone·Halbtöne/2 auf +artTone·Halbtöne/2 dB
  *           (Urteil des Nutzers: 3 zu schwach, 9 besser). bend und vibrato spielen ohne das zusätzliche Abklingen der Stimme (naturalDecay)
  *   vibrato ab 30 % der Dauer 5,5 Hz, bis ±25 Cent (nur Noten ab 0,3 s)
  *   hammer  ohne Anschlag: das Sample beginnt 30 ms später, Einsatz mindestens 20 ms, 15 % leiser
- *   dead    höchstens 50 ms lang, Tiefpass 900 Hz;   mute  Tiefpass 1600 Hz, Abklingen höchstens 0,5 s
+ *   dead    höchstens 50 ms lang, Tiefpass 900 Hz;   chuck  wie dead, höchstens 40 ms;   palmMute  Tiefpass 1600 Hz, Abklingen höchstens 0,5 s
+ *   staccato, choke   die Dauer kommt aus dem Ereignis, das Ausklingen dauert 30 ms statt der Zeit der Zone
+ * `ring` (letRing, Arpeggio-Überlappung): der Ton wird nicht abgeschnitten, Ausklingen 2 s.
  */
-export function playNote(ctx, out, t, { pack, midi, dur, vel, zone = pickZone(pack.meta.zones, midi, vel), gain = 1, timeScale = 1, filter = 20000, naturalDecay = 0, eq = null, cents = 0, oneShot = false, fadeOut = 0.15, art, artSemi, artTone = 9 }) {
+export function playNote(ctx, out, t, { pack, midi, dur, vel, art, zone = pickArtZone(pack.meta.zones, midi, vel, art), gain = 1, timeScale = 1, filter = 20000, naturalDecay = 0, eq = null, cents = 0, oneShot = false, fadeOut = 0.15, artSemi, artTime = 0.08, artTone = 9, ring = false }) {
   if (!zone) return;
-  if (art === 'dead') { dur = Math.min(dur, 0.05); filter = Math.min(filter, 900); }
-  if (art === 'mute') { filter = Math.min(filter, 1600); naturalDecay = naturalDecay > 0 ? Math.min(naturalDecay, 0.5) : 0.5; }
+  if (zone.art) art = undefined; // eigene Samples für diese Artikulation: ohne die gerechnete Variante
+  if (art === 'dead' || art === 'chuck') { dur = Math.min(dur, art === 'chuck' ? 0.04 : 0.05); filter = Math.min(filter, 900); }
+  if (art === 'palmMute') { filter = Math.min(filter, 1600); naturalDecay = naturalDecay > 0 ? Math.min(naturalDecay, 0.5) : 0.5; }
   if (art === 'hammer') gain *= 0.85;
   if (art === 'bend' || art === 'vibrato') naturalDecay = 0; // gezogene und bebende Töne brauchen Sustain: das zusätzliche Abklingen der Stimme entfällt
   const sample = pack.meta.samples[zone.sample];
@@ -91,7 +95,7 @@ export function playNote(ctx, out, t, { pack, midi, dur, vel, zone = pickZone(pa
   const peak = Math.max(FLOOR, gain * zoneGain(zone.attenuationDb) * velocity);
   const sustain = Math.max(FLOOR, peak * dbToGain(zone.sustainDb));
   const attack = Math.max(art === 'hammer' ? 0.02 : 0.003, zone.attack * timeScale), decay = Math.max(0.001, zone.decay * timeScale);
-  let release = Math.min(MAX_RELEASE, Math.max(MIN_RELEASE, zone.release * timeScale));
+  let release = ring ? MAX_RELEASE : art === 'staccato' || art === 'choke' ? 0.03 : Math.min(MAX_RELEASE, Math.max(MIN_RELEASE, zone.release * timeScale));
   let noteEnd = t + (Number.isFinite(dur) ? Math.max(0.02, dur) : 0.5);
   if (oneShot && zone.loop) { // ohne Schleife ist am Sample-Ende Stille: vorher ausklingen, statt abzureißen (Zonen ohne Schleife klingen wie bisher)
     const sampleEnd = t + sample.frames / sample.rate / rate;
@@ -157,7 +161,7 @@ export function playNote(ctx, out, t, { pack, midi, dur, vel, zone = pickZone(pa
   }
   node.connect(out);
   // Tonhöhen-Artikulationen über die Abspielgeschwindigkeit
-  if (art === 'slide') { src.playbackRate.setValueAtTime(from, t); src.playbackRate.exponentialRampToValueAtTime(rate, t + Math.min(0.08, span / 2)); }
+  if (art === 'slideIn') { src.playbackRate.setValueAtTime(from, t); src.playbackRate.exponentialRampToValueAtTime(rate, t + Math.min(artTime, span / 2)); }
   if (art === 'bend') { // weicher Verlauf (langsam los, schnell durch die Mitte, langsam ankommen) wie ein gezogener Finger, statt einer geraden Rampe
     const curve = new Float32Array(32);
     for (let i = 0; i < 32; i++) curve[i] = from * (rate / from) ** ease(i / 31);

@@ -102,6 +102,7 @@ export default {
   'err.badBeats': 'Takt {bar} hat eine ungültige Schlagzahl: {beats}. Erlaubt sind 1 bis 16 Schläge.',
   'err.badTags': 'Die Schlagworte sind ungültig.',
   'err.badComplexity': 'Die Komplexität {complexity} ist ungültig. Erlaubt sind Zahlen von 0 bis 1.',
+  'err.badOrnaments': 'Die Verzierungen {ornaments} sind ungültig. Erlaubt sind Zahlen von 0 bis 1.',
   'err.badLoose': 'Die Lockerheit {loose} ist ungültig. Erlaubt sind Zahlen von 0 bis 1.',
   'groove.straight': 'Gerade',
   'groove.latin': 'Latin',

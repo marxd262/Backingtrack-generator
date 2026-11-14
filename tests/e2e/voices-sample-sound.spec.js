@@ -593,7 +593,7 @@ test('Artikulationen (Bass finger): jede bekannte ändert den Ton, bleibt endlic
       return (await ctx.startRendering()).getChannelData(0);
     };
     const plain = await run(undefined), out = [];
-    for (const art of ['slide', 'bend', 'vibrato', 'hammer', 'dead', 'mute', 'nope']) {
+    for (const art of ['slideIn', 'bend', 'vibrato', 'hammer', 'dead', 'chuck', 'palmMute', 'staccato', 'choke', 'nope']) {
       const d = await run(art);
       let diff = 0, energy = 0, peak = 0, finite = true;
       for (let i = 0; i < d.length; i++) { diff += (d[i] - plain[i]) ** 2; energy += plain[i] ** 2; peak = Math.max(peak, Math.abs(d[i])); if (!Number.isFinite(d[i])) finite = false; }
@@ -604,6 +604,7 @@ test('Artikulationen (Bass finger): jede bekannte ändert den Ton, bleibt endlic
   for (const [art, diff, peak, finite] of rows) {
     expect(finite, art).toBe(true);
     expect(peak, art).toBeLessThan(1);
-    if (art === 'nope') expect(diff, art).toBeLessThan(1e-6); else expect(diff, art).toBeGreaterThan(0.05);
+    // staccato und choke ändern nur das Ausklingen (30 ms statt 0,2 s): kleiner Unterschied bei gleicher Notenlänge (gemessen 0,022)
+    if (art === 'nope') expect(diff, art).toBeLessThan(1e-6); else expect(diff, art).toBeGreaterThan(art === 'staccato' || art === 'choke' ? 0.01 : 0.05);
   }
 });

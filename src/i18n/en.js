@@ -102,6 +102,7 @@ export default {
   'err.badBeats': 'Bar {bar} has an invalid number of beats: {beats}. Allowed are 1 to 16 beats.',
   'err.badTags': 'The tags are invalid.',
   'err.badComplexity': 'The complexity {complexity} is invalid. Allowed are numbers from 0 to 1.',
+  'err.badOrnaments': 'The ornaments {ornaments} are invalid. Allowed are numbers from 0 to 1.',
   'err.badLoose': 'The looseness {loose} is invalid. Allowed are numbers from 0 to 1.',
   'groove.straight': 'Straight',
   'groove.latin': 'Latin',
