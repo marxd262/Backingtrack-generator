@@ -55,8 +55,8 @@ Reihenfolge nach `SPEC_PHASE3.md`, Abschnitt 9. „Standard“ heißt: eingescha
 | 7 Prio B, Lead | `scoop`, `fall` (Saxofon), `vibrato` | Standard (`485fd9f`, `f86bd8b`) | Vibrato mit festen 5,5 Hz „etwas schnell“; folgt jetzt dem Tempo (4 Hz bei 60 BPM bis 5,5 Hz ab 120 BPM), das fand der Nutzer „um einiges besser“ |
 | 7 Prio B, Schlagzeug | `flam` | Standard (`a0bdab6`) | „besser“ |
 | 7 Prio B, Tasten | `roll`, `crush`, `bark` | Standard (`a0bdab6`) | Blues „besser“. Der `roll` hat in der Probe nie ausgelöst und ist ungehört |
-| 9 Lead-Gitarre | Stimme `lead/sample/guitar` auf den vorhandenen Freepats-Samples; Regeln `bend`, `slideIn`, `hammer`/`pull` | fertig (`d96722e`, `90a6f13`, `b725eba`) | **offen**, noch nicht gehört |
-| außerhalb der Spec | Lead-Aufgabe `riff` (Boogie-Linie, einstimmig, MIDI 45 bis 67) | fertig (`53932f0`, `c438252`) | **offen**, noch nicht gehört |
+| 9 Lead-Gitarre | Stimme `lead/sample/guitar` auf den vorhandenen Freepats-Samples; Regeln `bend`, `slideIn`, `hammer`/`pull` | fertig (`d96722e`, `90a6f13`, `b725eba`) | B „besser“ (2026-11-15) |
+| außerhalb der Spec | Lead-Aufgabe `riff` (Boogie-Linie, einstimmig, MIDI 45 bis 67) | fertig (`53932f0`, `c438252`) | B „besser“ (2026-11-15) |
 
 Hörproben dazu: Schritte 10 bis 26 in `scripts/render-step.mjs`. Seit dem Urteil vom 2026-11-14 gilt für die Schritte 12 bis 20: A = Standard ohne die Gruppe, B = Standard.
 
