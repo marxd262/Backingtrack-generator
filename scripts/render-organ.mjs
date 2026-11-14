@@ -2,7 +2,7 @@
 // Fälle: Blues-Shuffle 90 (Preset jazz), Rock 120 mit Strophe und Refrain (rock), Ballade 70 (ballad). Band: Schlagzeug, Bass, Orgel, Percussion;
 // ohne Pad, weil eine Streicherfläche in derselben Lage die Orgel verdeckt. Eine Seite ist { voice, tuning, solo }: voice ersetzt die Orgel
 // (A in Schritt o1: das Orgel-Sample), tuning sind Feinwerte der Orgel-Variante des Falls, solo rendert nur die Akkord-Schicht.
-// Aufruf: node scripts/render-organ.mjs <schritt> [sample|synth] [ausgabeordner]   (Schritte: o1, level; Standard: sample, .superpowers/audio-ab)
+// Aufruf: node scripts/render-organ.mjs <schritt> [sample|synth] [ausgabeordner]   (Schritte: o1, o2, level; Standard: sample, .superpowers/audio-ab)
 // Der Server läuft auf einem freien Port (start(0)), nicht auf 4173: das Skript stört keinen zweiten Arbeitsordner.
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -13,11 +13,17 @@ const pick = (style, preset) => { const [, bpm, own] = ART_CASES.find(([s]) => s
 export const CASES = [pick('blues', 'jazz'), pick('rock', 'rock'), ['dreamy', 70, { preset: 'ballad' }]];
 const SAMPLE = { id: 'sample', variant: 'organ' };
 
+// Feinwerte, die alles nach dem Grundklang abschalten; only(...) lässt die genannten Schritte auf ihrem Standard
+const OFF = { click: 0, perc: 0, leslie: 0, drive: 0, swell: 0 };
+const only = (...on) => Object.fromEntries(Object.entries(OFF).filter(([name]) => !on.includes(name)));
+
 export const STEPS = {
   // Schritt 1, Grundklang: A = Orgel-Sample (chords/sample/organ), B = Tonewheel-Synth
-  o1: { name: 'tonewheel', a: { voice: SAMPLE }, b: {} },
+  o1: { name: 'tonewheel', a: { voice: SAMPLE }, b: { tuning: only() } },
+  // Schritt 2, Key-Click und Percussion: A = ohne, B = mit (Percussion hat nur das Preset jazz an, also der Blues)
+  o2: { name: 'click', a: { tuning: only() }, b: { tuning: only('click', 'perc') } },
   // Pegelmessung, keine Hörprobe: Akkord-Schicht allein; die Zeile "RMS A … B …" (dB, vor der Summe) ergibt level = 10 ** ((A - B) / 20)
-  level: { name: 'level', cases: [...CASES, pick('rock', 'gospel')], a: { voice: SAMPLE, solo: true }, b: { solo: true, tuning: { level: 1 } } },
+  level: { name: 'level', cases: [...CASES, pick('rock', 'gospel')], a: { voice: SAMPLE, solo: true }, b: { solo: true, tuning: { ...only(), level: 1 } } },
 };
 
 /** Läuft im Browser (wird serialisiert: keine Werte von außerhalb): rendert einen Fall, liefert L/R als base64 (Float32) und Zählungen der Akkord-Schicht. */

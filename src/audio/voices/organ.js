@@ -1,6 +1,8 @@
 // Tonewheel-Orgel (chords/organ/<preset>, versteckt): je Ton EIN Oszillator auf der Sub-Oktave (16'-Lage) mit einer PeriodicWave, deren Teiltöne
 // die neun Zugriegel sind. Die Orgel reagiert nicht auf die Anschlagstärke. Alle Zahlen sind Startwerte, nicht gehört. Feinwerte: tunables.js.
-// Kette (fest je Stimme, entsteht beim ersten Ton): Töne -> level -> out.
+// Kette (fest je Stimme, entsteht beim ersten Ton): Töne, Key-Click und Percussion -> pre -> level -> out.
+// Key-Click (click, clickOff): kurzer Rauschstoß bei Note-On und leiser bei Note-Off, Pegel und Ausschnitt des Rauschens je Klick aus dem Seed.
+// Percussion (perc, percHarm, percDecay): Sinus auf dem 2. oder 3. Teilton der 8'-Lage durch EINE gemeinsame Hüllkurve, single-trigger wie am Original.
 // Bekannte Grenze: Quint- und Terz-Zugriegel sind hier reine Obertöne; am Original sind es temperierte Räder (2 bzw. 14 Cent daneben).
 import { hz } from '../nodes.js';
 import { DRAWBARS } from './tunables.js';
@@ -15,6 +17,9 @@ export const WHEEL_CENTS = GEARS.map(([a, b], pc) => 1200 * Math.log2((40 * a) /
 
 const NOTE = 0.2; // Pegel eines Tons vor der Kette (die Welle hat rms 0,71)
 const ATTACK = 0.004, RELEASE = 0.012; // Tastenkontakt: kurz, aber ohne Knacken
+const CLICK_HP = 1000; // Hochpass des Key-Clicks (Hz): breitbandig, ohne Rumpeln
+const CLICK_TC = 0.002; // Abklingen des Klicks (Zeitkonstante, s)
+const HELD_EPS = 0.005; // so kurz vor dem Ende der letzten Taste gilt die Tastatur schon als frei (Mikrotiming verschiebt um Millisekunden)
 const PHASE = 2.399963; // Goldener Winkel: feste, verteilte Phasen der Teiltöne (Tonräder laufen nicht phasengleich; hält die Spitzen klein)
 
 /**
@@ -36,7 +41,17 @@ export function tonewheelPartials(midi, drawbars) {
   return out.map((a) => a / norm);
 }
 
-export function organVoice(layer, ctx, { tuned }) {
+/**
+ * Single-Trigger der Percussion: ein Ton bei `t` (bis `end`) löst nur aus, wenn keine andere Taste mehr gehalten wird. state = { held } merkt
+ * sich das späteste Tastenende. Die übrigen Töne eines gleichzeitig gegriffenen Akkords lösen nicht neu aus, klingen aber durch dieselbe Hüllkurve.
+ */
+export function percussionGate(state, t, end) {
+  const fire = t >= state.held - HELD_EPS;
+  state.held = Math.max(state.held, end);
+  return fire;
+}
+
+export function organVoice(layer, ctx, { tuned, rng, noise }) {
   const waves = new Map(); // Taste und Zugriegel -> PeriodicWave
   const waveFor = (midi, bars) => {
     const key = `${midi}:${bars.join('')}`;
@@ -49,9 +64,11 @@ export function organVoice(layer, ctx, { tuned }) {
   };
   let chain = null;
   const build = (out) => {
-    const level = ctx.createGain();
-    level.connect(out);
-    return { out, input: level, level, applied: new Map() };
+    const level = ctx.createGain(), pre = ctx.createGain(), percEnv = ctx.createGain(), clicks = ctx.createBiquadFilter();
+    clicks.type = 'highpass'; clicks.frequency.value = CLICK_HP;
+    percEnv.gain.value = 0;
+    clicks.connect(pre); percEnv.connect(pre); pre.connect(level).connect(out);
+    return { out, pre, level, clicks, percEnv, held: -Infinity, applied: new Map() };
   };
   // Feinwerte der Kette: nur setzen, wenn sich der Wert geändert hat (sonst wüchse die Automationsliste mit jedem Ton)
   const set = (param, value, t) => { if (chain.applied.get(param) !== value) { chain.applied.set(param, value); param.setValueAtTime(value, t); } };
@@ -61,17 +78,42 @@ export function organVoice(layer, ctx, { tuned }) {
     if (chain?.out !== out) chain = build(out);
     set(chain.level.gain, tuned('level'), t);
     const end = t + Math.max(0.03, e.dur);
-    const amp = ctx.createGain();
-    amp.gain.setValueAtTime(0, t);
-    amp.gain.linearRampToValueAtTime(NOTE, t + ATTACK);
-    amp.gain.setValueAtTime(NOTE, end);
-    amp.gain.linearRampToValueAtTime(0, end + RELEASE);
-    const o = ctx.createOscillator();
-    o.setPeriodicWave(waveFor(e.midi, DRAWBARS.map(tuned)));
-    o.frequency.value = hz(e.midi) / 2;
-    o.detune.value = WHEEL_CENTS[((e.midi % 12) + 12) % 12];
-    o.connect(amp).connect(chain.input);
-    o.start(t);
-    o.stop(end + RELEASE + 0.01);
+    const cents = WHEEL_CENTS[((e.midi % 12) + 12) % 12];
+    // Tastenkontakt: Oszillator durch eine kurze Rampe an `dest`
+    const key = (o, freq, peak, dest) => {
+      const amp = ctx.createGain();
+      amp.gain.setValueAtTime(0, t);
+      amp.gain.linearRampToValueAtTime(peak, t + ATTACK);
+      amp.gain.setValueAtTime(peak, end);
+      amp.gain.linearRampToValueAtTime(0, end + RELEASE);
+      o.frequency.value = freq;
+      o.detune.value = cents;
+      o.connect(amp).connect(dest);
+      o.start(t);
+      o.stop(end + RELEASE + 0.01);
+    };
+    const wheels = ctx.createOscillator();
+    wheels.setPeriodicWave(waveFor(e.midi, DRAWBARS.map(tuned)));
+    key(wheels, hz(e.midi) / 2, NOTE, chain.pre);
+
+    const click = tuned('click');
+    for (const [at, amount] of [[t, click], [end, click * tuned('clickOff')]]) {
+      if (!(amount > 0)) continue;
+      const g = ctx.createGain(), src = ctx.createBufferSource();
+      src.buffer = noise;
+      g.gain.setValueAtTime(amount * (0.7 + 0.6 * rng.next()), at);
+      g.gain.setTargetAtTime(0, at, CLICK_TC);
+      src.connect(g).connect(chain.clicks);
+      src.start(at, 0.9 * rng.next(), 0.03);
+    }
+
+    const perc = tuned('perc');
+    if (perc > 0) {
+      if (percussionGate(chain, t, end)) {
+        chain.percEnv.gain.setValueAtTime(1, t);
+        chain.percEnv.gain.setTargetAtTime(0, t, tuned('percDecay') / Math.LN10); // percDecay = Zeit bis -20 dB
+      }
+      key(ctx.createOscillator(), hz(e.midi) * tuned('percHarm'), NOTE * perc, chain.percEnv);
+    } else chain.held = Math.max(chain.held, end);
   };
 }

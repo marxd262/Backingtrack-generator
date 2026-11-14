@@ -32,9 +32,14 @@ const STRUM = { strum: spec(0, 0.05, 0.002, 0.012), strumUp: spec(0, 2, 1, 2), s
 // Tonewheel-Orgel (organ.js; alles Startwerte, nicht gehört): je Variante ein Zugriegel-Preset. d16 … d1 sind die neun Zugriegel (0 bis 8, je Stufe
 // 3 dB) in der Reihenfolge 16', 5⅓', 8', 4', 2⅔', 2', 1⅗', 1⅓', 1'. level gleicht den Pegel an chords/sample/organ an (gemessen mit
 // `node scripts/render-organ.mjs level`: Akkord-Schicht allein, ohne Begrenzer, rms Sample / Synth bei level 1).
+// Schritt 2: click Pegel des Key-Clicks (0 = aus; SPIELREGELN 4.6: immer leicht, stärker bei Rock), clickOff Anteil davon bei Note-Off;
+// perc Pegel der Percussion relativ zu einem Ton (0 = aus; nur das Preset jazz hat sie an: Jazz/Blues-Staccato, aus bei Flächen),
+// percHarm 2 oder 3 (Teilton der 8'-Lage), percDecay Zeit bis -20 dB in s (schnell etwa 0,2, langsam etwa 1).
 export const DRAWBARS = Object.freeze(['d16', 'd513', 'd8', 'd4', 'd223', 'd2', 'd135', 'd113', 'd1']);
 const organ = (bars, level, over) => ({
-  level: spec(0.05, 8, 0.05, level), ...Object.fromEntries(DRAWBARS.map((name, i) => [name, spec(0, 8, 1, Number(bars[i]))])), ...over,
+  level: spec(0.05, 8, 0.05, level), ...Object.fromEntries(DRAWBARS.map((name, i) => [name, spec(0, 8, 1, Number(bars[i]))])),
+  click: spec(0, 1, 0.01, 0.1), clickOff: spec(0, 1, 0.05, 0.5), perc: spec(0, 1, 0.05, 0), percHarm: spec(2, 3, 1, 3), percDecay: spec(0.05, 2, 0.05, 0.2),
+  ...over,
 });
 // Gemeinsame Namen der Saitenstimmen (Bedeutung: string-model.js STRING_DEFAULTS); die Startwerte sind nach bestem Wissen gesetzt und
 // werden in der Hörprobe nach Gehör verändert. level gleicht den Pegel an den klassischen Synth an (gemessen, siehe voices-string-sound.spec.js).
@@ -111,8 +116,8 @@ export const TUNABLES = deepFreeze({
   // Pegel gemessen 2026-11-15 (Schritt 1, nur Grundklang; Fälle aus render-organ.mjs, je Preset sein Fall, gospel im Rock-Fall): rms Synth gegen
   // Sample bei level 1: jazz +0,98 dB, rock +3,27, ballad +1,35, gospel +6,27 (die Orgel folgt der Anschlagstärke nicht, das Sample schon;
   // im Rock hebt außerdem die Klangkette der Schicht die hohen Zugriegel an)
-  'chords/organ/jazz': organ('888000000', 0.9),
-  'chords/organ/rock': organ('888800000', 0.7),
+  'chords/organ/jazz': organ('888000000', 0.9, { perc: spec(0, 1, 0.05, 0.5) }),
+  'chords/organ/rock': organ('888800000', 0.7, { click: spec(0, 1, 0.01, 0.2) }),
   'chords/organ/gospel': organ('888888888', 0.5),
   'chords/organ/ballad': organ('838000000', 0.85),
 });

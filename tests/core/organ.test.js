@@ -1,7 +1,7 @@
 // Tonewheel-Orgel: Teilton-Gewichte aus den Zugriegeln (Foldback, Normierung), Verstimmung der Räder, Register und Feinwerte.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { tonewheelPartials, WHEEL_CENTS } from '../../src/audio/voices/organ.js';
+import { tonewheelPartials, WHEEL_CENTS, percussionGate } from '../../src/audio/voices/organ.js';
 import { TUNABLES, DRAWBARS } from '../../src/audio/voices/tunables.js';
 import { VOICES } from '../../src/core/voices.js';
 
@@ -45,4 +45,12 @@ test('Register und Feinwerte: versteckt, vier Presets mit den neun Zugriegeln al
   for (const [variant, text] of Object.entries(presets)) {
     assert.equal(DRAWBARS.map((name) => TUNABLES[`chords/organ/${variant}`][name].value).join(''), text, variant);
   }
+});
+
+test('Percussion ist single-trigger: nur der erste Ton nach freier Tastatur löst aus, gebundene Töne nicht', () => {
+  const state = { held: -Infinity };
+  const fired = [[0, 0.5], [0, 0.5], [0.001, 0.5], [0.5, 1], [0.9, 1.4], [1.398, 2], [3, 3.2]].map(([t, end]) => percussionGate(state, t, end));
+  // Akkord aus drei Tönen: nur der erste; Anschluss genau am Ende: löst aus; in den gehaltenen Ton hinein: nicht; 2 ms vor dem Ende: löst aus; nach einer Pause: löst aus
+  assert.deepEqual(fired, [true, false, false, true, false, true, true]);
+  assert.equal(state.held, 3.2);
 });
