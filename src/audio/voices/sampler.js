@@ -75,7 +75,7 @@ const MAX_RELEASE = 2; // s, die Presets haben bis zu 4,5 s (Pads würden in den
  *           (Urteil des Nutzers: 3 zu schwach, 9 besser). bend und vibrato spielen ohne das zusätzliche Abklingen der Stimme (naturalDecay)
  *   vibrato Einsatz nach `artTime` s (Standard 0,2, spätestens bei 40 % der Dauer), 5,5 Hz, Tiefe |artSemi| Halbtöne (Standard 0,15 = ±15 Cent),
  *           schwillt in 0,25 s an (nur Noten ab 0,3 s; Werte aus den Regeln statt ±25 Cent ab 30 %)
- *   scoop   wie slideIn (kleiner Abstand, z. B. -0,5 bis -1 Halbton)
+ *   scoop, slideChord   wie slideIn (kleiner Abstand, z. B. -0,5 bis -1 Halbton)
  *   fall, slideOff   rutscht in den letzten `artTime` s (Standard 0,2, höchstens 60 % der Dauer) um `artSemi` Halbtöne (Standard -2) ab und blendet dabei aus
  *   hammer, pull  ohne Anschlag: das Sample beginnt 30 ms später, Einsatz mindestens 20 ms, 15 % leiser
  *   dead    höchstens 50 ms lang, Tiefpass 900 Hz;   chuck  wie dead, höchstens 40 ms;   palmMute  Tiefpass 1600 Hz, Abklingen höchstens 0,5 s
@@ -86,7 +86,7 @@ const MAX_RELEASE = 2; // s, die Presets haben bis zu 4,5 s (Pads würden in den
 export function playNote(ctx, out, t, { pack, midi, dur, vel, art, zone = pickArtZone(pack.meta.zones, midi, vel, art), gain = 1, timeScale = 1, filter = 20000, naturalDecay = 0, eq = null, cents = 0, oneShot = false, fadeOut = 0.15, artSemi, artTime, artTone = 9, ring = false }) {
   if (!zone) return;
   let slideEnd = null; // Vorlauf des slideIn: Beginn vorziehen, das Notenende bleibt
-  const glide = art === 'slideIn' || art === 'scoop', glideTime = artTime ?? 0.08;
+  const glide = art === 'slideIn' || art === 'scoop' || art === 'slideChord', glideTime = artTime ?? 0.08;
   if (glide) { const room = t - ctx.currentTime, lead = room > 0.02 ? Math.min(glideTime, room) : 0; if (lead) { slideEnd = t; t -= lead; dur += lead; } }
   if (zone.art) art = undefined; // eigene Samples für diese Artikulation: ohne die gerechnete Variante
   if (art === 'dead' || art === 'chuck') { dur = Math.min(dur, art === 'chuck' ? 0.04 : 0.05); filter = Math.min(filter, 900); }

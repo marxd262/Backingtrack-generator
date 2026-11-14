@@ -19,7 +19,7 @@ const mk = (id, over = {}) => ({
 const ON = { ornaments: { on: 1 } };
 
 test('an ist der Standard (Bass und Gitarre); Feinwert on 0, Regler 0 und beide Schichten auf 0 ergeben denselben Strom ohne Artikulationen; ungültiger Regler wirft', () => {
-  assert.deepEqual(ART_DEFAULTS, { on: 1, bass: 1, chords: 1, drums: 0, keys: 0, pad: 0, lead: 0, band: 0, bassB: 0 });
+  assert.deepEqual(ART_DEFAULTS, { on: 1, bass: 1, chords: 1, drums: 0, keys: 0, pad: 0, lead: 0, band: 0, bassB: 0, chordsB: 0 });
   assert.deepEqual(completeArt({ on: 1, bass: -1, chords: 'x', drums: 1 }), { ...ART_DEFAULTS, drums: 1 });
   for (const id of ['funk', 'rock', 'blues']) {
     const plain = buildEvents(mk(id), { ornaments: { on: 0 } });
@@ -373,4 +373,40 @@ test('Bass B (aus bis eingeschaltet): Oktav-Pop nur auf "+" und a und bis MIDI 5
     });
   }
   for (const art of ['octavePop', 'hammer', 'slideOff', 'palmMute']) assert.ok(count[art] > 0, JSON.stringify(count));
+});
+
+// ---- Gitarre, Priorität B ----
+test('Gitarre B (aus bis eingeschaltet): Country spielt Boom-Chick, der Blues-Shuffle das Boogie-Riff je Phrase, slideChord nur auf Zählzeiten um einen Bund, embellish löst nach einem Achtel in die Terz auf', () => {
+  const count = { boogie: 0, slideChord: 0, embellish: 0 };
+  for (const seed of SEEDS) {
+    const country = mk('country', { seed }), on = chordsOf(country, { chordsB: 1 }), beat = 60 / country.bpm;
+    assert.deepEqual(chordsOf(country, {}), chordsOf(country, { chordsB: 0 }));
+    for (let bar = 0; bar < 8; bar++) {
+      const inBar = on.filter((e) => e.bar === bar), root = { A: 9, D: 2, E: 4 }[['A', 'A', 'D', 'E'][bar % 4]];
+      assert.deepEqual(inBar.filter((e) => !e.strum).map((e) => [e.beat, e.midi % 12]), [[0, root], [2, (root + 7) % 12]], `Takt ${bar}: Wechselbass`);
+      assert.deepEqual([...new Set(inBar.filter((e) => e.strum).map((e) => e.beat))], [1, 3], `Takt ${bar}: Anschlag auf 2 und 4`);
+      assert.ok(inBar.every((e) => e.midi >= 40 && e.dur <= beat + 1e-6));
+    }
+    const shuffle = mk('blues', { seed, ornaments: 1, meter: [12, 8], groove: 'shuffle' }), riff = chordsOf(shuffle, { chordsB: 1 });
+    for (const phrase of [0, 4]) {
+      const bars = [0, 1, 2, 3].map((k) => riff.filter((e) => e.bar === phrase + k)), boogie = bars.map((list) => list.length > 0 && list.every((e) => e.strum?.[1] === 2));
+      assert.ok(boogie.every((x) => x === boogie[0]), `s=${seed}: die Phrase ab Takt ${phrase} spielt das Riff ganz oder gar nicht`);
+      if (!boogie[0]) continue;
+      count.boogie++;
+      for (const list of bars) {
+        assert.equal(list.length, 16); // 4 Schläge mal 2 Achtel mal 2 Töne
+        assert.deepEqual(list.filter((e) => e.strum[0] === 1 && Math.round(e.beat * 3) % 3 === 0).map((e) => e.midi - list[0].midi), [7, 9, 10, 9]);
+      }
+    }
+    for (const id of ['funk', 'rock', 'dreamy']) {
+      const track = mk(id, { seed, ornaments: 1, bpm: 70 }), plain = chordsOf(track, {}), b = chordsOf(track, { chordsB: 1 });
+      for (const e of b.filter((x) => x.art === 'slideChord')) { count.slideChord++; assert.ok(stepOf(e) % 4 === 0 && Math.abs(e.artSemi) === 1 && e.artTime >= 0.04 && e.artTime <= 0.08, JSON.stringify(e)); }
+      for (const e of b.filter((x) => x.art === 'hammer')) {
+        count.embellish++;
+        const sus = b.find((x) => x.bar === e.bar && Math.abs(x.t + x.dur - e.t) < 1e-5 && Math.abs(x.midi - e.midi) <= 2 && x.midi !== e.midi);
+        assert.ok(sus && plain.some((x) => x.bar === e.bar && x.midi === e.midi), JSON.stringify(e));
+      }
+    }
+  }
+  assert.ok(count.boogie > 0 && count.slideChord > 0 && count.embellish > 0, JSON.stringify(count));
 });

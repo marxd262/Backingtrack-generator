@@ -17,6 +17,7 @@ export const STEPS = {
   11: { name: 'guitar', cases: 'art', a: { 'mix/art': { on: 1, chords: 0 } }, b: { 'mix/art': { on: 1 } } },
   // ab hier je Instrument unabhängig: A = Standard (Bass und Gitarre an), B = dazu nur dieses Instrument
   12: { name: 'drums', cases: 'art', a: {}, b: { 'mix/art': { drums: 1 } } },
+  18: { name: 'guitarb', cases: 'art', a: {}, b: { 'mix/art': { chordsB: 1 } } }, // Gitarre Priorität B: slideChord, embellish, boomChick, boogie
   17: { name: 'bassb', cases: 'art', a: {}, b: { 'mix/art': { bassB: 1 } } }, // Bass Priorität B: slideOff, palmMute, octavePop, hammer/pull
   15: { name: 'band', cases: 'art', a: {}, b: { 'mix/art': { band: 1 } } }, // Band-Regeln für Bass und Gitarre (Fill-Takte, Slide in den Refrain)
   14: { name: 'pad', cases: 'art', a: {}, b: { 'mix/art': { pad: 1 } } },
@@ -62,6 +63,8 @@ export const ART_CASES = [
   ['dreamy', 70, { tags: { synths: ['arpeggio', 'widePad', 'warm'] }, voices: { chords: { id: 'sample', variant: 'steel' } } }],
   // seit Schritt 12: Reggae mit Stopp vor dem Break und Refrain danach (Side-Stick, Crash-Choke, Ride mit getretener Hi-Hat)
   ['reggae', 76, { track: { form: { sections: [{ type: 'verse', bars: 4 }, { type: 'break', bars: 2 }, { type: 'chorus', bars: 4 }] } } }],
+  // seit Schritt 18: Country mit Stahlsaiten-Gitarre (boomChick)
+  ['country', 112, { voices: { chords: { id: 'sample', variant: 'steel' } } }],
 ];
 
 const RATE = 44100;

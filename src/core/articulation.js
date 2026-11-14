@@ -10,12 +10,13 @@
 import { r6 } from './timeline.js';
 import { byTime, roundVel } from './event-helpers.js';
 import { chordTones, diatonicChords, noteToPc } from './music.js';
+import { CHORDS } from './chords.js';
 import { grooveIdFor } from './grooves.js';
 import { phrasesOf } from './form-arrange.js';
 import { densityAt } from './form-types.js';
 
-export const ART_DEFAULTS = Object.freeze({ on: 1, bass: 1, chords: 1, drums: 0, keys: 0, pad: 0, lead: 0, band: 0, bassB: 0 });
-const RULE_LAYER = { keys: 'chords', bassB: 'bass' }; // Regelgruppe -> Schicht, wenn die Namen abweichen
+export const ART_DEFAULTS = Object.freeze({ on: 1, bass: 1, chords: 1, drums: 0, keys: 0, pad: 0, lead: 0, band: 0, bassB: 0, chordsB: 0 });
+const RULE_LAYER = { keys: 'chords', bassB: 'bass', chordsB: 'chords' }; // Regelgruppe -> Schicht, wenn die Namen abweichen
 
 /** Füllt die Feinwerte auf; nur endliche Zahlen >= 0 zählen. */
 export function completeArt(options) {
@@ -125,6 +126,13 @@ const DRUM_PROFILES = {
 // Bass, Priorität B: slideOff (Phrasenende vor einer Pause, vor einem Stopp, letzte Note), palmMute (Strophe, je Takt), octavePop (auf "+" und a),
 // hammer (Folgeton im Abstand von 1 bis 2 Halbtönen ohne Anschlag, in Fill-Takten oder bei energy ab 0,6)
 const BASS_B = { shuffle: { slideOff: 0.2, hammer: 0.2 }, slowBlues: { slideOff: 0.2 }, rock: { slideOff: 0.3, palmMute: 0.5 }, funk: { octavePop: 0.3, hammer: 0.2 } };
+// Gitarre, Priorität B: slideChord (Stab auf einer Zählzeit rutscht von einem Bund daneben an), embellish (gehaltener Akkord: Sekunde oder Quarte,
+// nach einem Achtel Hammer-on auf die Terz), boomChick (Muster: Basston auf 1 und 3, Anschlag auf 2 und 4), boogie (Riff Quinte-Sexte-Septime auf
+// den tiefen Saiten, je Phrase, nur im Triolen-Raster)
+const GUITAR_B = {
+  funk: { slideChord: 0.2 }, shuffle: { slideChord: 0.15, boogie: 0.5 }, slowBlues: { slideChord: 0.25 }, rock: { embellish: 0.15 },
+  ballad: { embellish: 0.15 }, country: { boomChick: true, embellish: 0.2 },
+};
 // Tasten je Profil: pedal (Wahrscheinlichkeit je Takt; Ballade immer, Rock und Blues teilweise), staccato (kurze Stabs)
 const KEY_PROFILES = { ballad: { pedal: 1 }, rock: { pedal: 0.5 }, shuffle: { pedal: 0.5 }, slowBlues: { pedal: 0.5 }, funk: { staccato: true } };
 const GUITARS = new Set(['guitar', 'muted', 'jazz', 'funk', 'steel', 'nylon', 'twelve', 'freepats', 'freepatsjazz']); // Varianten von chords/sample
@@ -364,6 +372,57 @@ const RULES = {
         // ein Chuck dämpft die Saiten: was davor klingt, endet dort
         if (art === 'chuck' && k > 0) for (const e of bySteps.get(order[k - 1])) e.dur = r6(Math.min(e.dur, Math.max(0.001, stab[0].t - e.t)));
       });
+    }
+  },
+
+  // Rhythmusgitarre, Priorität B (SPEC_PHASE3 5.3), läuft nach den A-Regeln; nur Sample-Gitarren. Die Muster boomChick und boogie ersetzen die
+  // Stäbe ihres Takts (nie den Takt vor einem Stopp), die Verzierungen greifen nur an Stäben ohne Artikulation (embellish auch an letRing).
+  chordsB(out, { track, bars, ctx, profile, tempo, p, roll, slotTime }) {
+    const voice = track.voices?.chords, P = GUITAR_B[profile] ?? {};
+    if (voice?.id !== 'sample' || !GUITARS.has(voice.variant)) return;
+    const stabs = new Map(); // Takt -> Map(Schritt -> Töne des Stabs)
+    for (const e of out) {
+      if (e.layer !== 'chords' || e.type !== 'note' || !e.strum) continue;
+      const s = Math.round(e.beat * bars[e.bar].sub), m = stabs.get(e.bar) ?? stabs.set(e.bar, new Map()).get(e.bar);
+      m.set(s, [...(m.get(s) ?? []), e]);
+    }
+    for (const [index, bySteps] of stabs) {
+      const b = bars[index], c = ctx[index], phrase = { ...c, inPhrase: 0 }, tones = chordTones(b.chord, 3), vel = [...bySteps.values()][0][0].vel;
+      const low = tones[0] - 12 >= 40 ? tones[0] - 12 : tones[0]; // Basston auf den tiefen Saiten (ab E2)
+      const clear = () => { for (const stab of bySteps.values()) for (const e of stab) out.splice(out.indexOf(e), 1); };
+      const play = (s, midis, steps, more) => midis.forEach((midi, i) => out.push({
+        t: slotTime(b, s), bar: index, beat: s / b.sub, type: 'note', layer: 'chords', midi, vel: more?.vel ?? vel, dur: r6(steps * b.stepSec),
+        ...(midis.length > 1 && { strum: [i, midis.length] }), ...(more?.art && { art: more.art }),
+      }));
+      if (P.boomChick && b.beats === 4 && !c.stop) { // Wechselbass Grundton und Quinte auf 1 und 3, kurzer Anschlag auf 2 und 4
+        clear();
+        play(0, [low], b.sub); play(2 * b.sub, [low + CHORDS[b.chord.quality].fifth], b.sub);
+        for (const beat of [1, 3]) play(beat * b.sub, tones, b.sub / 2);
+        continue;
+      }
+      if (P.boogie && b.sub === 3 && !c.stop && roll(phrase, 'chordsB', 'boogie') < p(P.boogie, 'chordsB')) { // je Schlag zwei Shuffle-Achtel auf Grundton plus Quinte, Sexte, Septime, Sexte
+        clear();
+        const art = roll(phrase, 'chordsB', 'boogieMute') < 0.5 ? 'palmMute' : undefined;
+        for (let beat = 0; beat < b.beats; beat++) {
+          play(beat * 3, [low, low + [7, 9, 10, 9][beat % 4]], 2, { art });
+          play(beat * 3 + 2, [low, low + [7, 9, 10, 9][beat % 4]], 1, { art, vel: roundVel(vel * 0.85) });
+        }
+        continue;
+      }
+      for (const [s, stab] of bySteps) {
+        const plain = !stab[0].art, hammerSteps = b.sub === 4 ? 2 : 1, wait = hammerSteps * b.stepSec; // ein Achtel
+        if (P.slideChord && plain && s % b.sub === 0 && roll(c, 'chordsB', 'slideChord', s) < p(P.slideChord, 'chordsB')) {
+          const artSemi = roll(c, 'chordsB', 'slideDir', s) < 0.7 ? -1 : 1, artTime = r6(clamp((0.04 + 0.04 * roll(c, 'chordsB', 'slideTime', s)) * tempo, 0.04, 0.08));
+          for (const e of stab) Object.assign(e, { art: 'slideChord', artSemi, artTime });
+        } else if (P.embellish && (plain || stab[0].art === 'letRing') && stab[0].dur >= (2 * 60) / track.bpm - 1e-6 && roll(c, 'chordsB', 'embellish', s) < p(P.embellish, 'chordsB')) {
+          const third = stab.find((e) => [3, 4].includes((((e.midi - tones[0]) % 12) + 12) % 12));
+          if (!third || third.t + wait >= b.end - 0.01) continue;
+          const major = (((third.midi - tones[0]) % 12) + 12) % 12 === 4, sus4 = roll(c, 'chordsB', 'sus', s) < 0.5;
+          const { strum, ...rest } = third; // der Hammer-on ist ein einzelner Ton, kein Teil des Strums
+          out.push({ ...rest, t: r6(third.t + wait), beat: third.beat + hammerSteps / b.sub, art: 'hammer', vel: roundVel(third.vel * 0.8), dur: r6(third.dur - wait) });
+          Object.assign(third, { midi: third.midi + (sus4 ? (major ? 1 : 2) : major ? -2 : -1), dur: r6(wait) });
+        }
+      }
     }
   },
 
