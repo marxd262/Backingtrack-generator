@@ -83,6 +83,6 @@ export function sampleVoice(packId, layer, ctx, { getTimbre, tuned, classic, set
       filter = Math.min(filter, velocityBrightnessHz(e.vel, tuned('softHz')));
       oneShot = tuned('oneShot') >= 0.5;
     }
-    playNote(ctx, out, when, { pack, midi: e.midi, dur: e.dur, vel: e.vel, gain, timeScale, filter, naturalDecay: tuned('decay'), eq, cents, oneShot, art: e.art, artSemi: e.artSemi, artTime: e.artTime, artTone: e.artTone, ring: e.ring === true });
+    playNote(ctx, out, when, { pack, midi: e.midi, dur: e.dur, vel: e.vel, gain, timeScale, filter, naturalDecay: tuned('decay'), eq, cents, oneShot, art: e.art, artSemi: e.artSemi, artTime: e.artTime, artTone: e.artTone, artRate: e.artRate, ring: e.ring === true });
   };
 }

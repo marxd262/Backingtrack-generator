@@ -266,7 +266,8 @@ const RULES = {
   },
 
   // Lead (Saxofon, Flöte), Priorität B (SPEC_PHASE3 5.10): je Note höchstens eine Artikulation mit dem Vorrang fall (Phrasenende, nur Saxofon),
-  // vibrato (lange Noten), scoop (Phrasenanfang oder betonte Note). Phrase = Noten ohne Lücke von einem Schlag
+  // vibrato (lange Noten), scoop (Phrasenanfang oder betonte Note). Phrase = Noten ohne Lücke von einem Schlag.
+  // Das Vibrato folgt dem Tempo (artRate: 4 Hz bei 60 bpm bis 5,5 Hz ab 120 bpm; Urteil des Nutzers zu festen 5,5 Hz: "im Vergleich zum Takt etwas schnell")
   lead(out, { track, bars, ctx, tempo, p, roll }) {
     const notes = out.filter((e) => e.layer === 'lead' && e.type === 'note').sort(byTime), beat = 60 / track.bpm;
     const sax = track.voices?.lead?.variant === 'sax';
@@ -276,7 +277,7 @@ const RULES = {
       if (sax && ends && n.dur >= 0.3 && roll(c, 'lead', 'fall', s) < p(0.25, 'lead')) {
         Object.assign(n, { art: 'fall', artSemi: -2 - Math.floor(4 * roll(c, 'lead', 'fallSemi', s)), artTime: r6(clamp((0.15 + 0.15 * roll(c, 'lead', 'fallTime', s)) * tempo, 0.15, 0.3)) });
       } else if (n.dur >= beat && roll(c, 'lead', 'vibrato', s) < p(0.6, 'lead')) {
-        Object.assign(n, { art: 'vibrato', artSemi: r6(0.1 + 0.1 * roll(c, 'lead', 'vibratoDepth', s)), artTime: r6(0.15 + 0.15 * roll(c, 'lead', 'vibratoStart', s)) });
+        Object.assign(n, { art: 'vibrato', artSemi: r6(0.1 + 0.1 * roll(c, 'lead', 'vibratoDepth', s)), artTime: r6(0.15 + 0.15 * roll(c, 'lead', 'vibratoStart', s)), artRate: r6(clamp(4 + (track.bpm - 60) / 40, 4, 5.5)) });
       } else if ((starts || n.vel >= 0.85) && roll(c, 'lead', 'scoop', s) < p(0.3, 'lead')) {
         Object.assign(n, { art: 'scoop', artSemi: r6(-0.5 - 0.5 * roll(c, 'lead', 'scoopSemi', s)), artTime: r6(clamp((0.05 + 0.05 * roll(c, 'lead', 'scoopTime', s)) * tempo, 0.05, 0.1)) });
       }

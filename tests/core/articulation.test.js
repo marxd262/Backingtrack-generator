@@ -325,11 +325,13 @@ test('Lead: aus bis eingeschaltet; fall nur am Saxofon und am Phrasenende, vibra
     on.forEach((n, i) => {
       if (n.art) count[n.art] = (count[n.art] ?? 0) + 1;
       if (n.art === 'fall') assert.ok(variant === 'sax' && (!on[i + 1] || on[i + 1].t - (n.t + n.dur) >= beat - 1e-6) && n.artSemi <= -2 && n.artSemi >= -5 && n.artTime >= 0.15 && n.artTime <= 0.3, JSON.stringify(n));
-      if (n.art === 'vibrato') assert.ok(n.dur >= beat && n.artSemi >= 0.1 && n.artSemi <= 0.2 && n.artTime >= 0.15 && n.artTime <= 0.3, JSON.stringify(n));
+      if (n.art === 'vibrato') assert.ok(n.dur >= beat && n.artSemi >= 0.1 && n.artSemi <= 0.2 && n.artTime >= 0.15 && n.artTime <= 0.3 && n.artRate === 5.5, JSON.stringify(n)); // Rock 120: 5,5 Hz
       if (n.art === 'scoop') assert.ok(n.artSemi <= -0.5 && n.artSemi >= -1 && n.artTime >= 0.05 && n.artTime <= 0.1, JSON.stringify(n));
     });
   }
   assert.ok(count.fall > 0 && count.vibrato > 0 && count.scoop > 0, JSON.stringify(count));
+  const slow = buildEvents(mk('dreamy', { bpm: 70, ornaments: 1, layers: { drums: true, bass: true, chords: true, pad: true, lead: true }, jobs: { lead: 'melody' } }), { ornaments: { lead: 1 } }).filter((e) => e.art === 'vibrato');
+  assert.ok(slow.length > 0 && slow.every((e) => e.artRate === 4.25), 'bei 70 bpm 4,25 Hz');
 });
 
 // ---- Band-Regeln ----

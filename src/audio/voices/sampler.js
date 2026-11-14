@@ -73,7 +73,7 @@ const MAX_RELEASE = 2; // s, die Presets haben bis zu 4,5 s (Pads würden in den
  *   bend    beginnt `artSemi` Halbtöne daneben (Standard -2), hält kurz (höchstens 40 ms) und zieht in höchstens 180 ms weich auf den Ton;
  *           `artTone` (dB je Halbton, Standard 9, 0 = aus): ein Höhenregal ab 1800 Hz läuft mit, von -artTone·Halbtöne/2 auf +artTone·Halbtöne/2 dB
  *           (Urteil des Nutzers: 3 zu schwach, 9 besser). bend und vibrato spielen ohne das zusätzliche Abklingen der Stimme (naturalDecay)
- *   vibrato Einsatz nach `artTime` s (Standard 0,2, spätestens bei 40 % der Dauer), 5,5 Hz, Tiefe |artSemi| Halbtöne (Standard 0,15 = ±15 Cent),
+ *   vibrato Einsatz nach `artTime` s (Standard 0,2, spätestens bei 40 % der Dauer), `artRate` Hz (Standard 5,5), Tiefe |artSemi| Halbtöne (Standard 0,15 = ±15 Cent),
  *           schwillt in 0,25 s an (nur Noten ab 0,3 s; Werte aus den Regeln statt ±25 Cent ab 30 %)
  *   scoop, slideChord   wie slideIn (kleiner Abstand, z. B. -0,5 bis -1 Halbton)
  *   fall, slideOff   rutscht in den letzten `artTime` s (Standard 0,2, höchstens 60 % der Dauer) um `artSemi` Halbtöne (Standard -2) ab und blendet dabei aus
@@ -83,7 +83,7 @@ const MAX_RELEASE = 2; // s, die Presets haben bis zu 4,5 s (Pads würden in den
  *   swell   blendet in `artTime` s ein (Pad)
  * `ring` (letRing, Arpeggio-Überlappung): der Ton wird nicht abgeschnitten, Ausklingen 2 s.
  */
-export function playNote(ctx, out, t, { pack, midi, dur, vel, art, zone = pickArtZone(pack.meta.zones, midi, vel, art), gain = 1, timeScale = 1, filter = 20000, naturalDecay = 0, eq = null, cents = 0, oneShot = false, fadeOut = 0.15, artSemi, artTime, artTone = 9, ring = false }) {
+export function playNote(ctx, out, t, { pack, midi, dur, vel, art, zone = pickArtZone(pack.meta.zones, midi, vel, art), gain = 1, timeScale = 1, filter = 20000, naturalDecay = 0, eq = null, cents = 0, oneShot = false, fadeOut = 0.15, artSemi, artTime, artTone = 9, artRate = 5.5, ring = false }) {
   if (!zone) return;
   let slideEnd = null; // Vorlauf des slideIn: Beginn vorziehen, das Notenende bleibt
   const glide = art === 'slideIn' || art === 'scoop' || art === 'slideChord', glideTime = artTime ?? 0.08;
@@ -189,7 +189,7 @@ export function playNote(ctx, out, t, { pack, midi, dur, vel, art, zone = pickAr
   if (art === 'vibrato' && span >= 0.3) {
     const start = Math.min(artTime ?? 0.2, 0.4 * span), length = span - start, depth = 100 * (Number.isFinite(artSemi) ? Math.abs(artSemi) : 0.15);
     const curve = new Float32Array(Math.ceil(length * 200));
-    for (let i = 0; i < curve.length; i++) { const x = i / 200; curve[i] = rate * 2 ** ((depth * Math.min(1, x / 0.25) * Math.sin(2 * Math.PI * 5.5 * x)) / 1200); }
+    for (let i = 0; i < curve.length; i++) { const x = i / 200; curve[i] = rate * 2 ** ((depth * Math.min(1, x / 0.25) * Math.sin(2 * Math.PI * artRate * x)) / 1200); }
     src.playbackRate.setValueCurveAtTime(curve, t + start, length);
   }
   src.start(t, art === 'hammer' ? Math.min(0.03, sample.frames / sample.rate / 2) : 0);

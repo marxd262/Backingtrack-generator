@@ -31,6 +31,8 @@ export const STEPS = {
     name: 'lead', cases: 'art', a: {}, b: { 'mix/art': { lead: 1 } },
     extra: { voices: { lead: { id: 'sample', variant: 'sax' } }, track: { layers: { drums: true, bass: true, chords: true, pad: true, lead: true, percussion: true }, jobs: { lead: 'melody', percussion: 'mixed' } } },
   },
+  // Vibrato am Saxofon: A = feste 5,5 Hz (der Schlüssel 'demo/vib' ist kein Feinwert, er überschreibt artRate im Render), B = Standard (folgt dem Tempo)
+  23: { name: 'vibrato', cases: 'art', a: { 'demo/vib': { rate: 5.5 } }, b: {}, extra: { voices: { lead: { id: 'sample', variant: 'sax' } }, track: { layers: { drums: true, bass: true, chords: true, pad: true, lead: true, percussion: true }, jobs: { lead: 'melody', percussion: 'mixed' } } } },
   // Artikulationen (Vorbereitung Phase 3): keine Regeln, nur eine feste Demo-Verteilung in renderInPage; der Schlüssel 'demo/art' ist kein Feinwert,
   // er lässt in beiden Renders eine Gitarre (FreePats) die Lead-Linie statt der Akkorde spielen und schaltet in B die Artikulationen ein
   7: { name: 'art', a: { 'demo/art': { on: 0 } }, b: { 'demo/art': { on: 1 } } },
@@ -106,6 +108,7 @@ async function renderInPage([style, bpm, kind, tuning, limiter, extra]) {
   const demo = tuning['demo/art'];
   if (demo) { track.layers.lead = true; track.jobs.lead = 'melody'; track.voices.chords = { id: 'sample', variant: 'freepats' }; }
   const events = buildEvents(track, { timing: tuning['mix/timing'], ornaments: tuning['mix/art'] });
+  if (tuning['demo/vib']) for (const e of events) if (e.art === 'vibrato') e.artRate = tuning['demo/vib'].rate;
   if (demo) { // die Lead-Linie spielt eine Gitarre (Bends sind eine Gitarren-Technik): Lead-Noten auf die Akkord-Schicht legen, die Akkorde selbst entfallen
     for (let i = events.length - 1; i >= 0; i--) if (events[i].layer === 'chords') events.splice(i, 1);
     for (const e of events) if (e.layer === 'lead') e.layer = 'chords';
