@@ -147,7 +147,9 @@ function riff(b, _v, rng, params, _fill, _g, ctx) {
   const upper = [tones.map((m) => m - tones[0]).find((d) => d >= 6 && d <= 8) ?? 7, sixth, has(10) ? 10 : 11, sixth];
   const steps = [], midis = [];
   for (let beat = 0; beat < b.beats; beat++) { steps.push(beat * b.sub, beat * b.sub + 2); midis.push(low, low + upper[beat % 4]); }
-  return line(b, rng, params, steps, midis, 2 * b.stepSec, loudness(params));
+  // Anschlag 0,6 der übrigen Aufgaben: das Riff spielt durchgehend und tief; mit vollem Anschlag war es allein so laut wie die übrige Band
+  // (Schritt 26, gemessen: Unterschied B-A 0 dB im Funk, +1,6 dB im Rock)
+  return line(b, rng, params, steps, midis, 2 * b.stepSec, 0.6 * loudness(params));
 }
 
 /** Aufgaben des Leads (ohne `off`): (Takt, Abschnittszustand, rng, params, Fill-Takt, Groove, { scale, track }) -> Noten. */
