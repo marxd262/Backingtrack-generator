@@ -321,9 +321,9 @@ test('Pad: swell zu Beginn eines Teils (0,3 bis 1,5 s, höchstens die halbe Note
 });
 
 // ---- Lead ----
-test('Lead: abschaltbar; fall nur am Saxofon und am Phrasenende, vibrato nur auf Noten ab einem Schlag, scoop höchstens ein Halbton von unten', () => {
+test('Lead: abschaltbar; fall nur am Saxofon und am Phrasenende, vibrato nur auf Noten ab einem Schlag, scoop höchstens ein Halbton von unten; Gitarre: bend auf langen Noten aus der Skala, slideIn statt scoop, hammer/pull gebunden', () => {
   const count = {};
-  for (const variant of ['sax', 'flute']) for (const seed of SEEDS) {
+  for (const variant of ['sax', 'flute', 'guitar']) for (const seed of SEEDS) {
     const track = mk('rock', { seed, ornaments: 1, layers: { drums: true, bass: true, chords: true, pad: true, lead: true }, jobs: { lead: seed % 2 ? 'melody' : 'callResponse' }, voices: { lead: { id: 'sample', variant } } }); // die Melodie hat fast nur lange Noten (vibrato), Ruf und Antwort kurze (scoop)
     const of = (ornaments) => buildEvents(track, { timing: GRID, ornaments }).filter((e) => e.layer === 'lead');
     const off = of({}), on = of({ lead: 1 }), beat = 60 / track.bpm;
@@ -333,10 +333,17 @@ test('Lead: abschaltbar; fall nur am Saxofon und am Phrasenende, vibrato nur auf
       if (n.art) count[n.art] = (count[n.art] ?? 0) + 1;
       if (n.art === 'fall') assert.ok(variant === 'sax' && (!on[i + 1] || on[i + 1].t - (n.t + n.dur) >= beat - 1e-6) && n.artSemi <= -2 && n.artSemi >= -5 && n.artTime >= 0.15 && n.artTime <= 0.3, JSON.stringify(n));
       if (n.art === 'vibrato') assert.ok(n.dur >= beat && n.artSemi >= 0.1 && n.artSemi <= 0.2 && n.artTime >= 0.15 && n.artTime <= 0.3 && n.artRate === 5.5, JSON.stringify(n)); // Rock 120: 5,5 Hz
-      if (n.art === 'scoop') assert.ok(n.artSemi <= -0.5 && n.artSemi >= -1 && n.artTime >= 0.05 && n.artTime <= 0.1, JSON.stringify(n));
+      if (n.art === 'scoop') assert.ok(variant !== 'guitar' && n.artSemi <= -0.5 && n.artSemi >= -1 && n.artTime >= 0.05 && n.artTime <= 0.1, JSON.stringify(n));
+      if (['bend', 'slideIn', 'hammer', 'pull'].includes(n.art)) assert.equal(variant, 'guitar', n.art);
+      if (n.art === 'bend') assert.ok(n.dur >= beat && [-1, -2].includes(n.artSemi) && (n.artSemi === -1 || [9, 11, 0, 2, 4, 5, 7].includes((n.midi - 2) % 12)), JSON.stringify(n)); // A-Moll
+      if (n.art === 'slideIn') assert.ok([-1, -2].includes(n.artSemi) && n.artTime >= 0.05 && n.artTime <= 0.1, JSON.stringify(n));
+      if (n.art === 'hammer' || n.art === 'pull') {
+        const step = n.midi - on[i - 1].midi;
+        assert.ok(on[i - 1].bar === n.bar && Math.abs(step) >= 1 && Math.abs(step) <= 3 && (step > 0) === (n.art === 'hammer') && Math.abs(on[i - 1].t + on[i - 1].dur - n.t) < 1e-5, JSON.stringify([on[i - 1], n]));
+      }
     });
   }
-  assert.ok(count.fall > 0 && count.vibrato > 0 && count.scoop > 0, JSON.stringify(count));
+  assert.ok(count.fall > 0 && count.vibrato > 0 && count.scoop > 0 && count.bend > 0 && count.slideIn > 0 && (count.hammer ?? 0) + (count.pull ?? 0) > 0, JSON.stringify(count));
   const slow = buildEvents(mk('dreamy', { bpm: 70, ornaments: 1, layers: { drums: true, bass: true, chords: true, pad: true, lead: true }, jobs: { lead: 'melody' } }), { ornaments: { lead: 1 } }).filter((e) => e.art === 'vibrato');
   assert.ok(slow.length > 0 && slow.every((e) => e.artRate === 4.25), 'bei 70 bpm 4,25 Hz');
 });

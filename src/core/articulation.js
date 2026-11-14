@@ -266,21 +266,32 @@ const RULES = {
     }
   },
 
-  // Lead (Saxofon, Flöte), Priorität B (SPEC_PHASE3 5.10): je Note höchstens eine Artikulation mit dem Vorrang fall (Phrasenende, nur Saxofon),
-  // vibrato (lange Noten), scoop (Phrasenanfang oder betonte Note). Phrase = Noten ohne Lücke von einem Schlag.
+  // Lead (Saxofon, Flöte, Gitarre), Priorität B (SPEC_PHASE3 5.10): je Note höchstens eine Artikulation mit dem Vorrang fall (Phrasenende, nur Saxofon),
+  // bend (nur Gitarre, lange Noten: der Ton wird von der Skalenstufe darunter gezogen, 1 oder 2 Halbtöne; Antwort des Nutzers auf Frage 11: Bends nur
+  // im Einzelnoten-Spiel der Lead-Gitarre), vibrato (lange Noten), scoop (Phrasenanfang oder betonte Note; an der Gitarre ein slideIn von 1 bis 2
+  // Halbtönen), hammer/pull (nur Gitarre: Folgeton 1 bis 3 Halbtöne neben der Note davor im selben Takt, ohne Lücke, ohne Anschlag).
+  // Phrase = Noten ohne Lücke von einem Schlag. Alle Zahlen der Gitarre sind Startwerte, nicht gehört.
   // Das Vibrato folgt dem Tempo (artRate: 4 Hz bei 60 bpm bis 5,5 Hz ab 120 bpm; Urteil des Nutzers zu festen 5,5 Hz: "im Vergleich zum Takt etwas schnell")
   lead(out, { track, bars, ctx, tempo, p, roll }) {
     const notes = out.filter((e) => e.layer === 'lead' && e.type === 'note').sort(byTime), beat = 60 / track.bpm;
-    const sax = track.voices?.lead?.variant === 'sax';
+    const sax = track.voices?.lead?.variant === 'sax', guitar = track.voices?.lead?.id === 'sample' && track.voices.lead.variant === 'guitar';
+    const scale = new Set(diatonicChords(track.key).map((ch) => noteToPc(ch.root)));
     notes.forEach((n, i) => {
       const c = ctx[n.bar], s = Math.round(n.beat * bars[n.bar].sub), prev = notes[i - 1], next = notes[i + 1];
       const starts = !prev || n.t - (prev.t + prev.dur) >= beat, ends = !next || next.t - (n.t + n.dur) >= beat;
       if (sax && ends && n.dur >= 0.3 && roll(c, 'lead', 'fall', s) < p(0.25, 'lead')) {
         Object.assign(n, { art: 'fall', artSemi: -2 - Math.floor(4 * roll(c, 'lead', 'fallSemi', s)), artTime: r6(clamp((0.15 + 0.15 * roll(c, 'lead', 'fallTime', s)) * tempo, 0.15, 0.3)) });
+      } else if (guitar && n.dur >= beat && roll(c, 'lead', 'bend', s) < p(0.3, 'lead')) {
+        Object.assign(n, { art: 'bend', artSemi: scale.has((n.midi - 2) % 12) ? -2 : -1 });
       } else if (n.dur >= beat && roll(c, 'lead', 'vibrato', s) < p(0.6, 'lead')) {
         Object.assign(n, { art: 'vibrato', artSemi: r6(0.1 + 0.1 * roll(c, 'lead', 'vibratoDepth', s)), artTime: r6(0.15 + 0.15 * roll(c, 'lead', 'vibratoStart', s)), artRate: r6(clamp(4 + (track.bpm - 60) / 40, 4, 5.5)) });
       } else if ((starts || n.vel >= 0.85) && roll(c, 'lead', 'scoop', s) < p(0.3, 'lead')) {
-        Object.assign(n, { art: 'scoop', artSemi: r6(-0.5 - 0.5 * roll(c, 'lead', 'scoopSemi', s)), artTime: r6(clamp((0.05 + 0.05 * roll(c, 'lead', 'scoopTime', s)) * tempo, 0.05, 0.1)) });
+        const artTime = r6(clamp((0.05 + 0.05 * roll(c, 'lead', 'scoopTime', s)) * tempo, 0.05, 0.1)), x = roll(c, 'lead', 'scoopSemi', s);
+        Object.assign(n, guitar ? { art: 'slideIn', artSemi: x < 0.5 ? -1 : -2, artTime } : { art: 'scoop', artSemi: r6(-0.5 - 0.5 * x), artTime });
+      } else if (guitar && prev && prev.bar === n.bar && n.t - (prev.t + prev.dur) < bars[n.bar].stepSec && Math.abs(n.midi - prev.midi) >= 1 && Math.abs(n.midi - prev.midi) <= 3
+        && roll(c, 'lead', 'hammer', s) < p(0.4, 'lead')) {
+        Object.assign(n, { art: n.midi > prev.midi ? 'hammer' : 'pull', vel: roundVel(n.vel * 0.85) });
+        prev.dur = r6(Math.max(prev.dur, n.t - prev.t)); // gebunden: der Ton davor hält bis hierher
       }
     });
   },
