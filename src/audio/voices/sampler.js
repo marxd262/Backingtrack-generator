@@ -65,9 +65,18 @@ const MAX_RELEASE = 2; // s, die Presets haben bis zu 4,5 s (Pads würden in den
  * mit weniger als 0,05 dB entfallen; davor ein Hochpass bei 50 Hz. Nach dem Ausklingen stoppt die Quelle. `zone` (optional) spielt diese Zone statt
  * der nach Ton und Anschlag gewählten (Schläge: sample-hits.js). `cents` verstimmt zusätzlich. `oneShot` spielt nie die Schleife einer Zone mit
  * Schleife: das Sample klingt an seinem Ende aus (Zonen ohne Schleife bleiben unverändert); reicht die Note bis dahin, beginnt das Ausklingen spätestens `fadeOut` (s) vor dem Ende und endet mit ihm.
+ * `art` (Artikulation, Vorbereitung Phase 3; gerechnet, solange es keine eigenen Samples gibt; nach Wissen gesetzt, nicht gehört; Unbekanntes wirkt nicht):
+ *   slide   gleitet in 80 ms von `artSemi` Halbtönen daneben (Standard -2) auf den Ton
+ *   bend    beginnt `artSemi` Halbtöne daneben (Standard -2), hält 10 % der Dauer und zieht bis 45 % der Dauer auf den Ton
+ *   vibrato ab 30 % der Dauer 5,5 Hz, bis ±25 Cent (nur Noten ab 0,3 s)
+ *   hammer  ohne Anschlag: das Sample beginnt 30 ms später, Einsatz mindestens 20 ms, 15 % leiser
+ *   dead    höchstens 50 ms lang, Tiefpass 900 Hz;   mute  Tiefpass 1600 Hz, Abklingen höchstens 0,5 s
  */
-export function playNote(ctx, out, t, { pack, midi, dur, vel, zone = pickZone(pack.meta.zones, midi, vel), gain = 1, timeScale = 1, filter = 20000, naturalDecay = 0, eq = null, cents = 0, oneShot = false, fadeOut = 0.15 }) {
+export function playNote(ctx, out, t, { pack, midi, dur, vel, zone = pickZone(pack.meta.zones, midi, vel), gain = 1, timeScale = 1, filter = 20000, naturalDecay = 0, eq = null, cents = 0, oneShot = false, fadeOut = 0.15, art, artSemi }) {
   if (!zone) return;
+  if (art === 'dead') { dur = Math.min(dur, 0.05); filter = Math.min(filter, 900); }
+  if (art === 'mute') { filter = Math.min(filter, 1600); naturalDecay = naturalDecay > 0 ? Math.min(naturalDecay, 0.5) : 0.5; }
+  if (art === 'hammer') gain *= 0.85;
   const sample = pack.meta.samples[zone.sample];
   const src = ctx.createBufferSource();
   src.buffer = buffersFor(ctx, pack)[zone.sample];
@@ -78,7 +87,7 @@ export function playNote(ctx, out, t, { pack, midi, dur, vel, zone = pickZone(pa
   const velocity = Number.isFinite(vel) ? Math.min(1, Math.max(0, vel)) : 1; // ungültig zählt wie kräftig (wie bei der Zonenwahl)
   const peak = Math.max(FLOOR, gain * zoneGain(zone.attenuationDb) * velocity);
   const sustain = Math.max(FLOOR, peak * dbToGain(zone.sustainDb));
-  const attack = Math.max(0.003, zone.attack * timeScale), decay = Math.max(0.001, zone.decay * timeScale);
+  const attack = Math.max(art === 'hammer' ? 0.02 : 0.003, zone.attack * timeScale), decay = Math.max(0.001, zone.decay * timeScale);
   let release = Math.min(MAX_RELEASE, Math.max(MIN_RELEASE, zone.release * timeScale));
   let noteEnd = t + (Number.isFinite(dur) ? Math.max(0.02, dur) : 0.5);
   if (oneShot && zone.loop) { // ohne Schleife ist am Sample-Ende Stille: vorher ausklingen, statt abzureißen (Zonen ohne Schleife klingen wie bisher)
@@ -134,7 +143,16 @@ export function playNote(ctx, out, t, { pack, midi, dur, vel, zone = pickZone(pa
     node = node.connect(lp);
   }
   node.connect(out);
-  src.start(t);
+  // Tonhöhen-Artikulationen über die Abspielgeschwindigkeit
+  const span = noteEnd - t, from = rate * 2 ** ((Number.isFinite(artSemi) ? artSemi : -2) / 12);
+  if (art === 'slide') { src.playbackRate.setValueAtTime(from, t); src.playbackRate.exponentialRampToValueAtTime(rate, t + Math.min(0.08, span / 2)); }
+  if (art === 'bend') { src.playbackRate.setValueAtTime(from, t); src.playbackRate.setValueAtTime(from, t + 0.1 * span); src.playbackRate.exponentialRampToValueAtTime(rate, t + 0.45 * span); }
+  if (art === 'vibrato' && span >= 0.3) {
+    const length = 0.7 * span, curve = new Float32Array(Math.ceil(length * 200));
+    for (let i = 0; i < curve.length; i++) { const x = i / 200; curve[i] = rate * 2 ** ((25 * Math.min(1, x / 0.25) * Math.sin(2 * Math.PI * 5.5 * x)) / 1200); }
+    src.playbackRate.setValueCurveAtTime(curve, t + 0.3 * span, length);
+  }
+  src.start(t, art === 'hammer' ? Math.min(0.03, sample.frames / sample.rate / 2) : 0);
   src.stop(noteEnd + release + 0.05);
   return g; // Hüllkurve der Note, damit der Aufrufer sie vorzeitig abwürgen kann (Hi-Hat-Choke, sample-hits.js)
 }

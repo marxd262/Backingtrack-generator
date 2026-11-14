@@ -578,3 +578,32 @@ test('Kit wechseln, während ein Schlag klingt: kein Fehler, der klingende Schla
   expect(r.tail, JSON.stringify(r)).toBeGreaterThan(1e-3); // er klingt nach dem Wechsel noch
   expect(r.newKit, JSON.stringify(r)).toBeGreaterThan(1e-4); // der spätere Kick kommt aus dem 808-Kit
 });
+
+// Vorbereitung Phase 3: gerechnete Artikulationen im Sampler (sampler.js playNote, Feld art am Ereignis)
+test('Artikulationen (Bass finger): jede bekannte ändert den Ton, bleibt endlich und unter 1; eine unbekannte ändert nichts', async ({ page }) => {
+  test.setTimeout(120_000);
+  const rows = await page.evaluate(async () => {
+    const { createInstruments } = await import('/audio/synth.js');
+    const run = async (art) => {
+      const ctx = new OfflineAudioContext(1, 44100, 44100);
+      const inst = createInstruments(ctx, { limiter: false, voices: { bass: { id: 'sample', variant: 'finger' } }, timbre: { master: { echo: 0, reverb: 0, roomWet: 0 } }, tuning: { 'bass/sample/finger': { humanCents: 0, humanDb: 0 } } });
+      await inst.whenReady();
+      inst.output.connect(ctx.destination);
+      inst.layers.bass.trigger({ type: 'note', layer: 'bass', midi: 40, dur: 0.6, vel: 0.8, art }, 0.05);
+      return (await ctx.startRendering()).getChannelData(0);
+    };
+    const plain = await run(undefined), out = [];
+    for (const art of ['slide', 'bend', 'vibrato', 'hammer', 'dead', 'mute', 'nope']) {
+      const d = await run(art);
+      let diff = 0, energy = 0, peak = 0, finite = true;
+      for (let i = 0; i < d.length; i++) { diff += (d[i] - plain[i]) ** 2; energy += plain[i] ** 2; peak = Math.max(peak, Math.abs(d[i])); if (!Number.isFinite(d[i])) finite = false; }
+      out.push([art, Math.sqrt(diff / energy), peak, finite]);
+    }
+    return out;
+  });
+  for (const [art, diff, peak, finite] of rows) {
+    expect(finite, art).toBe(true);
+    expect(peak, art).toBeLessThan(1);
+    if (art === 'nope') expect(diff, art).toBeLessThan(1e-6); else expect(diff, art).toBeGreaterThan(0.05);
+  }
+});

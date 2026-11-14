@@ -11,6 +11,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /** Je Schritt: Thema (Dateiname) und die Feinwerte, die die Änderung abschalten (A). Ein neuer Schritt trägt sich hier ein. */
 export const STEPS = {
+  // Artikulationen (Vorbereitung Phase 3): keine Regeln, nur eine feste Demo-Verteilung in renderInPage; der Schlüssel 'demo/art' ist kein Feinwert,
+  // er schaltet in beiden Renders das Lead (Saxofon) ein und in B die Artikulationen
+  7: { name: 'art', a: { 'demo/art': { on: 0 } }, b: { 'demo/art': { on: 1 } } },
   1: { name: 'bus', a: { 'mix/bus': { on: 0 } }, b: { 'mix/bus': { on: 1 } } }, // Urteil: A (alter Begrenzer) bleibt Standard
   6: { name: 'strum', a: { 'chords/sample/guitar': { strumUp: 0, strumTilt: 0 } } },
   5: {
@@ -56,7 +59,20 @@ async function renderInPage([style, bpm, kind, tuning, limiter]) {
     jobs: { percussion: 'mixed' },
     voices: setAllVoices(null, kind),
   };
+  const demo = tuning['demo/art'];
+  if (demo) { track.layers.lead = true; track.jobs.lead = 'melody'; track.voices.lead = { id: 'sample', variant: 'sax' }; }
   const events = buildEvents(track, { timing: tuning['mix/timing'] });
+  if (demo?.on) {
+    // Demo, keine Spielregel: Bass kurze Noten dead, kleiner Schritt aufwärts hammer, sonst jede vierte Note slide; Lead lange Noten abwechselnd bend und vibrato, sonst jede dritte slide
+    for (const layer of ['bass', 'lead']) {
+      const notes = events.filter((e) => e.layer === layer && e.type === 'note');
+      notes.forEach((e, i) => {
+        const step = i ? e.midi - notes[i - 1].midi : 0;
+        if (layer === 'bass') e.art = e.dur < 0.13 ? 'dead' : step === 1 || step === 2 ? 'hammer' : i % 4 === 3 ? 'slide' : undefined;
+        else e.art = e.dur >= 0.45 ? (i % 2 ? 'bend' : 'vibrato') : i % 3 === 2 ? 'slide' : undefined;
+      });
+    }
+  }
   const total = (BARS * 4 * 60) / bpm;
   const ctx = new OfflineAudioContext(2, Math.ceil(RATE * (OFFSET + total + 2)), RATE);
   const { output, layers, whenReady } = createInstruments(ctx, { bpm, limiter, timbre: resolveTrackTimbre(track), voices: resolveVoices(track), tuning });
