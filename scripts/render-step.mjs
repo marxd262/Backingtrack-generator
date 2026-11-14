@@ -4,6 +4,7 @@
 // Die lautere Datei wird auf das RMS der leiseren abgesenkt, damit nicht "lauter" mit "besser" verwechselt wird (Faktor steht in der Ausgabe).
 // Ausgabe: <ordner>/step<n>-<thema>-A.wav und -B.wav (16 Bit, stereo, 44,1 kHz), je Fall Messwerte und step<n>-<thema>.html zum Anhören
 // (Doppelklick; beide Dateien laufen synchron, Leertaste schaltet um).
+// Schritte der Artikulations-Schicht (Phase 3, ab 10) rendern die Fälle aus ART_CASES (Funk, Rock mit Strophe und Refrain, Blues-Shuffle, Ballade).
 // Aufruf: node scripts/render-step.mjs <n> [sample|synth] [ausgabeordner]   (Standard: sample, .superpowers/audio-ab)
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -11,6 +12,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /** Je Schritt: Thema (Dateiname) und die Feinwerte, die die Änderung abschalten (A). Ein neuer Schritt trägt sich hier ein. */
 export const STEPS = {
+  // Phase 3, Priorität A: 10 = Bass (staccato, legato, dead, slideIn, approach) gegen die Schicht aus; 11 = Rhythmusgitarre dazu, gegen nur Bass
+  10: { name: 'bass', cases: 'art', a: { 'mix/art': { on: 0 } }, b: { 'mix/art': { on: 1, chords: 0 } } },
+  11: { name: 'guitar', cases: 'art', a: { 'mix/art': { on: 1, chords: 0 } }, b: { 'mix/art': { on: 1 } } },
   // Artikulationen (Vorbereitung Phase 3): keine Regeln, nur eine feste Demo-Verteilung in renderInPage; der Schlüssel 'demo/art' ist kein Feinwert,
   // er lässt in beiden Renders eine Gitarre (FreePats) die Lead-Linie statt der Akkorde spielen und schaltet in B die Artikulationen ein
   7: { name: 'art', a: { 'demo/art': { on: 0 } }, b: { 'demo/art': { on: 1 } } },
@@ -36,6 +40,16 @@ export const STEPS = {
   2: { name: 'pan', a: { 'mix/pan': { chords: 0, pad: 0, percussion: 0, kit: 0 } } },
 };
 export const CASES = [['rock', 120], ['funk', 100], ['psych', 90]];
+// Testfälle aus SPIELREGELN.md, auf die App abgebildet (SPEC_PHASE3 Abschnitt 8): [Stil, BPM, Zusätze]. Zusätze: track (Felder über den Standard),
+// tags (über die des Stils), voices (über "All samples"), chords (Akkordfolge statt der gewürfelten). Blues: Moll-Blues über 12 Takte im 12/8-Shuffle;
+// Rock mit Pick-Bass (Vorschlag aus Frage 16); Ballade mit Arpeggio auf der Stahlsaiten-Gitarre, damit die Gitarren-Regeln greifen
+const BLUES_12 = ['A', 'A', 'A', 'A', 'D', 'D', 'A', 'A', 'E', 'D', 'A', 'E'].map((root) => [root, root === 'E' ? 'maj' : 'min']);
+export const ART_CASES = [
+  ['funk', 100, {}],
+  ['rock', 120, { track: { form: { sections: [{ type: 'verse', bars: 4 }, { type: 'chorus', bars: 4 }] } }, voices: { bass: { id: 'sample', variant: 'pick' } } }],
+  ['blues', 90, { track: { meter: [12, 8], groove: 'shuffle', length: 12 }, chords: BLUES_12 }],
+  ['dreamy', 70, { tags: { synths: ['arpeggio', 'widePad', 'warm'] }, voices: { chords: { id: 'sample', variant: 'steel' } } }],
+];
 
 const RATE = 44100;
 const wav = (bytes) => {
@@ -48,7 +62,8 @@ const wav = (bytes) => {
 };
 
 /** Läuft im Browser: rendert einen Fall mit den Feinwerten `tuning` (limiter false: Mischung vor der Summenkette), liefert L/R als base64 (Float32). */
-async function renderInPage([style, bpm, kind, tuning, limiter]) {
+async function renderInPage([style, bpm, kind, tuning, limiter, extra]) {
+  extra ??= {}; // die alten Schritte haben keine Zusätze
   const { buildEvents } = await import('/core/events.js');
   const { resolveTrackTimbre } = await import('/core/timbre.js');
   const { resolveVoices, setAllVoices } = await import('/core/voices.js');
@@ -56,19 +71,21 @@ async function renderInPage([style, bpm, kind, tuning, limiter]) {
   const { STYLE_PRESETS, styleChordColor } = await import('/core/tags.js');
   const { progressionFor } = await import('/core/progressions.js');
   const { colorProgression } = await import('/core/harmony.js');
+  const { barTimeline, checkedTrack } = await import('/core/timeline.js');
   const seed = 17, OFFSET = 0.1, RATE = 44100, BARS = 8; // die Funktion wird serialisiert: keine Werte von außerhalb
   const p = STYLE_PRESETS.find((s) => s.id === style);
   const key = { root: 'A', mode: 'minor' };
   const track = {
-    key, bpm, seed, variety: true, length: BARS, tags: { ...structuredClone(p.tags), development: ['fullFromStart'] },
-    bars: colorProgression(progressionFor(key, seed).map((chord) => ({ chord, beats: 4 })), styleChordColor(p, seed, true), key),
+    key, bpm, seed, variety: true, length: BARS, tags: { ...structuredClone(p.tags), development: ['fullFromStart'], ...extra.tags },
+    bars: colorProgression((extra.chords?.map(([root, quality]) => ({ root, quality })) ?? progressionFor(key, seed)).map((chord) => ({ chord, beats: 4 })), styleChordColor(p, seed, true), key),
     layers: { drums: true, bass: true, chords: true, pad: true, lead: false, percussion: true },
     jobs: { percussion: 'mixed' },
-    voices: setAllVoices(null, kind),
+    voices: { ...setAllVoices(null, kind), ...extra.voices },
+    ...extra.track,
   };
   const demo = tuning['demo/art'];
   if (demo) { track.layers.lead = true; track.jobs.lead = 'melody'; track.voices.chords = { id: 'sample', variant: 'freepats' }; }
-  const events = buildEvents(track, { timing: tuning['mix/timing'] });
+  const events = buildEvents(track, { timing: tuning['mix/timing'], ornaments: tuning['mix/art'] });
   if (demo) { // die Lead-Linie spielt eine Gitarre (Bends sind eine Gitarren-Technik): Lead-Noten auf die Akkord-Schicht legen, die Akkorde selbst entfallen
     for (let i = events.length - 1; i >= 0; i--) if (events[i].layer === 'chords') events.splice(i, 1);
     for (const e of events) if (e.layer === 'lead') e.layer = 'chords';
@@ -84,25 +101,26 @@ async function renderInPage([style, bpm, kind, tuning, limiter]) {
       });
     }
   }
-  const total = (BARS * 4 * 60) / bpm;
+  const total = barTimeline(checkedTrack(track)).at(-1).end;
+  const arts = {}; // Zählung für die Ausgabe: wie oft welche Artikulation je Schicht vorkommt (Akkordtöne einzeln)
+  for (const e of events) if (e.art || e.ring) { const k = `${e.layer} ${e.art ?? 'ring'}`; arts[k] = (arts[k] ?? 0) + 1; }
   const ctx = new OfflineAudioContext(2, Math.ceil(RATE * (OFFSET + total + 2)), RATE);
   const { output, layers, whenReady } = createInstruments(ctx, { bpm, limiter, timbre: demo?.drive ? { ...resolveTrackTimbre(track), chords: { ...resolveTrackTimbre(track).chords, overdrive: demo.drive, distortion: demo.distortion ?? 0 } } : resolveTrackTimbre(track), voices: resolveVoices(track), tuning });
   await whenReady();
   output.connect(ctx.destination);
   for (const e of events) if (e.layer && e.t < total) layers[e.layer].trigger(e, OFFSET + e.t);
   const buf = await ctx.startRendering();
-  return [0, 1].map((c) => {
+  return { arts, chans: [0, 1].map((c) => {
     const bytes = new Uint8Array(buf.getChannelData(c).buffer);
     let bin = '';
     for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
     return btoa(bin);
-  });
+  }) };
 }
 
 /** Hörseite zum Paar: beide Dateien laufen synchron, nur eine ist hörbar; Leertaste schaltet ohne Unterbrechung um. */
-const abPage = (base) => {
-  let at = 0;
-  const jumps = CASES.map(([style, bpm]) => { const b = `<button onclick="seek(${at.toFixed(1)})">${style} ${bpm}</button>`; at += 0.1 + (8 * 4 * 60) / bpm + 2 + 1; return b; }).join(' '); // 8 Takte wie BARS in renderInPage
+const abPage = (base, starts) => {
+  const jumps = starts.map(([label, at]) => `<button onclick="seek(${at.toFixed(1)})">${label}</button>`).join(' ');
   return `<!doctype html><meta charset="utf-8"><title>${base}</title>
 <style>body{font:16px system-ui;max-width:640px;margin:40px auto}#now{font-size:96px;font-weight:700;margin:16px 0}button{font-size:16px;padding:8px 14px}input{width:100%}</style>
 <h1>${base}</h1><div id="now">A</div>
@@ -154,17 +172,18 @@ async function main() {
     await page.waitForFunction(() => typeof window.__render === 'function');
     const sides = { A: [], B: [] };
     const fmt = (m) => `Spitze ${m.peak.toFixed(1)}  RMS ${m.rms.toFixed(1)}  Crest ${m.crest.toFixed(1)}  Seite/Mitte ${m.sideMid.toFixed(1)} dB`;
-    for (const [style, bpm] of CASES) {
+    const cases = step.cases === 'art' ? ART_CASES : CASES;
+    for (const [style, bpm, extra] of cases) {
       const pres = [];
-      for (const tuning of [step.a, step.b ?? {}]) pres.push((await page.evaluate(renderInPage, [style, bpm, kind, tuning, false])).map(decode));
+      for (const tuning of [step.a, step.b ?? {}]) pres.push((await page.evaluate(renderInPage, [style, bpm, kind, tuning, false, extra])).chans.map(decode));
       // was die Änderung hinzufügt oder wegnimmt: RMS von (B - A) gegen A, vor der Summenkette (dort ist die Mischung linear)
       let diff = 0, ref = 0;
       for (let i = 0; i < pres[0][0].length; i++) for (const c of [0, 1]) { diff += (pres[1][c][i] - pres[0][c][i]) ** 2; ref += pres[0][c][i] ** 2; }
       console.log(`${style} ${bpm} (${kind})  vor der Summe (B): ${fmt(measure(pres[1]))}  Unterschied B-A ${(10 * Math.log10(diff / ref + 1e-12)).toFixed(1)} dB`);
       for (const [label, tuning] of [['A', step.a], ['B', step.b ?? {}]]) {
-        const chans = (await page.evaluate(renderInPage, [style, bpm, kind, tuning, true])).map(decode);
+        const { chans: raw, arts } = await page.evaluate(renderInPage, [style, bpm, kind, tuning, true, extra]), chans = raw.map(decode);
         sides[label].push(chans);
-        console.log(`  ${label}: ${fmt(measure(chans))}`);
+        console.log(`  ${label}: ${fmt(measure(chans))}${Object.keys(arts).length ? `  Artikulationen: ${Object.entries(arts).sort().map(([k, v]) => `${k} ${v}`).join(', ')}` : ''}`);
       }
     }
     // je Seite alle Fälle hintereinander (1 s Stille), dann die lautere Seite auf das RMS der leiseren absenken
@@ -189,7 +208,9 @@ async function main() {
       console.log(`${file}  ${(l.length / RATE).toFixed(1)} s  Pegelangleich ${db(scale).toFixed(1)} dB  übersteuerte Werte ${clipped}`);
     }
     const html = join(outDir, `step${n}-${step.name}.html`);
-    await writeFile(html, abPage(`step${n}-${step.name}`));
+    let at = 0; // Sprungmarken der Hörseite: Beginn jedes Falls in der zusammengesetzten Datei
+    const starts = cases.map(([style, bpm], k) => { const mark = [`${style} ${bpm}`, at]; at += sides.A[k][0].length / RATE + 1; return mark; });
+    await writeFile(html, abPage(`step${n}-${step.name}`, starts));
     console.log(`Anhören: ${html}`);
     if (errors.length) { console.error(errors.join('\n')); process.exitCode = 1; }
   } finally {

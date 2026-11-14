@@ -2,7 +2,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildEvents, STYLE_PRESETS, GROOVES } from '../../src/index.js';
-import { profileOf, completeArt, ART_DEFAULTS } from '../../src/core/articulation.js';
+import { profileOf, completeArt, planRoll, ART_DEFAULTS } from '../../src/core/articulation.js';
+import { barTimeline, checkedTrack } from '../../src/core/timeline.js';
+import { createRng } from '../../src/core/rng.js';
 import { pickArtZone } from '../../src/audio/voices/sample-zones.js';
 
 const bar = (root, quality) => ({ chord: { root, quality }, beats: 4 });
@@ -42,4 +44,93 @@ test('Sample-Gruppen: eine Artikulation nimmt die Zone mit ihrem art, wenn das P
   assert.equal(pickArtZone([dead, plain], 40, 0.8, undefined), plain);
   assert.equal(pickArtZone([plain], 40, 0.8, 'dead'), plain);
   assert.equal(pickArtZone(null, 40, 0.8, 'dead'), null);
+});
+
+// ---- Regeln ----
+const GRID = { amount: 0, tight: 0 }; // exakt auf dem Raster, damit Plätze und Vorlauf prüfbar sind
+const bassOf = (track, ornaments) => buildEvents(track, { timing: GRID, ornaments }).filter((e) => e.layer === 'bass');
+const stepOf = (e) => Math.round(e.beat * 4);
+const SEEDS = [1, 2, 3, 4, 5, 6, 7, 8];
+
+test('Verzierungs-Plan: die Wiederholung eines Teils behält etwa 70 % der Entscheidungen, derselbe Teil alle', () => {
+  const rng = createRng(5), c = { kind: 'verse', phrase: 0, inPhrase: 1, rep: 0 };
+  let same = 0;
+  for (let i = 0; i < 2000; i++) {
+    assert.equal(planRoll(rng, c, `x:${i}`), planRoll(rng, c, `x:${i}`));
+    if (planRoll(rng, c, `x:${i}`) === planRoll(rng, { ...c, rep: 1 }, `x:${i}`)) same++;
+  }
+  assert.ok(same > 1300 && same < 1500, `${same} von 2000`);
+});
+
+test('Bass Funk: Dead Notes nur auf e oder a direkt vor einer Note gleichen Tons, leise und kurz; die übrigen Noten staccato', () => {
+  let dead = 0;
+  for (const seed of SEEDS) {
+    const off = bassOf(mk('funk', { seed })), on = bassOf(mk('funk', { seed }), { on: 1, chords: 0 });
+    on.forEach((n, i) => {
+      if (n.art !== 'dead') return;
+      dead++;
+      assert.equal(stepOf(n) % 2, 1, JSON.stringify(n));
+      assert.ok(n.vel >= 0.3 && n.vel <= 0.5 && n.dur <= 0.06, JSON.stringify(n));
+      assert.equal(on[i + 1].midi, n.midi);
+      assert.ok(Math.abs(on[i + 1].t - n.t - 0.15) < 0.03, 'die Zielnote folgt ein 16tel später (100 BPM, leichter Swing)');
+    });
+    const sounding = (list) => list.filter((n) => n.art !== 'dead').reduce((sum, n) => sum + n.dur, 0);
+    assert.ok(sounding(on) < 0.7 * sounding(off), 'staccato: höchstens 60 % der Notenlänge');
+    assert.ok(on.filter((n) => n.art !== 'dead' && n.art !== 'slideIn').every((n) => n.art === 'staccato'));
+  }
+  assert.ok(dead >= SEEDS.length, `${dead} Dead Notes`);
+});
+
+test('Bass slideIn: nur auf der Eins, der Zielton kommt pünktlich (Beginn + artTime = Taktanfang), 1 bis 7 Halbtöne von unten, 40 bis 100 ms', () => {
+  let slides = 0;
+  for (const id of ['funk', 'blues', 'rock']) for (const seed of SEEDS) {
+    const track = mk(id, { seed, ornaments: 1 }), beat = 60 / track.bpm;
+    for (const n of bassOf(track, { on: 1 }).filter((x) => x.art === 'slideIn')) {
+      slides++;
+      const target = n.t + n.artTime;
+      if (n.t === 0) continue; // im allerersten Takt entfällt der Vorlauf
+      assert.ok(Math.abs(target / (4 * beat) - Math.round(target / (4 * beat))) < 1e-4, `${id} s=${seed}: ${JSON.stringify(n)}`);
+      assert.ok([-1, -2, -5, -6, -7].includes(n.artSemi) && n.artTime >= 0.04 && n.artTime <= 0.1);
+      assert.equal(n.bar, Math.round(target / (4 * beat)) - 1, 'vorgezogen in den Takt davor');
+    }
+  }
+  assert.ok(slides >= 10, `${slides} Slides`);
+});
+
+test('Bass Blues: Annäherungston auf dem letzten Achtel vor dem Akkordwechsel, einen Halbton neben der nächsten Note; sonst legato', () => {
+  let approaches = 0;
+  for (const seed of SEEDS) {
+    const track = mk('blues', { seed, ornaments: 1 }), on = bassOf(track, { on: 1 });
+    on.forEach((n, i) => {
+      if (n.art === 'approach') {
+        approaches++;
+        assert.equal(stepOf(n), 14);
+        assert.ok(n.bar % 4 !== 0, 'nur vor einem Wechsel (Folge Am Am Dm E)');
+        assert.equal(Math.abs(on[i + 1].midi - n.midi), 1, JSON.stringify([n, on[i + 1]]));
+      }
+      if (n.art === 'legato' && on[i + 1]) assert.ok(n.t + n.dur >= Math.min(on[i + 1].t, (n.bar + 1) * 4 * 60 / track.bpm) - 1e-4, 'hält bis zur nächsten Note oder zum Taktende');
+    });
+  }
+  assert.ok(approaches >= SEEDS.length, `${approaches} Annäherungstöne`);
+  // außerhalb des Blues bleibt der Annäherungston in der Tonleiter (Country, A-Moll)
+  const scale = new Set([9, 11, 0, 2, 4, 5, 7]);
+  for (const seed of SEEDS) for (const n of bassOf(mk('country', { seed, ornaments: 1 }), { on: 1 })) if (n.art === 'approach') assert.ok(scale.has(n.midi % 12), JSON.stringify(n));
+});
+
+test('Schicht an: sortiert, im Takt, Bass einstimmig, keine negative Dauer, reproduzierbar; Regler 1 verziert mindestens so viel wie 0,5', () => {
+  for (const id of ['funk', 'rock', 'blues', 'reggae', 'dreamy', 'country', 'psych', 'hardrock']) for (const seed of [1, 2, 3]) for (const ornaments of [0.5, 1]) {
+    const track = mk(id, { seed, ornaments, length: 16 }), events = buildEvents(track, ON), bars = barTimeline(checkedTrack(track)), label = `${id} s=${seed} o=${ornaments}`;
+    assert.deepEqual(events, buildEvents(track, ON), `${label}: reproduzierbar`);
+    for (let i = 1; i < events.length; i++) assert.ok(events[i].t >= events[i - 1].t, `${label}: sortiert`);
+    for (const e of events.filter((x) => x.layer)) {
+      assert.ok(e.t >= bars[e.bar].start - 1e-6 && e.t < bars[e.bar].end, `${label}: im Takt ${JSON.stringify(e)}`);
+      if (e.dur !== undefined) assert.ok(e.dur >= 0, `${label}: Dauer ${JSON.stringify(e)}`);
+    }
+    const bass = events.filter((e) => e.layer === 'bass');
+    for (let i = 1; i < bass.length; i++) assert.ok(bass[i - 1].t + bass[i - 1].dur <= bass[i].t + 1e-6, `${label}: Bass einstimmig bei ${i}`);
+    if (ornaments === 1) {
+      const count = (o) => buildEvents({ ...track, ornaments: o }, ON).filter((e) => ['dead', 'slideIn', 'approach'].includes(e.art)).length;
+      assert.ok(count(1) >= count(0.5), `${label}: ${count(1)} gegen ${count(0.5)}`);
+    }
+  }
 });
