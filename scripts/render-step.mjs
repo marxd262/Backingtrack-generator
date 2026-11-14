@@ -20,7 +20,7 @@ export const STEPS = {
     name: 'sustain', a: { 'demo/art': { on: 1, drive: 0.5, bendTone: 3 } },
     b: { 'demo/art': { on: 1, drive: 0.5, distortion: 0.5, bendTone: 3 }, 'chords/sample/freepats': { decay: 10 } },
   },
-  8: { name: 'bendeq', a: { 'demo/art': { on: 1, drive: 0.5, bendTone: 0 } }, b: { 'demo/art': { on: 1, drive: 0.5, bendTone: 3 } } },
+  8: { name: 'bendeq', a: { 'demo/art': { on: 1, drive: 0.5, bendTone: 3 } }, b: { 'demo/art': { on: 1, drive: 0.5, bendTone: 9 } } }, // 3 war dem Nutzer zu schwach
   1: { name: 'bus', a: { 'mix/bus': { on: 0 } }, b: { 'mix/bus': { on: 1 } } }, // Urteil: A (alter Begrenzer) bleibt Standard
   6: { name: 'strum', a: { 'chords/sample/guitar': { strumUp: 0, strumTilt: 0 } } },
   5: {
