@@ -19,7 +19,7 @@ const mk = (id, over = {}) => ({
 const ON = { ornaments: { on: 1 } };
 
 test('an ist der Standard (Bass und Gitarre); Feinwert on 0, Regler 0 und beide Schichten auf 0 ergeben denselben Strom ohne Artikulationen; ungültiger Regler wirft', () => {
-  assert.deepEqual(ART_DEFAULTS, { on: 1, bass: 1, chords: 1, drums: 0, keys: 0, pad: 0, lead: 0, band: 0 });
+  assert.deepEqual(ART_DEFAULTS, { on: 1, bass: 1, chords: 1, drums: 0, keys: 0, pad: 0, lead: 0, band: 0, bassB: 0 });
   assert.deepEqual(completeArt({ on: 1, bass: -1, chords: 'x', drums: 1 }), { ...ART_DEFAULTS, drums: 1 });
   for (const id of ['funk', 'rock', 'blues']) {
     const plain = buildEvents(mk(id), { ornaments: { on: 0 } });
@@ -349,4 +349,28 @@ test('Band-Regeln (aus bis eingeschaltet): Bass rutscht immer in die Eins des Re
     const keys = buildEvents({ ...track, ...EPIANO }, { timing: GRID, ornaments: { keys: 1 } }).filter((e) => e.layer === 'chords' && e.bar === 7);
     if (keys.length) assert.ok(keys.filter((e) => e.t === keys.at(-1).t).every((e) => e.art === 'staccato' && e.dur <= 15 / track.bpm + 1e-6));
   }
+});
+
+// ---- Bass, Priorität B ----
+test('Bass B (aus bis eingeschaltet): Oktav-Pop nur auf "+" und a und bis MIDI 52, hammer/pull nur 1 bis 2 Halbtöne nach der Note davor im selben Takt, slideOff auf der letzten Note und vor dem Stopp, Palm Mute nur in der Strophe', () => {
+  const count = {}, parts = form([['verse', 4], ['chorus', 4], ['break', 2], ['chorus', 4]]);
+  for (const id of ['funk', 'rock', 'blues']) for (const seed of SEEDS) for (const extra of [{}, parts]) {
+    const track = mk(id, { seed, ornaments: 1, ...extra });
+    const of = (ornaments) => buildEvents(track, { timing: GRID, ornaments }).filter((e) => e.layer === 'bass');
+    const off = of({}), on = of({ bassB: 1 });
+    assert.deepEqual(off, of({ bassB: 0 }));
+    assert.equal(on.length, off.length);
+    on.forEach((n, i) => {
+      assert.ok(n.midi >= 28 && n.midi <= 52, JSON.stringify(n));
+      if (['octavePop', 'hammer', 'pull', 'slideOff', 'palmMute'].includes(n.art)) count[n.art] = (count[n.art] ?? 0) + 1;
+      if (n.art === 'octavePop') assert.ok(stepOf(n) % 4 >= 2 && n.midi === off[i].midi + 12, JSON.stringify(n));
+      if (n.art === 'hammer' || n.art === 'pull') {
+        const step = n.midi - on[i - 1].midi;
+        assert.ok(on[i - 1].bar === n.bar && Math.abs(step) <= 2 && step !== 0 && (step > 0) === (n.art === 'hammer') && on[i - 1].t + on[i - 1].dur >= n.t - 1e-6, JSON.stringify([on[i - 1], n]));
+      }
+      if (n.art === 'slideOff') assert.ok((!on[i + 1] || on[i + 1].bar !== n.bar) && n.artSemi <= -3 && n.artSemi >= -7 && n.artTime >= 0.1 && n.artTime <= 0.25 && n.dur >= n.artTime, JSON.stringify(n));
+      if (n.art === 'palmMute') assert.ok(extra.form ? n.bar < 4 : true, JSON.stringify(n));
+    });
+  }
+  for (const art of ['octavePop', 'hammer', 'slideOff', 'palmMute']) assert.ok(count[art] > 0, JSON.stringify(count));
 });

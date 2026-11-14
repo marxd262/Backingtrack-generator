@@ -14,8 +14,8 @@ import { grooveIdFor } from './grooves.js';
 import { phrasesOf } from './form-arrange.js';
 import { densityAt } from './form-types.js';
 
-export const ART_DEFAULTS = Object.freeze({ on: 1, bass: 1, chords: 1, drums: 0, keys: 0, pad: 0, lead: 0, band: 0 });
-const RULE_LAYER = { keys: 'chords' }; // Regelgruppe -> Schicht, wenn die Namen abweichen
+export const ART_DEFAULTS = Object.freeze({ on: 1, bass: 1, chords: 1, drums: 0, keys: 0, pad: 0, lead: 0, band: 0, bassB: 0 });
+const RULE_LAYER = { keys: 'chords', bassB: 'bass' }; // Regelgruppe -> Schicht, wenn die Namen abweichen
 
 /** Füllt die Feinwerte auf; nur endliche Zahlen >= 0 zählen. */
 export function completeArt(options) {
@@ -59,7 +59,7 @@ function barContexts(bars, sections, params) {
       for (let i = ph.start; i < ph.start + ph.bars; i++) {
         const energy = sec.resolved ? clamp(0.5 + densityAt(sec.resolved, i - sec.start), 0, 1) : params.drive;
         ctx[i] = {
-          kind: sec.kind ?? '', phrase, inPhrase: i - ph.start, rep, first: i === sec.start, phraseStart: i === ph.start,
+          kind: sec.kind ?? '', phrase, inPhrase: i - ph.start, rep, first: i === sec.start, phraseStart: i === ph.start, phraseEnd: i === ph.start + ph.bars - 1,
           verse: sec.kind ? sec.kind !== 'chorus' : energy < 0.45, energy, stop: stop && i === last, fill: sec.fillAtEnd === true && i === last, roll: after === 'roll' && i === last,
           change: i > 0 && !sameChord(bars[i].chord, bars[i - 1].chord), nextChange: i + 1 < bars.length && !sameChord(bars[i].next, bars[i].chord),
         };
@@ -122,6 +122,9 @@ const DRUM_PROFILES = {
   shuffle: { stick: 'quiet' }, slowBlues: { stick: 'quiet' }, rock: { swap: 'hatHalf', rimshot: true }, ballad: { stick: 'verse', rimshot: true },
   reggae: { stick: 'always' }, latin: { stick: 'always' }, country: { stick: 'always' },
 };
+// Bass, Priorität B: slideOff (Phrasenende vor einer Pause, vor einem Stopp, letzte Note), palmMute (Strophe, je Takt), octavePop (auf "+" und a),
+// hammer (Folgeton im Abstand von 1 bis 2 Halbtönen ohne Anschlag, in Fill-Takten oder bei energy ab 0,6)
+const BASS_B = { shuffle: { slideOff: 0.2, hammer: 0.2 }, slowBlues: { slideOff: 0.2 }, rock: { slideOff: 0.3, palmMute: 0.5 }, funk: { octavePop: 0.3, hammer: 0.2 } };
 // Tasten je Profil: pedal (Wahrscheinlichkeit je Takt; Ballade immer, Rock und Blues teilweise), staccato (kurze Stabs)
 const KEY_PROFILES = { ballad: { pedal: 1 }, rock: { pedal: 0.5 }, shuffle: { pedal: 0.5 }, slowBlues: { pedal: 0.5 }, funk: { staccato: true } };
 const GUITARS = new Set(['guitar', 'muted', 'jazz', 'funk', 'steel', 'nylon', 'twelve', 'freepats', 'freepatsjazz']); // Varianten von chords/sample
@@ -362,5 +365,30 @@ const RULES = {
         if (art === 'chuck' && k > 0) for (const e of bySteps.get(order[k - 1])) e.dur = r6(Math.min(e.dur, Math.max(0.001, stab[0].t - e.t)));
       });
     }
+  },
+
+  // E-Bass, Priorität B (SPEC_PHASE3 5.1), läuft nach den A-Regeln und lässt deren Dead Notes, Annäherungstöne und Slides stehen.
+  bassB(out, { track, bars, ctx, profile, tempo, p, roll }) {
+    const P = BASS_B[profile] ?? {}, beat = 60 / track.bpm;
+    if (track.voices?.bass?.variant === 'upright') return;
+    const notes = out.filter((e) => e.layer === 'bass' && e.type === 'note').sort(byTime);
+    notes.forEach((n, i) => {
+      if (n.art === 'dead' || n.art === 'approach' || n.art === 'slideIn') return;
+      const b = bars[n.bar], c = ctx[n.bar], s = Math.round(n.beat * b.sub), prev = notes[i - 1], next = notes[i + 1];
+      const ends = (c.stop && next?.bar !== n.bar) || !next || (c.phraseEnd && next.t - (n.t + n.dur) >= beat);
+      if (P.slideOff && ends && roll(c, 'bassB', 'slideOff', s) < p(P.slideOff, 'bassB')) { // der Ton rutscht am Ende 3 bis 7 Halbtöne ab und blendet aus
+        const time = r6(clamp((0.1 + 0.15 * roll(c, 'bassB', 'slideOffTime', s)) * tempo, 0.1, 0.25));
+        Object.assign(n, { art: 'slideOff', artSemi: -3 - Math.floor(5 * roll(c, 'bassB', 'slideOffSemi', s)), artTime: time, dur: r6(Math.max(n.dur, time)) });
+      } else if (P.palmMute && c.verse && roll(c, 'bassB', 'palmMute') < p(P.palmMute, 'bassB')) n.art = 'palmMute';
+      else if (P.octavePop && b.sub === 4 && s % 4 >= 2 && n.midi <= 40 && roll(c, 'bassB', 'octavePop', s) < p(P.octavePop, 'bassB')) { // eine Oktave höher, heller, im Tonbereich (bis 52)
+        Object.assign(n, { art: 'octavePop', midi: n.midi + 12, vel: roundVel(n.vel * 1.1) });
+      }
+      const step = prev ? n.midi - prev.midi : 0;
+      if (P.hammer && prev && prev.bar === n.bar && prev.art !== 'dead' && Math.abs(step) >= 1 && Math.abs(step) <= 2 && (!n.art || n.art === 'staccato' || n.art === 'legato')
+        && (c.fill || c.energy >= 0.6) && roll(c, 'bassB', 'hammer', s) < p(P.hammer, 'bassB')) {
+        Object.assign(n, { art: step > 0 ? 'hammer' : 'pull', vel: roundVel(n.vel * 0.8) });
+        prev.dur = r6(Math.max(prev.dur, n.t - prev.t)); // gebunden: der Ton davor hält bis hierher
+      }
+    });
   },
 };

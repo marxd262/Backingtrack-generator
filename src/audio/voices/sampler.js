@@ -77,7 +77,7 @@ const MAX_RELEASE = 2; // s, die Presets haben bis zu 4,5 s (Pads würden in den
  *           schwillt in 0,25 s an (nur Noten ab 0,3 s; Werte aus den Regeln statt ±25 Cent ab 30 %)
  *   scoop   wie slideIn (kleiner Abstand, z. B. -0,5 bis -1 Halbton)
  *   fall, slideOff   rutscht in den letzten `artTime` s (Standard 0,2, höchstens 60 % der Dauer) um `artSemi` Halbtöne (Standard -2) ab und blendet dabei aus
- *   hammer  ohne Anschlag: das Sample beginnt 30 ms später, Einsatz mindestens 20 ms, 15 % leiser
+ *   hammer, pull  ohne Anschlag: das Sample beginnt 30 ms später, Einsatz mindestens 20 ms, 15 % leiser
  *   dead    höchstens 50 ms lang, Tiefpass 900 Hz;   chuck  wie dead, höchstens 40 ms;   palmMute  Tiefpass 1600 Hz, Abklingen höchstens 0,5 s
  *   staccato, choke   die Dauer kommt aus dem Ereignis, das Ausklingen dauert 30 ms statt der Zeit der Zone (auch bei chuck)
  *   swell   blendet in `artTime` s ein (Pad)
@@ -91,6 +91,7 @@ export function playNote(ctx, out, t, { pack, midi, dur, vel, art, zone = pickAr
   if (zone.art) art = undefined; // eigene Samples für diese Artikulation: ohne die gerechnete Variante
   if (art === 'dead' || art === 'chuck') { dur = Math.min(dur, art === 'chuck' ? 0.04 : 0.05); filter = Math.min(filter, 900); }
   if (art === 'palmMute') { filter = Math.min(filter, 1600); naturalDecay = naturalDecay > 0 ? Math.min(naturalDecay, 0.5) : 0.5; }
+  if (art === 'pull') art = 'hammer'; // Abzug wie Aufschlag: Folgeton ohne Anschlag
   if (art === 'hammer') gain *= 0.85;
   if (art === 'bend' || art === 'vibrato') naturalDecay = 0; // gezogene und bebende Töne brauchen Sustain: das zusätzliche Abklingen der Stimme entfällt
   const sample = pack.meta.samples[zone.sample];
