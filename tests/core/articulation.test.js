@@ -246,3 +246,35 @@ test('Schlagzeug mit Songform: Rock-Refrain halboffene Hi-Hat und Rimshot, sonst
     }
   }
 });
+
+// ---- Tasten ----
+const EPIANO = { voices: { chords: { id: 'sample', variant: 'epiano' } } };
+const keysOf = (track, ornaments = { keys: 1 }) => buildEvents(track, { timing: GRID, ornaments }).filter((e) => e.layer === 'chords');
+
+test('Tasten: aus bis eingeschaltet, nur am E-Piano; Oberstimme lauter, Mittelstimme leiser; kein Ton unter C3', () => {
+  for (const id of ['funk', 'rock', 'dreamy']) for (const seed of SEEDS) {
+    const track = mk(id, { seed, ...EPIANO }), off = keysOf(track, {}), on = keysOf(track);
+    assert.deepEqual(off, keysOf(track, { keys: 0 }));
+    assert.deepEqual(keysOf(mk(id, { seed })), keysOf(mk(id, { seed }), {}), 'Gitarre: die Tasten-Regeln greifen nicht');
+    assert.equal(on.length, off.length);
+    on.forEach((e, i) => {
+      assert.ok(e.midi >= 48);
+      const want = !e.strum ? 1 : e.strum[0] === 2 ? 1.1 : e.strum[0] === 1 ? 0.9 : 1;
+      assert.ok(Math.abs(e.vel - Math.min(1, want * off[i].vel)) < 0.002, JSON.stringify([e, off[i]]));
+    });
+  }
+});
+
+test('Tasten: Ballade hält mit Pedal bis zum Taktende und löst 20 bis 50 ms vor einem Akkordwechsel; Funk spielt Stabs von einem 16tel bis einem Achtel', () => {
+  for (const seed of SEEDS) {
+    const ballad = mk('dreamy', { seed, ...EPIANO }), bar = 4 * 60 / ballad.bpm;
+    for (const e of keysOf(ballad)) {
+      const gap = (e.bar + 1) * bar - (e.t + e.dur), changes = e.bar % 4 !== 0 && e.bar < 7; // Folge Am Am Dm E; nach dem letzten Takt kommt kein Wechsel
+      assert.equal(e.art, 'pedal');
+      assert.ok(changes ? gap >= 0.02 - 1e-4 && gap <= 0.05 + 1e-4 : Math.abs(gap) < 1e-4, JSON.stringify([e, gap]));
+    }
+    const funk = mk('funk', { seed, ...EPIANO }), sixteenth = 15 / funk.bpm;
+    assert.ok(keysOf(funk).every((e) => e.art === 'staccato' && e.dur <= 2 * sixteenth + 1e-6));
+    assert.ok(keysOf(funk).some((e) => e.dur >= sixteenth - 1e-6));
+  }
+});

@@ -17,6 +17,7 @@ export const STEPS = {
   11: { name: 'guitar', cases: 'art', a: { 'mix/art': { on: 1, chords: 0 } }, b: { 'mix/art': { on: 1 } } },
   // ab hier je Instrument unabhängig: A = Standard (Bass und Gitarre an), B = dazu nur dieses Instrument
   12: { name: 'drums', cases: 'art', a: {}, b: { 'mix/art': { drums: 1 } } },
+  13: { name: 'keys', cases: 'art', voices: { chords: { id: 'sample', variant: 'epiano' } }, a: {}, b: { 'mix/art': { keys: 1 } } }, // beide Seiten mit E-Piano statt Gitarre
   // Artikulationen (Vorbereitung Phase 3): keine Regeln, nur eine feste Demo-Verteilung in renderInPage; der Schlüssel 'demo/art' ist kein Feinwert,
   // er lässt in beiden Renders eine Gitarre (FreePats) die Lead-Linie statt der Akkorde spielen und schaltet in B die Artikulationen ein
   7: { name: 'art', a: { 'demo/art': { on: 0 } }, b: { 'demo/art': { on: 1 } } },
@@ -177,7 +178,8 @@ async function main() {
     const sides = { A: [], B: [] };
     const fmt = (m) => `Spitze ${m.peak.toFixed(1)}  RMS ${m.rms.toFixed(1)}  Crest ${m.crest.toFixed(1)}  Seite/Mitte ${m.sideMid.toFixed(1)} dB`;
     const cases = step.cases === 'art' ? ART_CASES : CASES;
-    for (const [style, bpm, extra] of cases) {
+    for (const [style, bpm, own] of cases) {
+      const extra = step.voices ? { ...own, voices: { ...own?.voices, ...step.voices } } : own; // Stimmen des Schritts gelten in allen Fällen
       const pres = [];
       for (const tuning of [step.a, step.b ?? {}]) pres.push((await page.evaluate(renderInPage, [style, bpm, kind, tuning, false, extra])).chans.map(decode));
       // was die Änderung hinzufügt oder wegnimmt: RMS von (B - A) gegen A, vor der Summenkette (dort ist die Mischung linear)

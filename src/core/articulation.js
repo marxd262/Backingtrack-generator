@@ -119,6 +119,8 @@ const DRUM_PROFILES = {
   shuffle: { stick: 'quiet' }, slowBlues: { stick: 'quiet' }, rock: { swap: 'hatHalf', rimshot: true }, ballad: { stick: 'verse', rimshot: true },
   reggae: { stick: 'always' }, latin: { stick: 'always' }, country: { stick: 'always' },
 };
+// Tasten je Profil: pedal (Wahrscheinlichkeit je Takt; Ballade immer, Rock und Blues teilweise), staccato (kurze Stabs)
+const KEY_PROFILES = { ballad: { pedal: 1 }, rock: { pedal: 0.5 }, shuffle: { pedal: 0.5 }, slowBlues: { pedal: 0.5 }, funk: { staccato: true } };
 const GUITARS = new Set(['guitar', 'muted', 'jazz', 'funk', 'steel', 'nylon', 'twelve', 'freepats', 'freepatsjazz']); // Varianten von chords/sample
 
 /** Regeln je Gruppe (Name = Feinwert): (Ereignisse, env) => void; sie ändern die Ereignisse und hängen neue an. */
@@ -219,6 +221,25 @@ const RULES = {
         n.artTime = r6(clamp((0.04 + 0.06 * roll(c, 'bass', 'slideTime')) * tempo, 0.04, Math.min(0.1, 15 / track.bpm))); // höchstens ein 16tel
       }
     });
+  },
+
+  // Tasten, Priorität A (SPEC_PHASE3 5.4/5.5), nur E-Piano (Sample und FM; ein Klavier gibt es noch nicht, die Orgel bekommt eigene Regeln):
+  // Stimmen-Gewichtung, pedal, staccato. Die Register-Regel (kein Ton unter C3, wenn der Bass spielt) erfüllt die Akkord-Schicht schon (ab MIDI 48).
+  keys(out, { track, bars, ctx, profile, p, roll }) {
+    const voice = track.voices?.chords, P = KEY_PROFILES[profile] ?? {};
+    if (voice?.id !== 'epiano' && !(voice?.id === 'sample' && voice.variant === 'epiano')) return;
+    for (const e of out) {
+      if (e.layer !== 'chords' || e.type !== 'note') continue;
+      const b = bars[e.bar], c = ctx[e.bar];
+      // Stimmen-Gewichtung im Stab: oberster Ton (Melodie) 10 % lauter, Mittelstimmen 10 % leiser
+      if (e.strum && e.strum[1] > 2) e.vel = roundVel(e.vel * (e.strum[0] === e.strum[1] - 1 ? 1.1 : e.strum[0] > 0 ? 0.9 : 1));
+      // pedal (je Takt aus dem Plan): der Ton hält bis zum Taktende; wechselt dort der Akkord, löst das Pedal 20 bis 50 ms vorher. Ein Stopp bleibt still
+      if (P.pedal && !c.stop && roll(c, 'keys', 'pedal') < p(P.pedal, 'keys')) {
+        const lift = c.nextChange ? 0.02 + 0.03 * roll(c, 'keys', 'lift') : 0;
+        Object.assign(e, { art: 'pedal', dur: r6(Math.max(0.02, b.end - lift - e.t)) });
+      // staccato: kurze Stabs, ein 16tel bis ein Achtel (je Takt aus dem Plan)
+      } else if (P.staccato && e.strum) Object.assign(e, { art: 'staccato', dur: r6(Math.min(e.dur, (15 / track.bpm) * (1 + roll(c, 'keys', 'staccato')))) });
+    }
   },
 
   // Rhythmusgitarre, Priorität A (SPEC_PHASE3 5.3), nur Sample-Gitarren (Tasten bekommen eigene Regeln). Je Takt: Anschlagrichtung nach Profil
