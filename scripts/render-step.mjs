@@ -70,7 +70,7 @@ export const STEPS = {
   2: { name: 'pan', a: { 'mix/pan': { chords: 0, pad: 0, percussion: 0, kit: 0 } } },
 };
 export const CASES = [['rock', 120], ['funk', 100], ['psych', 90]];
-// Testfälle aus SPIELREGELN.md, auf die App abgebildet (SPEC_PHASE3 Abschnitt 8): [Stil, BPM, Zusätze]. Zusätze: track (Felder über den Standard),
+// Testfälle aus docs/sound-v2/SPIELREGELN.md, auf die App abgebildet (SPEC_PHASE3 Abschnitt 8): [Stil, BPM, Zusätze]. Zusätze: track (Felder über den Standard),
 // tags (über die des Stils), voices (über "All samples"), chords (Akkordfolge statt der gewürfelten). Blues: Moll-Blues über 12 Takte im 12/8-Shuffle;
 // Rock mit Pick-Bass (Vorschlag aus Frage 16); Ballade mit Arpeggio auf der Stahlsaiten-Gitarre, damit die Gitarren-Regeln greifen
 const BLUES_12 = ['A', 'A', 'A', 'A', 'D', 'D', 'A', 'A', 'E', 'D', 'A', 'E'].map((root) => [root, root === 'E' ? 'maj' : 'min']);

@@ -1,4 +1,4 @@
-// Artikulations-Schicht (Phase 3; Regeln: SPIELREGELN.md, Bauplan: SPEC_PHASE3.md): eigener Schritt auf dem fertigen Ereignisstrom, nach der
+// Artikulations-Schicht (Phase 3; Regeln: docs/sound-v2/SPIELREGELN.md, Bauplan: docs/sound-v2/SPEC_PHASE3.md): eigener Schritt auf dem fertigen Ereignisstrom, nach der
 // Songform und vor dem Mikrotiming. Reine Logik, per Seed reproduzierbar. Standard seit dem Urteil des Nutzers zu Bass und Gitarre (2026-11-14). Der Schritt setzt Felder am Ereignis (art, artSemi, artTime, ring,
 // strumUp), ändert Längen und Lautstärken und fügt Noten ein. Wie eine Artikulation klingt, entscheidet die Stimme (sampler.js: eigene
 // Sample-Gruppe des Packs, sonst gerechnet, sonst normal). Alle Zahlen sind Startwerte aus den Regeln, nicht gehört.
