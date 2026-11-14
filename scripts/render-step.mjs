@@ -44,6 +44,8 @@ export const STEPS = {
   // 'demo/fixedtime' ist kein Feinwert, er überschreibt artTime im Render), B = Standard (aus Raster und Notenlänge)
   27: { name: 'bendtime', cases: 'art', a: { 'demo/fixedtime': { vibrato: 0.22 } }, b: {}, extra: { voices: { lead: { id: 'sample', variant: 'guitar' } }, track: { layers: { drums: true, bass: true, chords: true, pad: true, lead: true, percussion: true }, jobs: { lead: 'melody', percussion: 'mixed' } } } },
   // Lead-Aufgabe riff auf der Lead-Gitarre: A = ohne Lead (der Schlüssel 'demo/mute' ist kein Feinwert, er nimmt die Schicht aus dem Render), B = mit Riff
+  // Synth-Kit (Aufruf mit "synth"): A = Side-Stick als volle Snare und getretene Hi-Hat als geschlossene wie bisher, B = Standard (Side-Stick leiser, getretene entfällt)
+  28: { name: 'synthkit', cases: 'art', a: { 'drums/synth/classic': { sideStick: 1, hatPedal: 1 } } },
   26: { name: 'riff', cases: 'art', a: { 'demo/mute': { layer: 'lead' } }, b: {}, extra: { voices: { lead: { id: 'sample', variant: 'guitar' } }, track: { layers: { drums: true, bass: true, chords: true, pad: true, lead: true, percussion: true }, jobs: { lead: 'riff', percussion: 'mixed' } } } },
   // Artikulationen (Vorbereitung Phase 3): keine Regeln, nur eine feste Demo-Verteilung in renderInPage; der Schlüssel 'demo/art' ist kein Feinwert,
   // er lässt in beiden Renders eine Gitarre (FreePats) die Lead-Linie statt der Akkorde spielen und schaltet in B die Artikulationen ein
