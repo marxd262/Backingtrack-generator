@@ -68,16 +68,18 @@ const MAX_RELEASE = 2; // s, die Presets haben bis zu 4,5 s (Pads würden in den
  * `art` (Artikulation, Vorbereitung Phase 3; gerechnet, solange es keine eigenen Samples gibt; nach Wissen gesetzt, nicht gehört; Unbekanntes wirkt nicht):
  *   slide   gleitet in 80 ms von `artSemi` Halbtönen daneben (Standard -2) auf den Ton
  *   bend    beginnt `artSemi` Halbtöne daneben (Standard -2), hält kurz (höchstens 40 ms) und zieht in höchstens 180 ms weich auf den Ton;
- *           `artTone` (dB je Halbton, Standard 0 = aus, Versuch): ein Höhenregal ab 1800 Hz läuft mit, von -artTone·Halbtöne/2 auf +artTone·Halbtöne/2 dB
+ *           `artTone` (dB je Halbton, Standard 9, 0 = aus): ein Höhenregal ab 1800 Hz läuft mit, von -artTone·Halbtöne/2 auf +artTone·Halbtöne/2 dB
+ *           (Urteil des Nutzers: 3 zu schwach, 9 besser). bend und vibrato spielen ohne das zusätzliche Abklingen der Stimme (naturalDecay)
  *   vibrato ab 30 % der Dauer 5,5 Hz, bis ±25 Cent (nur Noten ab 0,3 s)
  *   hammer  ohne Anschlag: das Sample beginnt 30 ms später, Einsatz mindestens 20 ms, 15 % leiser
  *   dead    höchstens 50 ms lang, Tiefpass 900 Hz;   mute  Tiefpass 1600 Hz, Abklingen höchstens 0,5 s
  */
-export function playNote(ctx, out, t, { pack, midi, dur, vel, zone = pickZone(pack.meta.zones, midi, vel), gain = 1, timeScale = 1, filter = 20000, naturalDecay = 0, eq = null, cents = 0, oneShot = false, fadeOut = 0.15, art, artSemi, artTone = 0 }) {
+export function playNote(ctx, out, t, { pack, midi, dur, vel, zone = pickZone(pack.meta.zones, midi, vel), gain = 1, timeScale = 1, filter = 20000, naturalDecay = 0, eq = null, cents = 0, oneShot = false, fadeOut = 0.15, art, artSemi, artTone = 9 }) {
   if (!zone) return;
   if (art === 'dead') { dur = Math.min(dur, 0.05); filter = Math.min(filter, 900); }
   if (art === 'mute') { filter = Math.min(filter, 1600); naturalDecay = naturalDecay > 0 ? Math.min(naturalDecay, 0.5) : 0.5; }
   if (art === 'hammer') gain *= 0.85;
+  if (art === 'bend' || art === 'vibrato') naturalDecay = 0; // gezogene und bebende Töne brauchen Sustain: das zusätzliche Abklingen der Stimme entfällt
   const sample = pack.meta.samples[zone.sample];
   const src = ctx.createBufferSource();
   src.buffer = buffersFor(ctx, pack)[zone.sample];
