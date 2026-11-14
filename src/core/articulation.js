@@ -15,8 +15,8 @@ import { grooveIdFor } from './grooves.js';
 import { phrasesOf } from './form-arrange.js';
 import { densityAt } from './form-types.js';
 
-export const ART_DEFAULTS = Object.freeze({ on: 1, bass: 1, chords: 1, drums: 0, keys: 0, pad: 0, lead: 0, band: 0, bassB: 0, chordsB: 0 });
-const RULE_LAYER = { keys: 'chords', bassB: 'bass', chordsB: 'chords' }; // Regelgruppe -> Schicht, wenn die Namen abweichen
+export const ART_DEFAULTS = Object.freeze({ on: 1, bass: 1, chords: 1, drums: 0, keys: 0, pad: 0, lead: 0, band: 0, bassB: 0, chordsB: 0, keysB: 0, drumsB: 0 });
+const RULE_LAYER = { keys: 'chords', bassB: 'bass', chordsB: 'chords', keysB: 'chords', drumsB: 'drums' }; // Regelgruppe -> Schicht, wenn die Namen abweichen
 
 /** Füllt die Feinwerte auf; nur endliche Zahlen >= 0 zählen. */
 export function completeArt(options) {
@@ -423,6 +423,42 @@ const RULES = {
           Object.assign(third, { midi: third.midi + (sus4 ? (major ? 1 : 2) : major ? -2 : -1), dur: r6(wait) });
         }
       }
+    }
+  },
+
+  // Tasten, Priorität B (SPEC_PHASE3 5.4/5.5), nur E-Piano: roll (Ballade: Akkord auf der Eins bei Akkordwechsel und der letzte Akkord, von unten
+  // nach oben gebrochen, 15 bis 40 ms), crush (Blues: kleine Terz als Vorschlag 30 bis 60 ms vor der großen), bark (Funk: Akzent 15 % lauter)
+  keysB(out, { track, bars, ctx, profile, p, roll }) {
+    const voice = track.voices?.chords;
+    if (voice?.id !== 'epiano' && !(voice?.id === 'sample' && voice.variant === 'epiano')) return;
+    const stabs = new Map(); // "Takt:Schritt" -> Töne
+    for (const e of out) if (e.layer === 'chords' && e.type === 'note' && e.strum) { const k = `${e.bar}:${Math.round(e.beat * bars[e.bar].sub)}`; stabs.set(k, [...(stabs.get(k) ?? []), e]); }
+    const lastT = Math.max(...[...stabs.values()].map((stab) => stab[0].t));
+    for (const [key, stab] of stabs) {
+      const b = bars[stab[0].bar], c = ctx[b.index], s = Number(key.split(':')[1]), root = chordTones(b.chord, 3)[0];
+      const shift = (e, d) => Object.assign(e, { t: r6(e.t + d), beat: e.beat + d / (b.stepSec * b.sub), dur: r6(Math.max(0.02, e.dur - d)) });
+      if (profile === 'ballad' && ((s === 0 && c.change) || stab[0].t === lastT) && roll(c, 'keysB', 'roll', s) < p(0.2, 'keysB')) {
+        const total = 0.015 + 0.025 * roll(c, 'keysB', 'rollTime', s);
+        [...stab].sort((x, y) => x.midi - y.midi).forEach((e, i, all) => { if (i && e.t + total < b.end - 0.01) shift(e, (total * i) / (all.length - 1)); });
+      } else if ((profile === 'shuffle' || profile === 'slowBlues') && roll(c, 'keysB', 'crush', s) < p(0.2, 'keysB')) {
+        const third = stab.find((e) => (((e.midi - root) % 12) + 12) % 12 === 4), d = 0.03 + 0.03 * roll(c, 'keysB', 'crushTime', s);
+        if (!third || third.t + d >= b.end - 0.01) continue;
+        const { strum, ...rest } = third;
+        out.push({ ...rest, midi: third.midi - 1, dur: r6(d), art: 'crush' });
+        shift(third, d);
+      } else if (profile === 'funk' && s % b.sub === 0 && roll(c, 'keysB', 'bark', s) < p(0.3, 'keysB')) for (const e of stab) Object.assign(e, { art: 'bark', vel: roundVel(e.vel * 1.15) });
+    }
+  },
+
+  // Schlagzeug, Priorität B (SPEC_PHASE3 5.8): flam (Vorschlag gleichen Namens 15 bis 30 ms vorher, leise) im Fill und selten auf dem Backbeat.
+  // Nicht gebaut: Fills wechselnder Länge, Feathering und Besen (Jazz), Tamburin und Shaker.
+  drumsB(out, { bars, ctx, p, roll }) {
+    for (const e of out.filter((x) => x.layer === 'drums' && x.type === 'hit')) {
+      const b = bars[e.bar], c = ctx[e.bar], s = Math.round(e.beat * b.sub), inFill = c.fill && e.beat >= b.beats - 2;
+      const body = ['snare', 'tomHigh', 'tomMid', 'tomLow', 'rimshot'].includes(e.name) && e.vel >= 0.3;
+      const d = 0.015 + 0.015 * roll(c, 'drumsB', 'flamTime', s);
+      if (!body || e.t - d < b.start || !(roll(c, 'drumsB', 'flam', s) < p(inFill ? 0.25 : 0.08, 'drumsB'))) continue;
+      out.push({ ...e, t: r6(e.t - d), beat: e.beat - d / (b.stepSec * b.sub), vel: roundVel(0.4 * e.vel), art: 'flam' });
     }
   },
 

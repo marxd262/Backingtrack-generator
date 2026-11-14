@@ -17,6 +17,8 @@ export const STEPS = {
   11: { name: 'guitar', cases: 'art', a: { 'mix/art': { on: 1, chords: 0 } }, b: { 'mix/art': { on: 1 } } },
   // ab hier je Instrument unabhängig: A = Standard (Bass und Gitarre an), B = dazu nur dieses Instrument
   12: { name: 'drums', cases: 'art', a: {}, b: { 'mix/art': { drums: 1 } } },
+  19: { name: 'keysb', cases: 'art', extra: { voices: { chords: { id: 'sample', variant: 'epiano' } } }, a: {}, b: { 'mix/art': { keysB: 1 } } }, // Tasten B: roll, crush, bark
+  20: { name: 'drumsb', cases: 'art', a: {}, b: { 'mix/art': { drumsB: 1 } } }, // Schlagzeug B: Flams
   18: { name: 'guitarb', cases: 'art', a: {}, b: { 'mix/art': { chordsB: 1 } } }, // Gitarre Priorität B: slideChord, embellish, boomChick, boogie
   17: { name: 'bassb', cases: 'art', a: {}, b: { 'mix/art': { bassB: 1 } } }, // Bass Priorität B: slideOff, palmMute, octavePop, hammer/pull
   15: { name: 'band', cases: 'art', a: {}, b: { 'mix/art': { band: 1 } } }, // Band-Regeln für Bass und Gitarre (Fill-Takte, Slide in den Refrain)

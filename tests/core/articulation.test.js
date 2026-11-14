@@ -19,7 +19,7 @@ const mk = (id, over = {}) => ({
 const ON = { ornaments: { on: 1 } };
 
 test('an ist der Standard (Bass und Gitarre); Feinwert on 0, Regler 0 und beide Schichten auf 0 ergeben denselben Strom ohne Artikulationen; ungültiger Regler wirft', () => {
-  assert.deepEqual(ART_DEFAULTS, { on: 1, bass: 1, chords: 1, drums: 0, keys: 0, pad: 0, lead: 0, band: 0, bassB: 0, chordsB: 0 });
+  assert.deepEqual(ART_DEFAULTS, { on: 1, bass: 1, chords: 1, drums: 0, keys: 0, pad: 0, lead: 0, band: 0, bassB: 0, chordsB: 0, keysB: 0, drumsB: 0 });
   assert.deepEqual(completeArt({ on: 1, bass: -1, chords: 'x', drums: 1 }), { ...ART_DEFAULTS, drums: 1 });
   for (const id of ['funk', 'rock', 'blues']) {
     const plain = buildEvents(mk(id), { ornaments: { on: 0 } });
@@ -409,4 +409,53 @@ test('Gitarre B (aus bis eingeschaltet): Country spielt Boom-Chick, der Blues-Sh
     }
   }
   assert.ok(count.boogie > 0 && count.slideChord > 0 && count.embellish > 0, JSON.stringify(count));
+});
+
+// ---- Tasten und Schlagzeug, Priorität B ----
+test('Tasten B und Schlagzeug B (aus bis eingeschaltet): Roll bricht den Akkord in höchstens 40 ms, Crush setzt die kleine Terz vor die große, Bark betont Zählzeiten; Flam liegt 15 bis 30 ms vor einem Schlag gleichen Namens', () => {
+  const count = { roll: 0, crush: 0, bark: 0, flam: 0 };
+  for (const seed of SEEDS) {
+    for (const [id, tags] of [['dreamy', {}], ['blues', {}], ['funk', {}]]) {
+      const track = mk(id, { seed, ornaments: 1, ...EPIANO, ...tags }), off = keysOf(track, {}), on = keysOf(track, { keysB: 1 });
+      assert.deepEqual(off, keysOf(track, { keysB: 0 }));
+      const starts = new Map();
+      for (const e of on) if (e.strum && e.art !== 'crush') { const k = `${e.bar}:${stepOf(e)}`; starts.set(k, [...(starts.get(k) ?? []), e.t]); }
+      for (const ts of starts.values()) { const spread = Math.max(...ts) - Math.min(...ts); assert.ok(spread <= 0.06 + 1e-6, `${id}: ${spread}`); if (id === 'dreamy' && spread > 0.01) count.roll++; }
+      for (const e of on.filter((x) => x.art === 'crush')) {
+        count.crush++;
+        assert.ok(e.dur >= 0.03 && e.dur <= 0.06 && on.some((x) => x.midi === e.midi + 1 && Math.abs(x.t - e.t - e.dur) < 1e-5), JSON.stringify(e));
+      }
+      for (const e of on.filter((x) => x.art === 'bark')) { count.bark++; assert.equal(stepOf(e) % 4, 0); }
+    }
+    const track = mk('rock', { seed, ornaments: 1, length: 16 }), drums = drumsOf(track, { drumsB: 1 });
+    assert.deepEqual(drumsOf(track, {}), drumsOf(track, { drumsB: 0 }));
+    for (const e of drums.filter((x) => x.art === 'flam')) {
+      count.flam++;
+      assert.ok(drums.some((x) => x.name === e.name && !x.art && x.t - e.t >= 0.015 - 1e-6 && x.t - e.t <= 0.03 + 1e-6 && e.vel < x.vel), JSON.stringify(e));
+    }
+  }
+  for (const k of Object.keys(count)) assert.ok(count[k] > 0, JSON.stringify(count));
+});
+
+test('alle Regelgruppen zusammen: sortiert, im Takt, Dauer über 0, Bass einstimmig und in 28..52, Schlagnamen bekannt (Stile, Seeds, mit und ohne Songform, Gitarre und E-Piano)', () => {
+  const ALL = Object.fromEntries(Object.keys(ART_DEFAULTS).map((k) => [k, 1]));
+  const parts = form([['intro', 2], ['verse', 4], ['build', 4], ['chorus', 4], ['break', 2], ['chorus', 4], ['outro', 2]]);
+  for (const id of STYLE_PRESETS.map((s) => s.id)) for (const seed of [1, 2, 3]) for (const extra of [{}, parts, EPIANO, { meter: [12, 8] }, { meter: [3, 4] }]) {
+    const track = mk(id, { seed, ornaments: 1, length: 16, layers: { drums: true, bass: true, chords: true, pad: true, lead: true, percussion: true }, jobs: { lead: 'melody', percussion: 'mixed' }, ...extra });
+    if (extra.meter) track.bars = track.bars.map((b) => ({ ...b, beats: extra.meter[0] === 12 ? 4 : 3 }));
+    const events = buildEvents(track, { ornaments: ALL }), bars = barTimeline(checkedTrack(track)), label = `${id} s=${seed} ${JSON.stringify(extra).slice(0, 40)}`;
+    assert.deepEqual(events, buildEvents(track, { ornaments: ALL }), `${label}: reproduzierbar`);
+    for (let i = 1; i < events.length; i++) assert.ok(events[i].t >= events[i - 1].t, `${label}: sortiert`);
+    for (const e of events.filter((x) => x.layer)) {
+      assert.ok(e.t >= bars[e.bar].start - 1e-6 && e.t < bars[e.bar].end, `${label}: im Takt ${JSON.stringify(e)}`);
+      assert.ok(e.vel >= 0.05 && e.vel <= 1, `${label}: vel ${JSON.stringify(e)}`);
+      if (e.type === 'note') assert.ok(e.dur > 0 && Number.isInteger(e.midi), `${label}: Note ${JSON.stringify(e)}`);
+      if (e.type === 'hit' && e.layer === 'drums') assert.ok(DRUM_NAMES.includes(e.name), e.name);
+    }
+    const bass = events.filter((e) => e.layer === 'bass');
+    for (let i = 0; i < bass.length; i++) {
+      assert.ok(bass[i].midi >= 28 && bass[i].midi <= 52, `${label}: ${JSON.stringify(bass[i])}`);
+      if (i) assert.ok(bass[i - 1].t + bass[i - 1].dur <= bass[i].t + 1e-6, `${label}: Bass einstimmig bei ${i}`);
+    }
+  }
 });
