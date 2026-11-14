@@ -85,6 +85,9 @@ export const TUNABLES = deepFreeze({
   'lead/sample/flute': { level: spec(0.05, 8, 0.05, 2.4) },
   'lead/sample/sax': { level: spec(0.05, 8, 0.05, 1.3) },
   'lead/sample/synth': { level: spec(0.05, 8, 0.05, 4.3) },
+  // Lead-Gitarre: die Samples von chords/sample/freepats, einstimmig; Natürlichkeit wie die Gitarren, ohne Strum. Pegel gleiches Verfahren (gemessen
+  // 2026-11-14, Job melody, 8 s, Schicht allein, ohne Begrenzer): rms Sample / Synth bei level 1 und decay 3: 0.342; level = 1 / Verhältnis
+  'lead/sample/guitar': { level: spec(0.05, 8, 0.05, 2.9), decay: spec(0.2, 10, 0.1, 3), ...REALISM },
   'drums/sample/standard': { level: spec(0.05, 8, 0.05, 1.2), ...KIT_HUMAN },
   'drums/sample/brushes': { level: spec(0.05, 8, 0.05, 1.2), ...KIT_HUMAN },
   'drums/sample/rimshot': { level: spec(0.05, 8, 0.05, 1.3), ...KIT_HUMAN },

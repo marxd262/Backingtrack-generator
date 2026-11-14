@@ -231,6 +231,7 @@ export default {
   'variant.lead.sample.flute': 'Flöte (Sample)',
   'variant.lead.sample.sax': 'Altsaxofon (Sample)',
   'variant.lead.sample.synth': 'Synth-Lead (Sample)',
+  'variant.lead.sample.guitar': 'E-Gitarre clean (Freepats, Sample)',
   'variant.drums.sample.standard': 'Standard-Kit (Sample)',
   'variant.drums.sample.brushes': 'Besen-Kit (Sample)',
   'variant.drums.sample.rimshot': 'Rimshot-Kit (Sample)',

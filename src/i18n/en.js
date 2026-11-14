@@ -231,6 +231,7 @@ export default {
   'variant.lead.sample.flute': 'Flute (sample)',
   'variant.lead.sample.sax': 'Alto sax (sample)',
   'variant.lead.sample.synth': 'Synth lead (sample)',
+  'variant.lead.sample.guitar': 'Electric guitar, clean (Freepats, sample)',
   'variant.drums.sample.standard': 'Standard kit (sample)',
   'variant.drums.sample.brushes': 'Brush kit (sample)',
   'variant.drums.sample.rimshot': 'Rimshot kit (sample)',

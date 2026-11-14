@@ -64,6 +64,8 @@ test('jede Sample-Stimme hat einen gemessenen Pegel (level) und ein vorhandenes 
   }
   assert.equal(packIdFor('drums', 'rimshot'), 'drums-standard');
   assert.equal(packIdFor('drums', '808'), 'drums-808');
+  assert.equal(packIdFor('lead', 'guitar'), 'chords-freepats');
+  assert.ok(isVoice('lead', 'sample', 'guitar') && hasVoice('lead', 'sample', 'guitar'));
   for (const key of ['bass/sample/upright', 'chords/sample/muted']) assert.ok(TUNABLES[key].decay, `${key}: decay`);
 });
 
@@ -90,7 +92,7 @@ test('Gitarren-Samples: die fünf Feinwerte der Natürlichkeit mit ihren Standar
     }
   }
   // Klang v2, Schritt 5: Bass und E-Piano haben dieselben Namen (Anschlagkurve usw.), Schlagzeug-Kits und Percussion die Zufallsabweichung je
-  // Schlag (humanCents, humanDb, layerSpread; Kits dazu choke); Pad, Lead und Orgel haben nichts davon
+  // Schlag (humanCents, humanDb, layerSpread; Kits dazu choke); Pad, Orgel und die Lead-Stimmen außer der Gitarre haben nichts davon
   const withCurve = [], withHuman = [];
   for (const layer of VOICE_LAYERS) {
     for (const variant of VOICES[layer].sample?.variants ?? []) {
@@ -100,7 +102,7 @@ test('Gitarren-Samples: die fünf Feinwerte der Natürlichkeit mit ihren Standar
       if (layer === 'drums') assert.ok(table.layerSpread && table.choke, `${layer}/${variant}: layerSpread, choke`);
     }
   }
-  const others = ['bass/finger', 'bass/pick', 'bass/upright', 'chords/epiano'];
+  const others = ['bass/finger', 'bass/pick', 'bass/upright', 'chords/epiano', 'lead/guitar']; // die Lead-Gitarre spielt die Freepats-Samples der Akkord-Schicht
   assert.deepEqual(withCurve.sort(), [...GUITARS.map((v) => `chords/${v}`), ...others].sort());
   assert.deepEqual(withHuman.sort(), [...withCurve, ...VOICES.drums.sample.variants.map((v) => `drums/${v}`), ...VOICES.percussion.sample.variants.map((v) => `percussion/${v}`)].sort());
 });

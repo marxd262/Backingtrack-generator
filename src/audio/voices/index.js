@@ -27,7 +27,7 @@ const IMPLS = {
     'sample/guitar': sample('guitar'), 'sample/epiano': sample('epiano'), 'sample/organ': sample('organ'), 'sample/muted': sample('muted'), 'sample/jazz': sample('jazz'), 'sample/funk': sample('funk'), 'sample/steel': sample('steel'), 'sample/nylon': sample('nylon'), 'sample/twelve': sample('twelve'),
     'sample/freepats': sample('freepats'), 'sample/freepatsjazz': sample('freepatsjazz'),
   },
-  lead: { 'synth/classic': classicVoice, 'sample/flute': sample('flute'), 'sample/sax': sample('sax'), 'sample/synth': sample('synth') },
+  lead: { 'synth/classic': classicVoice, 'sample/flute': sample('flute'), 'sample/sax': sample('sax'), 'sample/synth': sample('synth'), 'sample/guitar': sample('guitar') },
   percussion: { 'synth/classic': (layer, ctx, deps) => percussionVoice(ctx, { noise: deps.noise }), ...kits('studio') },
   pad: { 'synth/classic': classicVoice, 'sample/strings': sample('strings'), 'sample/warm': sample('warm') },
 };

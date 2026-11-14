@@ -34,7 +34,7 @@ export const VOICES = deepFreeze({
   },
   lead: {
     synth: { kind: 'synth', variants: ['classic'], uses: [] },
-    sample: { kind: 'sample', variants: ['flute', 'sax', 'synth'], uses: [] },
+    sample: { kind: 'sample', variants: ['flute', 'sax', 'synth', 'guitar'], uses: [] },
   },
   percussion: {
     synth: { kind: 'synth', variants: ['classic'], uses: [] },
