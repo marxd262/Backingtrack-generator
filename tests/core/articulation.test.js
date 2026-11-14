@@ -1,7 +1,7 @@
 // Artikulations-Schicht (Phase 3, core/articulation.js): aus = unveränderter Strom; Stil-Profil aus Groove und Schlagworten; Regeln je Schicht.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildEvents, STYLE_PRESETS, GROOVES } from '../../src/index.js';
+import { buildEvents, STYLE_PRESETS, GROOVES, DRUM_NAMES } from '../../src/index.js';
 import { profileOf, completeArt, planRoll, ART_DEFAULTS } from '../../src/core/articulation.js';
 import { barTimeline, checkedTrack } from '../../src/core/timeline.js';
 import { createRng } from '../../src/core/rng.js';
@@ -19,8 +19,8 @@ const mk = (id, over = {}) => ({
 const ON = { ornaments: { on: 1 } };
 
 test('an ist der Standard (Bass und Gitarre); Feinwert on 0, Regler 0 und beide Schichten auf 0 ergeben denselben Strom ohne Artikulationen; ungültiger Regler wirft', () => {
-  assert.deepEqual(ART_DEFAULTS, { on: 1, bass: 1, chords: 1 });
-  assert.deepEqual(completeArt({ on: 1, bass: -1, chords: 'x' }), { ...ART_DEFAULTS, on: 1 });
+  assert.deepEqual(ART_DEFAULTS, { on: 1, bass: 1, chords: 1, drums: 0, keys: 0, pad: 0 });
+  assert.deepEqual(completeArt({ on: 1, bass: -1, chords: 'x', drums: 1 }), { ...ART_DEFAULTS, drums: 1 });
   for (const id of ['funk', 'rock', 'blues']) {
     const plain = buildEvents(mk(id), { ornaments: { on: 0 } });
     assert.deepEqual(buildEvents(mk(id)), buildEvents(mk(id), ON));
@@ -189,5 +189,60 @@ test('Gitarre: Anschlagrichtung nach Spielweise (16tel: e und a hoch; Achtel: "+
     }
     const keys = mk('funk', { seed, voices: { chords: { id: 'sample', variant: 'epiano' } } });
     assert.deepEqual(chordsOf(keys), chordsOf(keys, { on: 0 }));
+  }
+});
+
+// ---- Schlagzeug ----
+const drumsOf = (track, ornaments = { drums: 1 }) => buildEvents(track, { timing: GRID, ornaments }).filter((e) => e.layer === 'drums');
+
+test('Schlagzeug ist aus, bis es eingeschaltet wird; an: nur Namen aus DRUM_NAMES', () => {
+  for (const id of ['funk', 'rock', 'dreamy', 'reggae']) for (const seed of SEEDS) {
+    const track = mk(id, { seed });
+    assert.deepEqual(drumsOf(track, {}), drumsOf(track, { drums: 0 }));
+    assert.ok(drumsOf(track).every((e) => DRUM_NAMES.includes(e.name)));
+  }
+});
+
+test('Schlagzeug: Hi-Hat-Akzente 1 / 0,6 / 0,8 / 0,6 (Achtel 1 / 0,7), Geisternoten 0,15 bis 0,3, Side-Stick in Ballade und Reggae', () => {
+  for (const seed of SEEDS) {
+    const funk = drumsOf(mk('funk', { seed }));
+    for (let bar = 0; bar < 8; bar++) {
+      const hats = funk.filter((e) => e.bar === bar && e.name === 'hat'), top = Math.max(...hats.map((e) => e.vel)), sixteenths = hats.some((e) => stepOf(e) % 2);
+      for (const e of hats) {
+        const want = stepOf(e) % 4 === 0 ? 1 : stepOf(e) % 2 ? 0.6 : sixteenths ? 0.8 : 0.7;
+        assert.ok(Math.abs(e.vel / top - want) < 0.12, `${seed}: ${JSON.stringify(e)} gegen ${top}`);
+      }
+    }
+    const ghosts = drumsOf(mk('funk', { seed }), { drums: 0 }).filter((e) => e.name === 'snare' && e.vel < 0.3).length;
+    assert.equal(funk.filter((e) => e.name === 'snare' && e.vel >= 0.15 && e.vel < 0.3).length, ghosts);
+    for (const id of ['dreamy', 'reggae']) {
+      const kit = drumsOf(mk(id, { seed })), fillBar = 7; // ohne Songform: Fill im letzten Takt des Abschnitts
+      assert.ok(kit.some((e) => e.name === 'sideStick'), id);
+      assert.ok(kit.filter((e) => e.name === 'snare' && e.vel >= 0.3).every((e) => e.bar === fillBar && e.beat >= 2), `${id}: Snare nur im Fill`);
+    }
+  }
+});
+
+test('Schlagzeug mit Songform: Rock-Refrain halboffene Hi-Hat und Rimshot, sonst Ride mit getretener Hi-Hat auf 2 und 4; Crash mit Choke vor dem Stopp; offene Hi-Hat wird geschlossen', () => {
+  const parts = form([['verse', 4], ['chorus', 4], ['break', 2], ['chorus', 4]]);
+  for (const seed of SEEDS) {
+    const rock = drumsOf(mk('rock', { seed, ...parts }));
+    assert.ok(rock.filter((e) => e.bar < 4).every((e) => !['hatHalf', 'rimshot', 'ride'].includes(e.name)), 'Strophe unverändert');
+    assert.ok(rock.some((e) => e.bar >= 4 && e.bar < 8 && e.name === 'hatHalf') && !rock.some((e) => e.bar >= 4 && e.bar < 8 && e.name === 'hat'));
+    assert.ok(rock.some((e) => e.name === 'rimshot'));
+    const choke = rock.filter((e) => e.art === 'choke');
+    assert.deepEqual(choke.map((e) => [e.name, e.bar]), [['crash', 7]], 'ein Crash im Takt vor dem Stopp');
+    assert.ok(choke[0].artTime >= 0.05 && choke[0].artTime <= 0.15 && choke[0].t === Math.max(...rock.filter((e) => e.bar === 7).map((e) => e.t)));
+    const funk = drumsOf(mk('funk', { seed, ...parts }));
+    for (const bar of [4, 5, 6, 10, 11, 12, 13]) {
+      const pedals = funk.filter((e) => e.bar === bar && e.name === 'hatPedal' && e.vel === 0.35).map((e) => e.beat);
+      if (funk.some((e) => e.bar === bar && e.name === 'ride')) assert.deepEqual(pedals, [1, 3], `Takt ${bar}`);
+    }
+    assert.ok(funk.some((e) => e.name === 'ride'));
+    const open = funk.filter((e) => e.name === 'openHat' && e.bar !== 7);
+    for (const e of open) {
+      const beat = (Math.floor(e.beat) + 1) % 4, bar = e.bar + (beat === 0 ? 1 : 0);
+      if (funk.some((x) => x.bar === bar)) assert.ok(funk.some((x) => x.bar === bar && x.beat === beat && (x.name === 'hat' || x.name === 'hatPedal')), JSON.stringify(e));
+    }
   }
 });

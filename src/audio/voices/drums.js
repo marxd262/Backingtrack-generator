@@ -1,4 +1,5 @@
 import { adsr, osc } from '../nodes.js';
+import { DRUM_FALLBACK } from '../../core/event-helpers.js';
 
 // Klangerzeugung des Schlagzeugs (synth/classic): Schläge nach Namen. params ist drumParams (live aktualisiert, beim neutralen Klang die
 // bisherigen Konstanten) und wird beim Anschlag gelesen. Toms folgen dem Klangmodell nicht.
@@ -53,5 +54,6 @@ export function drumKitVoice(ctx, { params: p, noise }) {
   };
   const kit = { kick, snare, hat: hat(false), openHat: hat(true), crash };
   for (const [name, f] of Object.entries(TOMS)) kit[name] = tom(f);
-  return (out, t, e) => e.type === 'hit' && kit[e.name]?.(out, t, e.vel);
+  // Schlagarten der Artikulations-Schicht spielen ihren Grundschlag (die halboffene Hi-Hat die geschlossene: die offene würde hier nicht abgewürgt)
+  return (out, t, e) => e.type === 'hit' && (kit[e.name] ?? kit[e.name === 'hatHalf' ? 'hat' : DRUM_FALLBACK[e.name]])?.(out, t, e.vel);
 }

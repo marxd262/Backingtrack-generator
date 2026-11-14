@@ -24,6 +24,12 @@ export const humanVel = (base, rng) => roundVel(base * (0.94 + rng.next() * 0.12
 export const note = (b, layer, step, t, midi, vel, dur) =>
   ({ t, bar: b.index, beat: step / b.sub, type: 'note', layer, midi, vel, dur: r6(Math.min(dur, b.end - t)) });
 
+/**
+ * Schlagarten der Artikulations-Schicht (Phase 3) und der Grundschlag, auf den sie zurückfallen: in Stimmen ohne eigenen Klang dafür (bis die Packs
+ * Ride, halboffene Hi-Hat und Rimshot haben), für die Lage im Mikrotiming und fürs Panorama.
+ */
+export const DRUM_FALLBACK = Object.freeze({ sideStick: 'snare', rimshot: 'snare', ride: 'hat', rideBell: 'hat', hatHalf: 'openHat', hatPedal: 'hat' });
+
 const RANK = { chord: 0, marker: 1 };
 /** Sortierung des Ereignisstroms: nach t, bei Gleichstand chord, marker, Rest. */
 export const byTime = (x, y) => x.t - y.t || (RANK[x.type] ?? 2) - (RANK[y.type] ?? 2);

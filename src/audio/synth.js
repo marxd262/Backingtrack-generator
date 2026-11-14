@@ -11,6 +11,7 @@ import { createVoice } from './voices/index.js';
 import { tunedValue } from './voices/tunables.js';
 import { completeVoices, VOICE_LAYERS } from '../core/voices.js';
 import { LAYERS, LAYER_IDS } from '../core/layers.js';
+import { DRUM_FALLBACK } from '../core/event-helpers.js';
 
 // Schichtpegel und Summe, aus Messungen mit tests/e2e/levels.spec.js angeglichen (Messwerte dort im Kommentar)
 // trim: Pegel der Schicht; room: Teil der Summe in den Hall; echo: Echo (punktierte Achtel)
@@ -186,7 +187,7 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
     const fx = LAYERS[name].fx ? (guitarFx[name] = createGuitarFx(ctx, name, mute)) : null;
     layers[name] = {
       trigger(event, when) {
-        if (event.layer === name) voice(fx ? fx.input : name === 'drums' && kitPans[event.name] ? kitPans[event.name].input : mute, when, event);
+        if (event.layer === name) voice(fx ? fx.input : name === 'drums' && kitPans[DRUM_FALLBACK[event.name] ?? event.name] ? kitPans[DRUM_FALLBACK[event.name] ?? event.name].input : mute, when, event);
       },
       setMuted(on) {
         // kurze Rampe gegen Knacken, endet exakt auf 0 bzw. 1

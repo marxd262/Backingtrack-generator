@@ -17,8 +17,11 @@ import { percussionPlayer } from './percussion.js';
 import { applyMicrotiming, completeTiming, jitterScale, timingOf } from './microtiming.js';
 import { articulate, completeArt } from './articulation.js';
 
-/** Schlagzeug-Vokabular (Task 6 ordnet jedem Namen eine Stimme zu); Geisternoten sind `snare` mit vel < 0.3. */
-export const DRUM_NAMES = ['kick', 'snare', 'hat', 'openHat', 'tomHigh', 'tomMid', 'tomLow', 'crash'];
+/**
+ * Schlagzeug-Vokabular (Task 6 ordnet jedem Namen eine Stimme zu); Geisternoten sind `snare` mit vel < 0.3. Die letzten sechs sind Schlagarten der
+ * Artikulations-Schicht (articulation.js); eine Stimme ohne eigenen Klang dafür spielt den Grundschlag aus DRUM_FALLBACK (event-helpers.js).
+ */
+export const DRUM_NAMES = ['kick', 'snare', 'hat', 'openHat', 'tomHigh', 'tomMid', 'tomLow', 'crash', 'sideStick', 'rimshot', 'ride', 'rideBell', 'hatHalf', 'hatPedal'];
 
 /** Percussion-Vokabular (Treffer der Schicht `percussion`). */
 export const PERCUSSION_NAMES = ['shaker', 'tambourine', 'congaHigh', 'congaLow', 'bongoHigh', 'bongoLow', 'claves', 'cowbell'];

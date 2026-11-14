@@ -121,7 +121,8 @@ export const MIX_TUNABLES = deepFreeze({
   },
   // Artikulations-Schicht (Phase 3, core/articulation.js; Standardwerte von dort): on 0 = aus (Standard an seit dem Urteil des Nutzers 2026-11-14 zu Bass und Gitarre: B etwas besser), bass und
   // chords Faktor auf die Wahrscheinlichkeiten der Schicht (0 = Schicht ohne Artikulationen). Wirkt beim Bauen des Ereignisstroms.
-  'mix/art': { on: spec(0, 1, 1, ART_DEFAULTS.on), bass: spec(0, 2, 0.05, ART_DEFAULTS.bass), chords: spec(0, 2, 0.05, ART_DEFAULTS.chords) },
+  // drums, keys (Tasten auf der Akkord-Schicht) und pad sind gebaut, aber aus, bis der Nutzer sie gehört hat
+  'mix/art': Object.fromEntries(Object.entries(ART_DEFAULTS).map(([name, value]) => [name, name === 'on' ? spec(0, 1, 1, value) : spec(0, 2, 0.05, value)])),
   // Gemeinsamer Raum (Schritt 3, nach Wissen gesetzt, nicht gehört): wet Faktor auf den Pegel des Raums (Klangregler master.roomWet; 0 = aus, für Messungen und A/B), tone Tiefpass des
   // Rückwegs in Hz; je Schicht der Sendeanteil 0..1 (Schlagzeug und Percussion voll, Bass fast trocken). Die Größe ist der Klangregler master.roomSize (Mitte 0,4 s).
   'mix/room': {

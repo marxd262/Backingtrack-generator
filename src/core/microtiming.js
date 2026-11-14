@@ -9,7 +9,7 @@
 // hörbar, 2 etwas zu viel (Instrumente lösen sich voneinander), Standard dazwischen (1,5). Die Lagen selbst sind nach Wissen gesetzt.
 // Feinwerte: amount (Faktor auf Lage und Drift), tight (Rest des Zufalls je Note; amount 0 und tight 1 = Strom wie vor Klang v2), layback, drift.
 import { r6 } from './timeline.js';
-import { byTime } from './event-helpers.js';
+import { byTime, DRUM_FALLBACK } from './event-helpers.js';
 
 export const TIMING_DEFAULTS = Object.freeze({ amount: 1.5, tight: 0.3, layback: 1, drift: 1 });
 
@@ -55,7 +55,7 @@ export function applyMicrotiming(events, track, bars, rng, timing) {
   const out = events.map((e) => {
     const b = bars[e.bar];
     if (!(timing.amount > 0) || !e.layer || !b || !Number.isFinite(e.beat)) return e;
-    const name = e.layer === 'drums' ? (e.name === 'snare' && e.vel < 0.3 ? 'ghost' : e.name) : e.layer;
+    const name = e.layer === 'drums' ? (e.name === 'snare' && e.vel < 0.3 ? 'ghost' : DRUM_FALLBACK[e.name] ?? e.name) : e.layer; // Schlagarten liegen wie ihr Grundschlag
     const ms = timing.amount * (timing.layback * (offsets[name] ?? 0) + timing.drift * (drifts[e.layer]?.(e.t) ?? 0));
     const t = r6(Math.min(b.end - END_GAP, Math.max(b.start, e.t + ms / 1000)));
     // das Ende der Note bleibt, wo es war (Stopps und Taktgrenzen gelten weiter); nur der Einsatz wandert

@@ -2,8 +2,8 @@
 // Songform und vor dem Mikrotiming. Reine Logik, per Seed reproduzierbar. Standard seit dem Urteil des Nutzers zu Bass und Gitarre (2026-11-14). Der Schritt setzt Felder am Ereignis (art, artSemi, artTime, ring,
 // strumUp), ändert Längen und Lautstärken und fügt Noten ein. Wie eine Artikulation klingt, entscheidet die Stimme (sampler.js: eigene
 // Sample-Gruppe des Packs, sonst gerechnet, sonst normal). Alle Zahlen sind Startwerte aus den Regeln, nicht gehört.
-// Feinwerte: on (0 = Schicht aus, Strom unverändert), bass und chords (Faktor auf die
-// Wahrscheinlichkeiten der Schicht, 0 = Schicht ohne Artikulationen). Dazu das Track-Feld `ornaments` (Regler "Verzierungen", 0..1, fehlend 0,5):
+// Feinwerte: on (0 = Schicht aus, Strom unverändert), bass, chords (Rhythmusgitarre), drums, keys (Tasten auf der Akkord-Schicht), pad (Faktor auf die
+// Wahrscheinlichkeiten der Regelgruppe, 0 = Gruppe ohne Artikulationen). Standard an sind bass und chords; die übrigen warten auf das Urteil des Nutzers. Dazu das Track-Feld `ornaments` (Regler "Verzierungen", 0..1, fehlend 0,5):
 // Faktor 2 · ornaments auf jede Wahrscheinlichkeit unter 0,8, höchstens 0,9; 0 = alles aus.
 import { r6 } from './timeline.js';
 import { byTime, roundVel } from './event-helpers.js';
@@ -12,7 +12,8 @@ import { grooveIdFor } from './grooves.js';
 import { phrasesOf } from './form-arrange.js';
 import { densityAt } from './form-types.js';
 
-export const ART_DEFAULTS = Object.freeze({ on: 1, bass: 1, chords: 1 });
+export const ART_DEFAULTS = Object.freeze({ on: 1, bass: 1, chords: 1, drums: 0, keys: 0, pad: 0 });
+const RULE_LAYER = { keys: 'chords' }; // Regelgruppe -> Schicht, wenn die Namen abweichen
 
 /** Füllt die Feinwerte auf; nur endliche Zahlen >= 0 zählen. */
 export function completeArt(options) {
@@ -43,20 +44,21 @@ export function profileOf(track) {
 /**
  * Kontext je Takt: kind (Teil-Typ, ohne Songform ''), phrase (Nummer der 4-Takt-Phrase im Teil) und inPhrase (Takt darin), rep (wie oft ein Teil
  * dieser Art schon lief), first/phraseStart (erster Takt des Teils/der Phrase), verse (Strophe im Sinn der Regeln: alles außer dem Refrain; ohne
- * Songform energy < 0,45), energy 0..1, stop (letzter Takt vor einem Stopp), change/nextChange (Akkordwechsel zu Beginn/am Ende des Takts).
+ * Songform energy < 0,45), energy 0..1, stop/fill/roll (letzter Takt vor einem Stopp, mit Fill, mit Snare-Wirbel), change/nextChange (Akkordwechsel
+ * zu Beginn/am Ende des Takts).
  */
 function barContexts(bars, sections, params) {
   const ctx = [], seen = {};
   sections.forEach((sec, k) => {
     const rep = seen[sec.kind] ?? 0;
     seen[sec.kind] = rep + 1;
-    const last = sec.start + sec.bars - 1, stop = sections[k + 1]?.resolved?.transition === 'stop';
+    const last = sec.start + sec.bars - 1, after = sections[k + 1]?.resolved?.transition, stop = after === 'stop';
     phrasesOf(sec).forEach((ph, phrase) => {
       for (let i = ph.start; i < ph.start + ph.bars; i++) {
         const energy = sec.resolved ? clamp(0.5 + densityAt(sec.resolved, i - sec.start), 0, 1) : params.drive;
         ctx[i] = {
           kind: sec.kind ?? '', phrase, inPhrase: i - ph.start, rep, first: i === sec.start, phraseStart: i === ph.start,
-          verse: sec.kind ? sec.kind !== 'chorus' : energy < 0.45, energy, stop: stop && i === last,
+          verse: sec.kind ? sec.kind !== 'chorus' : energy < 0.45, energy, stop: stop && i === last, fill: sec.fillAtEnd === true && i === last, roll: after === 'roll' && i === last,
           change: i > 0 && !sameChord(bars[i].chord, bars[i - 1].chord), nextChange: i + 1 < bars.length && !sameChord(bars[i].next, bars[i].chord),
         };
       }
@@ -91,7 +93,7 @@ export function articulate(events, { track, bars, sections, params, rng, options
     slotTime: (b, s) => r6(b.start + s * b.stepSec + (b.sub === 4 && s % 2 ? (params.swing * b.stepSec) / 3 : 0)),
   };
   const out = events.map((e) => ({ ...e }));
-  for (const [layer, rules] of Object.entries(RULES)) if (options[layer] > 0 && track.layers[layer]) rules(out, env);
+  for (const [name, rules] of Object.entries(RULES)) if (options[name] > 0 && track.layers[RULE_LAYER[name] ?? name]) rules(out, env);
   // Vorlauf (Regel 6, der Zielton kommt pünktlich): das Ereignis bleibt auf seinem Platz, die Stimme beginnt artTime früher (sampler.js). So gilt
   // der Vertrag des Stroms weiter (Zeit und Dauer im Takt, Bass auf der Eins), und Stimmen ohne Artikulationen (Synth) spielen nicht zu früh
   return out.sort(byTime);
@@ -111,10 +113,55 @@ const PROFILES = {
   latin: { bass: { hold: 'legato' }, guitar: {} },
   country: { bass: { approach: 0.4, slideIn: 0.1 }, guitar: {} },
 };
+// Schlagzeug je Profil: stick = Side-Stick statt Snare (always, verse = in der Strophe, quiet = bei energy < 0,4), rimshot = Rimshot im Refrain,
+// swap = was im Refrain (nur mit Songform) statt der Hi-Hat spielt (fehlend: ride)
+const DRUM_PROFILES = {
+  shuffle: { stick: 'quiet' }, slowBlues: { stick: 'quiet' }, rock: { swap: 'hatHalf', rimshot: true }, ballad: { stick: 'verse', rimshot: true },
+  reggae: { stick: 'always' }, latin: { stick: 'always' }, country: { stick: 'always' },
+};
 const GUITARS = new Set(['guitar', 'muted', 'jazz', 'funk', 'steel', 'nylon', 'twelve', 'freepats', 'freepatsjazz']); // Varianten von chords/sample
 
-/** Regeln je Schicht: (Ereignisse, env) => void; sie ändern die Ereignisse und hängen neue an. */
+/** Regeln je Gruppe (Name = Feinwert): (Ereignisse, env) => void; sie ändern die Ereignisse und hängen neue an. */
 const RULES = {
+  // Schlagzeug, Priorität A, soweit die Packs es hergeben (SPEC_PHASE3 5.8): Hi-Hat-Akzentmuster, Lautstärke der Geisternoten, Side-Stick und
+  // Rimshot statt Snare, im Refrain Ride oder halboffene Hi-Hat statt der geschlossenen, getretene Hi-Hat, Crash mit Choke vor einem Stopp.
+  // Schlagarten ohne Sample fallen in der Stimme auf ihren Grundschlag zurück (DRUM_FALLBACK).
+  drums(out, { bars, ctx, profile, roll, slotTime }) {
+    const P = DRUM_PROFILES[profile] ?? {}, byBar = new Map();
+    for (const e of out) if (e.layer === 'drums' && e.type === 'hit') byBar.set(e.bar, [...(byBar.get(e.bar) ?? []), e]);
+    const add = (b, s, name, vel) => { const e = { t: slotTime(b, s), bar: b.index, beat: s / b.sub, type: 'hit', layer: 'drums', name, vel }; out.push(e); byBar.get(b.index).push(e); };
+    for (const [index, hits] of byBar) {
+      const b = bars[index], c = ctx[index], stepOf = (e) => Math.round(e.beat * b.sub), hats = hits.filter((e) => e.name === 'hat');
+      // Hi-Hat-Akzentmuster im 16tel-Raster als Faktor auf den lautesten Schlag des Takts: Achtel 1 / 0,7; 16tel 1 / 0,6 / 0,8 / 0,6
+      if (b.sub === 4 && hats.length) {
+        const top = Math.max(...hats.map((e) => e.vel)), sixteenths = hats.some((e) => stepOf(e) % 2);
+        for (const e of hats) { const s = stepOf(e); e.vel = roundVel(top * (s % 4 === 0 ? 1 : s % 2 ? 0.6 : sixteenths ? 0.8 : 0.7) * (0.94 + 0.12 * roll(c, 'drums', 'hat', s))); }
+      }
+      for (const e of hits) {
+        if (e.name !== 'snare') continue;
+        if (e.vel < 0.3) { e.vel = roundVel(0.15 + 0.14 * roll(c, 'drums', 'ghost', stepOf(e))); continue; } // Geisternote: 0,15 bis 0,29 statt fest 0,2
+        if ((c.fill && e.beat >= b.beats - 2) || (c.roll && e.beat >= b.beats / 2)) continue; // Fill und Wirbel bleiben auf der Snare
+        if (P.stick === 'always' || (P.stick === 'verse' && c.verse) || (P.stick === 'quiet' && c.energy < 0.4)) e.name = 'sideStick';
+        else if (P.rimshot && !c.verse) e.name = 'rimshot';
+      }
+      // Refrain (nur mit Songform, sonst gäbe es keinen Kontrast): Becken-Wechsel; zum Ride tritt der Fuß die Hi-Hat auf 2 und 4
+      if (c.kind === 'chorus' && hats.length) {
+        for (const e of hats) e.name = P.swap ?? 'ride';
+        if (!P.swap) for (let beat = 1; beat < b.beats; beat += 2) add(b, beat * b.sub, 'hatPedal', 0.35);
+      }
+      // vor einem Stopp: Crash auf den letzten Schlag vor der Stille, nach 50 bis 150 ms abgewürgt
+      if (c.stop) { const last = hits.reduce((x, y) => (y.t > x.t ? y : x)); hits.push({ ...last, name: 'crash', vel: 0.8, art: 'choke', artTime: r6(0.05 + 0.1 * roll(c, 'drums', 'crashChoke')) }); out.push(hits.at(-1)); }
+    }
+    // offene Hi-Hat: auf der nächsten Zählzeit schließen; steht dort keine geschlossene, tritt der Fuß sie zu (nicht in die Stille eines Stopps)
+    for (const [index, hits] of byBar) {
+      const b = bars[index];
+      for (const e of hits.filter((x) => x.name === 'openHat')) {
+        const s = (Math.floor(Math.round(e.beat * b.sub) / b.sub) + 1) * b.sub, at = s < b.steps ? b : bars[index + 1], step = s < b.steps ? s : 0, there = at && byBar.get(at.index);
+        if (there && !ctx[index].stop && !there.some((x) => (x.name === 'hat' || x.name === 'hatPedal') && Math.round(x.beat * at.sub) === step)) add(at, step, 'hatPedal', 0.3);
+      }
+    }
+  },
+
   // E-Bass, Priorität A (SPEC_PHASE3 5.1), in der Reihenfolge Notenwahl (approach, dead), Länge (staccato, legato), Verzierung (slideIn).
   // Einstimmigkeit: Noten, in die eine neue oder vorgezogene Note fällt, kürzt das Mikrotiming danach.
   bass(out, { track, bars, ctx, profile, tempo, p, roll, slotTime }) {

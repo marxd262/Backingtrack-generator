@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { VOICES, VOICE_LAYERS, isVoice } from '../../src/core/voices.js';
 import { DRUM_NAMES, PERCUSSION_NAMES } from '../../src/core/events.js';
+import { DRUM_FALLBACK } from '../../src/core/event-helpers.js';
 import { hasVoice, createVoice, packIdFor, hitKeysFor } from '../../src/audio/voices/index.js';
 import { HIT_KEYS } from '../../src/audio/voices/sample-hits.js';
 import { TUNABLES, tunedValue } from '../../src/audio/voices/tunables.js';
@@ -110,8 +111,9 @@ test('Clean Guitar: milderer Entzerrer (Standardwerte); die anderen Gitarren ohn
   for (const variant of GUITARS.slice(1)) assert.ok(!TUNABLES[`chords/sample/${variant}`].midDb, variant);
 });
 
-test('Tastenbelegung der Schläge: jeder Name hat eine Taste, jede Taste eine Zone in jedem Kit', () => {
-  assert.deepEqual(Object.keys(HIT_KEYS.drums).sort(), [...DRUM_NAMES].sort());
+test('Tastenbelegung der Schläge: jeder Name hat eine Taste (Schlagarten ohne Taste einen Grundschlag mit Taste), jede Taste eine Zone in jedem Kit', () => {
+  assert.ok(Object.keys(HIT_KEYS.drums).every((n) => DRUM_NAMES.includes(n)));
+  for (const n of DRUM_NAMES) assert.ok(Object.hasOwn(HIT_KEYS.drums, n) || Object.hasOwn(HIT_KEYS.drums, DRUM_FALLBACK[n]), n);
   assert.deepEqual(Object.keys(HIT_KEYS.percussion).sort(), [...PERCUSSION_NAMES].sort());
   for (const [layer, variant] of NEW_SAMPLES.filter(([l]) => l === 'drums' || l === 'percussion')) {
     const id = packIdFor(layer, variant);

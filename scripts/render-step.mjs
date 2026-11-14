@@ -15,6 +15,8 @@ export const STEPS = {
   // Phase 3, Priorität A: 10 = Bass (staccato, legato, dead, slideIn, approach) gegen die Schicht aus; 11 = Rhythmusgitarre dazu, gegen nur Bass
   10: { name: 'bass', cases: 'art', a: { 'mix/art': { on: 0 } }, b: { 'mix/art': { on: 1, chords: 0 } } },
   11: { name: 'guitar', cases: 'art', a: { 'mix/art': { on: 1, chords: 0 } }, b: { 'mix/art': { on: 1 } } },
+  // ab hier je Instrument unabhängig: A = Standard (Bass und Gitarre an), B = dazu nur dieses Instrument
+  12: { name: 'drums', cases: 'art', a: {}, b: { 'mix/art': { drums: 1 } } },
   // Artikulationen (Vorbereitung Phase 3): keine Regeln, nur eine feste Demo-Verteilung in renderInPage; der Schlüssel 'demo/art' ist kein Feinwert,
   // er lässt in beiden Renders eine Gitarre (FreePats) die Lead-Linie statt der Akkorde spielen und schaltet in B die Artikulationen ein
   7: { name: 'art', a: { 'demo/art': { on: 0 } }, b: { 'demo/art': { on: 1 } } },
@@ -49,6 +51,8 @@ export const ART_CASES = [
   ['rock', 120, { track: { form: { sections: [{ type: 'verse', bars: 4 }, { type: 'chorus', bars: 4 }] } }, voices: { bass: { id: 'sample', variant: 'pick' } } }],
   ['blues', 90, { track: { meter: [12, 8], groove: 'shuffle', length: 12 }, chords: BLUES_12 }],
   ['dreamy', 70, { tags: { synths: ['arpeggio', 'widePad', 'warm'] }, voices: { chords: { id: 'sample', variant: 'steel' } } }],
+  // seit Schritt 12: Reggae mit Stopp vor dem Break und Refrain danach (Side-Stick, Crash-Choke, Ride mit getretener Hi-Hat)
+  ['reggae', 76, { track: { form: { sections: [{ type: 'verse', bars: 4 }, { type: 'break', bars: 2 }, { type: 'chorus', bars: 4 }] } } }],
 ];
 
 const RATE = 44100;
