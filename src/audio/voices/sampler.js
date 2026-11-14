@@ -67,7 +67,7 @@ const MAX_RELEASE = 2; // s, die Presets haben bis zu 4,5 s (Pads würden in den
  * Schleife: das Sample klingt an seinem Ende aus (Zonen ohne Schleife bleiben unverändert); reicht die Note bis dahin, beginnt das Ausklingen spätestens `fadeOut` (s) vor dem Ende und endet mit ihm.
  * `art` (Artikulation, Vorbereitung Phase 3; gerechnet, solange es keine eigenen Samples gibt; nach Wissen gesetzt, nicht gehört; Unbekanntes wirkt nicht):
  *   slide   gleitet in 80 ms von `artSemi` Halbtönen daneben (Standard -2) auf den Ton
- *   bend    beginnt `artSemi` Halbtöne daneben (Standard -2), hält 10 % der Dauer und zieht bis 45 % der Dauer auf den Ton
+ *   bend    beginnt `artSemi` Halbtöne daneben (Standard -2), hält kurz (höchstens 40 ms) und zieht in höchstens 180 ms weich auf den Ton
  *   vibrato ab 30 % der Dauer 5,5 Hz, bis ±25 Cent (nur Noten ab 0,3 s)
  *   hammer  ohne Anschlag: das Sample beginnt 30 ms später, Einsatz mindestens 20 ms, 15 % leiser
  *   dead    höchstens 50 ms lang, Tiefpass 900 Hz;   mute  Tiefpass 1600 Hz, Abklingen höchstens 0,5 s
@@ -146,7 +146,12 @@ export function playNote(ctx, out, t, { pack, midi, dur, vel, zone = pickZone(pa
   // Tonhöhen-Artikulationen über die Abspielgeschwindigkeit
   const span = noteEnd - t, from = rate * 2 ** ((Number.isFinite(artSemi) ? artSemi : -2) / 12);
   if (art === 'slide') { src.playbackRate.setValueAtTime(from, t); src.playbackRate.exponentialRampToValueAtTime(rate, t + Math.min(0.08, span / 2)); }
-  if (art === 'bend') { src.playbackRate.setValueAtTime(from, t); src.playbackRate.setValueAtTime(from, t + 0.1 * span); src.playbackRate.exponentialRampToValueAtTime(rate, t + 0.45 * span); }
+  if (art === 'bend') { // weicher Verlauf (langsam los, schnell durch die Mitte, langsam ankommen) wie ein gezogener Finger, statt einer geraden Rampe
+    const curve = new Float32Array(32);
+    for (let i = 0; i < 32; i++) { const x = i / 31; curve[i] = from * (rate / from) ** (x * x * (3 - 2 * x)); }
+    src.playbackRate.setValueAtTime(from, t);
+    src.playbackRate.setValueCurveAtTime(curve, t + Math.min(0.04, 0.1 * span), Math.min(0.18, 0.35 * span));
+  }
   if (art === 'vibrato' && span >= 0.3) {
     const length = 0.7 * span, curve = new Float32Array(Math.ceil(length * 200));
     for (let i = 0; i < curve.length; i++) { const x = i / 200; curve[i] = rate * 2 ** ((25 * Math.min(1, x / 0.25) * Math.sin(2 * Math.PI * 5.5 * x)) / 1200); }

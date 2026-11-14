@@ -12,7 +12,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 /** Je Schritt: Thema (Dateiname) und die Feinwerte, die die Änderung abschalten (A). Ein neuer Schritt trägt sich hier ein. */
 export const STEPS = {
   // Artikulationen (Vorbereitung Phase 3): keine Regeln, nur eine feste Demo-Verteilung in renderInPage; der Schlüssel 'demo/art' ist kein Feinwert,
-  // er schaltet in beiden Renders das Lead (Saxofon) ein und in B die Artikulationen
+  // er lässt in beiden Renders eine Gitarre (FreePats) die Lead-Linie statt der Akkorde spielen und schaltet in B die Artikulationen ein
   7: { name: 'art', a: { 'demo/art': { on: 0 } }, b: { 'demo/art': { on: 1 } } },
   1: { name: 'bus', a: { 'mix/bus': { on: 0 } }, b: { 'mix/bus': { on: 1 } } }, // Urteil: A (alter Begrenzer) bleibt Standard
   6: { name: 'strum', a: { 'chords/sample/guitar': { strumUp: 0, strumTilt: 0 } } },
@@ -60,11 +60,15 @@ async function renderInPage([style, bpm, kind, tuning, limiter]) {
     voices: setAllVoices(null, kind),
   };
   const demo = tuning['demo/art'];
-  if (demo) { track.layers.lead = true; track.jobs.lead = 'melody'; track.voices.lead = { id: 'sample', variant: 'sax' }; }
+  if (demo) { track.layers.lead = true; track.jobs.lead = 'melody'; track.voices.chords = { id: 'sample', variant: 'freepats' }; }
   const events = buildEvents(track, { timing: tuning['mix/timing'] });
+  if (demo) { // die Lead-Linie spielt eine Gitarre (Bends sind eine Gitarren-Technik): Lead-Noten auf die Akkord-Schicht legen, die Akkorde selbst entfallen
+    for (let i = events.length - 1; i >= 0; i--) if (events[i].layer === 'chords') events.splice(i, 1);
+    for (const e of events) if (e.layer === 'lead') e.layer = 'chords';
+  }
   if (demo?.on) {
     // Demo, keine Spielregel: Bass kurze Noten dead, kleiner Schritt aufwärts hammer, sonst jede vierte Note slide; Lead lange Noten abwechselnd bend und vibrato, sonst jede dritte slide
-    for (const layer of ['bass', 'lead']) {
+    for (const layer of ['bass', 'chords']) {
       const notes = events.filter((e) => e.layer === layer && e.type === 'note');
       notes.forEach((e, i) => {
         const step = i ? e.midi - notes[i - 1].midi : 0;
