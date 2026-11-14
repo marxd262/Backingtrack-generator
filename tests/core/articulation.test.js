@@ -19,7 +19,7 @@ const mk = (id, over = {}) => ({
 const ON = { ornaments: { on: 1 } };
 
 test('an ist der Standard (Bass und Gitarre); Feinwert on 0, Regler 0 und beide Schichten auf 0 ergeben denselben Strom ohne Artikulationen; ungültiger Regler wirft', () => {
-  assert.deepEqual(ART_DEFAULTS, { on: 1, bass: 1, chords: 1, drums: 0, keys: 0, pad: 0 });
+  assert.deepEqual(ART_DEFAULTS, { on: 1, bass: 1, chords: 1, drums: 0, keys: 0, pad: 0, lead: 0 });
   assert.deepEqual(completeArt({ on: 1, bass: -1, chords: 'x', drums: 1 }), { ...ART_DEFAULTS, drums: 1 });
   for (const id of ['funk', 'rock', 'blues']) {
     const plain = buildEvents(mk(id), { ornaments: { on: 0 } });
@@ -311,4 +311,23 @@ test('Pad: swell zu Beginn eines Teils (0,3 bis 1,5 s, höchstens die halbe Note
     const ballad = padOf(mk('dreamy', { seed }));
     assert.deepEqual([...new Set(ballad.filter((e) => e.art === 'swell').map((e) => e.bar))], [0, 2, 3, 4, 6, 7]); // Folge Am Am Dm E
   }
+});
+
+// ---- Lead ----
+test('Lead: aus bis eingeschaltet; fall nur am Saxofon und am Phrasenende, vibrato nur auf Noten ab einem Schlag, scoop höchstens ein Halbton von unten', () => {
+  const count = {};
+  for (const variant of ['sax', 'flute']) for (const seed of SEEDS) {
+    const track = mk('rock', { seed, ornaments: 1, layers: { drums: true, bass: true, chords: true, pad: true, lead: true }, jobs: { lead: seed % 2 ? 'melody' : 'callResponse' }, voices: { lead: { id: 'sample', variant } } }); // die Melodie hat fast nur lange Noten (vibrato), Ruf und Antwort kurze (scoop)
+    const of = (ornaments) => buildEvents(track, { timing: GRID, ornaments }).filter((e) => e.layer === 'lead');
+    const off = of({}), on = of({ lead: 1 }), beat = 60 / track.bpm;
+    assert.deepEqual(off, of({ lead: 0 }));
+    assert.ok(off.every((e) => !e.art) && on.length === off.length);
+    on.forEach((n, i) => {
+      if (n.art) count[n.art] = (count[n.art] ?? 0) + 1;
+      if (n.art === 'fall') assert.ok(variant === 'sax' && (!on[i + 1] || on[i + 1].t - (n.t + n.dur) >= beat - 1e-6) && n.artSemi <= -2 && n.artSemi >= -5 && n.artTime >= 0.15 && n.artTime <= 0.3, JSON.stringify(n));
+      if (n.art === 'vibrato') assert.ok(n.dur >= beat && n.artSemi >= 0.1 && n.artSemi <= 0.2 && n.artTime >= 0.15 && n.artTime <= 0.3, JSON.stringify(n));
+      if (n.art === 'scoop') assert.ok(n.artSemi <= -0.5 && n.artSemi >= -1 && n.artTime >= 0.05 && n.artTime <= 0.1, JSON.stringify(n));
+    });
+  }
+  assert.ok(count.fall > 0 && count.vibrato > 0 && count.scoop > 0, JSON.stringify(count));
 });

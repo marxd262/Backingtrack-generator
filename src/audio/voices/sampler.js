@@ -73,17 +73,21 @@ const MAX_RELEASE = 2; // s, die Presets haben bis zu 4,5 s (Pads würden in den
  *   bend    beginnt `artSemi` Halbtöne daneben (Standard -2), hält kurz (höchstens 40 ms) und zieht in höchstens 180 ms weich auf den Ton;
  *           `artTone` (dB je Halbton, Standard 9, 0 = aus): ein Höhenregal ab 1800 Hz läuft mit, von -artTone·Halbtöne/2 auf +artTone·Halbtöne/2 dB
  *           (Urteil des Nutzers: 3 zu schwach, 9 besser). bend und vibrato spielen ohne das zusätzliche Abklingen der Stimme (naturalDecay)
- *   vibrato ab 30 % der Dauer 5,5 Hz, bis ±25 Cent (nur Noten ab 0,3 s)
+ *   vibrato Einsatz nach `artTime` s (Standard 0,2, spätestens bei 40 % der Dauer), 5,5 Hz, Tiefe |artSemi| Halbtöne (Standard 0,15 = ±15 Cent),
+ *           schwillt in 0,25 s an (nur Noten ab 0,3 s; Werte aus den Regeln statt ±25 Cent ab 30 %)
+ *   scoop   wie slideIn (kleiner Abstand, z. B. -0,5 bis -1 Halbton)
+ *   fall, slideOff   rutscht in den letzten `artTime` s (Standard 0,2, höchstens 60 % der Dauer) um `artSemi` Halbtöne (Standard -2) ab und blendet dabei aus
  *   hammer  ohne Anschlag: das Sample beginnt 30 ms später, Einsatz mindestens 20 ms, 15 % leiser
  *   dead    höchstens 50 ms lang, Tiefpass 900 Hz;   chuck  wie dead, höchstens 40 ms;   palmMute  Tiefpass 1600 Hz, Abklingen höchstens 0,5 s
  *   staccato, choke   die Dauer kommt aus dem Ereignis, das Ausklingen dauert 30 ms statt der Zeit der Zone (auch bei chuck)
  *   swell   blendet in `artTime` s ein (Pad)
  * `ring` (letRing, Arpeggio-Überlappung): der Ton wird nicht abgeschnitten, Ausklingen 2 s.
  */
-export function playNote(ctx, out, t, { pack, midi, dur, vel, art, zone = pickArtZone(pack.meta.zones, midi, vel, art), gain = 1, timeScale = 1, filter = 20000, naturalDecay = 0, eq = null, cents = 0, oneShot = false, fadeOut = 0.15, artSemi, artTime = 0.08, artTone = 9, ring = false }) {
+export function playNote(ctx, out, t, { pack, midi, dur, vel, art, zone = pickArtZone(pack.meta.zones, midi, vel, art), gain = 1, timeScale = 1, filter = 20000, naturalDecay = 0, eq = null, cents = 0, oneShot = false, fadeOut = 0.15, artSemi, artTime, artTone = 9, ring = false }) {
   if (!zone) return;
   let slideEnd = null; // Vorlauf des slideIn: Beginn vorziehen, das Notenende bleibt
-  if (art === 'slideIn') { const room = t - ctx.currentTime, lead = room > 0.02 ? Math.min(artTime, room) : 0; if (lead) { slideEnd = t; t -= lead; dur += lead; } }
+  const glide = art === 'slideIn' || art === 'scoop', glideTime = artTime ?? 0.08;
+  if (glide) { const room = t - ctx.currentTime, lead = room > 0.02 ? Math.min(glideTime, room) : 0; if (lead) { slideEnd = t; t -= lead; dur += lead; } }
   if (zone.art) art = undefined; // eigene Samples für diese Artikulation: ohne die gerechnete Variante
   if (art === 'dead' || art === 'chuck') { dur = Math.min(dur, art === 'chuck' ? 0.04 : 0.05); filter = Math.min(filter, 900); }
   if (art === 'palmMute') { filter = Math.min(filter, 1600); naturalDecay = naturalDecay > 0 ? Math.min(naturalDecay, 0.5) : 0.5; }
@@ -99,7 +103,7 @@ export function playNote(ctx, out, t, { pack, midi, dur, vel, art, zone = pickAr
   const velocity = Number.isFinite(vel) ? Math.min(1, Math.max(0, vel)) : 1; // ungültig zählt wie kräftig (wie bei der Zonenwahl)
   const peak = Math.max(FLOOR, gain * zoneGain(zone.attenuationDb) * velocity);
   const sustain = Math.max(FLOOR, peak * dbToGain(zone.sustainDb));
-  const attack = Math.max(art === 'swell' ? artTime : art === 'hammer' ? 0.02 : 0.003, zone.attack * timeScale), decay = Math.max(0.001, zone.decay * timeScale);
+  const attack = Math.max(art === 'swell' ? artTime ?? 0.5 : art === 'hammer' ? 0.02 : 0.003, zone.attack * timeScale), decay = Math.max(0.001, zone.decay * timeScale);
   let release = ring ? MAX_RELEASE : art === 'staccato' || art === 'choke' || art === 'chuck' ? 0.03 : Math.min(MAX_RELEASE, Math.max(MIN_RELEASE, zone.release * timeScale));
   let noteEnd = t + (Number.isFinite(dur) ? Math.max(0.02, dur) : 0.5);
   if (oneShot && zone.loop) { // ohne Schleife ist am Sample-Ende Stille: vorher ausklingen, statt abzureißen (Zonen ohne Schleife klingen wie bisher)
@@ -164,9 +168,17 @@ export function playNote(ctx, out, t, { pack, midi, dur, vel, art, zone = pickAr
     shelf.gain.setValueCurveAtTime(curve, bendStart, bendTime);
     node = node.connect(shelf);
   }
+  if (art === 'fall' || art === 'slideOff') { // am Notenende abwärts rutschen und dabei ausblenden
+    const start = noteEnd - Math.min(artTime ?? 0.2, 0.6 * span), fade = ctx.createGain();
+    src.playbackRate.setValueAtTime(rate, start);
+    src.playbackRate.exponentialRampToValueAtTime(from, noteEnd + 0.03);
+    fade.gain.setValueAtTime(1, start);
+    fade.gain.exponentialRampToValueAtTime(0.05, noteEnd);
+    node = node.connect(fade);
+  }
   node.connect(out);
   // Tonhöhen-Artikulationen über die Abspielgeschwindigkeit
-  if (art === 'slideIn') { src.playbackRate.setValueAtTime(from, t); src.playbackRate.exponentialRampToValueAtTime(rate, slideEnd ?? t + Math.min(artTime, span / 2)); }
+  if (glide) { src.playbackRate.setValueAtTime(from, t); src.playbackRate.exponentialRampToValueAtTime(rate, slideEnd ?? t + Math.min(glideTime, span / 2)); }
   if (art === 'bend') { // weicher Verlauf (langsam los, schnell durch die Mitte, langsam ankommen) wie ein gezogener Finger, statt einer geraden Rampe
     const curve = new Float32Array(32);
     for (let i = 0; i < 32; i++) curve[i] = from * (rate / from) ** ease(i / 31);
@@ -174,9 +186,10 @@ export function playNote(ctx, out, t, { pack, midi, dur, vel, art, zone = pickAr
     src.playbackRate.setValueCurveAtTime(curve, bendStart, bendTime);
   }
   if (art === 'vibrato' && span >= 0.3) {
-    const length = 0.7 * span, curve = new Float32Array(Math.ceil(length * 200));
-    for (let i = 0; i < curve.length; i++) { const x = i / 200; curve[i] = rate * 2 ** ((25 * Math.min(1, x / 0.25) * Math.sin(2 * Math.PI * 5.5 * x)) / 1200); }
-    src.playbackRate.setValueCurveAtTime(curve, t + 0.3 * span, length);
+    const start = Math.min(artTime ?? 0.2, 0.4 * span), length = span - start, depth = 100 * (Number.isFinite(artSemi) ? Math.abs(artSemi) : 0.15);
+    const curve = new Float32Array(Math.ceil(length * 200));
+    for (let i = 0; i < curve.length; i++) { const x = i / 200; curve[i] = rate * 2 ** ((depth * Math.min(1, x / 0.25) * Math.sin(2 * Math.PI * 5.5 * x)) / 1200); }
+    src.playbackRate.setValueCurveAtTime(curve, t + start, length);
   }
   src.start(t, art === 'hammer' ? Math.min(0.03, sample.frames / sample.rate / 2) : 0);
   src.stop(noteEnd + release + 0.05);

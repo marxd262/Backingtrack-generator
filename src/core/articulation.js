@@ -12,7 +12,7 @@ import { grooveIdFor } from './grooves.js';
 import { phrasesOf } from './form-arrange.js';
 import { densityAt } from './form-types.js';
 
-export const ART_DEFAULTS = Object.freeze({ on: 1, bass: 1, chords: 1, drums: 0, keys: 0, pad: 0 });
+export const ART_DEFAULTS = Object.freeze({ on: 1, bass: 1, chords: 1, drums: 0, keys: 0, pad: 0, lead: 0 });
 const RULE_LAYER = { keys: 'chords' }; // Regelgruppe -> Schicht, wenn die Namen abweichen
 
 /** Füllt die Feinwerte auf; nur endliche Zahlen >= 0 zählen. */
@@ -240,6 +240,24 @@ const RULES = {
       // staccato: kurze Stabs, ein 16tel bis ein Achtel (je Takt aus dem Plan)
       } else if (P.staccato && e.strum) Object.assign(e, { art: 'staccato', dur: r6(Math.min(e.dur, (15 / track.bpm) * (1 + roll(c, 'keys', 'staccato')))) });
     }
+  },
+
+  // Lead (Saxofon, Flöte), Priorität B (SPEC_PHASE3 5.10): je Note höchstens eine Artikulation mit dem Vorrang fall (Phrasenende, nur Saxofon),
+  // vibrato (lange Noten), scoop (Phrasenanfang oder betonte Note). Phrase = Noten ohne Lücke von einem Schlag
+  lead(out, { track, bars, ctx, tempo, p, roll }) {
+    const notes = out.filter((e) => e.layer === 'lead' && e.type === 'note').sort(byTime), beat = 60 / track.bpm;
+    const sax = track.voices?.lead?.variant === 'sax';
+    notes.forEach((n, i) => {
+      const c = ctx[n.bar], s = Math.round(n.beat * bars[n.bar].sub), prev = notes[i - 1], next = notes[i + 1];
+      const starts = !prev || n.t - (prev.t + prev.dur) >= beat, ends = !next || next.t - (n.t + n.dur) >= beat;
+      if (sax && ends && n.dur >= 0.3 && roll(c, 'lead', 'fall', s) < p(0.25, 'lead')) {
+        Object.assign(n, { art: 'fall', artSemi: -2 - Math.floor(4 * roll(c, 'lead', 'fallSemi', s)), artTime: r6(clamp((0.15 + 0.15 * roll(c, 'lead', 'fallTime', s)) * tempo, 0.15, 0.3)) });
+      } else if (n.dur >= beat && roll(c, 'lead', 'vibrato', s) < p(0.6, 'lead')) {
+        Object.assign(n, { art: 'vibrato', artSemi: r6(0.1 + 0.1 * roll(c, 'lead', 'vibratoDepth', s)), artTime: r6(0.15 + 0.15 * roll(c, 'lead', 'vibratoStart', s)) });
+      } else if ((starts || n.vel >= 0.85) && roll(c, 'lead', 'scoop', s) < p(0.3, 'lead')) {
+        Object.assign(n, { art: 'scoop', artSemi: r6(-0.5 - 0.5 * roll(c, 'lead', 'scoopSemi', s)), artTime: r6(clamp((0.05 + 0.05 * roll(c, 'lead', 'scoopTime', s)) * tempo, 0.05, 0.1)) });
+      }
+    });
   },
 
   // Pad und Streicher, Priorität A (SPEC_PHASE3 5.7): Stimmführung und swell. Die Dichte-Regel (Strophen meist leer) erfüllt die Songform schon.
