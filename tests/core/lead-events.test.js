@@ -48,6 +48,25 @@ const byBar = (notes) => {
   return map;
 };
 
+test('riff: je Schlag Grundton und darüber Quinte, Sexte, Septime, Sexte; tief (45 bis 67), einstimmig, im Takt; Sexte und Septime aus der Tonleiter, im Shuffle immer 9 und 10', () => {
+  for (const [over, sub, want] of [[{}, 4, { A: [7, 8, 10, 8], F: [7, 9, 11, 9], D: [7, 9, 10, 9], E: [7, 8, 10, 8] }], [{ meter: [12, 8], groove: 'shuffle' }, 3, { A: [7, 9, 10, 9], F: [7, 9, 10, 9], D: [7, 9, 10, 9], E: [7, 9, 10, 9] }]]) {
+    for (const seed of SEEDS.slice(0, 5)) {
+      const t = make('riff', { seed, ...over }), bars = barTimeline(checkedTrack(t)), notes = leadOf(t);
+      assert.equal(notes.length, 8 * 8, 'acht Takte mal vier Schläge mal zwei Achtel');
+      notes.forEach((e, k) => {
+        const b = bars[e.bar], next = notes[k + 1];
+        assert.ok(e.midi >= 45 && e.midi <= 67 && e.t >= b.start - 1e-9 && e.t + e.dur <= (next ? next.t : b.end) + 1e-6, JSON.stringify(e));
+      });
+      for (const [bar, list] of byBar(notes)) {
+        const root = bars[bar].chord.root, low = list[0].midi;
+        assert.equal(low % 12, { A: 9, F: 5, D: 2, E: 4 }[root]);
+        assert.deepEqual(list.map((e) => Math.round(e.beat * sub)), [0, 1, 2, 3].flatMap((beat) => [beat * sub, beat * sub + 2]));
+        assert.deepEqual(list.map((e) => e.midi - low), want[root].flatMap((up) => [0, up]), `Takt ${bar} über ${root}`);
+      }
+    }
+  }
+});
+
 test('off: keine Lead-Ereignisse, die anderen Schichten bleiben gleich, wenn der Lead spielt', () => {
   assert.equal(leadOf(make('off')).length, 0);
   const others = (job) => buildEvents(make(job)).filter((e) => e.layer !== 'lead');

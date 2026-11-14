@@ -128,10 +128,10 @@ const DRUM_PROFILES = {
 // hammer (Folgeton im Abstand von 1 bis 2 Halbtönen ohne Anschlag, in Fill-Takten oder bei energy ab 0,6)
 const BASS_B = { shuffle: { slideOff: 0.2, hammer: 0.2 }, slowBlues: { slideOff: 0.2 }, rock: { slideOff: 0.3, palmMute: 0.5 }, funk: { octavePop: 0.3, hammer: 0.2 } };
 // Gitarre, Priorität B: slideChord (Stab auf einer Zählzeit rutscht von einem Bund daneben an), embellish (gehaltener Akkord: Sekunde oder Quarte,
-// nach einem Achtel Hammer-on auf die Terz), boogie (Riff Quinte-Sexte-Septime auf den tiefen Saiten, je Phrase, nur im Triolen-Raster).
-// Boom-Chick (Country) ist wieder entfernt: Urteil des Nutzers "das Standardmuster ist besser" (stand in Commit d2e0004)
+// nach einem Achtel Hammer-on auf die Terz). Wieder entfernt: Boom-Chick (Country; Urteil des Nutzers "das Standardmuster ist besser", stand in
+// Commit d2e0004) und das Boogie-Riff (im Mix nicht vom Akkord zu unterscheiden; auf Wunsch des Nutzers jetzt die Lead-Aufgabe `riff`, lead.js)
 const GUITAR_B = {
-  funk: { slideChord: 0.2 }, shuffle: { slideChord: 0.15, boogie: 0.5 }, slowBlues: { slideChord: 0.25 }, rock: { embellish: 0.15 },
+  funk: { slideChord: 0.2 }, shuffle: { slideChord: 0.15 }, slowBlues: { slideChord: 0.25 }, rock: { embellish: 0.15 },
   ballad: { embellish: 0.15 }, country: { embellish: 0.2 },
 };
 // Tasten je Profil: pedal (Wahrscheinlichkeit je Takt; Ballade immer, Rock und Blues teilweise), staccato (kurze Stabs)
@@ -389,9 +389,8 @@ const RULES = {
     }
   },
 
-  // Rhythmusgitarre, Priorität B (SPEC_PHASE3 5.3), läuft nach den A-Regeln; nur Sample-Gitarren. Das Muster boogie ersetzt die
-  // Stäbe seines Takts (nie den Takt vor einem Stopp), die Verzierungen greifen nur an Stäben ohne Artikulation (embellish auch an letRing).
-  chordsB(out, { track, bars, ctx, profile, tempo, p, roll, slotTime }) {
+  // Rhythmusgitarre, Priorität B (SPEC_PHASE3 5.3), läuft nach den A-Regeln; nur Sample-Gitarren. Die Verzierungen greifen nur an Stäben ohne Artikulation (embellish auch an letRing).
+  chordsB(out, { track, bars, ctx, profile, tempo, p, roll }) {
     const voice = track.voices?.chords, P = GUITAR_B[profile] ?? {};
     if (voice?.id !== 'sample' || !GUITARS.has(voice.variant)) return;
     const stabs = new Map(); // Takt -> Map(Schritt -> Töne des Stabs)
@@ -401,22 +400,7 @@ const RULES = {
       m.set(s, [...(m.get(s) ?? []), e]);
     }
     for (const [index, bySteps] of stabs) {
-      const b = bars[index], c = ctx[index], phrase = { ...c, inPhrase: 0 }, tones = chordTones(b.chord, 3), vel = [...bySteps.values()][0][0].vel;
-      const low = tones[0] - 12 >= 40 ? tones[0] - 12 : tones[0]; // Basston auf den tiefen Saiten (ab E2)
-      const clear = () => { for (const stab of bySteps.values()) for (const e of stab) out.splice(out.indexOf(e), 1); };
-      const play = (s, midis, steps, more) => midis.forEach((midi, i) => out.push({
-        t: slotTime(b, s), bar: index, beat: s / b.sub, type: 'note', layer: 'chords', midi, vel: more?.vel ?? vel, dur: r6(steps * b.stepSec),
-        ...(midis.length > 1 && { strum: [i, midis.length] }), ...(more?.art && { art: more.art }),
-      }));
-      if (P.boogie && b.sub === 3 && !c.stop && roll(phrase, 'chordsB', 'boogie') < p(P.boogie, 'chordsB')) { // je Schlag zwei Shuffle-Achtel auf Grundton plus Quinte, Sexte, Septime, Sexte
-        clear();
-        const art = roll(phrase, 'chordsB', 'boogieMute') < 0.5 ? 'palmMute' : undefined;
-        for (let beat = 0; beat < b.beats; beat++) {
-          play(beat * 3, [low, low + [7, 9, 10, 9][beat % 4]], 2, { art });
-          play(beat * 3 + 2, [low, low + [7, 9, 10, 9][beat % 4]], 1, { art, vel: roundVel(vel * 0.85) });
-        }
-        continue;
-      }
+      const b = bars[index], c = ctx[index], tones = chordTones(b.chord, 3);
       for (const [s, stab] of bySteps) {
         const plain = !stab[0].art, hammerSteps = b.sub === 4 ? 2 : 1, wait = hammerSteps * b.stepSec; // ein Achtel
         if (P.slideChord && plain && s % b.sub === 0 && roll(c, 'chordsB', 'slideChord', s) < p(P.slideChord, 'chordsB')) {

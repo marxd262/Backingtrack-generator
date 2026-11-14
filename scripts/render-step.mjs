@@ -25,7 +25,7 @@ export const STEPS = {
   22: { name: 'guitarsolo', cases: 'art', a: {}, b: { 'mix/art': { chordsB: 1 } }, extra: { track: { layers: { drums: true, bass: false, chords: true, pad: false, lead: false, percussion: false } } } },
   19: { name: 'keysb', cases: 'art', extra: { voices: { chords: { id: 'sample', variant: 'epiano' } } }, a: { 'mix/art': { keysB: 0 } } }, // Tasten B: roll, crush, bark
   20: { name: 'drumsb', cases: 'art', a: { 'mix/art': { drumsB: 0 } } }, // Schlagzeug B: Flams
-  18: { name: 'guitarb', cases: 'art', a: {}, b: { 'mix/art': { chordsB: 1 } } }, // Gitarre Priorität B: slideChord, embellish, boogie
+  18: { name: 'guitarb', cases: 'art', a: {}, b: { 'mix/art': { chordsB: 1 } } }, // Gitarre Priorität B: slideChord, embellish (bis d370f69 und danach auch boomChick und boogie)
   17: { name: 'bassb', cases: 'art', a: { 'mix/art': { bassB: 0 } } }, // Bass Priorität B: slideOff, palmMute, octavePop, hammer/pull
   15: { name: 'band', cases: 'art', a: { 'mix/art': { band: 0 } } }, // Band-Regeln für Bass und Gitarre (Fill-Takte, Slide in den Refrain)
   14: { name: 'pad', cases: 'art', a: { 'mix/art': { pad: 0 } } },
@@ -37,6 +37,11 @@ export const STEPS = {
   },
   // Vibrato am Saxofon: A = feste 5,5 Hz (der Schlüssel 'demo/vib' ist kein Feinwert, er überschreibt artRate im Render), B = Standard (folgt dem Tempo)
   23: { name: 'vibrato', cases: 'art', a: { 'demo/vib': { rate: 5.5 } }, b: {}, extra: { voices: { lead: { id: 'sample', variant: 'sax' } }, track: { layers: { drums: true, bass: true, chords: true, pad: true, lead: true, percussion: true }, jobs: { lead: 'melody', percussion: 'mixed' } } } },
+  // Lead-Gitarre (lead/sample/guitar): A = ohne die Lead-Regeln (keine Techniken), B = Standard (bend, vibrato, slideIn, hammer/pull). 24 Melodie, 25 Frage und Antwort
+  24: { name: 'leadguitar', cases: 'art', a: { 'mix/art': { lead: 0 } }, extra: { voices: { lead: { id: 'sample', variant: 'guitar' } }, track: { layers: { drums: true, bass: true, chords: true, pad: true, lead: true, percussion: true }, jobs: { lead: 'melody', percussion: 'mixed' } } } },
+  25: { name: 'leadguitar2', cases: 'art', a: { 'mix/art': { lead: 0 } }, extra: { voices: { lead: { id: 'sample', variant: 'guitar' } }, track: { layers: { drums: true, bass: true, chords: true, pad: true, lead: true, percussion: true }, jobs: { lead: 'callResponse', percussion: 'mixed' } } } },
+  // Lead-Aufgabe riff auf der Lead-Gitarre: A = ohne Lead (der Schlüssel 'demo/mute' ist kein Feinwert, er nimmt die Schicht aus dem Render), B = mit Riff
+  26: { name: 'riff', cases: 'art', a: { 'demo/mute': { layer: 'lead' } }, b: {}, extra: { voices: { lead: { id: 'sample', variant: 'guitar' } }, track: { layers: { drums: true, bass: true, chords: true, pad: true, lead: true, percussion: true }, jobs: { lead: 'riff', percussion: 'mixed' } } } },
   // Artikulationen (Vorbereitung Phase 3): keine Regeln, nur eine feste Demo-Verteilung in renderInPage; der Schlüssel 'demo/art' ist kein Feinwert,
   // er lässt in beiden Renders eine Gitarre (FreePats) die Lead-Linie statt der Akkorde spielen und schaltet in B die Artikulationen ein
   7: { name: 'art', a: { 'demo/art': { on: 0 } }, b: { 'demo/art': { on: 1 } } },
@@ -112,6 +117,7 @@ async function renderInPage([style, bpm, kind, tuning, limiter, extra]) {
   const demo = tuning['demo/art'];
   if (demo) { track.layers.lead = true; track.jobs.lead = 'melody'; track.voices.chords = { id: 'sample', variant: 'freepats' }; }
   const events = buildEvents(track, { timing: tuning['mix/timing'], ornaments: tuning['mix/art'] });
+  if (tuning['demo/mute']) for (let i = events.length - 1; i >= 0; i--) if (events[i].layer === tuning['demo/mute'].layer) events.splice(i, 1);
   if (tuning['demo/vib']) for (const e of events) if (e.art === 'vibrato') e.artRate = tuning['demo/vib'].rate;
   if (demo) { // die Lead-Linie spielt eine Gitarre (Bends sind eine Gitarren-Technik): Lead-Noten auf die Akkord-Schicht legen, die Akkorde selbst entfallen
     for (let i = events.length - 1; i >= 0; i--) if (events[i].layer === 'chords') events.splice(i, 1);

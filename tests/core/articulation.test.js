@@ -392,22 +392,11 @@ test('Bass B (abschaltbar): Oktav-Pop nur auf "+" und a und bis MIDI 52, hammer/
 });
 
 // ---- Gitarre, Priorität B ----
-test('Gitarre B (abschaltbar): der Blues-Shuffle spielt das Boogie-Riff je Phrase, slideChord nur auf Zählzeiten um einen Bund, embellish löst nach einem Achtel in die Terz auf', () => {
-  const count = { boogie: 0, slideChord: 0, embellish: 0 };
+test('Gitarre B (abschaltbar): slideChord nur auf Zählzeiten um einen Bund, embellish löst nach einem Achtel in die Terz auf', () => {
+  const count = { slideChord: 0, embellish: 0 };
   for (const seed of SEEDS) {
     const country = mk('country', { seed });
     assert.deepEqual(chordsOf(country, {}), chordsOf(country, { chordsB: 0 }));
-    const shuffle = mk('blues', { seed, ornaments: 1, meter: [12, 8], groove: 'shuffle' }), riff = chordsOf(shuffle, { chordsB: 1 });
-    for (const phrase of [0, 4]) {
-      const bars = [0, 1, 2, 3].map((k) => riff.filter((e) => e.bar === phrase + k)), boogie = bars.map((list) => list.length > 0 && list.every((e) => e.strum?.[1] === 2));
-      assert.ok(boogie.every((x) => x === boogie[0]), `s=${seed}: die Phrase ab Takt ${phrase} spielt das Riff ganz oder gar nicht`);
-      if (!boogie[0]) continue;
-      count.boogie++;
-      for (const list of bars) {
-        assert.equal(list.length, 16); // 4 Schläge mal 2 Achtel mal 2 Töne
-        assert.deepEqual(list.filter((e) => e.strum[0] === 1 && Math.round(e.beat * 3) % 3 === 0).map((e) => e.midi - list[0].midi), [7, 9, 10, 9]);
-      }
-    }
     for (const id of ['funk', 'rock', 'dreamy']) {
       const track = mk(id, { seed, ornaments: 1, bpm: 70 }), plain = chordsOf(track, {}), b = chordsOf(track, { chordsB: 1 });
       for (const e of b.filter((x) => x.art === 'slideChord')) { count.slideChord++; assert.ok(stepOf(e) % 4 === 0 && Math.abs(e.artSemi) === 1 && e.artTime >= 0.04 && e.artTime <= 0.08, JSON.stringify(e)); }
@@ -418,7 +407,7 @@ test('Gitarre B (abschaltbar): der Blues-Shuffle spielt das Boogie-Riff je Phras
       }
     }
   }
-  assert.ok(count.boogie > 0 && count.slideChord > 0 && count.embellish > 0, JSON.stringify(count));
+  assert.ok(count.slideChord > 0 && count.embellish > 0, JSON.stringify(count));
 });
 
 // ---- Tasten und Schlagzeug, Priorität B ----

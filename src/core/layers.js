@@ -11,7 +11,7 @@ export const LAYERS = freeze({
   bass: { defaultOn: true, fx: true },
   chords: { defaultOn: true, fx: true },
   pad: { defaultOn: true, fx: true },
-  lead: { defaultOn: true, follows: 'chords', fx: true, jobs: ['off', 'fills', 'arpeggio', 'melody', 'callResponse'] },
+  lead: { defaultOn: true, follows: 'chords', fx: true, jobs: ['off', 'fills', 'arpeggio', 'melody', 'callResponse', 'riff'] },
   percussion: { defaultOn: false, follows: 'drums', fx: false, jobs: ['mixed', 'shaker', 'tambourine', 'congas', 'bongos', 'claves', 'cowbell'] },
 });
 

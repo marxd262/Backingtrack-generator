@@ -36,10 +36,10 @@ const module = (page, id) => page.locator(`.instrument[data-layer="${id}"]`);
 const job = (page, layer) => page.locator(`#job-${layer}`);
 const values = (page, layer) => job(page, layer).locator('option').evaluateAll((els) => els.map((e) => e.value));
 
-test('Lead-Modul: Auswahl Job mit Standard "off", alle fünf Aufgaben; Percussion-Modul: Part mit Standard "mixed", alle sieben', async ({ page }) => {
+test('Lead-Modul: Auswahl Job mit Standard "off", alle sechs Aufgaben; Percussion-Modul: Part mit Standard "mixed", alle sieben', async ({ page }) => {
   await expect(job(page, 'lead')).toHaveValue('off');
   await expect(page.locator('label[for="job-lead"]')).toHaveText('Lead-Aufgabe');
-  expect(await values(page, 'lead')).toEqual(['off', 'fills', 'arpeggio', 'melody', 'callResponse']);
+  expect(await values(page, 'lead')).toEqual(['off', 'fills', 'arpeggio', 'melody', 'callResponse', 'riff']);
   await expect(job(page, 'percussion')).toHaveValue('mixed');
   await expect(page.locator('label[for="job-percussion"]')).toHaveText('Percussion-Part');
   expect(await values(page, 'percussion')).toEqual(['mixed', 'shaker', 'tambourine', 'congas', 'bongos', 'claves', 'cowbell']);
@@ -91,6 +91,6 @@ test('die Tasten ‹ › am Display schalten die Aufgabe weiter, am Ende ist die
   await next.click();
   await expect(job(page, 'lead')).toHaveValue('fills');
   await expect(prev).toBeEnabled();
-  await job(page, 'lead').selectOption('callResponse');
+  await job(page, 'lead').selectOption('riff'); // die letzte Aufgabe
   await expect(next).toBeDisabled();
 });

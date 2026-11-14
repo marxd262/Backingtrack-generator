@@ -1,7 +1,8 @@
 // Lead-Stimme: eine Aufgabe (Job) je Track, gespielt Takt für Takt. Einstimmig, MIDI 72 bis 88 (eine Oktave über den Akkorden),
-// Töne aus der Skala der Tonart oder dem Akkord des Takts. Stärke folgt drive und syncopation, das Timing swing (über `at`).
+// Töne aus der Skala der Tonart oder dem Akkord des Takts (Ausnahme: das Riff, tief und mit Tönen der ganzen Tonleiter). Stärke folgt drive und syncopation, das Timing swing (über `at`).
 // Reine Logik ohne Audio.
-import { chordTones, scalePcs } from './music.js';
+import { chordTones, scalePcs, diatonicChords, noteToPc } from './music.js';
+import { profileOf } from './articulation.js';
 import { at, note, humanVel } from './event-helpers.js';
 
 const LEAD_MIN = 72;
@@ -135,8 +136,22 @@ function callResponse(b, v, rng, params, _fill, _g, ctx) {
   return line(b, rng, params, steps, midis, b.sub * b.stepSec, loudness(params) * (answer ? 0.92 : 1));
 }
 
-/** Aufgaben des Leads (ohne `off`): (Takt, Abschnittszustand, rng, params, Fill-Takt, Groove, { scale }) -> Noten. */
-export const LEAD_JOBS = Object.freeze({ fills, arpeggio, melody, callResponse });
+// Riff: Boogie-Linie auf den tiefen Saiten (Wunsch des Nutzers, 2026-11-14: das Boogie-Muster der Rhythmusgitarre als Teil des Leads), einstimmig:
+// je Schlag zwei Achtel (im Triolen-Raster lang-kurz), erst der Grundton, dann darüber Quinte, Sexte, Septime, Sexte. Sexte und Septime kommen aus
+// der Tonleiter der Tonart, im Blues (Shuffle) immer große Sexte und kleine Septime (Antwort des Nutzers: Töne außerhalb der Tonleiter nur
+// stilabhängig). Lage MIDI 45 bis 67, unter dem übrigen Lead.
+function riff(b, _v, rng, params, _fill, _g, ctx) {
+  const tones = chordTones(b.chord, 0), pc = tones[0] % 12, low = 45 + ((pc - 9 + 12) % 12); // Grundton zwischen A2 und G#3
+  const scale = diatonicChords(ctx.track.key).map((c) => noteToPc(c.root)), blues = ['shuffle', 'slowBlues'].includes(profileOf(ctx.track));
+  const has = (semi) => blues || scale.includes((pc + semi) % 12), sixth = has(9) ? 9 : 8;
+  const upper = [tones.map((m) => m - tones[0]).find((d) => d >= 6 && d <= 8) ?? 7, sixth, has(10) ? 10 : 11, sixth];
+  const steps = [], midis = [];
+  for (let beat = 0; beat < b.beats; beat++) { steps.push(beat * b.sub, beat * b.sub + 2); midis.push(low, low + upper[beat % 4]); }
+  return line(b, rng, params, steps, midis, 2 * b.stepSec, loudness(params));
+}
+
+/** Aufgaben des Leads (ohne `off`): (Takt, Abschnittszustand, rng, params, Fill-Takt, Groove, { scale, track }) -> Noten. */
+export const LEAD_JOBS = Object.freeze({ fills, arpeggio, melody, callResponse, riff });
 
 /**
  * Spieler für events.js: je Abschnitt ein frischer Zustand (Abschnittsanfang und -länge, letzte Lage, Ruf), `off` spielt nichts und zieht keine Zufallszahl.
@@ -146,6 +161,6 @@ export const leadPlayer = Object.freeze({
   section: (_params, _rng, _g, sec) => ({ start: sec.start, bars: sec.bars }),
   play: (b, v, rng, params, fill, g, job, track) => {
     if (!Object.hasOwn(LEAD_JOBS, job)) return [];
-    return LEAD_JOBS[job](b, v, rng, params, fill, g, { scale: scalePcs(track.key, LEAD_SCALE[track.key.mode]) });
+    return LEAD_JOBS[job](b, v, rng, params, fill, g, { scale: scalePcs(track.key, LEAD_SCALE[track.key.mode]), track });
   },
 });

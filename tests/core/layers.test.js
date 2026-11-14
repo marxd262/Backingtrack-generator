@@ -23,7 +23,7 @@ test('layerDefaults: Lead an, Percussion aus, jedes Mal ein neues Objekt', () =>
 test('jobsFor / isJob: nur Lead und Percussion haben Aufgaben, die erste ist der Standard', () => {
   assert.deepEqual(jobsFor('drums'), []);
   assert.deepEqual(jobsFor('unbekannt'), []);
-  assert.deepEqual(jobsFor('lead'), ['off', 'fills', 'arpeggio', 'melody', 'callResponse']);
+  assert.deepEqual(jobsFor('lead'), ['off', 'fills', 'arpeggio', 'melody', 'callResponse', 'riff']);
   assert.deepEqual(jobsFor('percussion'), ['mixed', 'shaker', 'tambourine', 'congas', 'bongos', 'claves', 'cowbell']);
   assert.equal(isJob('drums', 'x'), false);
   assert.equal(isJob('lead', 'melody'), true);

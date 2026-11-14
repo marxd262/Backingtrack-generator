@@ -314,6 +314,7 @@ export default {
   'job.lead.arpeggio': 'Arpeggio',
   'job.lead.melody': 'Melodie',
   'job.lead.callResponse': 'Frage und Antwort',
+  'job.lead.riff': 'Riff (Boogie)',
   'job.percussion.mixed': 'Gemischt',
   'job.percussion.shaker': 'Shaker',
   'job.percussion.tambourine': 'Tamburin',
