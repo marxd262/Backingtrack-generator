@@ -118,9 +118,10 @@ const PROFILES = {
   country: { bass: { approach: 0.4, slideIn: 0.1 }, guitar: {} },
 };
 // Schlagzeug je Profil: stick = Side-Stick statt Snare (always, verse = in der Strophe, quiet = bei energy < 0,4), rimshot = Rimshot im Refrain,
-// swap = was im Refrain (nur mit Songform) statt der Hi-Hat spielt (fehlend: ride)
+// swap: false = im Refrain bleibt die geschlossene Hi-Hat (sonst Ride mit getretener Hi-Hat). Rock: Urteil des Nutzers zur halboffenen Hi-Hat
+// auf jedem 16tel: "nur ganz viel Hi-Hat, viel zu viel"
 const DRUM_PROFILES = {
-  shuffle: { stick: 'quiet' }, slowBlues: { stick: 'quiet' }, rock: { swap: 'hatHalf', rimshot: true }, ballad: { stick: 'verse', rimshot: true },
+  shuffle: { stick: 'quiet' }, slowBlues: { stick: 'quiet' }, rock: { swap: false, rimshot: true }, ballad: { stick: 'verse', rimshot: true },
   reggae: { stick: 'always' }, latin: { stick: 'always' }, country: { stick: 'always' },
 };
 // Bass, Priorität B: slideOff (Phrasenende vor einer Pause, vor einem Stopp, letzte Note), palmMute (Strophe, je Takt), octavePop (auf "+" und a),
@@ -140,7 +141,7 @@ const GUITARS = new Set(['guitar', 'muted', 'jazz', 'funk', 'steel', 'nylon', 't
 /** Regeln je Gruppe (Name = Feinwert): (Ereignisse, env) => void; sie ändern die Ereignisse und hängen neue an. */
 const RULES = {
   // Schlagzeug, Priorität A, soweit die Packs es hergeben (SPEC_PHASE3 5.8): Hi-Hat-Akzentmuster, Lautstärke der Geisternoten, Side-Stick und
-  // Rimshot statt Snare, im Refrain Ride oder halboffene Hi-Hat statt der geschlossenen, getretene Hi-Hat, Crash mit Choke vor einem Stopp.
+  // Rimshot statt Snare, im Refrain Ride statt der geschlossenen Hi-Hat (nicht im Rock), getretene Hi-Hat, Crash mit Choke vor einem Stopp.
   // Schlagarten ohne Sample fallen in der Stimme auf ihren Grundschlag zurück (DRUM_FALLBACK).
   drums(out, { bars, ctx, profile, roll, slotTime }) {
     const P = DRUM_PROFILES[profile] ?? {}, byBar = new Map();
@@ -161,9 +162,9 @@ const RULES = {
         else if (P.rimshot && !c.verse) e.name = 'rimshot';
       }
       // Refrain (nur mit Songform, sonst gäbe es keinen Kontrast): Becken-Wechsel; zum Ride tritt der Fuß die Hi-Hat auf 2 und 4
-      if (c.kind === 'chorus' && hats.length) {
-        for (const e of hats) e.name = P.swap ?? 'ride';
-        if (!P.swap) for (let beat = 1; beat < b.beats; beat += 2) add(b, beat * b.sub, 'hatPedal', 0.35);
+      if (c.kind === 'chorus' && hats.length && P.swap !== false) {
+        for (const e of hats) e.name = 'ride';
+        for (let beat = 1; beat < b.beats; beat += 2) add(b, beat * b.sub, 'hatPedal', 0.35);
       }
       // vor einem Stopp: Crash auf den letzten Schlag vor der Stille, nach 50 bis 150 ms abgewürgt
       if (c.stop) { const last = hits.reduce((x, y) => (y.t > x.t ? y : x)); hits.push({ ...last, name: 'crash', vel: 0.8, art: 'choke', artTime: r6(0.05 + 0.1 * roll(c, 'drums', 'crashChoke')) }); out.push(hits.at(-1)); }

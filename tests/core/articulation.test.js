@@ -223,12 +223,12 @@ test('Schlagzeug: Hi-Hat-Akzente 1 / 0,6 / 0,8 / 0,6 (Achtel 1 / 0,7), Geisterno
   }
 });
 
-test('Schlagzeug mit Songform: Rock-Refrain halboffene Hi-Hat und Rimshot, sonst Ride mit getretener Hi-Hat auf 2 und 4; Crash mit Choke vor dem Stopp; offene Hi-Hat wird geschlossen', () => {
+test('Schlagzeug mit Songform: Rock-Refrain geschlossene Hi-Hat und Rimshot, sonst Ride mit getretener Hi-Hat auf 2 und 4; Crash mit Choke vor dem Stopp; offene Hi-Hat wird geschlossen', () => {
   const parts = form([['verse', 4], ['chorus', 4], ['break', 2], ['chorus', 4]]);
   for (const seed of SEEDS) {
     const rock = drumsOf(mk('rock', { seed, ...parts }));
     assert.ok(rock.filter((e) => e.bar < 4).every((e) => !['hatHalf', 'rimshot', 'ride'].includes(e.name)), 'Strophe unverändert');
-    assert.ok(rock.some((e) => e.bar >= 4 && e.bar < 8 && e.name === 'hatHalf') && !rock.some((e) => e.bar >= 4 && e.bar < 8 && e.name === 'hat'));
+    assert.ok(rock.some((e) => e.bar >= 4 && e.bar < 8 && e.name === 'hat') && !rock.some((e) => ['hatHalf', 'ride'].includes(e.name)), 'Refrain: die Hi-Hat bleibt geschlossen');
     assert.ok(rock.some((e) => e.name === 'rimshot'));
     const choke = rock.filter((e) => e.art === 'choke');
     assert.deepEqual(choke.map((e) => [e.name, e.bar]), [['crash', 7]], 'ein Crash im Takt vor dem Stopp');
