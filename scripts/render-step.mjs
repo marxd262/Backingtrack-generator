@@ -17,6 +17,7 @@ export const STEPS = {
   11: { name: 'guitar', cases: 'art', a: { 'mix/art': { on: 1, chords: 0 } }, b: { 'mix/art': { on: 1 } } },
   // ab hier je Instrument unabhängig: A = Standard (Bass und Gitarre an), B = dazu nur dieses Instrument
   12: { name: 'drums', cases: 'art', a: {}, b: { 'mix/art': { drums: 1 } } },
+  14: { name: 'pad', cases: 'art', a: {}, b: { 'mix/art': { pad: 1 } } },
   13: { name: 'keys', cases: 'art', voices: { chords: { id: 'sample', variant: 'epiano' } }, a: {}, b: { 'mix/art': { keys: 1 } } }, // beide Seiten mit E-Piano statt Gitarre
   // Artikulationen (Vorbereitung Phase 3): keine Regeln, nur eine feste Demo-Verteilung in renderInPage; der Schlüssel 'demo/art' ist kein Feinwert,
   // er lässt in beiden Renders eine Gitarre (FreePats) die Lead-Linie statt der Akkorde spielen und schaltet in B die Artikulationen ein

@@ -278,3 +278,37 @@ test('Tasten: Ballade hält mit Pedal bis zum Taktende und löst 20 bis 50 ms vo
     assert.ok(keysOf(funk).some((e) => e.dur >= sixteenth - 1e-6));
   }
 });
+
+// ---- Pad ----
+const padOf = (track, ornaments = { pad: 1 }) => buildEvents(track, { timing: GRID, ornaments }).filter((e) => e.layer === 'pad');
+
+test('Pad: aus bis eingeschaltet; Stimmführung hält gemeinsame Töne, bewegt die Stimmen insgesamt nicht weiter als die feste Lage, gleiche Akkordtöne, 48..84', () => {
+  const pcs = (list) => [...new Set(list.map((e) => e.midi % 12))].sort().join();
+  for (const id of ['funk', 'rock', 'dreamy', 'psych', 'blues']) for (const seed of SEEDS) {
+    const track = mk(id, { seed, length: 16 }), off = padOf(track, {}), on = padOf(track);
+    assert.deepEqual(off, padOf(track, { pad: 0 }));
+    assert.equal(on.length, off.length);
+    assert.ok(on.every((e) => e.midi >= 48 && e.midi <= 84));
+    const low = (list, bar) => list.filter((e) => e.bar === bar).map((e) => e.midi).sort((x, y) => x - y).slice(0, 3);
+    const moved = (list, bar) => { const a = low(list, bar - 1), b = low(list, bar); return a.length && b.length ? a.reduce((sum, m, k) => sum + Math.abs(b[k] - m), 0) : 0; };
+    let sumOn = 0, sumOff = 0;
+    for (let bar = 0; bar < 16; bar++) {
+      assert.equal(pcs(on.filter((e) => e.bar === bar)), pcs(off.filter((e) => e.bar === bar)), `${id} s=${seed} Takt ${bar}`);
+      if (!bar) continue;
+      sumOn += moved(on, bar); sumOff += moved(off, bar);
+      const before = low(on, bar - 1), now = on.filter((e) => e.bar === bar).map((e) => e.midi);
+      for (const m of before) if (now.some((x) => x % 12 === m % 12)) assert.ok(now.includes(m), `${id} s=${seed} Takt ${bar}: gemeinsamer Ton ${m} bleibt`);
+    }
+    assert.ok(sumOn <= sumOff, `${id} s=${seed}: ${sumOn} gegen ${sumOff}`);
+  }
+});
+
+test('Pad: swell zu Beginn eines Teils (0,3 bis 1,5 s, höchstens die halbe Notenlänge), in der Ballade bei jedem Akkordwechsel', () => {
+  for (const seed of SEEDS) {
+    const rock = padOf(mk('rock', { seed, length: 16 }));
+    assert.deepEqual([...new Set(rock.filter((e) => e.art === 'swell').map((e) => e.bar))], [0, 8]); // ohne Songform: Abschnitte zu 8 Takten
+    assert.ok(rock.filter((e) => e.art === 'swell').every((e) => e.artTime >= 0.3 && e.artTime <= Math.min(1.5, e.dur / 2) + 1e-6));
+    const ballad = padOf(mk('dreamy', { seed }));
+    assert.deepEqual([...new Set(ballad.filter((e) => e.art === 'swell').map((e) => e.bar))], [0, 2, 3, 4, 6, 7]); // Folge Am Am Dm E
+  }
+});

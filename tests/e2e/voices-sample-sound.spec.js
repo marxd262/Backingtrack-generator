@@ -593,7 +593,7 @@ test('Artikulationen (Bass finger): jede bekannte ändert den Ton, bleibt endlic
       return (await ctx.startRendering()).getChannelData(0);
     };
     const plain = await run(undefined), out = [];
-    for (const art of ['slideIn', 'bend', 'vibrato', 'hammer', 'dead', 'chuck', 'palmMute', 'staccato', 'choke', 'nope']) {
+    for (const art of ['slideIn', 'bend', 'vibrato', 'hammer', 'dead', 'chuck', 'palmMute', 'staccato', 'choke', 'swell', 'nope']) {
       const d = await run(art);
       let diff = 0, energy = 0, peak = 0, finite = true;
       for (let i = 0; i < d.length; i++) { diff += (d[i] - plain[i]) ** 2; energy += plain[i] ** 2; peak = Math.max(peak, Math.abs(d[i])); if (!Number.isFinite(d[i])) finite = false; }

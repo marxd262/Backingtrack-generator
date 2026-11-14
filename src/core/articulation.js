@@ -242,6 +242,35 @@ const RULES = {
     }
   },
 
+  // Pad und Streicher, Priorität A (SPEC_PHASE3 5.7): Stimmführung und swell. Die Dichte-Regel (Strophen meist leer) erfüllt die Songform schon.
+  pad(out, { bars, ctx, profile, tempo, roll }) {
+    const byBar = new Map();
+    for (const e of out) if (e.layer === 'pad' && e.type === 'note') byBar.set(e.bar, [...(byBar.get(e.bar) ?? []), e]);
+    let prev = null, prevBar = -2; // Lage der Grundstimmen im Takt davor
+    for (const index of [...byBar.keys()].sort((x, y) => x - y)) {
+      const notes = byBar.get(index), c = ctx[index], n = chordTones(bars[index].chord, 3).length, base = notes.slice(0, n);
+      // Stimmführung: jeder Akkordton nimmt die Oktavlage, die einem Ton des vorigen Akkords am nächsten liegt (gemeinsame Töne bleiben liegen),
+      // im Bereich 48..72; die Oktavverdopplung (breites Pad) folgt. Nach einer Lücke beginnt die Lage neu
+      if (prev && prevBar === index - 1) {
+        base.forEach((e, k) => {
+          let best = e.midi, dist = Infinity;
+          for (const m of prev) { const d = ((((e.midi - m) % 12) + 18) % 12) - 6; if (Math.abs(d) < dist) { dist = Math.abs(d); best = m + d; } }
+          while (best < 48) best += 12;
+          while (best > 72) best -= 12;
+          e.midi = best;
+          if (notes[n + k]) notes[n + k].midi = best + 12;
+        });
+      }
+      prev = base.map((e) => e.midi);
+      prevBar = index;
+      // swell: weich einblenden zu Beginn eines Teils, in der Ballade bei jedem Akkordwechsel; 0,3 bis 1,5 s, höchstens die halbe Notenlänge
+      if (c.first || (profile === 'ballad' && c.change)) {
+        const time = clamp((0.3 + 1.2 * roll(c, 'pad', 'swell')) * tempo, 0.3, 1.5);
+        for (const e of notes) Object.assign(e, { art: 'swell', artTime: r6(Math.min(time, e.dur / 2)) });
+      }
+    }
+  },
+
   // Rhythmusgitarre, Priorität A (SPEC_PHASE3 5.3), nur Sample-Gitarren (Tasten bekommen eigene Regeln). Je Takt: Anschlagrichtung nach Profil
   // und Spielweise, Chucks, dann je Stab höchstens eine Artikulation mit dem Vorrang chuck, choke, letRing, palmMute.
   chords(out, { track, bars, ctx, profile, p, roll, slotTime }) {

@@ -77,6 +77,7 @@ const MAX_RELEASE = 2; // s, die Presets haben bis zu 4,5 s (Pads würden in den
  *   hammer  ohne Anschlag: das Sample beginnt 30 ms später, Einsatz mindestens 20 ms, 15 % leiser
  *   dead    höchstens 50 ms lang, Tiefpass 900 Hz;   chuck  wie dead, höchstens 40 ms;   palmMute  Tiefpass 1600 Hz, Abklingen höchstens 0,5 s
  *   staccato, choke   die Dauer kommt aus dem Ereignis, das Ausklingen dauert 30 ms statt der Zeit der Zone (auch bei chuck)
+ *   swell   blendet in `artTime` s ein (Pad)
  * `ring` (letRing, Arpeggio-Überlappung): der Ton wird nicht abgeschnitten, Ausklingen 2 s.
  */
 export function playNote(ctx, out, t, { pack, midi, dur, vel, art, zone = pickArtZone(pack.meta.zones, midi, vel, art), gain = 1, timeScale = 1, filter = 20000, naturalDecay = 0, eq = null, cents = 0, oneShot = false, fadeOut = 0.15, artSemi, artTime = 0.08, artTone = 9, ring = false }) {
@@ -98,7 +99,7 @@ export function playNote(ctx, out, t, { pack, midi, dur, vel, art, zone = pickAr
   const velocity = Number.isFinite(vel) ? Math.min(1, Math.max(0, vel)) : 1; // ungültig zählt wie kräftig (wie bei der Zonenwahl)
   const peak = Math.max(FLOOR, gain * zoneGain(zone.attenuationDb) * velocity);
   const sustain = Math.max(FLOOR, peak * dbToGain(zone.sustainDb));
-  const attack = Math.max(art === 'hammer' ? 0.02 : 0.003, zone.attack * timeScale), decay = Math.max(0.001, zone.decay * timeScale);
+  const attack = Math.max(art === 'swell' ? artTime : art === 'hammer' ? 0.02 : 0.003, zone.attack * timeScale), decay = Math.max(0.001, zone.decay * timeScale);
   let release = ring ? MAX_RELEASE : art === 'staccato' || art === 'choke' || art === 'chuck' ? 0.03 : Math.min(MAX_RELEASE, Math.max(MIN_RELEASE, zone.release * timeScale));
   let noteEnd = t + (Number.isFinite(dur) ? Math.max(0.02, dur) : 0.5);
   if (oneShot && zone.loop) { // ohne Schleife ist am Sample-Ende Stille: vorher ausklingen, statt abzureißen (Zonen ohne Schleife klingen wie bisher)
