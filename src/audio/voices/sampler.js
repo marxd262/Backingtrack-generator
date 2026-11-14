@@ -67,7 +67,9 @@ const MAX_RELEASE = 2; // s, die Presets haben bis zu 4,5 s (Pads würden in den
  * Schleife: das Sample klingt an seinem Ende aus (Zonen ohne Schleife bleiben unverändert); reicht die Note bis dahin, beginnt das Ausklingen spätestens `fadeOut` (s) vor dem Ende und endet mit ihm.
  * `art` (Artikulation, Namen aus SPEC_PHASE3 Abschnitt 2; nach Wissen gesetzt, nicht gehört). Reihenfolge: hat das Pack Zonen mit diesem `art`
  * (eigene Sample-Gruppe), spielt eine davon ohne die gerechnete Variante; sonst wird gerechnet; Unbekanntes spielt normal:
- *   slideIn gleitet in `artTime` s (Standard 0,08) von `artSemi` Halbtönen daneben (Standard -2) auf den Ton
+ *   slideIn gleitet in `artTime` s (Standard 0,08) von `artSemi` Halbtönen daneben (Standard -2) auf den Ton; der Ton beginnt so viel früher,
+ *           dass er zum Zeitpunkt `t` ankommt (Regel: der Zielton kommt pünktlich). Reicht die Zeit bis `t` nicht (Planer mit 100 ms Vorausschau,
+ *           allererster Ton), wird der Vorlauf kürzer; unter 20 ms beginnt der Slide auf dem Schlag
  *   bend    beginnt `artSemi` Halbtöne daneben (Standard -2), hält kurz (höchstens 40 ms) und zieht in höchstens 180 ms weich auf den Ton;
  *           `artTone` (dB je Halbton, Standard 9, 0 = aus): ein Höhenregal ab 1800 Hz läuft mit, von -artTone·Halbtöne/2 auf +artTone·Halbtöne/2 dB
  *           (Urteil des Nutzers: 3 zu schwach, 9 besser). bend und vibrato spielen ohne das zusätzliche Abklingen der Stimme (naturalDecay)
@@ -79,6 +81,8 @@ const MAX_RELEASE = 2; // s, die Presets haben bis zu 4,5 s (Pads würden in den
  */
 export function playNote(ctx, out, t, { pack, midi, dur, vel, art, zone = pickArtZone(pack.meta.zones, midi, vel, art), gain = 1, timeScale = 1, filter = 20000, naturalDecay = 0, eq = null, cents = 0, oneShot = false, fadeOut = 0.15, artSemi, artTime = 0.08, artTone = 9, ring = false }) {
   if (!zone) return;
+  let slideEnd = null; // Vorlauf des slideIn: Beginn vorziehen, das Notenende bleibt
+  if (art === 'slideIn') { const room = t - ctx.currentTime, lead = room > 0.02 ? Math.min(artTime, room) : 0; if (lead) { slideEnd = t; t -= lead; dur += lead; } }
   if (zone.art) art = undefined; // eigene Samples für diese Artikulation: ohne die gerechnete Variante
   if (art === 'dead' || art === 'chuck') { dur = Math.min(dur, art === 'chuck' ? 0.04 : 0.05); filter = Math.min(filter, 900); }
   if (art === 'palmMute') { filter = Math.min(filter, 1600); naturalDecay = naturalDecay > 0 ? Math.min(naturalDecay, 0.5) : 0.5; }
@@ -161,7 +165,7 @@ export function playNote(ctx, out, t, { pack, midi, dur, vel, art, zone = pickAr
   }
   node.connect(out);
   // Tonhöhen-Artikulationen über die Abspielgeschwindigkeit
-  if (art === 'slideIn') { src.playbackRate.setValueAtTime(from, t); src.playbackRate.exponentialRampToValueAtTime(rate, t + Math.min(artTime, span / 2)); }
+  if (art === 'slideIn') { src.playbackRate.setValueAtTime(from, t); src.playbackRate.exponentialRampToValueAtTime(rate, slideEnd ?? t + Math.min(artTime, span / 2)); }
   if (art === 'bend') { // weicher Verlauf (langsam los, schnell durch die Mitte, langsam ankommen) wie ein gezogener Finger, statt einer geraden Rampe
     const curve = new Float32Array(32);
     for (let i = 0; i < 32; i++) curve[i] = from * (rate / from) ** ease(i / 31);

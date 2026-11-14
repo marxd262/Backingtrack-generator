@@ -18,13 +18,16 @@ const mk = (id, over = {}) => ({
 });
 const ON = { ornaments: { on: 1 } };
 
-test('aus ist der Standard: gleicher Strom wie ohne die Schicht; Regler 0 schaltet alles ab; ungültiger Regler wirft', () => {
-  assert.equal(ART_DEFAULTS.on, 0);
+test('an ist der Standard (Bass und Gitarre); Feinwert on 0, Regler 0 und beide Schichten auf 0 ergeben denselben Strom ohne Artikulationen; ungültiger Regler wirft', () => {
+  assert.deepEqual(ART_DEFAULTS, { on: 1, bass: 1, chords: 1 });
   assert.deepEqual(completeArt({ on: 1, bass: -1, chords: 'x' }), { ...ART_DEFAULTS, on: 1 });
   for (const id of ['funk', 'rock', 'blues']) {
-    assert.deepEqual(buildEvents(mk(id)), buildEvents(mk(id), { ornaments: { on: 0 } }));
-    assert.deepEqual(buildEvents(mk(id, { ornaments: 0 }), ON), buildEvents(mk(id)));
-    assert.deepEqual(buildEvents(mk(id), { ornaments: { on: 1, bass: 0, chords: 0 } }), buildEvents(mk(id)));
+    const plain = buildEvents(mk(id), { ornaments: { on: 0 } });
+    assert.deepEqual(buildEvents(mk(id)), buildEvents(mk(id), ON));
+    assert.notDeepEqual(buildEvents(mk(id)), plain);
+    assert.ok(plain.every((e) => !e.art && !e.ring && e.strumUp === undefined));
+    assert.deepEqual(buildEvents(mk(id, { ornaments: 0 })), plain);
+    assert.deepEqual(buildEvents(mk(id), { ornaments: { bass: 0, chords: 0 } }), plain);
   }
   assert.throws(() => buildEvents(mk('funk', { ornaments: 2 })), /badOrnaments/);
 });
@@ -65,7 +68,7 @@ test('Verzierungs-Plan: die Wiederholung eines Teils behält etwa 70 % der Entsc
 test('Bass Funk: Dead Notes nur auf e oder a direkt vor einer Note gleichen Tons, leise und kurz; die übrigen Noten staccato', () => {
   let dead = 0;
   for (const seed of SEEDS) {
-    const off = bassOf(mk('funk', { seed })), on = bassOf(mk('funk', { seed }), { on: 1, chords: 0 });
+    const off = bassOf(mk('funk', { seed }), { on: 0 }), on = bassOf(mk('funk', { seed }), { on: 1, chords: 0 });
     on.forEach((n, i) => {
       if (n.art !== 'dead') return;
       dead++;
@@ -81,17 +84,14 @@ test('Bass Funk: Dead Notes nur auf e oder a direkt vor einer Note gleichen Tons
   assert.ok(dead >= SEEDS.length, `${dead} Dead Notes`);
 });
 
-test('Bass slideIn: nur auf der Eins, der Zielton kommt pünktlich (Beginn + artTime = Taktanfang), 1 bis 7 Halbtöne von unten, 40 bis 100 ms', () => {
+test('Bass slideIn: nur auf der Eins, das Ereignis bleibt dort (den Vorlauf macht die Stimme), 1 bis 7 Halbtöne von unten, 40 bis 100 ms', () => {
   let slides = 0;
   for (const id of ['funk', 'blues', 'rock']) for (const seed of SEEDS) {
     const track = mk(id, { seed, ornaments: 1 }), beat = 60 / track.bpm;
     for (const n of bassOf(track, { on: 1 }).filter((x) => x.art === 'slideIn')) {
       slides++;
-      const target = n.t + n.artTime;
-      if (n.t === 0) continue; // im allerersten Takt entfällt der Vorlauf
-      assert.ok(Math.abs(target / (4 * beat) - Math.round(target / (4 * beat))) < 1e-4, `${id} s=${seed}: ${JSON.stringify(n)}`);
+      assert.ok(n.beat === 0 && Math.abs(n.t - n.bar * 4 * beat) < 1e-4, `${id} s=${seed}: ${JSON.stringify(n)}`);
       assert.ok([-1, -2, -5, -6, -7].includes(n.artSemi) && n.artTime >= 0.04 && n.artTime <= 0.1);
-      assert.equal(n.bar, Math.round(target / (4 * beat)) - 1, 'vorgezogen in den Takt davor');
     }
   }
   assert.ok(slides >= 10, `${slides} Slides`);

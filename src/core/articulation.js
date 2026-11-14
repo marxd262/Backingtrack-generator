@@ -1,8 +1,8 @@
 // Artikulations-Schicht (Phase 3; Regeln: SPIELREGELN.md, Bauplan: SPEC_PHASE3.md): eigener Schritt auf dem fertigen Ereignisstrom, nach der
-// Songform und vor dem Mikrotiming. Reine Logik, per Seed reproduzierbar. Der Schritt setzt Felder am Ereignis (art, artSemi, artTime, ring,
+// Songform und vor dem Mikrotiming. Reine Logik, per Seed reproduzierbar. Standard seit dem Urteil des Nutzers zu Bass und Gitarre (2026-11-14). Der Schritt setzt Felder am Ereignis (art, artSemi, artTime, ring,
 // strumUp), ändert Längen und Lautstärken und fügt Noten ein. Wie eine Artikulation klingt, entscheidet die Stimme (sampler.js: eigene
 // Sample-Gruppe des Packs, sonst gerechnet, sonst normal). Alle Zahlen sind Startwerte aus den Regeln, nicht gehört.
-// Feinwerte: on (0 = Schicht aus, Strom unverändert; Standard, bis der Nutzer geurteilt hat), bass und chords (Faktor auf die
+// Feinwerte: on (0 = Schicht aus, Strom unverändert), bass und chords (Faktor auf die
 // Wahrscheinlichkeiten der Schicht, 0 = Schicht ohne Artikulationen). Dazu das Track-Feld `ornaments` (Regler "Verzierungen", 0..1, fehlend 0,5):
 // Faktor 2 · ornaments auf jede Wahrscheinlichkeit unter 0,8, höchstens 0,9; 0 = alles aus.
 import { r6 } from './timeline.js';
@@ -12,7 +12,7 @@ import { grooveIdFor } from './grooves.js';
 import { phrasesOf } from './form-arrange.js';
 import { densityAt } from './form-types.js';
 
-export const ART_DEFAULTS = Object.freeze({ on: 0, bass: 1, chords: 1 });
+export const ART_DEFAULTS = Object.freeze({ on: 1, bass: 1, chords: 1 });
 
 /** Füllt die Feinwerte auf; nur endliche Zahlen >= 0 zählen. */
 export function completeArt(options) {
@@ -92,13 +92,8 @@ export function articulate(events, { track, bars, sections, params, rng, options
   };
   const out = events.map((e) => ({ ...e }));
   for (const [layer, rules] of Object.entries(RULES)) if (options[layer] > 0 && track.layers[layer]) rules(out, env);
-  // Vorlauf (Regel 6, der Zielton kommt pünktlich): der Ton beginnt artTime früher, notfalls im Takt davor; im allerersten Takt entfällt der Vorlauf
-  for (const e of out) {
-    if (e.art !== 'slideIn' || !(e.artTime > 0)) continue;
-    const t = r6(e.t - e.artTime), b = bars[t < bars[e.bar].start ? e.bar - 1 : e.bar];
-    if (!b) continue;
-    Object.assign(e, { t, dur: r6(e.dur + e.artTime), bar: b.index, beat: (t - b.start) / (b.stepSec * b.sub) });
-  }
+  // Vorlauf (Regel 6, der Zielton kommt pünktlich): das Ereignis bleibt auf seinem Platz, die Stimme beginnt artTime früher (sampler.js). So gilt
+  // der Vertrag des Stroms weiter (Zeit und Dauer im Takt, Bass auf der Eins), und Stimmen ohne Artikulationen (Synth) spielen nicht zu früh
   return out.sort(byTime);
 }
 
@@ -138,7 +133,7 @@ const RULES = {
       for (const b of bars) {
         const c = ctx[b.index], target = first.get(b.index + 1), s = b.steps - (b.sub === 4 ? 2 : 1);
         if (!c.nextChange || c.stop || !target || !playing.has(b.index) || !(roll(c, 'bass', 'approach') < p(P.approach, 'bass'))) continue;
-        const dir = roll(c, 'bass', 'approachDir') < 0.6 ? -1 : 1;
+        const dir = target.midi > 50 || (target.midi >= 30 && roll(c, 'bass', 'approachDir') < 0.6) ? -1 : 1; // im Tonbereich des Basses bleiben (28..52)
         let midi = target.midi + dir;
         if (!P.chromatic) while (!scale.has(((midi % 12) + 12) % 12)) midi += dir;
         for (let i = out.length - 1; i >= 0; i--) if (out[i].layer === 'bass' && out[i].type === 'note' && out[i].bar === b.index && stepOf(out[i]) >= s) out.splice(i, 1);

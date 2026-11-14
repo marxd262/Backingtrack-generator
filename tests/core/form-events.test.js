@@ -148,7 +148,7 @@ test('Zufallsregler: 0 hält das Bass-Muster in allen Phrasen eines Teils, 1 wec
   const parts = [['verse', 16], ['chorus', 16]];
   const beatsOf = (ev, i) => inBars(ev, [i, i + 1]).filter((e) => e.layer === 'bass').map((e) => e.beat).join();
   const changes = (randomness) => SEEDS.map((seed) => {
-    const ev = buildEvents(mk({ seed }, parts, { randomness }));
+    const ev = buildEvents(mk({ seed, ornaments: 0 }, parts, { randomness })); // ohne Verzierungen: Dead Notes und Annäherungstöne ändern das Muster je Takt
     let n = 0;
     for (const base of [0, 16]) for (const k of [4, 8, 12]) if (beatsOf(ev, base + k - 4) !== beatsOf(ev, base + k)) n++;
     return n;

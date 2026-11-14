@@ -119,7 +119,7 @@ export const MIX_TUNABLES = deepFreeze({
     amount: spec(0, 5, 0.05, TIMING_DEFAULTS.amount), tight: spec(0, 1, 0.05, TIMING_DEFAULTS.tight), layback: spec(0, 2, 0.05, TIMING_DEFAULTS.layback),
     drift: spec(0, 2, 0.05, TIMING_DEFAULTS.drift),
   },
-  // Artikulations-Schicht (Phase 3, core/articulation.js; Standardwerte von dort): on 0 = aus (Standard, bis der Nutzer geurteilt hat), bass und
+  // Artikulations-Schicht (Phase 3, core/articulation.js; Standardwerte von dort): on 0 = aus (Standard an seit dem Urteil des Nutzers 2026-11-14 zu Bass und Gitarre: B etwas besser), bass und
   // chords Faktor auf die Wahrscheinlichkeiten der Schicht (0 = Schicht ohne Artikulationen). Wirkt beim Bauen des Ereignisstroms.
   'mix/art': { on: spec(0, 1, 1, ART_DEFAULTS.on), bass: spec(0, 2, 0.05, ART_DEFAULTS.bass), chords: spec(0, 2, 0.05, ART_DEFAULTS.chords) },
   // Gemeinsamer Raum (Schritt 3, nach Wissen gesetzt, nicht gehört): wet Faktor auf den Pegel des Raums (Klangregler master.roomWet; 0 = aus, für Messungen und A/B), tone Tiefpass des

@@ -129,8 +129,9 @@ test('Pausen: höchstens eine Schicht je Takt, nie Bass, Schlagzeug behält Hi-H
     for (const seed of SEEDS) {
       const full = NO_TRANS(parts);
       full[5][2].transition = 'stop'; // der Break (Teil 5) hat einen Stopp: der Takt davor bleibt pausenfrei
-      const base = buildEvents(mk(full, { dynamics: 0, pauses: 0 }, { seed }));
-      const track = mk(full, { dynamics: 0, pauses }, { seed });
+      // ohne Verzierungen: sie hängen am Stoppfenster und an Pausen (Choke, letRing) und würden hier als verlorene Ereignisse zählen
+      const base = buildEvents(mk(full, { dynamics: 0, pauses: 0 }, { seed, ornaments: 0 }));
+      const track = mk(full, { dynamics: 0, pauses }, { seed, ornaments: 0 });
       const { sections } = info(track);
       const stopBar = sections[4].start + sections[4].bars - 1; // letzter Takt vor dem Break (Stopp)
       const out = buildEvents(track);
