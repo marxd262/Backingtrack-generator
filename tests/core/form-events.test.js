@@ -246,7 +246,8 @@ test('Eigenschaften: zufällige Formen halten den Vertrag', () => {
     }
     // Zufall 0 (nur Stile ohne Synkopen-Streuung nach complexity 0: sonst würfeln Zusatzstabs): Teile mit gleichbleibender Dichte spielen in allen Phrasen dasselbe Muster (Takt j und j + 4, ohne den Fill-Takt; ohne Pausen und Crash, die kommen aus der Nachbearbeitung)
     if (randomness === 0 && ['rock', 'country', 'psych'].includes(style.id)) {
-      const sig = (bar, layer) => ev.filter((e) => e.bar === bar && e.layer === layer && e.name !== 'crash').map((e) => `${e.name ?? ''}@${e.beat}`).sort().join();
+      const plain = buildEvents({ ...track, ornaments: 0 }); // ohne Verzierungen: die würfeln je Wiederholung neu (Flam, Side-Stick)
+      const sig = (bar, layer) => plain.filter((e) => e.bar === bar && e.layer === layer && e.name !== 'crash').map((e) => `${e.name ?? ''}@${e.beat}`).sort().join();
       parts.forEach((p, i) => {
         if (p.type === 'build' || p.type === 'outro') return;
         for (let j = starts[i]; j + 4 < starts[i] + p.bars - 1; j++) {

@@ -5,7 +5,7 @@
 // Feinwerte: on (0 = Schicht aus, Strom unverändert), bass, chords (Rhythmusgitarre), drums, keys (Tasten auf der Akkord-Schicht), pad (Faktor auf die
 // Wahrscheinlichkeiten der Regelgruppe, 0 = Gruppe ohne Artikulationen), lead, band (über 0: die Band-Regeln 1, 2 und 6 aus SPIELREGELN Abschnitt 5
 // gelten für Bass und Gitarre: Slides nur auf einem Kick, während eines Drum-Fills spielt der Bass einfach und die Gitarre lässt klingen, der
-// Bass rutscht in die Eins des Refrains). Standard an sind bass und chords; die übrigen warten auf das Urteil des Nutzers. Dazu das Track-Feld `ornaments` (Regler "Verzierungen", 0..1, fehlend 0,5):
+// Bass rutscht in die Eins des Refrains). Standard an ist alles außer chordsB (Urteil des Nutzers, 2026-11-14). Dazu das Track-Feld `ornaments` (Regler "Verzierungen", 0..1, fehlend 0,5):
 // Faktor 2 · ornaments auf jede Wahrscheinlichkeit unter 0,8, höchstens 0,9; 0 = alles aus.
 import { r6 } from './timeline.js';
 import { byTime, roundVel } from './event-helpers.js';
@@ -14,7 +14,8 @@ import { grooveIdFor } from './grooves.js';
 import { phrasesOf } from './form-arrange.js';
 import { densityAt } from './form-types.js';
 
-export const ART_DEFAULTS = Object.freeze({ on: 1, bass: 1, chords: 1, drums: 0, keys: 0, pad: 0, lead: 0, band: 0, bassB: 0, chordsB: 0, keysB: 0, drumsB: 0 });
+// Standard nach dem Urteil des Nutzers (2026-11-14): alles an bis auf Gitarre B (Boogie im Mix nicht zu hören, slideChord noch ohne Urteil)
+export const ART_DEFAULTS = Object.freeze({ on: 1, bass: 1, chords: 1, drums: 1, keys: 1, pad: 1, lead: 1, band: 1, bassB: 1, chordsB: 0, keysB: 1, drumsB: 1 });
 const RULE_LAYER = { keys: 'chords', bassB: 'bass', chordsB: 'chords', keysB: 'chords', drumsB: 'drums' }; // Regelgruppe -> Schicht, wenn die Namen abweichen
 
 /** Füllt die Feinwerte auf; nur endliche Zahlen >= 0 zählen. */
@@ -142,7 +143,7 @@ const RULES = {
   // Schlagzeug, Priorität A, soweit die Packs es hergeben (SPEC_PHASE3 5.8): Hi-Hat-Akzentmuster, Lautstärke der Geisternoten, Side-Stick und
   // Rimshot statt Snare, im Refrain Ride statt der geschlossenen Hi-Hat (nicht im Rock), getretene Hi-Hat, Crash mit Choke vor einem Stopp.
   // Schlagarten ohne Sample fallen in der Stimme auf ihren Grundschlag zurück (DRUM_FALLBACK).
-  drums(out, { bars, ctx, profile, roll, slotTime }) {
+  drums(out, { track, bars, ctx, profile, roll, slotTime }) {
     const P = DRUM_PROFILES[profile] ?? {}, byBar = new Map();
     for (const e of out) if (e.layer === 'drums' && e.type === 'hit') byBar.set(e.bar, [...(byBar.get(e.bar) ?? []), e]);
     const add = (b, s, name, vel) => { const e = { t: slotTime(b, s), bar: b.index, beat: s / b.sub, type: 'hit', layer: 'drums', name, vel }; out.push(e); byBar.get(b.index).push(e); };
@@ -165,8 +166,9 @@ const RULES = {
         for (const e of hats) e.name = 'ride';
         for (let beat = 1; beat < b.beats; beat += 2) add(b, beat * b.sub, 'hatPedal', 0.35);
       }
-      // vor einem Stopp: Crash auf den letzten Schlag vor der Stille, nach 50 bis 150 ms abgewürgt
-      if (c.stop) { const last = hits.reduce((x, y) => (y.t > x.t ? y : x)); hits.push({ ...last, name: 'crash', vel: 0.8, art: 'choke', artTime: r6(0.05 + 0.1 * roll(c, 'drums', 'crashChoke')) }); out.push(hits.at(-1)); }
+      // vor einem Stopp: Crash auf den letzten Schlag vor der Stille, nach 50 bis 150 ms abgewürgt (nur im Sample-Kit: das Synth-Kit kann nicht abwürgen,
+      // der Crash klänge in die Stille)
+      if (c.stop && track.voices?.drums?.id === 'sample') { const last = hits.reduce((x, y) => (y.t > x.t ? y : x)); hits.push({ ...last, name: 'crash', vel: 0.8, art: 'choke', artTime: r6(0.05 + 0.1 * roll(c, 'drums', 'crashChoke')) }); out.push(hits.at(-1)); }
     }
     // offene Hi-Hat: auf der nächsten Zählzeit schließen; steht dort keine geschlossene, tritt der Fuß sie zu (nicht in die Stille eines Stopps)
     for (const [index, hits] of byBar) {
@@ -445,14 +447,15 @@ const RULES = {
     }
   },
 
-  // Schlagzeug, Priorität B (SPEC_PHASE3 5.8): flam (Vorschlag gleichen Namens 15 bis 30 ms vorher, leise) im Fill und selten auf dem Backbeat.
+  // Schlagzeug, Priorität B (SPEC_PHASE3 5.8): flam (Vorschlag gleichen Namens 15 bis 30 ms vorher, leise) im Fill und selten auf dem Backbeat,
+  // nie im Wirbel (der steigt gleichmäßig an).
   // Nicht gebaut: Fills wechselnder Länge, Feathering und Besen (Jazz), Tamburin und Shaker.
   drumsB(out, { bars, ctx, p, roll }) {
     for (const e of out.filter((x) => x.layer === 'drums' && x.type === 'hit')) {
       const b = bars[e.bar], c = ctx[e.bar], s = Math.round(e.beat * b.sub), inFill = c.fill && e.beat >= b.beats - 2;
       const body = ['snare', 'tomHigh', 'tomMid', 'tomLow', 'rimshot'].includes(e.name) && e.vel >= 0.3;
       const d = 0.015 + 0.015 * roll(c, 'drumsB', 'flamTime', s);
-      if (!body || e.t - d < b.start || !(roll(c, 'drumsB', 'flam', s) < p(inFill ? 0.25 : 0.08, 'drumsB'))) continue;
+      if (!body || e.t - d < b.start || (c.roll && e.beat >= b.beats / 2) || !(roll(c, 'drumsB', 'flam', s) < p(inFill ? 0.25 : 0.08, 'drumsB'))) continue;
       out.push({ ...e, t: r6(e.t - d), beat: e.beat - d / (b.stepSec * b.sub), vel: roundVel(0.4 * e.vel), art: 'flam' });
     }
   },
@@ -466,9 +469,10 @@ const RULES = {
       if (n.art === 'dead' || n.art === 'approach' || n.art === 'slideIn') return;
       const b = bars[n.bar], c = ctx[n.bar], s = Math.round(n.beat * b.sub), prev = notes[i - 1], next = notes[i + 1];
       const ends = (c.stop && next?.bar !== n.bar) || !next || (c.phraseEnd && next.t - (n.t + n.dur) >= beat);
-      if (P.slideOff && ends && roll(c, 'bassB', 'slideOff', s) < p(P.slideOff, 'bassB')) { // der Ton rutscht am Ende 3 bis 7 Halbtöne ab und blendet aus
-        const time = r6(clamp((0.1 + 0.15 * roll(c, 'bassB', 'slideOffTime', s)) * tempo, 0.1, 0.25));
-        Object.assign(n, { art: 'slideOff', artSemi: -3 - Math.floor(5 * roll(c, 'bassB', 'slideOffSemi', s)), artTime: time, dur: r6(Math.max(n.dur, time)) });
+      const room = b.end - n.t - 0.005; // der Ton endet im Takt
+      if (P.slideOff && ends && room >= 0.1 && roll(c, 'bassB', 'slideOff', s) < p(P.slideOff, 'bassB')) { // der Ton rutscht am Ende 3 bis 7 Halbtöne ab und blendet aus
+        const time = r6(Math.min(room, clamp((0.1 + 0.15 * roll(c, 'bassB', 'slideOffTime', s)) * tempo, 0.1, 0.25)));
+        Object.assign(n, { art: 'slideOff', artSemi: -3 - Math.floor(5 * roll(c, 'bassB', 'slideOffSemi', s)), artTime: time, dur: r6(Math.min(room, Math.max(n.dur, time))) });
       } else if (P.palmMute && c.verse && roll(c, 'bassB', 'palmMute') < p(P.palmMute, 'bassB')) n.art = 'palmMute';
       else if (P.octavePop && b.sub === 4 && s % 4 >= 2 && n.midi <= 40 && roll(c, 'bassB', 'octavePop', s) < p(P.octavePop, 'bassB')) { // eine Oktave höher, heller, im Tonbereich (bis 52)
         Object.assign(n, { art: 'octavePop', midi: n.midi + 12, vel: roundVel(n.vel * 1.1) });

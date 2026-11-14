@@ -183,7 +183,7 @@ test('Eigenschaften über gewürfelte Formen, Taktarten und Seeds: im Takt, vel 
             assert.ok(e.vel >= 0.05 && e.vel <= 1 && e.vel === round3(e.vel), `${label}: vel ${e.vel}`);
             layersByBar[e.bar].add(e.layer);
           }
-          if (e.type === 'note') assert.ok(e.dur > 0 && e.t + e.dur <= b.end + 1e-6, `${label}: dur`);
+          if (e.type === 'note') assert.ok(e.dur > 0 && e.t + e.dur <= b.end + 1e-6, `${label}: dur ${JSON.stringify(e)} Taktende ${b.end}`);
         }
         for (const s of sections) for (let i = s.start; i < s.start + s.bars; i++) {
           if (s.layers.bass || s.layers.drums) assert.ok(layersByBar[i].has('bass') || layersByBar[i].has('drums'), `${label}: Takt ${i} ohne Bass und Schlagzeug`);

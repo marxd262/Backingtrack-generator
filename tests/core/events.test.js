@@ -75,9 +75,9 @@ test('zwei Presets ergeben unterschiedliche Ströme', () => {
 });
 
 test('layers.drums:false ergibt keine hit-Ereignisse, die anderen Schichten bleiben gleich', () => {
-  const events = make({ layers: { drums: false } });
+  const events = make({ layers: { drums: false }, ornaments: 0 }); // ohne Verzierungen: deren Band-Regeln lassen Bass und Gitarre auf das Schlagzeug hören
   assert.equal(ofType(events, 'hit').length, 0);
-  assert.deepEqual(ofLayer(events, 'bass'), ofLayer(make(), 'bass'));
+  assert.deepEqual(ofLayer(events, 'bass'), ofLayer(make({ ornaments: 0 }), 'bass'));
 });
 
 test('alle vier Schichten aus ergibt nur chord und marker', () => {
@@ -132,7 +132,7 @@ test('Humanisierung mit Swing: höchstens 0,02 s vom geswingten Raster', () => {
     const { swing } = resolveTags(tags, createRng(1));
     assert.ok(swing > 0);
     for (const bpm of [40, 100, 240]) {
-      const events = make({ tags, bpm });
+      const events = make({ tags, bpm, ornaments: 0 }); // ohne Verzierungen: Flam und Crush liegen mit Absicht neben dem Raster
       const chordT = ofType(events, 'chord').map((c) => c.t);
       const stepSec = 60 / bpm / 4;
       for (const e of sounding(events)) {
@@ -226,8 +226,8 @@ test('wenig drive (Halbzeit): Snare nur auf Zählzeit 3, mittlerer drive: auf 2 
     const snares = ofType(events, 'hit').filter((e) => e.name === 'snare' && !isGhost(e) && !fills.has(e.bar));
     return [...new Set(snares.map((e) => e.beat))].sort();
   };
-  assert.deepEqual(backbeats(withPreset('dreamy')), [2]);
-  assert.deepEqual(backbeats(make()), [1, 3]);
+  assert.deepEqual(backbeats(withPreset('dreamy', { ornaments: 0 })), [2]); // ohne Verzierungen: die machen aus der Snare Side-Stick oder Rimshot
+  assert.deepEqual(backbeats(make({ ornaments: 0 })), [1, 3]);
 });
 
 test('Pad: je Akkordton eine Note über den ganzen Takt, bei breitem Pad zusätzlich eine Oktave höher', () => {

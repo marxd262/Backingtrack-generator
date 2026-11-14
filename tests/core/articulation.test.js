@@ -1,7 +1,7 @@
 // Artikulations-Schicht (Phase 3, core/articulation.js): aus = unveränderter Strom; Stil-Profil aus Groove und Schlagworten; Regeln je Schicht.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildEvents, STYLE_PRESETS, GROOVES, DRUM_NAMES } from '../../src/index.js';
+import { buildEvents as build, STYLE_PRESETS, GROOVES, DRUM_NAMES } from '../../src/index.js';
 import { profileOf, completeArt, planRoll, ART_DEFAULTS } from '../../src/core/articulation.js';
 import { barTimeline, checkedTrack } from '../../src/core/timeline.js';
 import { createRng } from '../../src/core/rng.js';
@@ -16,15 +16,20 @@ const mk = (id, over = {}) => ({
   voices: { bass: { id: 'sample', variant: 'finger' }, chords: { id: 'sample', variant: 'guitar' } },
   ...over,
 });
+// Die Regel-Tests laufen gegen eine feste Basis (nur Bass und Gitarre Priorität A, der Standard vor dem Urteil vom 2026-11-14), damit jede Gruppe
+// einzeln prüfbar bleibt: übergebene Feinwerte gelten über dieser Basis. Ohne Feinwerte gilt der echte Standard.
+const BASIS = { drums: 0, keys: 0, pad: 0, lead: 0, band: 0, bassB: 0, chordsB: 0, keysB: 0, drumsB: 0 };
+const buildEvents = (track, o = {}) => build(track, o.ornaments ? { ...o, ornaments: { ...BASIS, ...o.ornaments } } : o);
 const ON = { ornaments: { on: 1 } };
 
-test('an ist der Standard (Bass und Gitarre); Feinwert on 0, Regler 0 und beide Schichten auf 0 ergeben denselben Strom ohne Artikulationen; ungültiger Regler wirft', () => {
-  assert.deepEqual(ART_DEFAULTS, { on: 1, bass: 1, chords: 1, drums: 0, keys: 0, pad: 0, lead: 0, band: 0, bassB: 0, chordsB: 0, keysB: 0, drumsB: 0 });
+test('an ist der Standard (alle Gruppen außer Gitarre B); Feinwert on 0, Regler 0 und alle Gruppen auf 0 ergeben denselben Strom ohne Artikulationen; ungültiger Regler wirft', () => {
+  assert.deepEqual(ART_DEFAULTS, { on: 1, bass: 1, chords: 1, drums: 1, keys: 1, pad: 1, lead: 1, band: 1, bassB: 1, chordsB: 0, keysB: 1, drumsB: 1 });
   assert.deepEqual(completeArt({ on: 1, bass: -1, chords: 'x', drums: 1 }), { ...ART_DEFAULTS, drums: 1 });
   for (const id of ['funk', 'rock', 'blues']) {
     const plain = buildEvents(mk(id), { ornaments: { on: 0 } });
-    assert.deepEqual(buildEvents(mk(id)), buildEvents(mk(id), ON));
-    assert.notDeepEqual(buildEvents(mk(id)), plain);
+    assert.deepEqual(buildEvents(mk(id)), build(mk(id), { ornaments: ART_DEFAULTS }));
+    assert.notDeepEqual(buildEvents(mk(id)), buildEvents(mk(id), ON), 'der Standard spielt mehr als die Basis');
+    assert.notDeepEqual(buildEvents(mk(id), ON), plain);
     assert.ok(plain.every((e) => !e.art && !e.ring && e.strumUp === undefined));
     assert.deepEqual(buildEvents(mk(id, { ornaments: 0 })), plain);
     assert.deepEqual(buildEvents(mk(id), { ornaments: { bass: 0, chords: 0 } }), plain);
@@ -195,7 +200,7 @@ test('Gitarre: Anschlagrichtung nach Spielweise (16tel: e und a hoch; Achtel: "+
 // ---- Schlagzeug ----
 const drumsOf = (track, ornaments = { drums: 1 }) => buildEvents(track, { timing: GRID, ornaments }).filter((e) => e.layer === 'drums');
 
-test('Schlagzeug ist aus, bis es eingeschaltet wird; an: nur Namen aus DRUM_NAMES', () => {
+test('Schlagzeug ist abschaltbar; an: nur Namen aus DRUM_NAMES', () => {
   for (const id of ['funk', 'rock', 'dreamy', 'reggae']) for (const seed of SEEDS) {
     const track = mk(id, { seed });
     assert.deepEqual(drumsOf(track, {}), drumsOf(track, { drums: 0 }));
@@ -226,7 +231,9 @@ test('Schlagzeug: Hi-Hat-Akzente 1 / 0,6 / 0,8 / 0,6 (Achtel 1 / 0,7), Geisterno
 test('Schlagzeug mit Songform: Rock-Refrain geschlossene Hi-Hat und Rimshot, sonst Ride mit getretener Hi-Hat auf 2 und 4; Crash mit Choke vor dem Stopp; offene Hi-Hat wird geschlossen', () => {
   const parts = form([['verse', 4], ['chorus', 4], ['break', 2], ['chorus', 4]]);
   for (const seed of SEEDS) {
-    const rock = drumsOf(mk('rock', { seed, ...parts }));
+    const kit = { voices: { drums: { id: 'sample', variant: 'standard' } } };
+    const rock = drumsOf(mk('rock', { seed, ...parts, ...kit }));
+    assert.ok(!drumsOf(mk('rock', { seed, ...parts })).some((e) => e.art === 'choke'), 'das Synth-Kit kann nicht abwürgen: kein Crash vor dem Stopp');
     assert.ok(rock.filter((e) => e.bar < 4).every((e) => !['hatHalf', 'rimshot', 'ride'].includes(e.name)), 'Strophe unverändert');
     assert.ok(rock.some((e) => e.bar >= 4 && e.bar < 8 && e.name === 'hat') && !rock.some((e) => ['hatHalf', 'ride'].includes(e.name)), 'Refrain: die Hi-Hat bleibt geschlossen');
     assert.ok(rock.some((e) => e.name === 'rimshot'));
@@ -251,7 +258,7 @@ test('Schlagzeug mit Songform: Rock-Refrain geschlossene Hi-Hat und Rimshot, son
 const EPIANO = { voices: { chords: { id: 'sample', variant: 'epiano' } } };
 const keysOf = (track, ornaments = { keys: 1 }) => buildEvents(track, { timing: GRID, ornaments }).filter((e) => e.layer === 'chords');
 
-test('Tasten: aus bis eingeschaltet, nur am E-Piano; Oberstimme lauter, Mittelstimme leiser; kein Ton unter C3', () => {
+test('Tasten: abschaltbar, nur am E-Piano; Oberstimme lauter, Mittelstimme leiser; kein Ton unter C3', () => {
   for (const id of ['funk', 'rock', 'dreamy']) for (const seed of SEEDS) {
     const track = mk(id, { seed, ...EPIANO }), off = keysOf(track, {}), on = keysOf(track);
     assert.deepEqual(off, keysOf(track, { keys: 0 }));
@@ -282,7 +289,7 @@ test('Tasten: Ballade hält mit Pedal bis zum Taktende und löst 20 bis 50 ms vo
 // ---- Pad ----
 const padOf = (track, ornaments = { pad: 1 }) => buildEvents(track, { timing: GRID, ornaments }).filter((e) => e.layer === 'pad');
 
-test('Pad: aus bis eingeschaltet; Stimmführung hält gemeinsame Töne, bewegt die Stimmen insgesamt nicht weiter als die feste Lage, gleiche Akkordtöne, 48..84', () => {
+test('Pad: abschaltbar; Stimmführung hält gemeinsame Töne, bewegt die Stimmen insgesamt nicht weiter als die feste Lage, gleiche Akkordtöne, 48..84', () => {
   const pcs = (list) => [...new Set(list.map((e) => e.midi % 12))].sort().join();
   for (const id of ['funk', 'rock', 'dreamy', 'psych', 'blues']) for (const seed of SEEDS) {
     const track = mk(id, { seed, length: 16 }), off = padOf(track, {}), on = padOf(track);
@@ -314,7 +321,7 @@ test('Pad: swell zu Beginn eines Teils (0,3 bis 1,5 s, höchstens die halbe Note
 });
 
 // ---- Lead ----
-test('Lead: aus bis eingeschaltet; fall nur am Saxofon und am Phrasenende, vibrato nur auf Noten ab einem Schlag, scoop höchstens ein Halbton von unten', () => {
+test('Lead: abschaltbar; fall nur am Saxofon und am Phrasenende, vibrato nur auf Noten ab einem Schlag, scoop höchstens ein Halbton von unten', () => {
   const count = {};
   for (const variant of ['sax', 'flute']) for (const seed of SEEDS) {
     const track = mk('rock', { seed, ornaments: 1, layers: { drums: true, bass: true, chords: true, pad: true, lead: true }, jobs: { lead: seed % 2 ? 'melody' : 'callResponse' }, voices: { lead: { id: 'sample', variant } } }); // die Melodie hat fast nur lange Noten (vibrato), Ruf und Antwort kurze (scoop)
@@ -335,7 +342,7 @@ test('Lead: aus bis eingeschaltet; fall nur am Saxofon und am Phrasenende, vibra
 });
 
 // ---- Band-Regeln ----
-test('Band-Regeln (aus bis eingeschaltet): Bass rutscht immer in die Eins des Refrains, im Fill-Takt kein Annäherungston, unter dem Fill schweigt die Gitarre und der Stab davor klingt aus; Tasten kurz vor dem Stopp', () => {
+test('Band-Regeln (abschaltbar): Bass rutscht immer in die Eins des Refrains, im Fill-Takt kein Annäherungston, unter dem Fill schweigt die Gitarre und der Stab davor klingt aus; Tasten kurz vor dem Stopp', () => {
   const parts = form([['verse', 4], ['chorus', 4], ['break', 2], ['chorus', 4]]);
   for (const id of ['rock', 'blues', 'funk']) for (const seed of SEEDS) {
     const track = mk(id, { seed, ornaments: 1, ...parts });
@@ -354,7 +361,7 @@ test('Band-Regeln (aus bis eingeschaltet): Bass rutscht immer in die Eins des Re
 });
 
 // ---- Bass, Priorität B ----
-test('Bass B (aus bis eingeschaltet): Oktav-Pop nur auf "+" und a und bis MIDI 52, hammer/pull nur 1 bis 2 Halbtöne nach der Note davor im selben Takt, slideOff auf der letzten Note und vor dem Stopp, Palm Mute nur in der Strophe', () => {
+test('Bass B (abschaltbar): Oktav-Pop nur auf "+" und a und bis MIDI 52, hammer/pull nur 1 bis 2 Halbtöne nach der Note davor im selben Takt, slideOff auf der letzten Note und vor dem Stopp, Palm Mute nur in der Strophe', () => {
   const count = {}, parts = form([['verse', 4], ['chorus', 4], ['break', 2], ['chorus', 4]]);
   for (const id of ['funk', 'rock', 'blues']) for (const seed of SEEDS) for (const extra of [{}, parts]) {
     const track = mk(id, { seed, ornaments: 1, ...extra });
@@ -370,7 +377,7 @@ test('Bass B (aus bis eingeschaltet): Oktav-Pop nur auf "+" und a und bis MIDI 5
         const step = n.midi - on[i - 1].midi;
         assert.ok(on[i - 1].bar === n.bar && Math.abs(step) <= 2 && step !== 0 && (step > 0) === (n.art === 'hammer') && on[i - 1].t + on[i - 1].dur >= n.t - 1e-6, JSON.stringify([on[i - 1], n]));
       }
-      if (n.art === 'slideOff') assert.ok((!on[i + 1] || on[i + 1].bar !== n.bar) && n.artSemi <= -3 && n.artSemi >= -7 && n.artTime >= 0.1 && n.artTime <= 0.25 && n.dur >= n.artTime, JSON.stringify(n));
+      if (n.art === 'slideOff') assert.ok(n.t + n.dur <= (n.bar + 1) * 4 * 60 / track.bpm + 1e-6 && (!on[i + 1] || on[i + 1].bar !== n.bar) && n.artSemi <= -3 && n.artSemi >= -7 && n.artTime >= 0.1 && n.artTime <= 0.25 && n.dur >= n.artTime, JSON.stringify(n));
       if (n.art === 'palmMute') assert.ok(extra.form ? n.bar < 4 : true, JSON.stringify(n));
     });
   }
@@ -378,7 +385,7 @@ test('Bass B (aus bis eingeschaltet): Oktav-Pop nur auf "+" und a und bis MIDI 5
 });
 
 // ---- Gitarre, Priorität B ----
-test('Gitarre B (aus bis eingeschaltet): der Blues-Shuffle spielt das Boogie-Riff je Phrase, slideChord nur auf Zählzeiten um einen Bund, embellish löst nach einem Achtel in die Terz auf', () => {
+test('Gitarre B (abschaltbar): der Blues-Shuffle spielt das Boogie-Riff je Phrase, slideChord nur auf Zählzeiten um einen Bund, embellish löst nach einem Achtel in die Terz auf', () => {
   const count = { boogie: 0, slideChord: 0, embellish: 0 };
   for (const seed of SEEDS) {
     const country = mk('country', { seed });
@@ -408,7 +415,7 @@ test('Gitarre B (aus bis eingeschaltet): der Blues-Shuffle spielt das Boogie-Rif
 });
 
 // ---- Tasten und Schlagzeug, Priorität B ----
-test('Tasten B und Schlagzeug B (aus bis eingeschaltet): Roll bricht den Akkord in höchstens 40 ms, Crush setzt die kleine Terz vor die große, Bark betont Zählzeiten; Flam liegt 15 bis 30 ms vor einem Schlag gleichen Namens', () => {
+test('Tasten B und Schlagzeug B (abschaltbar): Roll bricht den Akkord in höchstens 40 ms, Crush setzt die kleine Terz vor die große, Bark betont Zählzeiten; Flam liegt 15 bis 30 ms vor einem Schlag gleichen Namens', () => {
   const count = { roll: 0, crush: 0, bark: 0, flam: 0 };
   for (const seed of SEEDS) {
     for (const [id, tags] of [['dreamy', {}], ['blues', {}], ['funk', {}]]) {

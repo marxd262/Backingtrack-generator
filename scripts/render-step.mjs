@@ -11,24 +11,28 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /** Je Schritt: Thema (Dateiname) und die Feinwerte, die die Änderung abschalten (A). Ein neuer Schritt trägt sich hier ein. */
+// Die Gruppen, die seit dem Urteil vom 2026-11-14 Standard sind: A schaltet die eigene Gruppe ab, B ist der Standard von heute
+const LATER = { drums: 0, keys: 0, pad: 0, lead: 0, band: 0, bassB: 0, keysB: 0, drumsB: 0 };
 export const STEPS = {
   // Phase 3, Priorität A: 10 = Bass (staccato, legato, dead, slideIn, approach) gegen die Schicht aus; 11 = Rhythmusgitarre dazu, gegen nur Bass
-  10: { name: 'bass', cases: 'art', a: { 'mix/art': { on: 0 } }, b: { 'mix/art': { on: 1, chords: 0 } } },
-  11: { name: 'guitar', cases: 'art', a: { 'mix/art': { on: 1, chords: 0 } }, b: { 'mix/art': { on: 1 } } },
-  // ab hier je Instrument unabhängig: A = Standard (Bass und Gitarre an), B = dazu nur dieses Instrument
-  12: { name: 'drums', cases: 'art', a: {}, b: { 'mix/art': { drums: 1 } } },
-  // alles zusammen: A = Standard (Bass und Gitarre A), B = alle Regelgruppen an
-  21: { name: 'all', cases: 'art', a: {}, b: { 'mix/art': { drums: 1, keys: 1, pad: 1, lead: 1, band: 1, bassB: 1, chordsB: 1, keysB: 1, drumsB: 1 } } },
-  19: { name: 'keysb', cases: 'art', extra: { voices: { chords: { id: 'sample', variant: 'epiano' } } }, a: {}, b: { 'mix/art': { keysB: 1 } } }, // Tasten B: roll, crush, bark
-  20: { name: 'drumsb', cases: 'art', a: {}, b: { 'mix/art': { drumsB: 1 } } }, // Schlagzeug B: Flams
+  10: { name: 'bass', cases: 'art', a: { 'mix/art': { on: 0 } }, b: { 'mix/art': { ...LATER, chords: 0 } } },
+  11: { name: 'guitar', cases: 'art', a: { 'mix/art': { ...LATER, chords: 0 } }, b: { 'mix/art': LATER } },
+  // ab hier je Gruppe: A = Standard ohne diese Gruppe, B = Standard (bis zum Urteil war es umgekehrt: A = nur Bass und Gitarre, B = dazu die Gruppe)
+  12: { name: 'drums', cases: 'art', a: { 'mix/art': { drums: 0 } } },
+  // alles zusammen: A = nur Bass und Gitarre A, B = alle Regelgruppen an
+  21: { name: 'all', cases: 'art', a: { 'mix/art': LATER }, b: { 'mix/art': { chordsB: 1 } } },
+  // Frage des Nutzers zu Schritt 18 (Boogie nicht zu hören, geht er im Mix unter?): Gitarre B nur mit Schlagzeug, ohne Bass, Pad und Percussion
+  22: { name: 'guitarsolo', cases: 'art', a: {}, b: { 'mix/art': { chordsB: 1 } }, extra: { track: { layers: { drums: true, bass: false, chords: true, pad: false, lead: false, percussion: false } } } },
+  19: { name: 'keysb', cases: 'art', extra: { voices: { chords: { id: 'sample', variant: 'epiano' } } }, a: { 'mix/art': { keysB: 0 } } }, // Tasten B: roll, crush, bark
+  20: { name: 'drumsb', cases: 'art', a: { 'mix/art': { drumsB: 0 } } }, // Schlagzeug B: Flams
   18: { name: 'guitarb', cases: 'art', a: {}, b: { 'mix/art': { chordsB: 1 } } }, // Gitarre Priorität B: slideChord, embellish, boogie
-  17: { name: 'bassb', cases: 'art', a: {}, b: { 'mix/art': { bassB: 1 } } }, // Bass Priorität B: slideOff, palmMute, octavePop, hammer/pull
-  15: { name: 'band', cases: 'art', a: {}, b: { 'mix/art': { band: 1 } } }, // Band-Regeln für Bass und Gitarre (Fill-Takte, Slide in den Refrain)
-  14: { name: 'pad', cases: 'art', a: {}, b: { 'mix/art': { pad: 1 } } },
-  13: { name: 'keys', cases: 'art', extra: { voices: { chords: { id: 'sample', variant: 'epiano' } } }, a: {}, b: { 'mix/art': { keys: 1 } } }, // beide Seiten mit E-Piano statt Gitarre
+  17: { name: 'bassb', cases: 'art', a: { 'mix/art': { bassB: 0 } } }, // Bass Priorität B: slideOff, palmMute, octavePop, hammer/pull
+  15: { name: 'band', cases: 'art', a: { 'mix/art': { band: 0 } } }, // Band-Regeln für Bass und Gitarre (Fill-Takte, Slide in den Refrain)
+  14: { name: 'pad', cases: 'art', a: { 'mix/art': { pad: 0 } } },
+  13: { name: 'keys', cases: 'art', extra: { voices: { chords: { id: 'sample', variant: 'epiano' } } }, a: { 'mix/art': { keys: 0 } } }, // beide Seiten mit E-Piano statt Gitarre
   // beide Seiten mit Lead-Schicht (Melodie) auf dem Saxofon
   16: {
-    name: 'lead', cases: 'art', a: {}, b: { 'mix/art': { lead: 1 } },
+    name: 'lead', cases: 'art', a: { 'mix/art': { lead: 0 } },
     extra: { voices: { lead: { id: 'sample', variant: 'sax' } }, track: { layers: { drums: true, bass: true, chords: true, pad: true, lead: true, percussion: true }, jobs: { lead: 'melody', percussion: 'mixed' } } },
   },
   // Vibrato am Saxofon: A = feste 5,5 Hz (der Schlüssel 'demo/vib' ist kein Feinwert, er überschreibt artRate im Render), B = Standard (folgt dem Tempo)

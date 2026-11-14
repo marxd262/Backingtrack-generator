@@ -6,6 +6,7 @@ import { buildEvents } from '../../src/index.js';
 import { barTimeline, checkedTrack } from '../../src/core/timeline.js';
 import { applyMicrotiming, completeTiming, jitterScale, timingOf, TIMING_DEFAULTS } from '../../src/core/microtiming.js';
 import { createRng } from '../../src/core/rng.js';
+import { DRUM_FALLBACK } from '../../src/core/event-helpers.js';
 
 const TRACK = {
   key: { root: 'A', mode: 'minor' }, bpm: 100, seed: 3, length: 8,
@@ -49,7 +50,7 @@ test('Standard: gleiche Ereignisse, sortiert, im Takt, höchstens 20 ms vom alte
 
 test('Standard: die Backbeat-Snare liegt im Mittel hinter dem Raster, der Kick nicht; Akkordtöne eines Stabs bleiben zusammen', () => {
   const on = buildEvents(TRACK, ON), beat = 60 / TRACK.bpm;
-  const late = (name) => mean(on.filter((e) => e.layer === 'drums' && e.name === name && e.vel >= 0.3 && Number.isInteger(e.beat * 2)).map((e) => e.t - (e.bar * 4 + e.beat) * beat));
+  const late = (name) => mean(on.filter((e) => e.layer === 'drums' && (DRUM_FALLBACK[e.name] ?? e.name) === name && e.vel >= 0.3 && Number.isInteger(e.beat * 2)).map((e) => e.t - (e.bar * 4 + e.beat) * beat));
   assert.ok(late('snare') > 0.003, `snare ${late('snare')}`);
   assert.ok(late('snare') > late('kick') + 0.002, `snare ${late('snare')} kick ${late('kick')}`);
   const off = buildEvents(TRACK, OFF);
