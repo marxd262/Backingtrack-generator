@@ -134,3 +134,60 @@ test('Schicht an: sortiert, im Takt, Bass einstimmig, keine negative Dauer, repr
     }
   }
 });
+
+// ---- Rhythmusgitarre ----
+const chordsOf = (track, ornaments = { on: 1, bass: 0 }) => buildEvents(track, { timing: GRID, ornaments }).filter((e) => e.layer === 'chords');
+const key = (e) => `${e.bar}:${stepOf(e)}`;
+const form = (parts) => ({ form: { sections: parts.map(([type, bars]) => ({ type, bars })) } });
+
+test('Gitarre Funk: Chucks auf freien 16teln sind die Mehrheit der Anschläge, Chokes nur auf Zählzeiten und höchstens ein 16tel lang, runter-hoch-hoch-hoch', () => {
+  for (const seed of SEEDS) {
+    const track = mk('funk', { seed }), off = chordsOf(track, { on: 0 }), on = chordsOf(track);
+    const written = new Set(off.map(key)), chucks = on.filter((e) => e.art === 'chuck'), strokes = new Set(on.map(key));
+    assert.ok(chucks.every((e) => !written.has(key(e)) && e.dur <= 0.03 && e.strum[1] === 3), 'Chucks nur auf freien Plätzen, drei Töne');
+    assert.ok(new Set(chucks.map(key)).size > strokes.size / 2, `Mehrheit: ${new Set(chucks.map(key)).size} von ${strokes.size}`);
+    for (const e of on.filter((x) => x.art === 'choke')) assert.ok(stepOf(e) % 4 === 0 && e.dur <= 15 / track.bpm + 1e-6, JSON.stringify(e));
+    assert.ok(on.every((e) => e.strumUp === 2));
+    for (const e of on) { // was vor einem Chuck klingt, endet dort
+      const next = chucks.find((x) => x.t > e.t + 1e-6);
+      if (next) assert.ok(e.t + e.dur <= next.t + 1e-6 || e.bar !== next.bar, JSON.stringify([e, next]));
+    }
+  }
+});
+
+test('Gitarre Rock mit Songform: Palm Mute in der Strophe öfter als im Refrain, die Eins im Refrain klingt aus, vor dem Stopp ein Choke', () => {
+  let verse = 0, chorus = 0;
+  for (const seed of SEEDS) {
+    const on = chordsOf(mk('rock', { seed, ornaments: 1, ...form([['verse', 8], ['chorus', 8], ['break', 4], ['verse', 4]]) }));
+    verse += on.filter((e) => e.art === 'palmMute' && e.bar < 8).length;
+    chorus += on.filter((e) => e.art === 'palmMute' && e.bar >= 8 && e.bar < 16).length;
+    assert.ok(on.filter((e) => e.bar >= 8 && e.bar < 15 && stepOf(e) === 0).every((e) => e.art === 'letRing' && e.ring === true));
+    const stopBar = on.filter((e) => e.bar === 15); // letzter Takt des Refrains: der Break danach beginnt mit einem Stopp
+    if (stopBar.length) assert.ok(stopBar.filter((e) => e.t === stopBar.at(-1).t).every((e) => e.art === 'choke'), JSON.stringify(stopBar.at(-1)));
+  }
+  assert.ok(verse > 3 * chorus && verse > 0, `${verse} gegen ${chorus}`);
+});
+
+test('Gitarre: Reggae würgt jeden Stab ab; der letzte Stab des Tracks klingt aus; Arpeggios (Psych) überlappen bis zum Taktende', () => {
+  for (const seed of SEEDS) {
+    assert.ok(chordsOf(mk('reggae', { seed })).every((e) => e.art === 'choke'));
+    const rock = chordsOf(mk('rock', { seed }));
+    assert.ok(rock.filter((e) => e.t === rock.at(-1).t).every((e) => e.art === 'letRing'));
+    const track = mk('psych', { seed }), beat = 60 / track.bpm, arp = chordsOf(track);
+    assert.ok(arp.length > 0 && arp.every((e) => e.ring === true && Math.abs(e.t + e.dur - (e.bar + 1) * 4 * beat) < 1e-4));
+  }
+});
+
+test('Gitarre: Anschlagrichtung nach Spielweise (16tel: e und a hoch; Achtel: "+" hoch), Aufschläge leiser; Tasten bleiben unberührt', () => {
+  for (const seed of SEEDS) {
+    const track = mk('rock', { seed }), off = new Map(chordsOf(track, { on: 0 }).map((e) => [`${key(e)}:${e.midi}`, e]));
+    for (const e of chordsOf(track)) {
+      const bar = [...off.values()].filter((x) => x.bar === e.bar), sixteenths = bar.some((x) => stepOf(x) % 2);
+      assert.equal(e.strumUp, sixteenths ? 1 : 2);
+      const up = sixteenths ? stepOf(e) % 2 === 1 : stepOf(e) % 4 !== 0, before = off.get(`${key(e)}:${e.midi}`).vel;
+      assert.ok(Math.abs(e.vel - (up ? 0.85 : 1) * before) < 0.002, JSON.stringify(e));
+    }
+    const keys = mk('funk', { seed, voices: { chords: { id: 'sample', variant: 'epiano' } } });
+    assert.deepEqual(chordsOf(keys), chordsOf(keys, { on: 0 }));
+  }
+});

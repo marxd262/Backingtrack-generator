@@ -7,7 +7,7 @@
 // Faktor 2 · ornaments auf jede Wahrscheinlichkeit unter 0,8, höchstens 0,9; 0 = alles aus.
 import { r6 } from './timeline.js';
 import { byTime, roundVel } from './event-helpers.js';
-import { diatonicChords, noteToPc } from './music.js';
+import { chordTones, diatonicChords, noteToPc } from './music.js';
 import { grooveIdFor } from './grooves.js';
 import { phrasesOf } from './form-arrange.js';
 import { densityAt } from './form-types.js';
@@ -104,16 +104,19 @@ export function articulate(events, { track, bars, sections, params, rng, options
 
 // Werte je Stil-Profil (Wahrscheinlichkeiten vor Regler, Tempo und Feinwert; fehlt ein Eintrag, greift die Regel nicht).
 // Bass: hold = Grundhaltung der Notenlänge, dead, slideIn, approach (chromatic: Halbton statt Tonleiterton, nur im Blues erlaubt)
+// Gitarre: palmMute [Strophe, Refrain], chuck (freie 16tel), backbeatChuck (auf 2 und 4 im Refrain), choke (ab 0,8 jeder Stab, sonst nur auf
+// Zählzeiten), ring (jeder Stab klingt aus), ringAccent (die Eins im Refrain klingt aus), arpRing (Arpeggio-Überlappung immer), strumUp (feste Spielweise)
 const PROFILES = {
-  shuffle: { bass: { hold: 'legato', approach: 0.4, slideIn: 0.25, chromatic: true } },
-  slowBlues: { bass: { hold: 'legato', slideIn: 0.3, chromatic: true } },
-  rock: { bass: { slideIn: 0.15, dead: 0.05 } },
-  funk: { bass: { hold: 'staccato', dead: 0.35, slideIn: 0.15 } },
-  ballad: { bass: { hold: 'legato', slideIn: 0.1 } },
-  reggae: { bass: { hold: 'legato', slideIn: 0.15 } },
-  latin: { bass: { hold: 'legato' } },
-  country: { bass: { approach: 0.4, slideIn: 0.1 } },
+  shuffle: { bass: { hold: 'legato', approach: 0.4, slideIn: 0.25, chromatic: true }, guitar: {} },
+  slowBlues: { bass: { hold: 'legato', slideIn: 0.3, chromatic: true }, guitar: { ring: true, arpRing: true } },
+  rock: { bass: { slideIn: 0.15, dead: 0.05 }, guitar: { palmMute: [0.7, 0.1], ringAccent: true } },
+  funk: { bass: { hold: 'staccato', dead: 0.35, slideIn: 0.15 }, guitar: { chuck: 0.8, choke: 0.6, strumUp: 2 } },
+  ballad: { bass: { hold: 'legato', slideIn: 0.1 }, guitar: { ring: true, arpRing: true, backbeatChuck: 0.3 } },
+  reggae: { bass: { hold: 'legato', slideIn: 0.15 }, guitar: { choke: 1 } },
+  latin: { bass: { hold: 'legato' }, guitar: {} },
+  country: { bass: { approach: 0.4, slideIn: 0.1 }, guitar: {} },
 };
+const GUITARS = new Set(['guitar', 'muted', 'jazz', 'funk', 'steel', 'nylon', 'twelve', 'freepats', 'freepatsjazz']); // Varianten von chords/sample
 
 /** Regeln je Schicht: (Ereignisse, env) => void; sie ändern die Ereignisse und hängen neue an. */
 const RULES = {
@@ -174,5 +177,64 @@ const RULES = {
         n.artTime = r6(clamp((0.04 + 0.06 * roll(c, 'bass', 'slideTime')) * tempo, 0.04, Math.min(0.1, 15 / track.bpm))); // höchstens ein 16tel
       }
     });
+  },
+
+  // Rhythmusgitarre, Priorität A (SPEC_PHASE3 5.3), nur Sample-Gitarren (Tasten bekommen eigene Regeln). Je Takt: Anschlagrichtung nach Profil
+  // und Spielweise, Chucks, dann je Stab höchstens eine Artikulation mit dem Vorrang chuck, choke, letRing, palmMute.
+  chords(out, { track, bars, ctx, profile, p, roll, slotTime }) {
+    const voice = track.voices?.chords, P = PROFILES[profile].guitar;
+    if (voice?.id !== 'sample' || !GUITARS.has(voice.variant)) return;
+    const power = track.bars.some((x) => x.chord.quality === 'power'), psych = has(track, 'mood', 'psychedelic'), sixteenth = 15 / track.bpm;
+    const stabs = new Map(); // Takt -> Map(Schritt -> Töne des Stabs)
+    const playing = new Set(); // Takte, in denen die Gitarre spielt
+    for (const e of out) {
+      if (e.layer !== 'chords' || e.type !== 'note') continue;
+      const b = bars[e.bar], c = ctx[e.bar], s = Math.round(e.beat * b.sub);
+      playing.add(e.bar);
+      if (e.strum) { if (!stabs.has(e.bar)) stabs.set(e.bar, new Map()); const m = stabs.get(e.bar); m.set(s, [...(m.get(s) ?? []), e]); }
+      // Arpeggio-Überlappung: gezupfte Töne klingen bis zum Taktende weiter (Ballade, Psych, ruhige Strophe); ein Stopp bleibt still
+      else if ((P.arpRing || psych || (c.verse && c.energy < 0.45)) && !c.stop) Object.assign(e, { ring: true, dur: r6(Math.max(e.dur, b.end - e.t)) });
+    }
+    for (const [index, bySteps] of stabs) {
+      const b = bars[index], c = ctx[index], written = [...bySteps.keys()];
+      // Anschlagrichtung (Antwort auf Frage 1): Funk runter-hoch-hoch-hoch (2); sonst im 16tel-Spiel Zählzeit und "+" runter, e und a hoch (1), im
+      // Achtel-Spiel Zählzeit runter, "+" hoch (2); Rock ab 160 BPM nur Abschläge (0). Die Stimme liest strumUp am Ereignis (sample.js)
+      const mode = P.strumUp ?? (profile === 'rock' && track.bpm >= 160 ? 0 : b.sub === 4 && written.some((s) => s % 2) ? 1 : 2);
+      const isUp = (s) => (mode === 2 || b.sub !== 4 ? mode > 0 && s % b.sub !== 0 : mode === 1 && s % 2 === 1);
+      const base = bySteps.get(written[0])[0].vel;
+      const chuck = (s) => bySteps.set(s, chordTones(b.chord, 3).map((midi, i, all) => {
+        const e = { t: slotTime(b, s), bar: index, beat: s / b.sub, type: 'note', layer: 'chords', midi, vel: roundVel(0.5 * base), dur: 0.03, art: 'chuck', strum: [i, all.length] };
+        out.push(e);
+        return e;
+      }));
+      // chuck im Funk: gedämpfter Anschlag auf den freien 16teln (die Hand pendelt durch), nicht in die Stille eines Stopps
+      if (P.chuck && b.sub === 4) for (let s = 0; s < b.steps; s++) if (!bySteps.has(s) && !(c.stop && s >= b.steps - 2 * b.sub) && roll(c, 'chords', 'chuck', s) < p(P.chuck, 'chords')) chuck(s);
+      // chuck im Pop-Refrain: auf 2 und 4, ersetzt einen Stab dort
+      const backbeat = new Set(P.backbeatChuck && !c.verse && !c.stop && b.beats === 4 ? [b.sub, 3 * b.sub].filter((s) => roll(c, 'chords', 'backbeat', s) < p(P.backbeatChuck, 'chords')) : []);
+      for (const s of backbeat) if (!bySteps.has(s)) chuck(s);
+      // palmMute: der ganze Takt gedämpft (Rock: Strophe oft, Refrain selten; Powerchords öfter)
+      const muted = P.palmMute && roll(c, 'chords', 'palmMute') < p(c.verse ? (power ? 0.8 : P.palmMute[0]) : P.palmMute[1], 'chords');
+      const order = [...bySteps.keys()].sort((x, y) => x - y);
+      order.forEach((s, k) => {
+        const stab = bySteps.get(s), last = k === order.length - 1, onBeat = s % b.sub === 0;
+        const until = last ? b.end : bySteps.get(order[k + 1])[0].t;
+        let art = stab[0].art;
+        if (!art && backbeat.has(s)) { art = 'chuck'; for (const e of stab) Object.assign(e, { vel: roundVel(0.5 * e.vel), dur: 0.03 }); }
+        // choke: letzter Stab vor einem Stopp; Reggae immer (ab 0,8), Funk auf den Zählzeiten
+        else if (!art && ((c.stop && last) || (P.choke && (P.choke >= 0.8 || onBeat) && roll(c, 'chords', 'choke', s) < p(P.choke, 'chords')))) art = 'choke';
+        // letRing: Profil (Ballade, Slow Blues), letzter Stab vor einer Pause oder dem Ende, Akzent auf der Eins im Refrain (Rock)
+        else if (!art && (P.ring || (last && !playing.has(index + 1)) || (P.ringAccent && !c.verse && s === 0))) art = 'letRing';
+        else if (!art && muted) art = 'palmMute';
+        for (const e of stab) {
+          e.strumUp = mode;
+          if (isUp(s)) e.vel = roundVel(e.vel * 0.85); // Aufschlag leiser
+          if (art) e.art = art;
+          if (art === 'choke') e.dur = r6(Math.min(e.dur, sixteenth));
+          if (art === 'letRing') Object.assign(e, { ring: true, dur: c.stop ? e.dur : r6(Math.max(e.dur, until - e.t)) });
+        }
+        // ein Chuck dämpft die Saiten: was davor klingt, endet dort
+        if (art === 'chuck' && k > 0) for (const e of bySteps.get(order[k - 1])) e.dur = r6(Math.min(e.dur, Math.max(0.001, stab[0].t - e.t)));
+      });
+    }
   },
 };
