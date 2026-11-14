@@ -17,6 +17,8 @@ export const STEPS = {
   11: { name: 'guitar', cases: 'art', a: { 'mix/art': { on: 1, chords: 0 } }, b: { 'mix/art': { on: 1 } } },
   // ab hier je Instrument unabhängig: A = Standard (Bass und Gitarre an), B = dazu nur dieses Instrument
   12: { name: 'drums', cases: 'art', a: {}, b: { 'mix/art': { drums: 1 } } },
+  // alles zusammen: A = Standard (Bass und Gitarre A), B = alle Regelgruppen an
+  21: { name: 'all', cases: 'art', a: {}, b: { 'mix/art': { drums: 1, keys: 1, pad: 1, lead: 1, band: 1, bassB: 1, chordsB: 1, keysB: 1, drumsB: 1 } } },
   19: { name: 'keysb', cases: 'art', extra: { voices: { chords: { id: 'sample', variant: 'epiano' } } }, a: {}, b: { 'mix/art': { keysB: 1 } } }, // Tasten B: roll, crush, bark
   20: { name: 'drumsb', cases: 'art', a: {}, b: { 'mix/art': { drumsB: 1 } } }, // Schlagzeug B: Flams
   18: { name: 'guitarb', cases: 'art', a: {}, b: { 'mix/art': { chordsB: 1 } } }, // Gitarre Priorität B: slideChord, embellish, boomChick, boogie
