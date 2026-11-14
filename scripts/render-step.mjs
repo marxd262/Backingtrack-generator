@@ -17,6 +17,7 @@ export const STEPS = {
   11: { name: 'guitar', cases: 'art', a: { 'mix/art': { on: 1, chords: 0 } }, b: { 'mix/art': { on: 1 } } },
   // ab hier je Instrument unabhängig: A = Standard (Bass und Gitarre an), B = dazu nur dieses Instrument
   12: { name: 'drums', cases: 'art', a: {}, b: { 'mix/art': { drums: 1 } } },
+  15: { name: 'band', cases: 'art', a: {}, b: { 'mix/art': { band: 1 } } }, // Band-Regeln für Bass und Gitarre (Fill-Takte, Slide in den Refrain)
   14: { name: 'pad', cases: 'art', a: {}, b: { 'mix/art': { pad: 1 } } },
   13: { name: 'keys', cases: 'art', extra: { voices: { chords: { id: 'sample', variant: 'epiano' } } }, a: {}, b: { 'mix/art': { keys: 1 } } }, // beide Seiten mit E-Piano statt Gitarre
   // beide Seiten mit Lead-Schicht (Melodie) auf dem Saxofon

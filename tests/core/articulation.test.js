@@ -19,7 +19,7 @@ const mk = (id, over = {}) => ({
 const ON = { ornaments: { on: 1 } };
 
 test('an ist der Standard (Bass und Gitarre); Feinwert on 0, Regler 0 und beide Schichten auf 0 ergeben denselben Strom ohne Artikulationen; ungültiger Regler wirft', () => {
-  assert.deepEqual(ART_DEFAULTS, { on: 1, bass: 1, chords: 1, drums: 0, keys: 0, pad: 0, lead: 0 });
+  assert.deepEqual(ART_DEFAULTS, { on: 1, bass: 1, chords: 1, drums: 0, keys: 0, pad: 0, lead: 0, band: 0 });
   assert.deepEqual(completeArt({ on: 1, bass: -1, chords: 'x', drums: 1 }), { ...ART_DEFAULTS, drums: 1 });
   for (const id of ['funk', 'rock', 'blues']) {
     const plain = buildEvents(mk(id), { ornaments: { on: 0 } });
@@ -330,4 +330,23 @@ test('Lead: aus bis eingeschaltet; fall nur am Saxofon und am Phrasenende, vibra
     });
   }
   assert.ok(count.fall > 0 && count.vibrato > 0 && count.scoop > 0, JSON.stringify(count));
+});
+
+// ---- Band-Regeln ----
+test('Band-Regeln (aus bis eingeschaltet): Bass rutscht immer in die Eins des Refrains, im Fill-Takt kein Annäherungston, unter dem Fill schweigt die Gitarre und der Stab davor klingt aus; Tasten kurz vor dem Stopp', () => {
+  const parts = form([['verse', 4], ['chorus', 4], ['break', 2], ['chorus', 4]]);
+  for (const id of ['rock', 'blues', 'funk']) for (const seed of SEEDS) {
+    const track = mk(id, { seed, ornaments: 1, ...parts });
+    const of = (ornaments) => buildEvents(track, { timing: GRID, ornaments });
+    assert.deepEqual(of({}), of({ band: 0 }));
+    const on = of({ band: 1 }), bass = on.filter((e) => e.layer === 'bass'), guitar = on.filter((e) => e.layer === 'chords');
+    assert.equal(bass.find((e) => e.bar === 4 && e.beat === 0)?.art, 'slideIn', `${id} s=${seed}: Slide in den Refrain`);
+    assert.ok(!bass.some((e) => e.bar === 3 && e.art === 'approach'), 'Takt 3 hat den Fill');
+    const under = guitar.filter((e) => e.bar === 3 && e.beat >= 2), before = guitar.filter((e) => e.bar === 3 && e.beat < 2);
+    if (before.length) assert.equal(under.length, 0, `${id} s=${seed}: unter dem Fill schweigt die Gitarre`);
+    const held = guitar.filter((e) => e.bar === 3 && e.strum).at(-1);
+    if (held) assert.ok(held.art === 'letRing' && held.ring === true, JSON.stringify(held));
+    const keys = buildEvents({ ...track, ...EPIANO }, { timing: GRID, ornaments: { keys: 1 } }).filter((e) => e.layer === 'chords' && e.bar === 7);
+    if (keys.length) assert.ok(keys.filter((e) => e.t === keys.at(-1).t).every((e) => e.art === 'staccato' && e.dur <= 15 / track.bpm + 1e-6));
+  }
 });

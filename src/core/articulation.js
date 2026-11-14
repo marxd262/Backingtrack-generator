@@ -3,7 +3,9 @@
 // strumUp), ändert Längen und Lautstärken und fügt Noten ein. Wie eine Artikulation klingt, entscheidet die Stimme (sampler.js: eigene
 // Sample-Gruppe des Packs, sonst gerechnet, sonst normal). Alle Zahlen sind Startwerte aus den Regeln, nicht gehört.
 // Feinwerte: on (0 = Schicht aus, Strom unverändert), bass, chords (Rhythmusgitarre), drums, keys (Tasten auf der Akkord-Schicht), pad (Faktor auf die
-// Wahrscheinlichkeiten der Regelgruppe, 0 = Gruppe ohne Artikulationen). Standard an sind bass und chords; die übrigen warten auf das Urteil des Nutzers. Dazu das Track-Feld `ornaments` (Regler "Verzierungen", 0..1, fehlend 0,5):
+// Wahrscheinlichkeiten der Regelgruppe, 0 = Gruppe ohne Artikulationen), lead, band (über 0: die Band-Regeln 1, 2 und 6 aus SPIELREGELN Abschnitt 5
+// gelten für Bass und Gitarre: Slides nur auf einem Kick, während eines Drum-Fills spielt der Bass einfach und die Gitarre lässt klingen, der
+// Bass rutscht in die Eins des Refrains). Standard an sind bass und chords; die übrigen warten auf das Urteil des Nutzers. Dazu das Track-Feld `ornaments` (Regler "Verzierungen", 0..1, fehlend 0,5):
 // Faktor 2 · ornaments auf jede Wahrscheinlichkeit unter 0,8, höchstens 0,9; 0 = alles aus.
 import { r6 } from './timeline.js';
 import { byTime, roundVel } from './event-helpers.js';
@@ -12,7 +14,7 @@ import { grooveIdFor } from './grooves.js';
 import { phrasesOf } from './form-arrange.js';
 import { densityAt } from './form-types.js';
 
-export const ART_DEFAULTS = Object.freeze({ on: 1, bass: 1, chords: 1, drums: 0, keys: 0, pad: 0, lead: 0 });
+export const ART_DEFAULTS = Object.freeze({ on: 1, bass: 1, chords: 1, drums: 0, keys: 0, pad: 0, lead: 0, band: 0 });
 const RULE_LAYER = { keys: 'chords' }; // Regelgruppe -> Schicht, wenn die Namen abweichen
 
 /** Füllt die Feinwerte auf; nur endliche Zahlen >= 0 zählen. */
@@ -85,6 +87,7 @@ export function articulate(events, { track, bars, sections, params, rng, options
   if (!options.on || !(amount > 0)) return events;
   const tempo = clamp(110 / track.bpm, 0.5, 1.2); // Regel 7: schnell = weniger und kürzer
   const env = {
+    band: options.band > 0,
     track, bars, params, tempo, profile: profileOf(track), ctx: barContexts(bars, sections, params),
     /** Wahrscheinlichkeit einer Regel nach Regler, Tempo und Feinwert der Schicht; stilprägende Regeln (ab 0,8) werden nicht skaliert. */
     p: (base, layer) => (base >= 0.8 ? base : Math.min(0.9, base * 2 * amount * tempo * options[layer])),
@@ -166,13 +169,14 @@ const RULES = {
 
   // E-Bass, Priorität A (SPEC_PHASE3 5.1), in der Reihenfolge Notenwahl (approach, dead), Länge (staccato, legato), Verzierung (slideIn).
   // Einstimmigkeit: Noten, in die eine neue oder vorgezogene Note fällt, kürzt das Mikrotiming danach.
-  bass(out, { track, bars, ctx, profile, tempo, p, roll, slotTime }) {
+  bass(out, { track, bars, ctx, profile, tempo, p, roll, slotTime, band }) {
     const variant = track.voices?.bass?.variant, P = PROFILES[profile].bass;
     if (variant === 'upright') return; // der Kontrabass hat eigene Regeln (Priorität B und C)
     const notes = () => out.filter((e) => e.layer === 'bass' && e.type === 'note').sort(byTime);
     const stepOf = (e) => Math.round(e.beat * bars[e.bar].sub);
     const add = (b, s, fields) => out.push({ t: slotTime(b, s), bar: b.index, beat: s / b.sub, type: 'note', layer: 'bass', ...fields });
     const playing = new Set(notes().map((n) => n.bar)); // Takte, in denen der Bass spielt
+    const kicks = band ? out.filter((e) => e.layer === 'drums' && e.name === 'kick').map((e) => e.t) : [];
 
     // approach: vor einem Akkordwechsel auf dem letzten Achtel ein Ton einen Schritt unter (60 %) oder über der ersten Note des neuen Takts;
     // ersetzt, was dort liegt. Tonleiterton, im Blues der Halbton
@@ -181,7 +185,7 @@ const RULES = {
       const first = new Map(notes().filter((n) => stepOf(n) === 0).map((n) => [n.bar, n]));
       for (const b of bars) {
         const c = ctx[b.index], target = first.get(b.index + 1), s = b.steps - (b.sub === 4 ? 2 : 1);
-        if (!c.nextChange || c.stop || !target || !playing.has(b.index) || !(roll(c, 'bass', 'approach') < p(P.approach, 'bass'))) continue;
+        if (!c.nextChange || c.stop || (band && c.fill) || !target || !playing.has(b.index) || !(roll(c, 'bass', 'approach') < p(P.approach, 'bass'))) continue; // Band-Regel 2: im Fill-Takt kein Annäherungston
         const dir = target.midi > 50 || (target.midi >= 30 && roll(c, 'bass', 'approachDir') < 0.6) ? -1 : 1; // im Tonbereich des Basses bleiben (28..52)
         let midi = target.midi + dir;
         if (!P.chromatic) while (!scale.has(((midi % 12) + 12) % 12)) midi += dir;
@@ -197,7 +201,7 @@ const RULES = {
         const b = bars[n.bar], s = stepOf(n), prev = list[i - 1];
         if (b.sub !== 4 || s % 2 || n.art) return; // nur vor Zählzeit oder "+": der Platz davor ist ein e oder a
         const at = s > 0 ? b : bars[n.bar - 1], slot = s > 0 ? s - 1 : (at?.steps ?? 0) - 1;
-        if (!at || at.sub !== 4 || !playing.has(at.index) || (at !== b && ctx[at.index].stop)) return;
+        if (!at || at.sub !== 4 || !playing.has(at.index) || (at !== b && ctx[at.index].stop) || (band && ctx[at.index].fill && slot >= at.steps - 2 * at.sub)) return; // Band-Regel 2: keine Dead Note unter dem Fill
         const c = ctx[at.index];
         if ((prev && prev.bar === at.index && stepOf(prev) >= slot) || !(roll(c, 'bass', 'dead', slot) < p(P.dead, 'bass'))) return; // dort spielt der Bass schon
         add(at, slot, { midi: n.midi, vel: roundVel(0.3 + 0.2 * roll(c, 'bass', 'deadVel', slot)), dur: r6(0.03 + 0.03 * roll(c, 'bass', 'deadDur', slot)), art: 'dead' });
@@ -214,7 +218,10 @@ const RULES = {
       if (hold === 'staccato') { n.dur = r6(Math.max(0.03, n.dur * (0.3 + 0.3 * roll(c, 'bass', 'staccato')))); n.art ??= 'staccato'; }
       if (hold === 'legato') { n.dur = r6(Math.max(n.dur, Math.min(next?.t ?? Infinity, b.end) - n.t)); n.art ??= 'legato'; }
       // slideIn: auf der Eins bei Akkordwechsel, Phrasen- oder Teilbeginn von unten in den Ton, nicht in die Stille eines Stopps hinein
-      if (P.slideIn && stepOf(n) === 0 && n.art !== 'approach' && (c.change || c.phraseStart || c.first) && !ctx[n.bar - 1]?.stop && roll(c, 'bass', 'slideIn') < p(P.slideIn, 'bass')) {
+      // Band-Regeln: in die Eins des Refrains rutscht der Bass immer (6); sonst nicht nach einem Fill (2) und nur, wenn dort ein Kick liegt (1)
+      const intoChorus = band && c.first && c.kind === 'chorus';
+      const fits = !band || intoChorus || (!ctx[n.bar - 1]?.fill && kicks.some((t) => Math.abs(t - n.t) <= b.stepSec + 1e-6));
+      if ((P.slideIn || intoChorus) && stepOf(n) === 0 && n.art !== 'approach' && (c.change || c.phraseStart || c.first) && !ctx[n.bar - 1]?.stop && fits && (intoChorus || roll(c, 'bass', 'slideIn') < p(P.slideIn, 'bass'))) {
         const r = roll(c, 'bass', 'slideSemi'); // meist 1 oder 2 Halbtöne, selten (10 %) ein langer Slide über 5 bis 7
         n.art = 'slideIn';
         n.artSemi = r < 0.1 ? -5 - Math.floor(r * 30) : r < 0.55 ? -1 : -2;
@@ -228,11 +235,15 @@ const RULES = {
   keys(out, { track, bars, ctx, profile, p, roll }) {
     const voice = track.voices?.chords, P = KEY_PROFILES[profile] ?? {};
     if (voice?.id !== 'epiano' && !(voice?.id === 'sample' && voice.variant === 'epiano')) return;
+    const lastT = new Map(); // letzter Anschlag je Takt (für den Stopp)
+    for (const e of out) if (e.layer === 'chords' && e.type === 'note') lastT.set(e.bar, Math.max(lastT.get(e.bar) ?? 0, e.t));
     for (const e of out) {
       if (e.layer !== 'chords' || e.type !== 'note') continue;
       const b = bars[e.bar], c = ctx[e.bar];
       // Stimmen-Gewichtung im Stab: oberster Ton (Melodie) 10 % lauter, Mittelstimmen 10 % leiser
       if (e.strum && e.strum[1] > 2) e.vel = roundVel(e.vel * (e.strum[0] === e.strum[1] - 1 ? 1.1 : e.strum[0] > 0 ? 0.9 : 1));
+      // vor einem Stopp spielen alle kurz (Band-Regel 3): der letzte Anschlag höchstens ein 16tel
+      if (c.stop && e.t >= lastT.get(e.bar) - 1e-6) { Object.assign(e, { art: 'staccato', dur: r6(Math.min(e.dur, 15 / track.bpm)) }); continue; }
       // pedal (je Takt aus dem Plan): der Ton hält bis zum Taktende; wechselt dort der Akkord, löst das Pedal 20 bis 50 ms vorher. Ein Stopp bleibt still
       if (P.pedal && !c.stop && roll(c, 'keys', 'pedal') < p(P.pedal, 'keys')) {
         const lift = c.nextChange ? 0.02 + 0.03 * roll(c, 'keys', 'lift') : 0;
@@ -291,7 +302,7 @@ const RULES = {
 
   // Rhythmusgitarre, Priorität A (SPEC_PHASE3 5.3), nur Sample-Gitarren (Tasten bekommen eigene Regeln). Je Takt: Anschlagrichtung nach Profil
   // und Spielweise, Chucks, dann je Stab höchstens eine Artikulation mit dem Vorrang chuck, choke, letRing, palmMute.
-  chords(out, { track, bars, ctx, profile, p, roll, slotTime }) {
+  chords(out, { track, bars, ctx, profile, p, roll, slotTime, band }) {
     const voice = track.voices?.chords, P = PROFILES[profile].guitar;
     if (voice?.id !== 'sample' || !GUITARS.has(voice.variant)) return;
     const power = track.bars.some((x) => x.chord.quality === 'power'), psych = has(track, 'mood', 'psychedelic'), sixteenth = 15 / track.bpm;
@@ -306,7 +317,11 @@ const RULES = {
       else if ((P.arpRing || psych || (c.verse && c.energy < 0.45)) && !c.stop) Object.assign(e, { ring: true, dur: r6(Math.max(e.dur, b.end - e.t)) });
     }
     for (const [index, bySteps] of stabs) {
-      const b = bars[index], c = ctx[index], written = [...bySteps.keys()];
+      const b = bars[index], c = ctx[index];
+      // Band-Regel 2 (nur einer füllt): unter dem Drum-Fill (letzte zwei Schläge) schweigt die Gitarre, der letzte Stab davor klingt aus
+      const fillFrom = band && c.fill ? b.steps - 2 * b.sub : Infinity;
+      for (const s of [...bySteps.keys()].sort((x, y) => x - y).slice(1)) if (s >= fillFrom) { for (const e of bySteps.get(s)) out.splice(out.indexOf(e), 1); bySteps.delete(s); }
+      const written = [...bySteps.keys()];
       // Anschlagrichtung (Antwort auf Frage 1): Funk runter-hoch-hoch-hoch (2); sonst im 16tel-Spiel Zählzeit und "+" runter, e und a hoch (1), im
       // Achtel-Spiel Zählzeit runter, "+" hoch (2); Rock ab 160 BPM nur Abschläge (0). Die Stimme liest strumUp am Ereignis (sample.js)
       const mode = P.strumUp ?? (profile === 'rock' && track.bpm >= 160 ? 0 : b.sub === 4 && written.some((s) => s % 2) ? 1 : 2);
@@ -318,10 +333,10 @@ const RULES = {
         return e;
       }));
       // chuck im Funk: gedämpfter Anschlag auf den freien 16teln (die Hand pendelt durch), nicht in die Stille eines Stopps
-      if (P.chuck && b.sub === 4) for (let s = 0; s < b.steps; s++) if (!bySteps.has(s) && !(c.stop && s >= b.steps - 2 * b.sub) && roll(c, 'chords', 'chuck', s) < p(P.chuck, 'chords')) chuck(s);
+      if (P.chuck && b.sub === 4) for (let s = 0; s < b.steps; s++) if (!bySteps.has(s) && s < fillFrom && !(c.stop && s >= b.steps - 2 * b.sub) && roll(c, 'chords', 'chuck', s) < p(P.chuck, 'chords')) chuck(s);
       // chuck im Pop-Refrain: auf 2 und 4, ersetzt einen Stab dort
       const backbeat = new Set(P.backbeatChuck && !c.verse && !c.stop && b.beats === 4 ? [b.sub, 3 * b.sub].filter((s) => roll(c, 'chords', 'backbeat', s) < p(P.backbeatChuck, 'chords')) : []);
-      for (const s of backbeat) if (!bySteps.has(s)) chuck(s);
+      for (const s of backbeat) if (!bySteps.has(s) && s < fillFrom) chuck(s);
       // palmMute: der ganze Takt gedämpft (Rock: Strophe oft, Refrain selten; Powerchords öfter)
       const muted = P.palmMute && roll(c, 'chords', 'palmMute') < p(c.verse ? (power ? 0.8 : P.palmMute[0]) : P.palmMute[1], 'chords');
       const order = [...bySteps.keys()].sort((x, y) => x - y);
@@ -329,7 +344,8 @@ const RULES = {
         const stab = bySteps.get(s), last = k === order.length - 1, onBeat = s % b.sub === 0;
         const until = last ? b.end : bySteps.get(order[k + 1])[0].t;
         let art = stab[0].art;
-        if (!art && backbeat.has(s)) { art = 'chuck'; for (const e of stab) Object.assign(e, { vel: roundVel(0.5 * e.vel), dur: 0.03 }); }
+        if (!art && last && fillFrom < Infinity) art = 'letRing';
+        else if (!art && backbeat.has(s)) { art = 'chuck'; for (const e of stab) Object.assign(e, { vel: roundVel(0.5 * e.vel), dur: 0.03 }); }
         // choke: letzter Stab vor einem Stopp; Reggae immer (ab 0,8), Funk auf den Zählzeiten
         else if (!art && ((c.stop && last) || (P.choke && (P.choke >= 0.8 || onBeat) && roll(c, 'chords', 'choke', s) < p(P.choke, 'chords')))) art = 'choke';
         // letRing: Profil (Ballade, Slow Blues), letzter Stab vor einer Pause oder dem Ende, Akzent auf der Eins im Refrain (Rock)
