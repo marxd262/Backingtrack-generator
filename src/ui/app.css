@@ -20,6 +20,8 @@
   --ring: #b9b9b5;
   --led-off: #bdbdb9;
   --dots: #8f8f8b;
+  --screw: var(--led-off); /* Schraubenkopf, Rand und Schlitz aus den vorhandenen Grautönen */
+  --screw-edge: var(--dots);
   --wheel-grey: #d6d6d2; /* Akkorde der Tonart im Akkordkreis */
   --sans: Barlow, system-ui, sans-serif;
   --mono: 'Share Tech Mono', ui-monospace, monospace;
@@ -31,7 +33,16 @@
   --accent2: var(--teal); /* folgender Akkord (Griffbrett, Kopfzeile) */
   --on-accent: #111; /* Text auf Türkis/Pink ist dunkel */
   --staff: rgba(42, 42, 42, 0.07);
+  --white: #fff; /* Ringe um Tasten, späterer Akkord */
+  --field: #f6f6f3; /* Eingabefelder, Faderkappe */
+  --key-ink: #eee; /* Schrift auf schwarzen Tasten */
+  --title: #444; /* Modultitel, Name der App */
+  --black: #000; /* Rand der Displays */
+  --pink-soft: #f8d6dc; /* derselbe Akkord geht weiter */
   --target: 44px;
+  /* Höhe einer Rack-Reihe (wie die feste Bauhöhe im Eurorack): alle Reihen einer Ansicht sind so hoch, auch die leeren. Start und Einstellen
+     benutzen diesen Wert; der Fokus zeigt dieselben zwei Reihen vergrößert (eigener, für beide Reihen gleicher Wert, siehe dort). */
+  --u: 21rem;
 }
 
 * { box-sizing: border-box; }
@@ -42,12 +53,11 @@ body {
   min-height: 100vh;
   color: var(--ink);
   font-family: var(--sans);
-  font-size: 1.0625rem;
+  font-size: 16px;
   line-height: 1.4;
   background-color: var(--gap);
 }
-.top, main { background-color: var(--panel); box-shadow: inset 0 0 0 1px var(--panel-edge); }
-body:not(:has(.play:not([hidden]))) { background-color: var(--panel); } /* Startseite: ganze Fläche Platte, kein dunkler Rest darunter */
+.top { background-color: var(--panel); box-shadow: inset 0 0 0 1px var(--panel-edge); }
 
 button, input, output, select { font: inherit; color: inherit; }
 button { cursor: pointer; }
@@ -70,54 +80,53 @@ button { cursor: pointer; }
   border: 0;
 }
 
+/* --- Startseite: derselbe Rack wie die Spielseite. Kopfzeile (Name, Sprache) als Platte, darunter eine Reihe mit zwei verschraubten Modulen
+   (Satz und Spielen) in der Mitte; links und rechts davon und in den Reihen darunter leerer Rackplatz mit Schienen. --- */
 .top {
   display: flex;
-  justify-content: flex-end;
-  padding: 12px 16px;
+  justify-content: space-between;
+  align-items: center;
+  margin: 3px 3px 0;
+  padding: 4px 10px;
+  border-radius: 2px;
 }
 
 .lang { display: flex; gap: 4px; }
+.top .brand { display: flex; align-items: center; max-width: none; margin: 0; white-space: nowrap; } /* Name der App links, Sprache rechts */
 
-main {
-  display: flow-root; /* die Ränder der Startseite bleiben in der Platte, kein dunkler Streifen unter der Kopfzeile */
-  max-width: 100rem;
-  margin: 0 auto;
-  padding: 0 16px 48px;
-}
-
-.start {
-  max-width: 44rem;
-  margin: 0 auto;
-  text-align: center;
-}
+body:not(:has(.play:not([hidden]))) { display: flex; flex-direction: column; min-height: 100dvh; }
+body:not(:has(.play:not([hidden]))) main { flex: 1; display: flex; flex-direction: column; padding: 3px; }
+/* die bestückte Reihe steht senkrecht in der Mitte; das Raster der leeren Reihen ist daran ausgerichtet (eine Reihe: Musterkachel mittig, um die halbe Fuge versetzt) */
+.start:not([hidden]) { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 3px; background-position: 0 calc(50% + 1.5px); }
+.start-row { flex: none; height: var(--u); justify-content: center; }
 .start[hidden], .play[hidden] { display: none; }
+#mod-start, #mod-go { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding-bottom: 18px; text-align: center; }
+#mod-start { flex: 0 1 44rem; padding-inline: 24px; }
+#mod-go { flex: 0 1 24rem; }
 
-.tonight {
-  margin: 6vh 0 0.2em;
-  font-size: clamp(1.4rem, 4.5vw, 2rem);
-  font-style: italic;
-}
+.tonight { margin: 0; color: var(--ink-soft); font-size: 16px; font-style: italic; }
 
-.sentence {
-  margin: 0;
-  font-size: clamp(1.6rem, 6.5vw, 2.6rem);
-  line-height: 1.5;
-}
+/* der Satz: Bindewörter in der Textschrift, die wählbaren Werte als Displays (Klick öffnet die Auswahl) */
+.sentence { margin: 0; font-size: 22px; line-height: 2.6; }
 
 .word {
   min-height: var(--target);
-  padding: 0 0.08em;
+  padding: 2px 10px;
   border: 0;
-  background: none;
-  text-decoration: underline;
-  text-decoration-thickness: 0.06em;
-  text-underline-offset: 0.18em;
+  border-radius: 3px;
+  background: var(--lcd);
+  color: var(--lcd-ink);
+  font-family: var(--mono);
+  letter-spacing: 0.04em;
+  box-shadow: inset 0 0 0 2px var(--black);
+  margin: 3px 2px;
 }
-.word[aria-expanded="true"] { text-decoration-style: double; }
+.word[aria-expanded="true"] { color: var(--lcd-ink-2); }
 
 .variant {
-  margin: 0.8em 0 1.2em;
+  margin: 0;
   color: var(--ink-soft);
+  font-size: 14px;
 }
 .variant input {
   width: 5.5em;
@@ -139,7 +148,7 @@ main {
   border-radius: 999px;
   background: var(--pink);
   color: var(--on-accent);
-  font-size: 1.5rem;
+  font-size: 22px;
   font-weight: 600;
 }
 /* beim Spielen ist der aktuelle Akkord das farbige Objekt, der Knopf wird schlicht */
@@ -149,20 +158,22 @@ main {
   color: var(--ink);
 }
 
-.now { min-height: 9rem; }
-.now-chord {
-  margin: 0.2em 0 0;
-  min-height: 1.15em;
-  color: var(--accent);
-  font-size: clamp(3.5rem, 16vw, 6rem);
-  line-height: 1.15;
-}
+/* laufender Akkord als Display und Taktzeile; im Stand leer, der Platz bleibt (nichts springt beim Start) */
+.now { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.now-chord { margin: 0; min-width: 5ch; min-height: 1.35em; font-size: 40px; line-height: 1.2; text-align: center; }
+.now-chord:empty { visibility: hidden; }
 .position {
   margin: 0;
   min-height: 1.4em;
   color: var(--ink-soft);
+  font-size: 14px;
   font-variant-numeric: tabular-nums;
 }
+/* Zuletzt gespielt: hinter der Punktlinie, Zusammenfassung und Weitermachen */
+.last { align-self: stretch; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.last[hidden] { display: none; }
+.last .dots { align-self: stretch; }
+.last-summary { margin: 0; font-size: 12px; color: var(--ink); overflow-wrap: anywhere; }
 
 /* Live-Region bleibt auch leer gerendert, damit Screenreader den ersten Text ankündigen */
 .message:empty { margin: 0; }
@@ -176,11 +187,12 @@ main {
   min-width: var(--target);
   min-height: var(--target);
   padding: 0 12px;
+  font-size: 14px;
   border: 0;
   border-radius: 2px;
   background: var(--key);
-  color: #eee;
-  box-shadow: 0 0 0 2px #fff, 0 0 0 3px var(--ring);
+  color: var(--key-ink);
+  box-shadow: 0 0 0 2px var(--white), 0 0 0 3px var(--ring);
 }
 /* LED-Taste: Auswahl aus wenigen Werten; die LED davor zeigt den Zustand, der Text bleibt dunkel auf der Platte */
 .chip[aria-pressed] { background: transparent; color: var(--ink); box-shadow: none; display: inline-flex; align-items: center; gap: 6px; }
@@ -189,12 +201,14 @@ main {
 /* Spurname (nur Anzeige): die LED zeigt, ob die Schicht in diesem Takt spielt (tuning.js setzt .on); stumm (data-muted) = durchgestrichen und gedämpft */
 .lane-label { display: flex; align-items: center; gap: 6px; padding: 0 8px; font-size: 12px; color: var(--ink); }
 .lane-label::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--led-off); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15); }
-.lane-label.on::before { background: var(--pink); box-shadow: 0 0 6px var(--pink); }
+.lane-label.on::before { background: color-mix(in srgb, var(--pink) 45%, var(--led-off)); }
+.lane-label.sound::before { background: var(--pink); }
+.lane-label.hit::before { background: var(--lcd-ink); box-shadow: 0 0 6px 1px var(--lcd-ink), inset 0 0 0 1px rgba(0, 0, 0, 0.45); }
 .lane-label[data-muted="true"] { color: var(--ink-soft); text-decoration: line-through; }
 /* Schlagwort ohne Wirkung: gestrichelt und leiser, gewählt bleibt es gut lesbar */
 /* deaktiviert (z. B. Akkordarten, die auf dieser Stufe nicht passen): gedämpft, gestrichelt, kein Klick-Zeiger */
 .chip:disabled { border: 1px dashed var(--ink-soft); color: var(--ink-soft); opacity: 0.6; box-shadow: none; cursor: default; }
-.chip.inert:not([aria-pressed="true"]) { color: var(--ink-soft); }
+.chip.inert:not([aria-pressed="true"]) { color: var(--ink-soft); opacity: 0.6; }
 .chip.inert[aria-pressed="true"]::before { background: var(--ink-soft); box-shadow: none; }
 
 /* Popover unter dem Wort, innerhalb des Fensters */
@@ -223,7 +237,7 @@ main {
   display: block;
   margin: 0 0 8px;
   color: var(--ink-soft);
-  font-size: 0.9rem;
+  font-size: 12px;
 }
 .pop-label:not(:first-child) { margin-top: 16px; }
 
@@ -245,9 +259,9 @@ main {
   text-align: left;
 }
 .card[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--ink); }
-.card-name { font-size: 1.15rem; }
+.card-name { font-size: 16px; }
 .card-bpm { color: var(--ink-soft); font-variant-numeric: tabular-nums; }
-.card-hint { font-size: 0.875rem; }
+.card-hint { font-size: 14px; }
 .rhythm {
   display: grid;
   grid-template-columns: repeat(16, 1fr);
@@ -261,9 +275,7 @@ main {
 .tempo-row input { flex: 1; min-width: 0; height: var(--target); accent-color: var(--ink); }
 .tempo-row output { display: inline-block; min-width: 3ch; text-align: right; font-variant-numeric: tabular-nums; }
 
-.actions { margin-top: 1.5em; }
-
-.actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: 0; }
 
 /* --- Spielseite: eine Spalte über die Fensterhöhe. Kopfleiste fest, Visualisierung in zwei Reihen, das Rack bekommt den Rest
    und scrollt in sich (senkrecht und waagerecht); die Seite scrollt nie. Im Fokus füllt die Visualisierung die Höhe. --- */
@@ -284,15 +296,16 @@ body:has(.play:not([hidden])) main { max-width: none; padding: 0; background: no
   box-shadow: inset 0 0 0 1px var(--panel-edge);
 }
 .play-head .lcd { margin: 0; font-size: 16px; }
+.play-head .lcd:empty::before { content: attr(data-idle); opacity: 0.45; }
 .play-field { display: flex; align-items: center; gap: 6px; margin: 0; }
 .play-label { font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-soft); }
 #play-part { min-width: 12ch; min-height: 1.6em; text-transform: uppercase; }
 /* Name der App: führt zur Startseite; steht mittig zwischen Wiedergabe und Schaltern */
-.brand { min-height: var(--target); margin-inline: auto; padding: 0 4px; border: 0; background: none; color: #444; font-size: 15px; }
+.brand { min-height: var(--target); margin-inline: auto; padding: 0 4px; border: 0; background: none; color: var(--title); font-size: 14px; }
 /* Schalter Fokus/Einstellen: Schiene mit Schieber, die aktive Seite dunkel beschriftet */
 .mode-switch { display: inline-flex; align-items: center; gap: 8px; min-height: var(--target); padding: 0 4px; border: 0; background: none; color: var(--ink-soft); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; }
-.mode-track { position: relative; width: 34px; height: 16px; border-radius: 2px; background: var(--key); box-shadow: 0 0 0 2px #fff, 0 0 0 3px var(--ring); }
-.mode-track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 12px; border-radius: 1px; background: #d8d8d4; }
+.mode-track { position: relative; width: 34px; height: 16px; border-radius: 2px; background: var(--key); box-shadow: 0 0 0 2px var(--white), 0 0 0 3px var(--ring); }
+.mode-track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 12px; border-radius: 1px; background: var(--panel-edge); }
 .mode-switch[aria-checked="true"] .mode-track::after { left: 18px; }
 .mode-switch[aria-checked="false"] .mode-off, .mode-switch[aria-checked="true"] .mode-on { color: var(--ink); }
 
@@ -300,47 +313,60 @@ body:has(.play:not([hidden])) main { max-width: none; padding: 0; background: no
    bis zu ihrem Minimum (oben: Griffbrett 240 px plus Modulrand und Tasten 76 px; unten: Streifen 52 px plus 6 Spuren zu 14 px plus Modulrand 28 px);
    das Rack nimmt den Rest und gibt zuerst nach (bis 150 px). */
 .viz { flex: 0 1 auto; display: flex; flex-direction: column; gap: 3px; min-height: 0; }
-.viz-top { flex: 0 1 20rem; }
-.viz-bottom { flex: 0 1 22rem; }
+.viz-top, .viz-bottom { flex: 0 1 var(--u); }
+.viz-top { justify-content: space-between; } /* Tonart links, Akkorde rechts, das Griffbrett dazwischen */
 #play[data-mode="setup"] .viz { min-height: calc(316px + 168px + 3px); }
 #play[data-mode="setup"] .viz-top { min-height: 316px; }
 #play[data-mode="setup"] .viz-bottom { min-height: 168px; }
 .viz .module { display: flex; flex-direction: column; }
 #mod-key { flex: none; width: 14rem; justify-content: center; }
-#mod-fretboard { flex: 1; }
+/* Griffbrett höchstens 1440 px breit (Bünde nicht übermäßig weit); auf breiteren Monitoren liegt links und rechts davon leerer Rackplatz
+   (die Schienen der Reihe scheinen durch), Tonart und Akkorde bleiben außen */
+#mod-fretboard { flex: 0 1 90rem; }
 #mod-fretboard .module-head { display: flex; flex-wrap: wrap; gap: 0 18px; margin-bottom: 4px; }
-#mod-wheel { flex: none; align-items: center; gap: 6px; }
+#mod-wheel { flex: none; width: calc(var(--u) - 4.5rem); align-items: center; gap: 6px; }
 #mod-song { flex: 1; }
 #play[data-mode="setup"] .legend { display: none; }
-#play[data-mode="focus"] .viz { flex: 1; }
-#play[data-mode="focus"] .viz-top { flex: 1.25 1 0; }
-#play[data-mode="focus"] .viz-bottom { flex: 1 1 0; }
+/* Fokus: dieselben zwei Reihen vergrößert. Beide sind gleich hoch und füllen zusammen das Fenster unter der Kopfleiste (64 px mit Fugen),
+   höchstens 30 rem je Reihe (Saitenabstand um 55 px); was auf großen Monitoren übrig bleibt, sind leere Reihen derselben Höhe darüber und darunter. */
+#play[data-mode="focus"] { --u: clamp(20rem, calc((100dvh - 64px) / 2), 30rem); }
+/* beide Reihen stehen senkrecht in der Mitte, das Raster der leeren Reihen läuft darüber und darunter weiter (zwei Reihen: Kachel um eine halbe Reihe versetzt) */
+#play[data-mode="focus"] .viz { flex: 1; justify-content: center; background-position: 0 calc(50% - var(--u) / 2); }
+/* kleines Fenster: die obere Reihe schrumpft nie unter das, was Griffbrett und Legende brauchen (dann gibt die untere nach, die Reihen sind ungleich) */
+#play[data-mode="focus"] .viz-top { min-height: min-content; }
 #play[data-mode="focus"] .form-strip { height: 5rem; }
 #play[data-mode="focus"] :is(#rack, #form-song, #form-insp) { display: none; }
 
-/* Rack: fast schwarz, Schienen mit Lochreihe oben und unten (bleiben beim Scrollen stehen), Module in einer Reihe */
-.rack { flex: 1 1 0%; min-height: 0; overflow: auto; overscroll-behavior: contain; background: var(--gap); }
-.rack::before, .rack::after { content: ""; position: sticky; left: 0; z-index: 1; display: block; height: 12px; background: var(--rail) radial-gradient(circle, var(--rail-dot) 2px, transparent 2.5px) 0 50% / 16px 12px repeat-x; }
+/* Rack: fast schwarz, die Module brechen in Reihen um (Lied · Instrumente · Mischung) und das Rack scrollt nur senkrecht in sich.
+   Wie im echten Rack decken die Module die Schienen ab und sind an ihren vier Ecken darauf verschraubt (Schrauben: .module::before);
+   zu sehen sind die Schienen (Lochreihe auf Höhe der Schrauben) nur dort, wo kein Modul sitzt. Jede Reihe ist genau --u hoch, auch die
+   leeren: der Rack-Grund ist ein Muster aus leeren Reihen (Schiene oben, Schiene unten, 3 px Fuge), auf dem die Module liegen. */
+.rack { flex: 1 1 0%; min-height: 0; overflow: auto; overscroll-behavior: contain; background-color: var(--gap); background-attachment: local; }
 #play[data-mode="setup"] .rack { min-height: 150px; }
-.rack::before { top: 0; }
-.rack::after { bottom: 0; }
-.rack-row { width: max-content; min-width: 100%; padding: 3px 0; }
-#mod-harmony { width: 26rem; }
-#mod-rhythm { width: 16rem; }
-#mod-character { width: 18rem; }
+.rack-row { flex-wrap: wrap; }
+.rack, .viz, .start { /* leere Rack-Reihen im Raster der Reihenhöhe */
+  --hole: var(--rail-dot) 2px, transparent 2.5px;
+  --row: calc(var(--u) + 3px);
+  background-image:
+    radial-gradient(circle at 8px 8px, var(--hole)), radial-gradient(circle at 8px calc(var(--u) - 8px), var(--hole)),
+    linear-gradient(var(--rail) 16px, transparent 16px calc(var(--u) - 16px), var(--rail) calc(var(--u) - 16px) var(--u), transparent var(--u));
+  background-size: 16px var(--row), 16px var(--row), 100% var(--row);
+}
+/* Rack-Module sind genau eine Reihe hoch; passt ihr Inhalt einmal nicht (viele Akkorde, lange Übersetzung), scrollt das Modul in sich */
+.rack .module { height: var(--u); padding-bottom: 18px; overflow: hidden auto; scrollbar-width: thin; }
+#mod-harmony { flex: 1 1 26rem; }
+#mod-rhythm { flex: 1 1 16rem; }
+#mod-character { flex: 1 1 18rem; }
 #mod-harmony, #mod-rhythm, #mod-character { display: flex; flex-direction: column; gap: 6px; }
 .module .lbl { margin: 0; }
 .pair { display: flex; gap: 8px; }
 .pair .field { flex: 1; min-width: 0; }
 .field { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .field .lcd-select { width: 100%; }
-/* großer weißer Tempoknopf: Beschriftung, Knopf, LCD-Anzeige in einer Reihe */
-.tempo-knob { display: flex; align-items: center; gap: 10px; }
-.tempo-knob .lcd { margin-left: auto; min-width: 8ch; text-align: center; font-size: 16px; }
-#mod-rhythm .knob-cell { flex-direction: row; justify-content: flex-start; gap: 10px; }
-#mod-rhythm .knob-cell .lcd { margin-left: auto; }
+.knob-line { display: flex; align-items: flex-end; gap: 8px; } /* Knöpfe nebeneinander, unten bündig: Knopf, Name, Wert je Zelle */
 .char-words { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; padding: 0; list-style: none; }
-.word-tag { padding: 2px 8px; border-radius: 2px; background: #fff; color: #111; font-size: 12px; box-shadow: inset 0 0 0 1px var(--ring); }
+.word-tag { padding: 2px 8px; border-radius: 2px; background: var(--white); color: var(--on-accent); font-size: 12px; box-shadow: inset 0 0 0 1px var(--ring); }
+.word-tag.inert { opacity: 0.5; } /* bewirkt zurzeit nichts */
 #tags-btn { align-self: flex-start; }
 #mod-harmony .message:empty { display: none; }
 /* Popover im Rack: über dem Knopf (unten ist kein Platz), links bündig mit ihm, scrollt in sich */
@@ -349,37 +375,61 @@ body:has(.play:not([hidden])) main { max-width: none; padding: 0; background: no
 #add-pop { position-anchor: --add; }
 #tags-pop { position-anchor: --tags; }
 .pop-rack { position-area: top span-right; margin: 60px 8px 8px; /* oben bleibt die Kopfleiste (mit den Sprachtasten) frei */ width: min(36rem, calc(100vw - 32px)); }
-#mod-mixer { width: max-content; }
+#mod-mixer { flex: 0 1 auto; width: max-content; max-width: 100%; }
 /* Instrument-Module: Stimme, Aufgabe, kleine Knöpfe mit Beschriftung (mindestens 11 px) darunter, Zurücksetzen */
-.rack-instruments { display: flex; gap: 3px; }
-.instrument { width: 18rem; display: flex; flex-direction: column; gap: 6px; }
-.lbl { font-size: 11px; line-height: 1.2; color: var(--ink); overflow-wrap: anywhere; }
+/* eigene Reihe(n): sechs gleich breite Module nebeneinander, unter 1360 px zwei Reihen zu drei (nie eine angebrochene Reihe) */
+.rack-instruments { flex: 0 0 100%; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); grid-auto-rows: var(--u); gap: 3px; }
+@media (max-width: 84.9375rem) { .rack-instruments { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.instrument { display: flex; flex-direction: column; gap: 6px; }
+.lbl { font-size: 11px; line-height: 1.2; color: var(--ink); overflow-wrap: anywhere; hyphens: auto; }
 .inst-caption { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 22px; }
 .inst-caption .lcd { padding: 1px 6px; font-size: 12px; }
 .inst-caption .voice-status:not(:empty) { margin-left: 0.6em; }
 .inst-voice, .inst-job { display: flex; flex-direction: column; gap: 2px; }
 .inst-job:empty { display: none; }
 .lcd-select.alt select { color: var(--lcd-ink-2); }
-.inst-knobs, .mixer-master { margin-top: 2px; padding-top: 8px; border-top: 1.5px dotted var(--dots); display: grid; grid-template-columns: repeat(auto-fill, minmax(4.2rem, 1fr)); gap: 8px 4px; justify-items: center; }
-.knob-cell { display: flex; flex-direction: column; align-items: center; gap: 3px; width: 100%; text-align: center; }
-.knob-cell:has(input:disabled) { opacity: 0.4; }
-.instrument > .hint { margin: 0; color: var(--ink-soft); font-size: 12px; }
-.instrument > .timbre-reset, .mix-master-left > .timbre-reset { align-self: flex-start; }
-.mixer-master { grid-template-columns: 4.2rem; }
+.inst-knobs, .mixer-master { margin-top: 2px; padding-top: 8px; border-top: 1.5px dotted var(--dots); display: grid; gap: 6px 4px; justify-items: center; }
+/* Knopfraster der Instrument-Module: 3 Spalten, feste Plätze (knob-slots.js), in jedem Modul auf derselben Höhe. Zeilen 1 und 2: Klang des
+   Instruments oder die Aufgabe, dann die Punktlinie, Zeilen 3 und 4: Effekte, unten rechts Zurücksetzen. Leere Plätze bleiben frei. */
+.inst-knobs { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(44px, auto)) 0 repeat(2, minmax(44px, auto)); }
+.inst-divider { grid-area: 3 / 1 / 4 / -1; justify-self: stretch; border-top: 1.5px dotted var(--dots); }
+.inst-knobs > .inst-job { grid-area: 1 / 1 / 3 / -1; justify-self: stretch; }
+.inst-knobs > .hint { grid-area: 4 / 1 / 6 / -1; justify-self: stretch; }
+.knob-cell:has(.timbre-reset:disabled) .lbl { color: var(--ink-soft); }
+.knob-cell > .timbre-reset { width: 20px; height: 20px; margin: 4px 0; font-size: 12px; } /* mit Ring so groß wie ein kleiner Knopf (28 px); die Trefferfläche bleibt größer (.push::before) */
+.knob-cell > .timbre-reset::before { inset: -12px; }
+.mixer-master .knob-cell:has(.timbre-reset) { grid-column: 3; } /* auch im Gesamtklang unten rechts */
+.knob-cell { position: relative; display: flex; flex-direction: column; align-items: center; gap: 3px; width: 100%; text-align: center; }
+.knob-cell[hidden] { display: none; } /* Orgel-Knöpfe ohne Orgel */
+.knob-cell:has(input:disabled) > :is(.knob, .lbl) { opacity: 0.4; }
+/* Anzeige über dem Knopf (data-hint: Wert oder "ohne Wirkung"), sofort beim Überfahren und solange der Knopf den Fokus hat; nur Bild, Vorleser haben aria-valuetext */
+.knob-cell[data-hint]:is(:hover, :focus-within)::after {
+  content: attr(data-hint); position: absolute; bottom: calc(100% - 4px); left: 50%; translate: -50% 0; z-index: 2; pointer-events: none;
+  padding: 1px 5px; border-radius: 3px; background: var(--lcd); color: var(--lcd-ink); font-family: var(--mono); font-size: 11px; line-height: 1.3; white-space: nowrap; box-shadow: inset 0 0 0 1px var(--black);
+}
+.knob-cell:has(input:disabled)[data-hint]::after { color: var(--lcd-ink-2); }
+.instrument .hint { margin: 0; color: var(--ink-soft); font-size: 12px; }
+/* Gesamtklang: Schalter Alle Samples oben, darunter die sechs Gesamt-Knöpfe in drei Spalten */
+#mod-master { flex: 0 1 auto; display: flex; flex-direction: column; gap: 6px; }
+.master-voices { display: flex; justify-content: center; }
+.mixer-master { grid-template-columns: repeat(3, 4.2rem); }
 /* Mixer: Kanäle nebeneinander, rechts der Gesamtkanal */
 .mixer { display: flex; align-items: stretch; gap: 6px; }
 .mix-ch { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 4.2rem; }
-.mix-ch .lbl { text-align: center; min-height: 2.4em; display: flex; align-items: flex-end; }
+/* Fader und LED-Pegelanzeige nebeneinander: graue LEDs als Raster, darüber die leuchtenden bis --level (0..1, setzt mixer.js); die obersten sind pink */
+.fader-row { display: flex; align-items: stretch; gap: 4px; }
+.meter { --leds: repeating-linear-gradient(to top, var(--black) 0 4px, transparent 4px 6px); position: relative; width: 5px; background: var(--led-off); -webkit-mask: var(--leds); mask: var(--leds); }
+.meter::after { content: ""; position: absolute; inset: 0; background: linear-gradient(to top, var(--teal) 84%, var(--pink) 84%); clip-path: inset(calc((1 - var(--level, 0)) * 100%) 0 0 0); }
+.mix-ch > label.lbl { text-align: center; min-height: 2.4em; display: flex; align-items: flex-end; } /* Kanalname: Platz für zwei Zeilen, unten bündig */
 .mix-ch output { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .mix-ch .mute-key { width: 100%; justify-content: center; padding: 0 4px; font-size: 11px; flex-direction: column; gap: 3px; }
 .mix-master { display: flex; gap: 6px; margin-left: 8px; padding-left: 12px; border-left: 1.5px dotted var(--dots); }
-.mix-master-left { display: flex; flex-direction: column; align-items: center; gap: 8px; }
 /* Fader: natives Range-Input, senkrecht; Schiene dunkel, Kappe weiß (wie rack.html) */
-.fader { writing-mode: vertical-lr; direction: rtl; appearance: none; -webkit-appearance: none; width: 28px; height: 150px; margin: 0; padding: 0; background: transparent; }
-.fader::-webkit-slider-runnable-track { width: 8px; border-radius: 2px; background: var(--key); box-shadow: 0 0 0 2px #fff, 0 0 0 3px var(--ring); }
-.fader::-moz-range-track { width: 8px; border-radius: 2px; background: var(--key); box-shadow: 0 0 0 2px #fff, 0 0 0 3px var(--ring); }
-.fader::-webkit-slider-thumb { -webkit-appearance: none; width: 24px; height: 12px; margin-left: -8px; border: 1.5px solid var(--key); border-radius: 2px; background: #f6f6f3 linear-gradient(var(--key), var(--key)) center / calc(100% - 6px) 1.5px no-repeat; }
-.fader::-moz-range-thumb { width: 24px; height: 12px; border: 1.5px solid var(--key); border-radius: 2px; background: #f6f6f3 linear-gradient(var(--key), var(--key)) center / calc(100% - 6px) 1.5px no-repeat; }
+.fader { writing-mode: vertical-lr; direction: rtl; appearance: none; -webkit-appearance: none; width: 28px; height: 138px; margin: 0; padding: 0; background: transparent; }
+.fader::-webkit-slider-runnable-track { width: 8px; border-radius: 2px; background: var(--key); box-shadow: 0 0 0 2px var(--white), 0 0 0 3px var(--ring); }
+.fader::-moz-range-track { width: 8px; border-radius: 2px; background: var(--key); box-shadow: 0 0 0 2px var(--white), 0 0 0 3px var(--ring); }
+.fader::-webkit-slider-thumb { -webkit-appearance: none; width: 24px; height: 12px; margin-left: -8px; border: 1.5px solid var(--key); border-radius: 2px; background: var(--field) linear-gradient(var(--key), var(--key)) center / calc(100% - 6px) 1.5px no-repeat; }
+.fader::-moz-range-thumb { width: 24px; height: 12px; border: 1.5px solid var(--key); border-radius: 2px; background: var(--field) linear-gradient(var(--key), var(--key)) center / calc(100% - 6px) 1.5px no-repeat; }
 .fader:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
 /* Schalter Alle Samples: Schiene wie der Moduswechsel, Schieber links = Synth, rechts = Sample, Mitte = gemischt */
 .all-voices { display: flex; flex-direction: column; align-items: center; gap: 4px; min-height: var(--target); padding: 4px; border: 0; background: none; }
@@ -390,13 +440,13 @@ body:has(.play:not([hidden])) main { max-width: none; padding: 0; background: no
 
 /* feste Mindestbreiten, damit die Kopfzeile beim Akkordwechsel nicht springt: gemessen breitestes Etikett aller
    Grundtöne x Dur/Moll/vermindert ("Abdim" 6,23ch), plus etwa 8 % Reserve; der folgende Akkord steht im Modul Tonart */
-.play-head .play-now { min-width: 8ch; min-height: 1.6em; font-size: 20px; text-align: center; }
+.play-head .play-now { min-width: 8ch; min-height: 1.6em; font-size: 22px; text-align: center; }
 /* Tonart-Modul: Tonart groß als LCD, Skala darunter, hinter der Punktlinie der folgende Akkord (zweite Farbe) mit Countdown */
 #mod-key .play-next { margin: 0; text-align: center; font-size: 22px; min-height: 1.5em; }
 #mod-key .play-key { margin: 0; padding: 4px 10px; text-align: center; font-size: 40px; line-height: 1.1; }
 .key-scale { margin: 4px 0 0; text-align: center; font-size: 14px; color: var(--ink); }
 .key-next[hidden] { display: none; }
-.key-label { margin: 0 0 3px; text-align: center; font-size: 12px; color: #444; }
+.key-label { margin: 0 0 3px; text-align: center; font-size: 12px; color: var(--title); }
 #play-countdown:not(:empty)::before { content: " \00b7  "; white-space: pre; }
 #play[data-mode="focus"] #mod-key .play-key { font-size: 58px; }
 #play[data-mode="focus"] #mod-key .play-next { font-size: 30px; }
@@ -404,17 +454,17 @@ body:has(.play:not([hidden])) main { max-width: none; padding: 0; background: no
 #play[data-mode="focus"] .key-label { font-size: 14px; }
 /* Variante: Nummer zwischen Zurück/Vor, dann Würfel; feste Breite, damit die Knöpfe beim Weiterschalten nicht wandern */
 .variant-switch { display: flex; align-items: center; gap: 6px; }
-.variant-switch .chip { font-size: 1.4rem; line-height: 1; }
+.variant-switch .chip { font-size: 22px; line-height: 1; }
 .variant-switch .play-variant { min-width: 13ch; text-align: center; font-variant-numeric: tabular-nums; }
 .play-head .play-position { min-width: 14ch; min-height: 1.6em; }
-.play-head .go { min-width: 6rem; min-height: var(--target); font-size: 1.125rem; }
+.play-head .go { min-width: 6rem; min-height: var(--target); font-size: 16px; }
 .play-head .message { flex-basis: 100%; margin: 0; }
 /* leer: aus dem Flex-Fluss (keine Zeile, kein Abstand), bleibt aber gerendert, damit die Live-Region angesagt wird */
 .play-head .message:empty { position: absolute; }
 .label {
   margin: 1.4em 0 8px;
   color: var(--ink-soft);
-  font-size: 0.9rem;
+  font-size: 12px;
   font-weight: normal;
 }
 #mod-harmony .message { margin: 8px 0 0; }
@@ -432,11 +482,11 @@ body:has(.play:not([hidden])) main { max-width: none; padding: 0; background: no
 .group > summary::-webkit-details-marker { display: none; }
 .group > summary::before { content: "▸" / ""; flex: none; color: var(--ink-soft); }
 .group[open] > summary::before { content: "▾" / ""; }
-.group > summary .label { margin: 0; color: var(--ink); font-size: 1rem; }
+.group > summary .label { margin: 0; color: var(--ink); font-size: 16px; }
 .group[open] { padding-bottom: 8px; }
 .lbl.off { color: var(--ink-soft); }
 .tempo-row input:disabled { opacity: 0.5; }
-.sub-label { margin: 8px 0 4px; color: var(--ink-soft); font-size: 0.85rem; }
+.sub-label { margin: 8px 0 4px; color: var(--ink-soft); font-size: 12px; }
 #add-qualities .chips { margin-bottom: 4px; }
 #add-qualities .group { border-top-style: dashed; }
 
@@ -445,15 +495,12 @@ body:has(.play:not([hidden])) main { max-width: none; padding: 0; background: no
 #profiles-pop { position-anchor: --profiles; position-area: block-end span-inline-start; width: min(56rem, calc(100vw - 32px)); }
 /* Rack-Look: Modulplatte mit Schraubenpunkten und Titel, dunkler Rand, Baum als LCD, Felder wie die Auswahlfelder der Platten */
 #profiles-pop { padding: 22px 12px 12px; border: 0; border-radius: 2px; background: var(--panel); box-shadow: 0 0 0 3px var(--gap), inset 0 0 0 1px var(--panel-edge), 0 10px 30px rgba(0, 0, 0, 0.45); }
-#profiles-pop::before, #profiles-pop::after { content: ""; position: absolute; top: 5px; width: 7px; height: 7px; border-radius: 50%; background: #cfcfcb; box-shadow: inset 0 0 0 1px #b8b8b4; }
-#profiles-pop::before { left: 5px; }
-#profiles-pop::after { right: 5px; }
 #profiles-pop::backdrop { background: transparent; }
 #profiles-pop .pop-label { color: var(--ink); font-size: 12px; }
 .profiles { display: grid; gap: 16px; align-items: start; }
 @media (min-width: 46rem) { .profiles { grid-template-columns: minmax(15rem, 20rem) 1fr; } }
 .profiles [hidden] { display: none; } /* hidden gegen display: grid/flex der Abschnitte */
-.profile-tree { max-height: 60vh; overflow-y: auto; overscroll-behavior: contain; padding: 4px; border-radius: 3px; background: var(--lcd); color: var(--lcd-ink); font-family: var(--mono); letter-spacing: 0.04em; box-shadow: inset 0 0 0 2px #000; scrollbar-color: var(--lcd-ink) transparent; }
+.profile-tree { max-height: 60vh; overflow-y: auto; overscroll-behavior: contain; padding: 4px; border-radius: 3px; background: var(--lcd); color: var(--lcd-ink); font-family: var(--mono); letter-spacing: 0.04em; box-shadow: inset 0 0 0 2px var(--black); scrollbar-color: var(--lcd-ink) transparent; }
 .tree-row {
   display: flex;
   align-items: center;
@@ -491,9 +538,9 @@ body:has(.play:not([hidden])) main { max-width: none; padding: 0; background: no
 .tree-row[data-drop="no"] { opacity: 0.45; cursor: no-drop; }
 .profile-panel { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; }
 .profile-section { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
-.profile-title { margin: 0; font-size: 1.25rem; font-weight: 600; overflow-wrap: anywhere; }
+.profile-title { margin: 0; font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
 .profile-summary { margin: 0; }
-.profile-panel .hint { margin: 0; color: var(--ink-soft); font-size: 0.9rem; }
+.profile-panel .hint { margin: 0; color: var(--ink-soft); font-size: 12px; }
 .profiles .pop-label { margin: 8px 0 0; }
 .profile-panel input[type="text"], .profile-panel select, .profile-panel textarea {
   width: 100%;
@@ -501,12 +548,15 @@ body:has(.play:not([hidden])) main { max-width: none; padding: 0; background: no
   padding: 0 8px;
   border: 1px solid var(--ink-soft);
   border-radius: 2px;
-  background: #f6f6f3;
+  background: var(--field);
   color: var(--ink);
 }
 .profile-panel input[type="text"], .profile-panel select { min-height: var(--target); }
-.profile-panel input[type="file"] { min-height: var(--target); max-width: 100%; }
-.profiles textarea { padding: 6px 8px; font: 0.8rem/1.3 ui-monospace, monospace; resize: vertical; }
+.profile-panel input[type="file"] { min-height: var(--target); max-width: 100%; padding: 3px; font-size: 14px; }
+.profile-panel input[type="file"]::file-selector-button { min-height: 38px; margin-right: 10px; padding: 0 12px; border: 0; border-radius: 2px; background: var(--key); color: var(--key-ink); font: inherit; box-shadow: 0 0 0 2px var(--white), 0 0 0 3px var(--ring); cursor: pointer; }
+.profile-panel select { border: 0; border-radius: 3px; background: var(--lcd); color: var(--lcd-ink); font-family: var(--mono); font-size: 14px; letter-spacing: 0.06em; box-shadow: inset 0 0 0 2px var(--black); }
+.profile-panel select option { background: var(--lcd); color: var(--lcd-ink); }
+.profiles textarea { padding: 6px 8px; font: 12px/1.3 var(--mono); resize: vertical; }
 /* Teile-Auswahl: eingeklappte Zeile "Inhalt: …" mit eigenem Pfeil wie die Klang-Gruppen */
 .profile-parts > summary { display: flex; align-items: center; gap: 8px; min-height: var(--target); cursor: pointer; list-style: none; }
 .profile-parts > summary::-webkit-details-marker { display: none; }
@@ -517,7 +567,7 @@ body:has(.play:not([hidden])) main { max-width: none; padding: 0; background: no
 .profile-part { padding-bottom: 4px; }
 .profile-part label { display: flex; align-items: center; gap: 10px; min-height: var(--target); cursor: pointer; }
 .profile-part input { flex: none; width: 1.5rem; height: 1.5rem; margin: 0; accent-color: var(--ink); }
-.profile-part .hint { display: block; padding-inline-start: calc(1.5rem + 10px); font-size: 0.85rem; }
+.profile-part .hint { display: block; padding-inline-start: calc(1.5rem + 10px); font-size: 12px; }
 .profile-ask { margin: 0; overflow-wrap: anywhere; }
 /* Meldung und "Rückgängig" in einer Zeile; "Alles sichern" abgesetzt ganz unten */
 .profile-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
@@ -539,11 +589,12 @@ body:has(.play:not([hidden])) main { max-width: none; padding: 0; background: no
 .fret-note[hidden] { display: none; }
 .fret-note { --r: 11px; } /* Notenradius; fretboard.js setzt ihn je Bund kleiner, wenn der Bund eng ist */
 .fret-note .dot { x: calc(var(--r) * -1); y: calc(var(--r) * -1); width: calc(var(--r) * 2); height: calc(var(--r) * 2); rx: var(--r); fill: var(--paper); stroke: var(--ink); stroke-width: 1.5; }
-.fret-note .ring { display: none; r: calc(var(--r) * 1.32); fill: none; stroke: var(--accent); stroke-width: 2; }
-.fret-note text { fill: var(--ink); font-size: 12px; text-anchor: middle; dominant-baseline: central; }
+.fret-note .ring { display: none; r: calc(var(--r) + 3px); fill: none; stroke: var(--accent); stroke-width: 2; }
+/* Notenname: halbfett und so groß wie der Radius, nie unter 12 px (in sehr engen Bünden ragt er dann über den Punkt) */
+.fret-note text { fill: var(--ink); font-size: max(12px, calc(var(--r) * 1.05)); font-weight: 600; text-anchor: middle; dominant-baseline: central; }
 .fret-note[data-role~="current"] .dot { fill: var(--accent); stroke: var(--accent); }
 .fret-note[data-role~="next"] .dot { rx: 3px; fill: var(--accent2); stroke: var(--accent2); }
-/* Raute mit 18er-Seite: Spitzen bleiben im Grundton-Ring (r 14.5) und neben den Nachbarn */
+/* Raute mit der Seite 1,64 r: ihre Spitzen (1,16 r) bleiben im Grundton-Ring (r + 3 px) und neben den Nachbarn */
 .fret-note[data-role~="both"] .dot {
   x: calc(var(--r) * -0.82); y: calc(var(--r) * -0.82); width: calc(var(--r) * 1.64); height: calc(var(--r) * 1.64); rx: 2px;
   transform: rotate(45deg); transform-box: fill-box; transform-origin: center;
@@ -555,7 +606,7 @@ body:has(.play:not([hidden])) main { max-width: none; padding: 0; background: no
 .fret-note[data-role~="outside"] text { fill: var(--ink); }
 /* Legende: "außerhalb" allein, ohne Rollenfarbe, steht für jetzigen und folgenden Akkord */
 .fret-note[data-role="outside"] .dot { fill: var(--ink-soft); stroke: var(--ink-soft); }
-.legend { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 8px 0 0; padding: 0; list-style: none; font-size: 0.9rem; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 8px 0 0; padding: 0; list-style: none; font-size: 12px; }
 .legend li { display: flex; align-items: center; gap: 8px; }
 .legend svg { flex: none; width: 24px; height: 24px; }
 
@@ -572,6 +623,7 @@ body:has(.play:not([hidden])) main { max-width: none; padding: 0; background: no
   --part-build: #ecd7a6;
   --part-chorus: #e9b5a5;
   --part-break: #d3dde8;
+  --part-bridge: color-mix(in srgb, var(--teal) 28%, var(--panel)); /* Bridge: aus dem Türkis abgeleitet, kein neuer Farbwert */
   --part-outro: #ddd3de;
 }
 #mod-song [hidden] { display: none; }
@@ -601,13 +653,14 @@ body:has(.play:not([hidden])) main { max-width: none; padding: 0; background: no
   border-radius: 5px 5px 2px 2px;
   background: var(--part-verse);
   color: var(--ink);
-  font-size: 0.8rem;
+  font-size: 12px;
   line-height: 1.2;
   cursor: pointer;
 }
 .form-part[data-type="intro"] { background: var(--part-intro); }
 .form-part[data-type="build"] { background: var(--part-build); }
 .form-part[data-type="chorus"] { background: var(--part-chorus); }
+.form-part[data-type="bridge"] { background: var(--part-bridge); }
 .form-part[data-type="break"] { background: repeating-linear-gradient(135deg, var(--part-break) 0 6px, transparent 6px 9px), var(--paper); }
 .form-part[data-type="outro"] { background: var(--part-outro); }
 .form-part-name, .form-part-bars { display: block; padding: 0 6px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -622,10 +675,10 @@ body:has(.play:not([hidden])) main { max-width: none; padding: 0; background: no
    Zu hoch scrollen sie in sich. */
 .song-wrap { flex: 1; min-height: 0; display: flex; gap: 10px; }
 .form-song, .form-insp { flex: none; display: flex; flex-direction: column; gap: 6px; overflow: auto; overscroll-behavior: contain; }
+.form-song { gap: 4px; } /* passt mit englischen Beschriftungen in eine Reihenhöhe */
 .form-song { width: 14rem; }
 /* breit: zwei Spalten (Anzeigen links, Knöpfe rechts), Titel und Tastenreihe über beide; das Feld braucht dann 228 px statt 388 */
 @media (min-width: 1500px) {
-  #play[data-mode="setup"] .viz-bottom { flex-basis: 16rem; }
   .form-song { width: auto; grid-template-columns: 10rem 14.5rem; column-gap: 10px; align-content: start; display: grid; }
   .form-song > .label, .form-song > .sub-label, .form-song > .form-bar { grid-column: 1 / -1; }
   .form-song > .field { grid-column: 1; }
@@ -634,12 +687,13 @@ body:has(.play:not([hidden])) main { max-width: none; padding: 0; background: no
 .form-insp { width: 29rem; }
 .form-song > .label, .form-insp > .label { margin: 0; color: var(--ink); font-size: 12px; }
 /* Schild "TEIL N": nur dieses trägt die Farbe des Blocks, Schrift dunkel */
-.part-chip { padding: 1px 6px; border-radius: 2px; background: var(--panel-edge); color: #111; font-weight: 600; letter-spacing: 0.04em; }
+.part-chip { padding: 1px 6px; border-radius: 2px; background: var(--panel-edge); color: var(--on-accent); font-weight: 600; letter-spacing: 0.04em; }
 .part-chip[data-type="intro"] { background: var(--part-intro); }
 .part-chip[data-type="verse"] { background: var(--part-verse); }
 .part-chip[data-type="build"] { background: var(--part-build); }
 .part-chip[data-type="chorus"] { background: var(--part-chorus); }
 .part-chip[data-type="break"] { background: var(--part-break); }
+.part-chip[data-type="bridge"] { background: var(--part-bridge); }
 .part-chip[data-type="outro"] { background: var(--part-outro); }
 .insp-cols { display: grid; grid-template-columns: minmax(10rem, 12rem) minmax(0, 1fr); gap: 6px 12px; align-items: start; }
 .insp-displays, .insp-controls { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
@@ -654,7 +708,7 @@ body:has(.play:not([hidden])) main { max-width: none; padding: 0; background: no
 .form-insp .knob-cell .lcd { max-width: 100%; font-size: 12px; letter-spacing: 0; white-space: normal; text-align: center; }
 .knob:has(input.unset) { opacity: 0.55; } /* nicht gesetzt (gilt der Standard des Typs): blass, damit der gesetzte Wert auffällt */
 .btn-row { display: flex; flex-wrap: wrap; justify-content: space-around; align-items: flex-start; gap: 6px 14px; }
-.btn-row .chip { font-size: 13px; padding: 0 8px; }
+.btn-row .chip { font-size: 12px; padding: 0 8px; }
 .push-cell { display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; }
 .pair-btns { display: flex; gap: 14px; }
 .push { font-size: 16px; line-height: 1; }
@@ -678,7 +732,7 @@ select {
   padding: 0 10px;
   border: 1px solid var(--ink-soft);
   border-radius: 2px;
-  background: #f6f6f3;
+  background: var(--field);
   color: var(--ink);
 }
 
@@ -689,15 +743,15 @@ select {
 .wheel-prog .chip { min-width: 0; min-height: 40px; padding: 0 8px; box-shadow: 0 0 0 1px var(--ring); }
 #progression [aria-current="true"] { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 0.2em; }
 /* Akkordfolge: Farbe nach Rolle (Text immer dunkel), darunter die römische Stufe aus data-degree */
-.chip[class*="role-"] { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; min-height: 52px; padding: 0 10px; color: #111; line-height: 1.15; box-shadow: 0 0 0 1px var(--ring); }
+.chip[class*="role-"] { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; min-height: 52px; padding: 0 10px; color: var(--on-accent); line-height: 1.15; box-shadow: 0 0 0 1px var(--ring); }
 .chip[class*="role-"]::after { content: attr(data-degree); font-size: 11px; }
 .role-now { background: var(--pink); }
-.chip.role-hold { background: #f8d6dc; box-shadow: inset 0 0 0 2px var(--pink), 0 0 0 1px var(--ring); }
+.chip.role-hold { background: var(--pink-soft); box-shadow: inset 0 0 0 2px var(--pink), 0 0 0 1px var(--ring); }
 .role-next { background: var(--teal); }
-.role-later { background: #fff; }
+.role-later { background: var(--white); }
 .prog-row { display: flex; align-items: flex-start; gap: 8px; }
 .prog-row .chips { flex: 1; }
-.add-btn { font-size: 1.4rem; line-height: 1; }
+.add-btn { font-size: 22px; line-height: 1; }
 
 .tag-group {
   display: flex;
@@ -707,7 +761,13 @@ select {
   padding: 7px 0;
   border-top: 1px solid rgba(42, 38, 34, 0.2);
 }
-.tag-label { flex: 0 0 7rem; margin: 0; font-style: italic; }
+.tag-label { flex: 0 0 7rem; margin: 0; color: var(--ink-soft); font-size: 12px; }
+/* Kennbuchstaben hinter dem Wort (Spiel, Klang, Form): aus data-marks, nicht Teil des Textes */
+#tags .chip::after { content: attr(data-marks) / ""; font-size: 11px; font-weight: 600; letter-spacing: 0.1em; color: var(--ink-soft); }
+.tag-legend { margin: 0 0 6px; }
+/* Anzeige: bleibt beim Scrollen der Liste oben stehen, vier Zeilen Platz, damit nichts springt */
+.lcd.tag-fx { position: sticky; top: 0; z-index: 1; margin: 0 0 8px; padding: 6px 8px; min-height: 6.2em; font-size: 12px; line-height: 1.4; letter-spacing: 0.02em; white-space: pre-line; }
+.tag-fx::first-line { color: var(--lcd-ink-2); } /* erste Zeile: der Name des Worts */
 .tag-group .chips { flex: 1 1 14rem; }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -717,21 +777,38 @@ select {
 /* --- Bausteine des Racks --- */
 /* Modul: helle Platte mit zwei Schraubenpunkten oben, Titel klein oben rechts */
 .module { position: relative; padding: 18px 10px 10px; background: var(--panel); border-radius: 2px; box-shadow: inset 0 0 0 1px var(--panel-edge); min-width: 0; }
-.module::before, .module::after { content: ""; position: absolute; top: 5px; width: 7px; height: 7px; border-radius: 50%; background: #cfcfcb; box-shadow: inset 0 0 0 1px #b8b8b4; }
-.module::before { left: 5px; }
-.module::after { right: 5px; }
-.module-title { position: absolute; top: 3px; margin: 0; right: 18px; display: flex; align-items: center; gap: 6px; font-size: 12px; color: #444; }
+/* Kreuzschlitz-Schrauben an den vier Ecken (10 px, Mitte 8 px vom Rand = Lochreihe der Schienen): je Ecke Kopf und zwei Schlitze */
+.module::before, #profiles-pop::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  --head: radial-gradient(circle, var(--screw) 3.4px, var(--screw-edge) 3.6px 4.6px, transparent 5px);
+  --slot: linear-gradient(var(--ink-soft), var(--ink-soft));
+  background:
+    var(--slot) left 5px top 7px / 6px 2px no-repeat, var(--slot) left 7px top 5px / 2px 6px no-repeat, var(--head) left 3px top 3px / 10px 10px no-repeat,
+    var(--slot) right 5px top 7px / 6px 2px no-repeat, var(--slot) right 7px top 5px / 2px 6px no-repeat, var(--head) right 3px top 3px / 10px 10px no-repeat,
+    var(--slot) left 5px bottom 7px / 6px 2px no-repeat, var(--slot) left 7px bottom 5px / 2px 6px no-repeat, var(--head) left 3px bottom 3px / 10px 10px no-repeat,
+    var(--slot) right 5px bottom 7px / 6px 2px no-repeat, var(--slot) right 7px bottom 5px / 2px 6px no-repeat, var(--head) right 3px bottom 3px / 10px 10px no-repeat;
+}
+.module-title { position: absolute; top: 3px; margin: 0; right: 18px; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--title); }
 
 /* LCD: alles, was ein gewählter Wert ist */
-.lcd { padding: 2px 6px; border-radius: 3px; background: var(--lcd); color: var(--lcd-ink); font-family: var(--mono); font-size: 14px; letter-spacing: 0.06em; white-space: nowrap; box-shadow: inset 0 0 0 2px #000; }
+.lcd { padding: 2px 6px; border-radius: 3px; background: var(--lcd); color: var(--lcd-ink); font-family: var(--mono); font-size: 14px; letter-spacing: 0.06em; white-space: nowrap; box-shadow: inset 0 0 0 2px var(--black); }
 .lcd.alt { color: var(--lcd-ink-2); }
 
 .led { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--led-off); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15); }
-.led.on { background: var(--pink); box-shadow: 0 0 6px var(--pink); }
+/* Aktivität (app.js): an (.on, die Schicht spielt in diesem Takt) gedämpft pink, klingender Ton (.sound) voll pink, Anschlag (.hit) blitzt im
+   Grün der Displays (eigene Farbe, damit man den Einsatz auch in einem durchklingenden Ton sieht; dunkler Rand für den Kontrast auf der hellen Platte) */
+.led.on { background: color-mix(in srgb, var(--pink) 45%, var(--led-off)); }
+.led.sound { background: var(--pink); }
+.led.hit { background: var(--lcd-ink); box-shadow: 0 0 6px 1px var(--lcd-ink), inset 0 0 0 1px rgba(0, 0, 0, 0.45); }
+/* Schlag-LED: sitzt rechts im Start/Stopp-Taster (ohne eigene Breite, die Kopfleiste bleibt eine Zeile) */
+#beat-led { position: relative; margin: 0 9px 0 -26px; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { /* ohne Blitzen: an heißt volle Helligkeit */
+  .led.on, .lane-label.on::before { background: var(--pink); box-shadow: 0 0 6px var(--pink); }
+}
 .led.t.on { background: var(--teal); box-shadow: 0 0 6px var(--teal); }
 
 /* runder Taster für Aktionen; die Trefferfläche reicht über den Ring hinaus bis 44 px */
-.push { position: relative; flex: none; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 50%; background: var(--key); box-shadow: 0 0 0 3px #fff, 0 0 0 4px var(--ring); color: #eee; }
+.push { position: relative; flex: none; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 50%; background: var(--key); box-shadow: 0 0 0 3px var(--white), 0 0 0 4px var(--ring); color: var(--key-ink); }
 .push::before { content: ""; position: absolute; inset: -7px; }
 
 .dots { margin: 2px 4px; border-top: 1.5px dotted var(--dots); }
@@ -743,7 +820,7 @@ select {
 .knob--l { width: 64px; height: 64px; }
 .knob > svg { display: block; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
 .knob > input[type="range"] { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; pointer-events: none; }
-.knob-track { fill: none; stroke: #cfcfcb; stroke-width: 1; }
+.knob-track { fill: none; stroke: var(--panel-edge); stroke-width: 1; }
 .knob-arc { fill: none; stroke: var(--pink); stroke-width: 3; stroke-linecap: round; }
 .knob-arc[data-side="left"] { stroke: var(--teal); }
 
@@ -764,15 +841,15 @@ select {
   letter-spacing: 0.06em;
   text-align: center;
   text-align-last: center;
-  box-shadow: inset 0 0 0 2px #000;
+  box-shadow: inset 0 0 0 2px var(--black);
   cursor: pointer;
 }
 .lcd-select .lcd-out { display: flex; align-items: center; justify-content: center; cursor: default; white-space: nowrap; }
 .lcd-select select:disabled { opacity: 0.55; cursor: default; }
 .lcd-select select option { background: var(--lcd); color: var(--lcd-ink); }
 /* Taste: 44 px Trefferfläche, daneben (ohne Überlappung) das Select; das Bild der Taste (24 px) liegt als ::before dahinter */
-.lcd-btn { position: relative; isolation: isolate; flex: none; width: 44px; height: 44px; padding: 0; border: 0; background: none; color: #ddd; font-size: 16px; line-height: 44px; text-align: center; }
-.lcd-btn::before { content: ""; position: absolute; inset: 10px; z-index: -1; border-radius: 2px; background: var(--key); box-shadow: 0 0 0 2px #fff, 0 0 0 3px var(--ring); }
+.lcd-btn { position: relative; isolation: isolate; flex: none; width: 44px; height: 44px; padding: 0; border: 0; background: none; color: var(--key-ink); font-size: 16px; line-height: 44px; text-align: center; }
+.lcd-btn::before { content: ""; position: absolute; inset: 10px; z-index: -1; border-radius: 2px; background: var(--key); box-shadow: 0 0 0 2px var(--white), 0 0 0 3px var(--ring); }
 .lcd-btn:disabled { opacity: 0.35; cursor: default; }
 
 /* Laptop-Breite: die Sprachtasten sollen noch in die erste Zeile der Kopfleiste passen; sonst wächst sie um eine Zeile und frisst Höhe (1280 × 720) */
@@ -780,12 +857,16 @@ select {
   .play-head { gap: 6px 8px; }
   .brand { max-width: 6.5rem; white-space: normal; line-height: 1.1; font-size: 14px; }
   .play-head .lang .chip { min-width: 0; padding: 0 8px; }
-  .play-head .play-now { font-size: 18px; }
+  .play-head .play-now { font-size: 16px; }
 }
 
 /* Spielseite schmal (unter 768 px): alles untereinander, dann scrollt die Seite senkrecht, waagerecht scrollt nur das Griffbrett.
    Am Dateiende und mit #play davor, damit es die festen Breiten der Module überstimmt. */
 @media (max-width: 47.9375rem) {
+  /* Startseite schmal: die beiden Module untereinander über die ganze Breite, kein leerer Rackplatz daneben */
+  .start-row { flex-wrap: wrap; height: auto; }
+  .start-row > .module { flex: 1 1 100%; }
+  #mod-start { padding-inline: 10px; }
   #play:not([hidden]) { height: auto; }
   #play :is(.shelf, .song-wrap, .rack-instruments) { flex-wrap: wrap; }
   #play[data-mode] :is(.viz, .viz-top, .viz-bottom, .rack) { min-height: 0; flex: none; }
@@ -793,9 +874,10 @@ select {
   #play :is(.form-song, .form-insp, .rack) { overflow: visible; }
   #play .insp-cols { grid-template-columns: minmax(0, 1fr); }
   #play .push { width: var(--target); height: var(--target); } /* Fingergröße statt Trefferfläche über den Rand */
-  #play .rack-row { width: auto; }
   #play :is(.mixer, .mix-master) { flex-wrap: wrap; }
   #play #mod-mixer { width: 100%; }
+  #play .rack-instruments { grid-template-columns: minmax(0, 1fr); grid-auto-rows: auto; }
+  #play .rack .module { height: auto; overflow: visible; } /* untereinander: jedes Modul so hoch wie sein Inhalt */
   #play #lanes { height: calc(var(--lanes, 6) * 44px); } /* Spurnamen in Fingerhöhe */
   #play .wheel { flex: none; width: min(100%, 24rem); height: auto; }
 }

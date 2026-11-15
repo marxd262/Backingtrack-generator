@@ -84,7 +84,7 @@ async function wheelPoint(page, root, quality, ring = 'outer') {
 }
 
 test('Feintuning öffnet die Spielseite, zurück zur Startseite: Navigation ohne aria-expanded, hidden, Fokus', async ({ page }) => {
-  await expect(tuneBtn(page)).toHaveText('Feintuning');
+  await expect(tuneBtn(page)).toHaveText('Einstellen');
   // Feintuning navigiert und klappt nichts auf: kein aria-expanded, kein aria-controls
   await expect(tuneBtn(page)).not.toHaveAttribute('aria-expanded');
   await expect(tuneBtn(page)).not.toHaveAttribute('aria-controls');
@@ -146,26 +146,78 @@ test('Schlagworte nach Kategorien, mehrere pro Kategorie wählbar', async ({ pag
   await expect(drums.getByRole('button', { name: 'Halbzeit' })).toHaveAttribute('aria-pressed', 'true');
 });
 
-test('Schlagworte ohne Wirkung: gedämpft, mit Hinweis in beiden Sprachen, weiter wählbar', async ({ page }) => {
+test('Schlagworte greifbar: Kennbuchstaben für Spiel, Klang und Form, die Anzeige erklärt das berührte Wort, wirkungslose Wörter sind blass', async ({ page }) => {
   await openPlayPage(page);
   await openTags(page);
-  const withBreakouts = page.locator('#tags [data-tag="withBreakouts"]');
-  await expect(withBreakouts).toHaveClass(/\binert\b/);
-  await expect(withBreakouts).toHaveAttribute('title', 'noch ohne Wirkung');
-  await expect(withBreakouts).toHaveAttribute('aria-description', 'noch ohne Wirkung');
-  await expect(withBreakouts).toHaveAccessibleName('mit Ausbrüchen');
-  await expect(page.locator('#tags .inert')).toHaveCount(1);
-  // Schlagworte mit Wirkung tragen keinen Hinweis
-  const driving = page.locator('#tags [data-tag="driving"]');
-  await expect(driving).not.toHaveClass(/\binert\b/);
-  await expect(driving).not.toHaveAttribute('title', /./);
-  await withBreakouts.click();
-  await expect(withBreakouts).toHaveAttribute('aria-pressed', 'true');
-  await withBreakouts.click();
-  await expect(withBreakouts).toHaveAttribute('aria-pressed', 'false');
-  await page.locator('[data-lang="en"]').click();
-  await expect(withBreakouts).toHaveAttribute('title', 'no effect yet');
-  await expect(withBreakouts).toHaveAttribute('aria-description', 'no effect yet');
+  const tag = (id) => page.locator(`#tags [data-tag="${id}"]`);
+  const fx = page.locator('#tag-fx');
+  const marks = (id) => tag(id).getAttribute('data-marks');
+  // beim Öffnen liegt der Fokus auf dem ersten gewählten Wort: die Anzeige erklärt es sofort
+  await expect(fx).toHaveText('treibend\nSpiel, sofort: Antrieb +30 %');
+  await expect(page.locator('.tag-legend')).toHaveText(/S ändert das Spiel, K den Klang, F das Würfeln der Form/);
+  // Kennbuchstaben stehen nicht im Text des Worts (Name bleibt der Name)
+  expect(await marks('driving')).toBe('S');
+  expect(await marks('punchy')).toBe('K');
+  expect(await marks('dreamy')).toBe('S K');
+  expect(await marks('buildsSlowly')).toBe('F'); // mit Songform
+  expect(await marks('withBreakouts')).toBe('F');
+  await expect(tag('driving')).toHaveText('treibend');
+  await expect(tag('withBreakouts')).toHaveAccessibleName('mit Ausbrüchen');
+  await expect(tag('driving')).toHaveAttribute('aria-describedby', 'tag-fx');
+
+  // Spiel-Wort
+  await tag('driving').hover();
+  await expect(fx).toHaveText('treibend\nSpiel, sofort: Antrieb +30 %');
+  await expect(tag('driving')).not.toHaveClass(/\binert\b/);
+  // Form-Wort: wirkt beim nächsten Würfeln, ist also nicht wirkungslos
+  await tag('withBreakouts').hover();
+  await expect(fx).toHaveText('mit Ausbrüchen\nForm, beim nächsten Würfeln: öfter Break');
+  await expect(tag('withBreakouts')).not.toHaveClass(/\binert\b/);
+  // Klang-Wort am Sample-Kit (Standard): bewirkt nichts, blass (auch gewählt, im Stil Funk), die Anzeige sagt warum
+  await tag('punchy').hover();
+  await expect(fx).toHaveText('kräftig\nOhne Wirkung bei der gewählten Stimme: Schlagzeug: Kick-Punch +35 %, Kick-Länge −15 %, Snare-Knack +20 %');
+  await expect(tag('punchy')).toHaveClass(/\binert\b/);
+  await expect(tag('punchy')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#char-words .word-tag.inert')).toHaveText(['kräftig', 'knackig']);
+  // weiter wählbar, per Tastatur erklärt die Anzeige das fokussierte Wort
+  await tag('boomy').focus();
+  await expect(fx).toHaveText(/^dröhnend\nOhne Wirkung/);
+  await page.keyboard.press('Enter');
+  await expect(tag('boomy')).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Escape');
+
+  // mit dem Synth-Kit wirkt das Wort: nicht mehr blass, die Anzeige nennt die Regler; ein von Hand gestellter Knopf gewinnt
+  await page.locator('#voice-drums').selectOption('synth/classic');
+  await openTags(page);
+  await tag('punchy').hover();
+  await expect(fx).toHaveText('kräftig\nKlang, sofort: Schlagzeug: Kick-Punch +35 %, Kick-Länge −15 %, Snare-Knack +20 %');
+  await expect(tag('punchy')).not.toHaveClass(/\binert\b/);
+  await expect(page.locator('#char-words .word-tag.inert')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await page.locator('#timbre-drums-kickPunch').fill('90');
+  await openTags(page);
+  await tag('punchy').hover();
+  await expect(fx).toHaveText('kräftig\nKlang, sofort: Schlagzeug: Kick-Länge −15 %, Snare-Knack +20 %\nVom Knopf überstimmt (Zurücksetzen gibt ihn frei): Schlagzeug: Kick-Punch +35 %');
+
+  // ohne Songform: „baut langsam auf“ wirkt sofort aufs Spiel, „mit Ausbrüchen“ bewirkt nichts
+  await page.keyboard.press('Escape');
+  await page.locator('#form-template').selectOption('off');
+  await openTags(page);
+  expect(await marks('buildsSlowly')).toBe('S');
+  await tag('buildsSlowly').hover();
+  await expect(fx).toHaveText('baut langsam auf\nSpiel, sofort: Schichten setzen nach und nach ein');
+  await tag('withBreakouts').hover();
+  await expect(fx).toHaveText('mit Ausbrüchen\nBewirkt zurzeit nichts.');
+  await expect(tag('withBreakouts')).toHaveClass(/\binert\b/);
+
+  // Englisch: eigene Kennbuchstaben und Texte, keine rohen Schlüssel
+  await page.locator('[data-lang="en"]').click(); // der Klick daneben schließt das Fenster
+  await openTags(page);
+  expect(await marks('driving')).toBe('P');
+  expect(await marks('punchy')).toBe('S');
+  await tag('driving').hover();
+  await expect(fx).toHaveText('driving\nPlaying, at once: drive +30%'.replace('+30%', '+30 %'));
   expect(await rawKeysIn(page)).toEqual([]);
 });
 
@@ -445,7 +497,7 @@ test('keine rohen Schlüssel in beiden Sprachen auf der Spielseite', async ({ pa
   await openPlayPage(page);
   expect(await rawKeysIn(page)).toEqual([]);
   await page.locator('[data-lang="en"]').click();
-  await expect(tuneBtn(page)).toHaveText('Fine-tune');
+  await expect(tuneBtn(page)).toHaveText('Set up');
   await expect(page.locator('#play-back')).toHaveText('Backing track generator');
   await expect(page.locator('#play-back')).toHaveAttribute('title', 'To start page');
   expect(await rawKeysIn(page)).toEqual([]);

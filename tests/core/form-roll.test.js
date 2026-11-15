@@ -10,7 +10,7 @@ import { createRng } from '../../src/core/rng.js';
 
 const IDS = ['jam', 'pop', 'buildDrop', 'blues', 'rock'];
 const SIZES = [24, 32, 48, 64, 96, 128, 192];
-const MIN = { intro: 2, build: 2, break: 2, outro: 2, verse: 4, chorus: 4 };
+const MIN = { intro: 2, build: 2, break: 2, outro: 2, verse: 4, chorus: 4, bridge: 4 };
 const MAX_PART = 32;
 const TAGSETS = [{}, { development: ['buildsSlowly'] }, { development: ['fullFromStart'] }, { development: ['withBreakouts'] }, { development: ['buildsSlowly', 'withBreakouts'] }];
 const SEEDS = 200;
@@ -30,10 +30,13 @@ function broken(form, { jam, checkBars = true } = {}) {
     if (t[i] === 'build' && t[i + 1] !== 'chorus') return 'Aufbau nicht vor Refrain';
     if (t[i] === 'break' && (i === 0 || i === n - 1)) return 'Break am Rand';
     if (t[i] === 'break' && t[i + 1] === 'break') return 'zwei Breaks';
+    if (t[i] === 'bridge' && t[i - 1] !== 'chorus') return 'Bridge nicht hinter einem Refrain';
+    if (t[i] === 'bridge' && !['chorus', 'verse', 'build'].includes(t[i + 1])) return 'Bridge führt nicht in Strophe, Aufbau oder Refrain';
     if (!jam && i >= 2 && t[i] === t[i - 1] && t[i] === t[i - 2]) return 'drei gleiche';
     if (checkBars && (form.sections[i].bars < MIN[t[i]] || form.sections[i].bars > MAX_PART)) return `Länge ${t[i]}${form.sections[i].bars}`;
   }
   if (!jam && formLength(form) >= 24 && !t.includes('chorus')) return 'kein Refrain';
+  if (t.filter((x) => x === 'bridge').length > 1) return 'mehr als eine Bridge';
   return null;
 }
 
@@ -82,6 +85,40 @@ test('Leitplanken 1 bis 6, Summe nahe Ziel, gültig: Seeds x Vorlagen x Zielgrö
       if (Math.abs(sum - targetBars) > 4) assert.fail(`Summe ${sum} Ziel ${targetBars}: ${label(ctx, f)}`);
       if (template === 'blues' && !f.sections.every((s) => s.bars % 12 === 0)) assert.fail(`Blues nicht in 12ern: ${label(ctx, f)}`);
     }
+  }
+});
+
+test('Bridge: nur in Pop und Rock ab 48 Takten, bei etwa einem Drittel der Würfe, höchstens eine, 4 oder 8 Takte; Struktur 0 würfelt keine', () => {
+  const share = (template, targetBars, structure = FEEL_DEFAULTS.structure) => {
+    let n = 0;
+    for (let seed = 1; seed <= SEEDS; seed++) {
+      const f = rollForm({ template, targetBars, seed, feel: { structure } });
+      const bridges = f.sections.filter((s) => s.type === 'bridge');
+      assert.ok(bridges.length <= 1, label({ template, targetBars, seed }, f));
+      for (const b of bridges) assert.ok(b.bars >= 4 && b.bars <= 8, label({ template, targetBars, seed }, f));
+      n += bridges.length;
+    }
+    return n / SEEDS;
+  };
+  for (const template of ['jam', 'buildDrop', 'blues']) for (const size of [48, 96, 192]) assert.equal(share(template, size), 0, template);
+  for (const template of ['pop', 'rock']) {
+    for (const size of [24, 32]) assert.equal(share(template, size), 0, `${template} ${size}`);
+    for (const size of [64, 96, 128]) {
+      const s = share(template, size);
+      assert.ok(s > 0.1 && s < 0.5, `${template} ${size}: ${s}`);
+    }
+    assert.equal(share(template, 96, 0), 0, `${template}: Struktur 0`);
+    assert.ok(share(template, 96, 1) > share(template, 96), `${template}: mehr Struktur, mehr Bridges`);
+  }
+});
+
+test('Bridge: ein gesperrter Bridge-Teil bleibt beim Neuwürfeln stehen; der Start der App (Funk, Vorlage Auto = Jam) würfelt nie eine', () => {
+  const previous = { sections: [{ type: 'verse', bars: 8 }, { type: 'chorus', bars: 8 }, { type: 'bridge', bars: 8, locked: true }, { type: 'chorus', bars: 8 }] };
+  for (let seed = 1; seed <= 50; seed++) {
+    const f = rollForm({ template: 'pop', targetBars: 64, seed, previous });
+    assert.deepEqual(f.sections[2], { type: 'bridge', bars: 8, locked: true }, label({ seed }, f));
+    assert.deepEqual(reasons(f), []);
+    assert.ok(!types(rollForm({ template: 'auto', style: 'funk', targetBars: 96, seed })).includes('bridge'));
   }
 });
 

@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { sliderGain, MIX_NAMES } from '../../src/audio/mix.js';
-import { MIX_KEY, DEFAULT_MIX, loadMix, saveMix } from '../../src/ui/mix-state.js';
+import { MIX_KEY, DEFAULT_MIX, DEFAULT_PAN, loadMix, loadPan, saveMix } from '../../src/ui/mix-state.js';
+import { MIX_TUNABLES } from '../../src/audio/voices/tunables.js';
 import { stepVariant } from '../../src/ui/variant.js';
 
 const storageWith = (raw) => ({ getItem: () => raw });
@@ -38,6 +39,19 @@ test('loadMix: gültige Werte bleiben, ungültige einzeln auf 1, unbekannte Schl
   const raw = JSON.stringify({ drums: 0.5, bass: 0, chords: 1.5, pad: 'laut', master: -1, extra: 0.2 });
   assert.deepEqual(loadMix(storageWith(raw)), { drums: 0.5, bass: 0, chords: 1, pad: 1, lead: 1, percussion: 1, master: 1 });
   assert.deepEqual(loadMix(storageWith('{"master":0.3}')), { ...DEFAULT_MIX, master: 0.3 });
+});
+
+test('Pan: Standard sind die Feinwerte mix/pan; im selben Eintrag gemerkt, ältere Einträge ohne pan und ungültige Werte geben den Standard', () => {
+  for (const [name, pan] of Object.entries(DEFAULT_PAN)) assert.equal(pan, MIX_TUNABLES['mix/pan'][name].value, name);
+  assert.deepEqual(Object.keys(DEFAULT_PAN), ['drums', 'bass', 'chords', 'pad', 'lead', 'percussion']);
+  assert.deepEqual(loadPan(storageWith('{"drums":0.5}')), DEFAULT_PAN);
+  assert.deepEqual(loadPan(storageWith('{"pan":{"bass":-1,"pad":2,"lead":"x"}}')), { ...DEFAULT_PAN, bass: -1 });
+  assert.deepEqual(loadPan(null), DEFAULT_PAN);
+  const data = {};
+  const storage = { getItem: (k) => data[k] ?? null, setItem: (k, v) => { data[k] = v; } };
+  saveMix(storage, { ...DEFAULT_MIX, bass: 0.5 }, { ...DEFAULT_PAN, lead: 0.7 });
+  assert.deepEqual(loadPan(storage), { ...DEFAULT_PAN, lead: 0.7 });
+  assert.deepEqual(loadMix(storage), { ...DEFAULT_MIX, bass: 0.5 });
 });
 
 test('saveMix -> loadMix Rundreise; gesperrter Speicher wirft nicht', () => {

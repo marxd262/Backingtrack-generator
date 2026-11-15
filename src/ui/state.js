@@ -3,11 +3,12 @@ import { STYLE_PRESETS } from '../index.js';
 import { detectLanguage } from '../i18n/index.js';
 import { progressionFor } from '../core/progressions.js';
 import { loadLayout } from './layout-state.js';
-import { loadMix } from './mix-state.js';
+import { loadMix, loadPan } from './mix-state.js';
 import { LAYER_IDS, layerDefaults, completeJobs } from '../core/layers.js';
 import { chordName } from '../core/chords.js';
 import { colorProgression } from '../core/harmony.js';
 import { styleChordColor } from '../core/tags.js';
+import { completeVoices } from '../core/voices.js';
 import { METERS, meterKey, convertTempo } from '../core/grooves.js';
 import { SCALE_MODE } from '../core/music.js';
 import { rollForm } from '../core/form-roll.js';
@@ -60,6 +61,7 @@ export const state = {
     bpm: funk.bpm,
     bars: [],
     tags: structuredClone(funk.tags),
+    voices: completeVoices(funk.voices), // Stimmen-Vorschlag des Stils; jede lässt sich im Rack ändern
     timbre: {}, // Klangregler: nur die vom Nutzer gesetzten Felder { gruppe: { feld: 0..1 } }, über den Schlagworten
     layers: layerDefaults(),
     jobs: completeJobs(), // Aufgabe je Schicht mit Aufgaben (Lead, Percussion)
@@ -80,6 +82,8 @@ export const state = {
   page: 'start', // 'start' | 'play'
   layout: loadLayout(layoutStorage), // Fokus/Einstellen, Beschriftung, Bünde; Änderungen über saveLayout
   mix: loadMix(layoutStorage), // Mischpult-Regler { <Schicht-ids>, master }, je 0..1; Änderungen über saveMix
+  pan: loadPan(layoutStorage), // Lage je Schicht im Panorama, -1 links .. 1 rechts; mit dem Mix gemerkt
+  organ: { leslie: 'auto', drive: null }, // Orgel im Akkord-Modul: Leslie-Wähler und Zerre (null = die des Presets), siehe organ-tuning.js
   current: null, // { bar, chord } aus onBar
   errors: [], // [{ code, params }], übersetzt erst in render()
   notice: null, // Schlüssel einer Hinweis-Meldung der Akkordfolge, z. B. volle Folge
@@ -119,6 +123,8 @@ export function applyStyle(id) {
   // das Stiltempo ist ein Viertel-Tempo: in 6/8 und 12/8 (Puls = punktierte Viertel) gilt dieselbe Achtelgeschwindigkeit
   state.track.bpm = convertTempo(p.bpm, '4/4', meterKey(state.track.meter));
   state.track.tags = structuredClone(p.tags);
+  // der Stil schlägt Stimmen vor (Bass, Akkorde, Schlagzeug) und setzt sie wie die Schlagworte; die übrigen Schichten behalten ihre Wahl
+  state.track.voices = completeVoices({ ...state.track.voices, ...p.voices });
   state.track.timbre = {}; // neue Vorlage, neuer Ausgangspunkt für die Regler
   if (state.track.form?.auto) rollNewForm(); // Vorlage Auto folgt dem Stil (gesperrte Teile bleiben)
 }

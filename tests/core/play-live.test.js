@@ -14,14 +14,14 @@ const makeCtx = () => ({ currentTime: 0, destination: node(), createGain: node }
 
 // Spion-Instrumente: merken sich Aufrufe von trigger und setTimbre
 function spy() {
-  const calls = { trigger: [], timbre: [], voices: [], created: [] };
+  const calls = { trigger: [], timbre: [], voices: [], tuning: [], created: [] };
   const create = (_ctx, options) => {
     calls.created.push(options);
     const layers = {};
     for (const name of ['drums', 'bass', 'chords', 'pad']) {
       layers[name] = { trigger: (e, when) => calls.trigger.push({ layer: name, e, when }), setMuted() {} };
     }
-    return { output: node(), layers, setTimbre: (x) => calls.timbre.push(x), setVoices: (x) => calls.voices.push(x) };
+    return { output: node(), layers, setTimbre: (x) => calls.timbre.push(x), setVoices: (x) => calls.voices.push(x), setTuning: (x) => calls.tuning.push(x) };
   };
   return { calls, create };
 }
@@ -265,4 +265,25 @@ test('songTime zählt die Liedzeit ab Liedanfang, folgt setTempo und bleibt nach
   ctx.currentTime += 5;
   assert.equal(h.songTime(), last);
   await tick();
+});
+
+test('tuning: play gibt die Feinwerte an die Instrumente, setTuning ersetzt sie live, nach stop() ohne Wirkung', async () => {
+  const seen = [];
+  const calls = [];
+  const create = (ctx, options) => {
+    seen.push(options.tuning);
+    const node = () => ({ connect: (x) => x, disconnect() {}, gain: { value: 1, cancelScheduledValues() {}, setValueAtTime() {}, linearRampToValueAtTime() {} } });
+    const layers = Object.fromEntries(['drums', 'bass', 'chords', 'pad', 'lead', 'percussion'].map((l) => [l, { trigger() {}, setMuted() {} }]));
+    return { output: node(), layers, setTuning: (x) => calls.push(x) };
+  };
+  const tuning = { 'chords/organ/jazz': { leslie: 3 } };
+  const h = play(makeCtx(), track(), { loops: Infinity, createInstruments: create, tuning });
+  try {
+    assert.equal(seen[0], tuning);
+    const next = { 'chords/organ/jazz': { drive: 0.8 } };
+    h.setTuning(next);
+    assert.deepEqual(calls, [next]);
+  } finally { h.stop(); }
+  h.setTuning({});
+  assert.equal(calls.length, 1);
 });

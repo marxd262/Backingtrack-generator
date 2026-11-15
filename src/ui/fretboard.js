@@ -9,9 +9,10 @@ import { chordName, setAttr, setText } from './state.js';
 const NS = 'http://www.w3.org/2000/svg';
 const MIN_W = 640; // schmaler wird der Behälter waagerecht gescrollt, das Brett bleibt so breit
 const NUT_X = 46; // links davon die Leersaiten-Töne
-const PAD = 8; // das Brett ragt so weit über die äußeren Saiten
 const NUM_H = 18; // eigene Zeile der Bundzahlen unter dem Brett
-const NOTE_R = 11; // Notenradius, in engen Bünden höchstens 40 % der Bundbreite
+const NOTE_R = 17; // größter Notenradius; kleiner, wo der Platz fehlt: höchstens 36 % des Saitenabstands und 44 % der Bundbreite
+const RING = 4; // Grundton-Ring samt Strich über den Notenradius hinaus: so weit ragt das Brett mindestens über eine Note
+const OPEN_R = 15; // Leersaiten: links vom Sattel ist nur NUT_X Platz (mit Grundton-Ring)
 const MARKS = [3, 5, 7, 9, 12, 15, 17, 19, 21];
 
 function el(name, attrs, parent) {
@@ -47,9 +48,12 @@ export function createFretboard(container) {
     svg?.remove();
 
     const right = w - 6;
-    const sh = Math.max((h - NUM_H - 4 - 2 * PAD) / 5, 0);
-    const stringY = (string) => 2 + PAD + string * sh;
-    const boardH = 5 * sh + 2 * PAD;
+    // Saitenabstand sh und Rand pad (das Brett ragt um Notenradius plus Ring über die äußeren Saiten, keine Note wird abgeschnitten):
+    // 5 sh + 2 pad = Bretthöhe, pad = Radius + RING, Radius = 0,36 sh, höchstens NOTE_R
+    const boardH = Math.max(h - NUM_H - 4, 0);
+    const sh = Math.max((boardH - 2 * RING) / 5.72, (boardH - 2 * (NOTE_R + RING)) / 5, 0);
+    const pad = (boardH - 5 * sh) / 2;
+    const stringY = (string) => 2 + pad + string * sh;
     // echt: Abstand zum Sattel = Mensur * (1 - 2^(-n/12)), Bund 22 endet am Rand; gleich: alle Bünde gleich breit
     const span = right - NUT_X;
     const scaleLength = span / (1 - 2 ** (-FRETS / 12));
@@ -77,7 +81,7 @@ export function createFretboard(container) {
     cells = [];
     STANDARD_TUNING.forEach((_, string) => {
       for (let fret = 0; fret <= FRETS; fret++) {
-        const r = fret === 0 ? NOTE_R : Math.min(NOTE_R, 0.4 * (wireX(fret) - wireX(fret - 1)));
+        const r = Math.min(NOTE_R, 0.36 * sh, fret === 0 ? OPEN_R : 0.44 * (wireX(fret) - wireX(fret - 1)));
         const g = el('g', { class: 'fret-note', 'data-string': string, 'data-fret': fret, 'data-role': '', hidden: '', style: `--r:${r.toFixed(1)}px`, transform: `translate(${noteX(fret).toFixed(1)} ${stringY(string).toFixed(1)})` }, svg);
         el('circle', { class: 'ring' }, g);
         el('rect', { class: 'dot' }, g);

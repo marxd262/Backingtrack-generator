@@ -20,7 +20,11 @@ const track = (extra = {}) => ({
 });
 
 test('Konstanten: Typen, Übergänge, Grenzen, Standardregler, Tabelle', () => {
-  assert.deepEqual([...PART_TYPES], ['intro', 'verse', 'build', 'chorus', 'break', 'outro']);
+  assert.deepEqual([...PART_TYPES], ['intro', 'verse', 'build', 'chorus', 'bridge', 'break', 'outro']);
+  // Bridge: volle Band ohne Lead und Percussion, leiser und ruhiger als der Refrain, lauter und dichter als die Strophe
+  assert.deepEqual([...TYPE_TABLE.bridge.layers].sort(), ['bass', 'chords', 'drums', 'pad']);
+  assert.ok(TYPE_TABLE.bridge.level[0] < TYPE_TABLE.chorus.level[0] && TYPE_TABLE.bridge.level[0] > TYPE_TABLE.verse.level[0]);
+  assert.ok(TYPE_TABLE.bridge.density[0] < TYPE_TABLE.chorus.density[0] && TYPE_TABLE.bridge.density[0] > TYPE_TABLE.verse.density[0]);
   assert.deepEqual([...TRANSITIONS], ['none', 'fill', 'roll', 'stop']);
   assert.deepEqual({ ...FEEL_DEFAULTS }, { structure: 0.6, dynamics: 0.6, pauses: 0.4, randomness: 0.5 });
   assert.equal(FORM_LIMITS.parts, 64);

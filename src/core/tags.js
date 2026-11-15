@@ -16,50 +16,55 @@ export const TAG_CATEGORIES = [
   { id: 'padSound', tags: ['swelling', 'airy', 'glassy', 'thick', 'moving'] },
 ];
 
+// Stimmen-Vorschlag eines Stils (SPEC_PHASE3, Antwort auf Frage 16): Sample-Varianten für Bass, Akkorde und Schlagzeug; die Stilwahl der
+// Oberfläche schreibt sie in track.voices, der Nutzer kann jede danach ändern. Pad, Lead und Percussion schlägt kein Stil vor.
+// Die Tabelle stammt aus den Spielregeln (Rock: Pick-Bass, Country: Kontrabass und Stahlsaiten, Reggae: Seitenschlag ...) und ist ungehört.
+const sampleVoices = (bass, chords, drums) => Object.freeze(Object.fromEntries(Object.entries({ bass, chords, drums }).map(([layer, variant]) => [layer, Object.freeze({ id: 'sample', variant })])));
+
 export const STYLE_PRESETS = [
   {
-    id: 'funk', bpm: 100,
+    id: 'funk', bpm: 100, voices: sampleVoices('finger', 'funk', 'standard'),
     tags: { drums: ['driving', 'dry'], bass: ['bouncy'], synths: [], rhythm: ['funky', 'syncopated'], mood: [], development: ['buildsSlowly'],
       drumSound: ['punchy', 'snappy'], bassSound: ['plucky'], chordSound: ['biting'], padSound: [] },
   },
   {
-    id: 'psych', bpm: 112,
+    id: 'psych', bpm: 112, voices: sampleVoices('finger', 'twelve', 'standard'),
     tags: { drums: ['driving'], bass: ['deepFat'], synths: ['arpeggio', 'widePad', 'shimmering'], rhythm: ['straight'], mood: ['psychedelic'], development: ['buildsSlowly'],
       drumSound: [], bassSound: ['fuzz'], chordSound: ['chorused'], padSound: ['swelling', 'glassy'] },
   },
   {
-    id: 'dreamy', bpm: 80,
+    id: 'dreamy', bpm: 80, voices: sampleVoices('finger', 'epiano', 'brushes'),
     tags: { drums: ['halftime', 'loose'], bass: ['calm'], synths: ['widePad', 'warm'], rhythm: [], mood: ['dreamy'], development: ['buildsSlowly'],
       drumSound: ['roomy'], bassSound: ['round'], chordSound: ['mellow'], padSound: ['airy', 'swelling'] },
   },
   // Gitarren-Stile (siehe docs/superpowers/specs/2026-11-09-guitar-styles-design.md); nur aus vorhandenen Schlagworten gebaut
   {
-    id: 'blues', bpm: 88, chordColor: 'sevenths', chordColorAlt: 'extended',
+    id: 'blues', bpm: 88, voices: sampleVoices('finger', 'jazz', 'jazz'), chordColor: 'sevenths', chordColorAlt: 'extended',
     tags: { drums: ['loose'], bass: ['bouncy'], synths: ['warm'], rhythm: ['swing'], mood: [], development: ['fullFromStart'],
       drumSound: ['roomy'], bassSound: ['round'], chordSound: ['mellow'], padSound: [] },
   },
   {
-    id: 'rock', bpm: 124,
+    id: 'rock', bpm: 124, voices: sampleVoices('pick', 'guitar', 'standard'),
     tags: { drums: ['driving', 'heavy'], bass: ['gritty'], synths: [], rhythm: ['straight'], mood: ['bright'], development: ['fullFromStart'],
       drumSound: ['punchy', 'snappy'], bassSound: ['resonant'], chordSound: ['biting'], padSound: ['thick'] },
   },
   {
-    id: 'hardrock', bpm: 148, chordColor: 'power', chordColorAlt: 'triads',
+    id: 'hardrock', bpm: 148, voices: sampleVoices('pick', 'muted', 'standard'), chordColor: 'power', chordColorAlt: 'triads',
     tags: { drums: ['driving', 'heavy'], bass: ['deepFat', 'gritty'], synths: ['deepSynths'], rhythm: ['straight'], mood: ['dark'], development: ['fullFromStart'],
       drumSound: ['boomy'], bassSound: ['fuzz'], chordSound: ['biting', 'ringing'], padSound: [] },
   },
   {
-    id: 'reggae', bpm: 76,
+    id: 'reggae', bpm: 76, voices: sampleVoices('finger', 'muted', 'rimshot'),
     tags: { drums: ['halftime', 'loose'], bass: ['calm', 'deepFat'], synths: ['warm'], rhythm: ['syncopated'], mood: [], development: ['fullFromStart'],
       drumSound: ['roomy'], bassSound: ['sub', 'round'], chordSound: ['biting'], padSound: [] },
   },
   {
-    id: 'country', bpm: 112,
+    id: 'country', bpm: 112, voices: sampleVoices('upright', 'steel', 'brushes'),
     tags: { drums: ['dry'], bass: ['bouncy'], synths: [], rhythm: ['straight'], mood: ['bright'], development: ['fullFromStart'],
       drumSound: ['crisp'], bassSound: ['plucky'], chordSound: ['ringing'], padSound: ['airy'] },
   },
   {
-    id: 'poppunk', bpm: 172, chordColor: 'power', chordColorAlt: 'triads',
+    id: 'poppunk', bpm: 172, voices: sampleVoices('pick', 'muted', 'standard'), chordColor: 'power', chordColorAlt: 'triads',
     tags: { drums: ['driving', 'heavy'], bass: ['bouncy'], synths: [], rhythm: ['straight'], mood: ['bright'], development: ['fullFromStart'],
       drumSound: ['crisp', 'snappy'], bassSound: ['plucky'], chordSound: ['biting'], padSound: ['thick'] },
   },
@@ -105,7 +110,10 @@ const EFFECTS = {
   fullFromStart: { buildUp: 'instant' },
 };
 
-/** Schlagwort-IDs ohne Eintrag in Muster- und Klangtabelle: wählbar, ändern aber nichts. */
+/** Wirkung der Schlagworte auf das Spiel (Musterwerte), für die Anzeige im Schlagwort-Fenster der Oberfläche. */
+export const TAG_PLAY_EFFECTS = Object.freeze(Object.fromEntries(Object.entries(EFFECTS).map(([tag, fx]) => [tag, Object.freeze({ ...fx })])));
+
+/** Schlagwort-IDs ohne Eintrag in Muster- und Klangtabelle: wählbar, ändern aber nichts (`withBreakouts` wirkt nur beim Würfeln der Songform). */
 export const INERT_TAGS = Object.freeze(TAG_CATEGORIES.flatMap((c) => c.tags)
   .filter((tag) => !Object.hasOwn(EFFECTS, tag) && !Object.hasOwn(TIMBRE_EFFECTS, tag)));
 

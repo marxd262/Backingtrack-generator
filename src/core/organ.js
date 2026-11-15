@@ -9,6 +9,9 @@
 import { r6 } from './timeline.js';
 import { levelAt } from './form-types.js';
 
+/** Stellungen des Leslie-Wählers der Oberfläche, in seiner Reihenfolge; `auto` folgt den Regeln unten (schnell in Refrain und Aufbau). */
+export const LESLIE_MODES = Object.freeze(['off', 'slow', 'auto', 'fast']);
+
 /** out: Ereignisse (werden geändert); env: aus articulate (track, bars, ctx = Kontext je Takt) und die Abschnitte der Songform. */
 export function organRules(out, { track, bars, ctx, sections }) {
   if (track.voices?.chords?.id !== 'organ') return;

@@ -191,7 +191,7 @@ test('Mix überlebt das Neuladen, Stummschaltungen nicht; kaputter Speicher wird
   await slider(page, 'bass').fill('40');
   await slider(page, 'master').fill('70');
   await mixMute(page, 'chords').click();
-  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('backingtrack.mix')))).toEqual({ drums: 1, bass: 0.4, chords: 1, pad: 1, lead: 1, percussion: 1, master: 0.7 });
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('backingtrack.mix')))).toEqual({ drums: 1, bass: 0.4, chords: 1, pad: 1, lead: 1, percussion: 1, master: 0.7, pan: { drums: 0, bass: 0, chords: 0.3, pad: -0.2, lead: 0, percussion: -0.4 } });
   await page.reload();
   await expect(page.locator('#go')).toHaveText(/\S/);
   await openPlayPage(page);
@@ -424,4 +424,70 @@ test('Fader springt während der Wiedergabe nicht: kein Schreiben ins Eingabefel
   expect(await writes(), 'gezogener Fader wird nicht neu gesetzt').toBe(0);
   await page.mouse.up();
   await expect(playGo(page)).toHaveText('Stopp');
+});
+
+// Pan je Kanal und Pegelanzeige (UI-Schritt 2)
+const pan = (page, name) => page.locator(`#pan-${name}`);
+const meterLevel = (page, name) => page.locator(`#mixer .mix-ch:has(#mix-${name}) .meter`).evaluate((el) => Number(getComputedStyle(el).getPropertyValue('--level') || 0));
+
+test('Pan je Kanal: Standard ist die Lage im Panorama, wirkt live ohne Neustart, wird gemerkt, Doppelklick stellt den Standard wieder her', async ({ page }) => {
+  await openPlayPage(page);
+  await showMixer(page);
+  await expect(page.locator('#mixer input[id^="pan-"]')).toHaveCount(6); // der Gesamtkanal hat keinen
+  for (const [name, value] of [['drums', '0'], ['bass', '0'], ['chords', '30'], ['pad', '-20'], ['lead', '0'], ['percussion', '-40']]) await expect(pan(page, name), name).toHaveValue(value);
+  await expect(pop(page).getByRole('slider', { name: 'Pan Akkorde', exact: true })).toHaveAttribute('aria-valuetext', '30 % rechts');
+  await expect(pan(page, 'pad')).toHaveAttribute('aria-valuetext', '20 % links');
+  await expect(pan(page, 'bass')).toHaveAttribute('aria-valuetext', 'Mitte');
+
+  await playFast(page);
+  expect(await contexts(page)).toBe(1);
+  const before = await shownBar(page);
+  await recordPositions(page);
+  await page.evaluate(() => { window.__targets.length = 0; });
+  await pan(page, 'bass').fill('50');
+  // Balance: links 1 - pan, rechts 1 + pan
+  await expect.poll(() => targets(page)).toEqual(expect.arrayContaining([0.5, 1.5]));
+  await expect(pan(page, 'bass')).toHaveAttribute('aria-valuetext', '50 % rechts');
+  await expectKeepsCounting(page, before, 'Pan');
+  expect(await contexts(page)).toBe(1);
+  expect((await page.evaluate(() => JSON.parse(localStorage.getItem('backingtrack.mix')))).pan.bass).toBe(0.5);
+  await playGo(page).click();
+
+  // Tastatur und Doppelklick
+  await pan(page, 'chords').focus();
+  await page.keyboard.press('ArrowLeft');
+  await expect(pan(page, 'chords')).toHaveValue('29');
+  await page.locator('.knob:has(#pan-chords)').dblclick();
+  await expect(pan(page, 'chords')).toHaveValue('30');
+
+  await page.reload();
+  await expect(page.locator('#go')).toHaveText(/\S/);
+  await openPlayPage(page);
+  await expect(pan(page, 'bass')).toHaveValue('50');
+  await expect(pan(page, 'chords')).toHaveValue('30');
+});
+
+test('Pegelanzeige: leuchtet bei laufender Wiedergabe je Kanal und am Gesamtkanal, stumme Schicht bleibt dunkel, nach dem Stopp läuft sie zurück', async ({ page }) => {
+  await openPlayPage(page);
+  await showMixer(page);
+  await expect(page.locator('#mixer .meter')).toHaveCount(7);
+  for (const name of ['drums', 'master']) expect(await meterLevel(page, name), name).toBe(0);
+  await mixMute(page, 'bass').click();
+  await page.locator('#form-template').selectOption('off'); // ohne Form spielt das Schlagzeug vom ersten Takt an (ein gewürfeltes Intro ließe es schweigen)
+  await playFast(page);
+  for (const name of ['drums', 'master']) await expect.poll(() => meterLevel(page, name), { message: name, timeout: BAR_TIMEOUT }).toBeGreaterThan(0);
+  expect(await meterLevel(page, 'bass')).toBe(0); // gemessen wird hinter Fader und Stumm
+  await playGo(page).click();
+  for (const name of ['drums', 'master']) await expect.poll(() => meterLevel(page, name), { message: name, timeout: BAR_TIMEOUT }).toBe(0);
+});
+
+test('Modul Gesamtklang: eigenes Modul neben dem Mixer mit dem Schalter Alle Samples und den sechs Gesamt-Knöpfen', async ({ page }) => {
+  await openPlayPage(page);
+  await expect(page.getByRole('region', { name: 'Gesamtklang' })).toBeVisible();
+  await expect(page.locator('#mod-master #all-voices')).toHaveCount(1);
+  await expect(page.locator('#mod-master #mixer-master input[type="range"]')).toHaveCount(6);
+  await expect(page.locator('#mod-mixer #mixer-master, #mod-mixer #all-voices')).toHaveCount(0);
+  await page.getByRole('button', { name: /^EN/i }).click();
+  await expect(page.locator('#mod-master-title')).toHaveText('Master sound');
+  await expect(page.locator('#mod-mixer').getByRole('slider', { name: 'Pan Bass', exact: true })).toHaveAttribute('aria-valuetext', 'centre');
 });

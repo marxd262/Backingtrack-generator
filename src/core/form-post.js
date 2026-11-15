@@ -5,7 +5,7 @@ import { byTime, roundVel } from './event-helpers.js';
 import { r6 } from './timeline.js';
 
 /** Wahrscheinlichkeit einer Pause je Teil-Typ (mal Regler `pauses`). Der Bass pausiert nie: nur im Break dürfte er, und dort ist der Faktor 0. */
-const PAUSE_FACTOR = { verse: 0.6, chorus: 0.25, intro: 0.5, outro: 0.5, build: 0, break: 0 };
+const PAUSE_FACTOR = { verse: 0.6, chorus: 0.25, bridge: 0.25, intro: 0.5, outro: 0.5, build: 0, break: 0 };
 const PAUSE_LAYERS = ['chords', 'pad', 'lead', 'percussion', 'drums'];
 const KEEP = new Set(['kick', 'hat', 'openHat']); // das Schlagzeug pausiert nie ganz
 const STOP_TWO_BEATS = 0.6; // ab diesem Regler zwei Schläge Stille

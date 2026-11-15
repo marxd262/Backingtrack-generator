@@ -1,6 +1,6 @@
 // Die 10 Teile eines Profils: aus der Sitzung festhalten (captureParts), aus fremden Daten bereinigen (sanitizeParts) und auf eine
 // Sitzung anwenden (applyParts). Reine Logik ohne DOM und Audio; die Sitzung hat die Form des Oberflächenzustands
-// { track, scale, style, chordColor, chordColorFromStyle, mix } (src/ui/state.js).
+// { track, scale, style, chordColor, chordColorFromStyle, mix, pan, organ } (src/ui/state.js).
 import { normalizeTrack, validateTrack } from './track.js';
 import { isValidKey, SCALE_NAMES, SCALE_MODE } from './music.js';
 import { isMeter, meterKey, convertTempo, METERS, GROOVES } from './grooves.js';
@@ -9,6 +9,7 @@ import { isJob, completeJobs, LAYER_IDS } from './layers.js';
 import { STYLE_PRESETS } from './tags.js';
 import { CHORD_COLORS } from './harmony.js';
 import { DEFAULT_TIMBRE } from './timbre.js';
+import { LESLIE_MODES } from './organ.js';
 import { normalizeForm, isValidForm, formLength } from './form.js';
 import { FEEL_DEFAULTS, DYNAMICS_MAX, FORM_LIMITS } from './form-types.js';
 import { rollForm, resolveTemplate, TEMPLATE_IDS, TARGET_SIZES } from './form-roll.js';
@@ -32,13 +33,14 @@ const MAX_BARS = 512;
 const CAPTURE = {
   harmony: ({ track: t, scale, chordColor, chordColorFromStyle }) => ({ key: t.key, scale, bars: t.bars, chordColor, chordColorFromStyle, meter: t.meter }),
   tempo: ({ track: t }) => ({ bpm: t.bpm, meter: t.meter }), // bpm zählt den Puls dieser Taktart (applyParts rechnet um)
-  rhythm: ({ track: t }) => ({ groove: t.groove ?? null, complexity: t.complexity ?? null, loose: t.loose ?? null, length: t.length }),
+  rhythm: ({ track: t }) => ({ groove: t.groove ?? null, complexity: t.complexity ?? null, loose: t.loose ?? null, ornaments: t.ornaments ?? null, length: t.length }),
   style: ({ track: t, style }) => ({ style, tags: t.tags }),
-  sound: ({ track: t }) => ({ timbre: t.timbre ?? {} }),
+  // organ (Leslie-Wähler und Zerre der Orgel) fehlt in Sitzungen ohne diese Knöpfe
+  sound: ({ track: t, organ }) => (organ ? { timbre: t.timbre ?? {}, organ } : { timbre: t.timbre ?? {} }),
   // vollständig (auch die Standardwerte): Laden mischt je Schlüssel, ein leeres Objekt könnte den Standard nie zurückholen
   voices: ({ track: t }) => ({ voices: completeVoices(t.voices), jobs: completeJobs(t.jobs) }),
   layers: ({ track: t }) => ({ layers: t.layers }),
-  mixer: ({ mix }) => ({ mix }),
+  mixer: ({ mix, pan }) => (pan ? { mix, pan } : { mix }), // pan (Lage je Schicht) fehlt in Sitzungen ohne Pan-Knöpfe
   variant: ({ track: t }) => ({ seed: t.seed, variety: t.variety }),
   // ohne (gültige) Form gibt es keinen Teil: captureParts lässt ihn dann weg
   form: ({ track: t }) => (isValidForm(t.form) ? { form: normalizeForm(t.form) } : undefined),
@@ -123,6 +125,7 @@ function sanitize(raw) {
       if ('groove' in f) { if (f.groove === null || (typeof f.groove === 'string' && Object.hasOwn(GROOVES, f.groove))) out.groove = f.groove; else bad(); }
       if ('complexity' in f) { if (f.complexity === null || num01(f.complexity)) out.complexity = f.complexity; else bad(); }
       if ('loose' in f) { if (f.loose === null || num01(f.loose)) out.loose = f.loose; else bad(); }
+      if ('ornaments' in f) { if (f.ornaments === null || num01(f.ornaments)) out.ornaments = f.ornaments; else bad(); }
       if ('length' in f) { if (typeof f.length === 'number' && trackOk({ length: f.length }, 'badLength')) out.length = f.length; else bad(); }
     },
     style(f, out) {
@@ -136,6 +139,15 @@ function sanitize(raw) {
       }
     },
     sound(f, out) {
+      if ('organ' in f) {
+        if (!isPlain(f.organ)) bad();
+        else {
+          const g = fields(f.organ), organ = {};
+          if ('leslie' in g) { if (LESLIE_MODES.includes(g.leslie)) organ.leslie = g.leslie; else bad(); }
+          if ('drive' in g) { if (g.drive === null || num01(g.drive)) organ.drive = g.drive; else bad(); }
+          if (Object.keys(organ).length) out.organ = organ;
+        }
+      }
       if (!('timbre' in f)) return;
       if (!isPlain(f.timbre)) return bad();
       const groups = dict(f.timbre, Object.keys(DEFAULT_TIMBRE), isPlain, (g, group) => dict(g, Object.keys(DEFAULT_TIMBRE[group]), num01));
@@ -153,6 +165,7 @@ function sanitize(raw) {
     },
     mixer(f, out) {
       if ('mix' in f) { const m = dict(f.mix, MIX_NAMES, num01); if (nonEmpty(m)) out.mix = m; }
+      if ('pan' in f) { const p = dict(f.pan, LAYER_IDS, (v) => typeof v === 'number' && v >= -1 && v <= 1); if (nonEmpty(p)) out.pan = p; }
     },
     variant(f, out) {
       if ('seed' in f) { if (Number.isInteger(f.seed) && f.seed >= 0 && f.seed <= MAX_SEED) out.seed = f.seed; else bad(); }
@@ -230,7 +243,7 @@ export function applyParts(session, parts) {
   // bpm in der Taktart des Profils -> Taktart nach dem Laden (harmony ist schon angewendet); ohne meter (ältere Profile) wie gespeichert
   if (tempo && has(tempo, 'bpm')) t.bpm = has(tempo, 'meter') ? convertTempo(tempo.bpm, meterKey(tempo.meter), meterKey(t.meter)) : tempo.bpm;
   if (r) {
-    for (const k of ['groove', 'complexity', 'loose']) if (has(r, k)) { if (r[k] === null) delete t[k]; else t[k] = r[k]; }
+    for (const k of ['groove', 'complexity', 'loose', 'ornaments']) if (has(r, k)) { if (r[k] === null) delete t[k]; else t[k] = r[k]; }
     if (has(r, 'length')) t.length = r.length;
   }
   if (style) {
@@ -238,12 +251,14 @@ export function applyParts(session, parts) {
     if (has(style, 'tags')) t.tags = style.tags;
   }
   if (sound && has(sound, 'timbre')) t.timbre = sound.timbre;
+  if (sound && has(sound, 'organ')) s.organ = { ...s.organ, ...sound.organ }; // ältere Profile ohne organ lassen Leslie und Zerre, wie sie sind
   if (voices) {
     if (has(voices, 'voices')) t.voices = { ...t.voices, ...voices.voices };
     if (has(voices, 'jobs')) t.jobs = { ...t.jobs, ...voices.jobs };
   }
   if (layers && has(layers, 'layers')) t.layers = { ...t.layers, ...layers.layers };
   if (mixer && has(mixer, 'mix')) s.mix = { ...s.mix, ...mixer.mix };
+  if (mixer && has(mixer, 'pan')) s.pan = { ...s.pan, ...mixer.pan }; // ältere Profile ohne pan lassen die Lage, wie sie ist
   if (variant) for (const k of ['seed', 'variety']) if (has(variant, k)) t[k] = variant[k];
   if (form && has(form, 'form')) t.form = form.form;
   else if (r && has(r, 'length') && isValidForm(t.form) && nearestSize(r.length) !== nearestSize(formLength(t.form))) {

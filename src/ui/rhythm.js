@@ -1,4 +1,4 @@
-// Bedienung des Moduls "Rhythmus" im Rack: Tempo (großer Knopf), Taktart (LED-Tasten), Groove der Taktart (LCD-Auswahl) und Komplexität. Die Rechnung steht in
+// Bedienung des Moduls "Rhythmus" im Rack: Tempo (großer Knopf), Komplexität, Lockerheit, Verzierungen, Taktart (LED-Tasten) und Groove der Taktart (LCD-Auswahl). Die Rechnung steht in
 // core/grooves.js. Groove und Komplexität wirken live (applyLive), ein Taktartwechsel startet eine laufende Wiedergabe neu.
 import { t } from '../index.js';
 import { $, state, pressed, setText, setAttr, setMeter } from './state.js';
@@ -30,9 +30,10 @@ export function initRhythm({ render, restartIfPlaying, applyLive }) {
     applyLive({ patterns: true });
     render();
   });
-  // Komplexität und Lockerheit (Mikrotiming): Track-Felder 0..1, fehlend 0,5; beide tauschen den Ereignisstrom
+  // Komplexität, Lockerheit (Mikrotiming) und Verzierungen (Artikulations-Schicht: Slides, Dead Notes, Flams ...; 0 = keine):
+  // Track-Felder 0..1, fehlend 0,5; alle drei tauschen den Ereignisstrom
   let queued = false;
-  const sliders = ['complexity', 'loose'].map((field) => {
+  const sliders = ['complexity', 'loose', 'ornaments'].map((field) => {
     const slider = $(field);
     createKnob(slider, { origin: 'center', kind: 'teal' });
     slider.addEventListener('input', () => {

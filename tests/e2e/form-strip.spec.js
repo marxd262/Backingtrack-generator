@@ -147,7 +147,7 @@ test('Auswahl per Klick hebt den Teil hervor und zeigt dessen Einstellungen', as
 
 test('Typ ändern sperrt den Teil und nur ihn; die Typ-Auswahl enthält nur die feste Liste', async ({ page }) => {
   await setForm(page, FORM96);
-  expect(await page.locator('#part-type option').evaluateAll((os) => os.map((o) => o.value))).toEqual(['intro', 'verse', 'build', 'chorus', 'break', 'outro']);
+  expect(await page.locator('#part-type option').evaluateAll((os) => os.map((o) => o.value))).toEqual(['intro', 'verse', 'build', 'chorus', 'bridge', 'break', 'outro']);
   await pick(page, 1);
   await page.locator('#part-type').selectOption('chorus');
   const f = await form(page);
@@ -420,7 +420,7 @@ test('Sprachwechsel beschriftet Streifen, Teilnamen, Einstellungen und Knöpfe n
   await expect(page.locator('#part-density-out')).toHaveText('Default (20%)');
   await expect(page.locator('#part-lock')).toHaveText('Lock');
   expect(await page.locator('#part-transition option').allTextContents()).toEqual(['none', 'Fill', 'Roll', 'Stop']);
-  expect(await page.locator('#part-type option').allTextContents()).toEqual(['Intro', 'Verse', 'Build', 'Chorus', 'Break', 'Outro']);
+  expect(await page.locator('#part-type option').allTextContents()).toEqual(['Intro', 'Verse', 'Build', 'Chorus', 'Bridge', 'Break', 'Outro']);
   for (const id of ['part-delete', 'part-left', 'part-right', 'part-copy']) await expect(page.locator(`#${id}`)).toHaveAccessibleName(/^(Delete|Move left|Move right|Duplicate)$/);
   expect(await page.locator('.lanes').innerText()).not.toMatch(RAW_KEY);
   await page.locator('[data-lang="de"]').first().click();
@@ -793,4 +793,32 @@ test('Spurnamen stehen links vor den Spuren, sind nur Anzeige und zeigen Stumm a
   expect(await first.evaluate((el) => getComputedStyle(el).textDecorationLine)).toBe('line-through');
   await mute.click();
   await expect(first).toHaveAttribute('data-muted', 'false');
+});
+
+// Songteil Bridge (Phase 3)
+test('Bridge: als Typ wählbar, eigener Name und eigene Farbe im Streifen und am Schild, spielt ohne Fehler und wird im Profil-Teil Form gemerkt', async ({ page }) => {
+  await parts(page).nth(1).click();
+  await page.locator('#part-type').selectOption('bridge');
+  await expect(parts(page).nth(1)).toHaveAttribute('data-type', 'bridge');
+  await expect(parts(page).nth(1).locator('.form-part-name')).toHaveText('Bridge');
+  await expect(parts(page).nth(1)).toHaveClass(/\blocked\b/); // jede Bearbeitung sperrt den Teil
+  await expect(page.locator('#part-chip')).toHaveAttribute('data-type', 'bridge');
+  const colors = await parts(page).evaluateAll((els) => Object.fromEntries(els.map((el) => [el.dataset.type, getComputedStyle(el).backgroundColor])));
+  expect(new Set(Object.values(colors)).size).toBe(Object.keys(colors).length); // die Bridge teilt ihre Farbe mit keinem anderen Typ
+  expect(await page.locator('#part-chip').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(colors.bridge);
+  const form = await page.evaluate(async () => structuredClone((await import('/ui/state.js')).state.track.form));
+  expect(form.sections[1].type).toBe('bridge');
+  expect(await page.evaluate(async () => {
+    const { state } = await import('/ui/state.js');
+    const { validateTrack, buildEvents } = await import('/index.js');
+    const { captureParts, sanitizeParts } = await import('/core/profile-parts.js');
+    const { readSession } = await import('/ui/profile-session.js');
+    const kept = sanitizeParts(captureParts(readSession(state), ['form']));
+    const markers = buildEvents(state.track).filter((e) => e.type === 'marker' && e.name === 'section').map((e) => e.kind);
+    return { errors: validateTrack(state.track).length, skipped: kept.skipped, type: kept.parts.form.form.sections[1].type, marker: markers[1] };
+  })).toEqual({ errors: 0, skipped: 0, type: 'bridge', marker: 'bridge' });
+  await page.locator('#tuning-tempo').fill('200');
+  await page.locator('#play-go').click();
+  await expect(page.locator('#play-position')).toHaveText(/^Takt \d+ von \d+$/, { timeout: 15_000 });
+  await page.locator('#play-go').click();
 });

@@ -36,9 +36,9 @@ const center = async (locator) => {
 
 test('Komplexität ist ein Schieberegler mit Beschriftung, per Tab erreichbar, der Fokusring sitzt am Knopf', async ({ page }) => {
   await expect(page.getByRole('slider', { name: 'Komplexität' })).toHaveCount(1);
-  await page.locator('#groove-select').focus();
+  // Knopfzeile des Moduls Rhythmus: Tempo, Komplexität, Lockerheit
+  await page.locator('#tuning-tempo').focus();
   await page.keyboard.press('Tab');
-  // die Tasten ‹ › am Display sind keine Tab-Halte (die Pfeiltasten am Select schalten weiter)
   await expect(complexity(page)).toBeFocused();
   expect(await knob(page).evaluate((el) => getComputedStyle(el).outlineStyle)).not.toBe('none');
 });

@@ -1,6 +1,8 @@
 // Stimmenwahl in den Instrument-Modulen (Rack): ein LCD-Select für Stimme und Variante zusammen (nach Art gruppiert, ein Eintrag je
 // Variante), Art-Kennung SMP/SYN, Ladezustand der Sample-Stimmen im Display und ein Hinweis auf ausgegraute Knöpfe. Die Wahl steht in
-// state.track.voices, wirkt live über player.setVoices und bleibt bei einem Stilwechsel stehen. Welche Regler eine Stimme benutzt, steht im Register (usesTimbreField).
+// state.track.voices und wirkt live über player.setVoices. Ein Stilwechsel setzt die vom Stil vorgeschlagenen Stimmen (Bass, Akkorde, Schlagzeug;
+// state.js applyStyle); renderVoices bemerkt jede von außen geänderte Wahl (Stil, Profil, Weitermachen), lädt ihr Pack und gibt sie an den Player.
+// Welche Regler eine Stimme benutzt, steht im Register (usesTimbreField).
 import { t } from '../index.js';
 import { state, setText, setAttr } from './state.js';
 import { DEFAULT_TIMBRE } from '../core/timbre.js';
@@ -17,10 +19,12 @@ const el = (tag, props = {}) => Object.assign(document.createElement(tag), props
 export function initVoices({ render, player }) {
   const rows = {};
   const loadState = {}; // je Instrument: '' | 'loading' | 'ready' | 'error' (nur Sample-Stimmen laden)
+  const watched = {}; // je Instrument die Wahl ("id/variante"), deren Laden zuletzt verfolgt wurde
 
   // Ladezustand einer gerade gewählten Sample-Stimme verfolgen; ein überholter Ausgang (inzwischen andere Wahl) zählt nicht mehr
   function watch(layer) {
     const { id, variant } = completeVoices(state.track.voices)[layer];
+    watched[layer] = `${id}/${variant}`;
     if (VOICES[layer][id].kind !== 'sample') { loadState[layer] = ''; return; }
     // schon geladen: sofort bereit, ohne 'lädt …' dazwischen (sonst flackert die Ansage)
     if (peekPack(packIdFor(layer, variant))) { loadState[layer] = 'ready'; return; }
@@ -60,7 +64,8 @@ export function initVoices({ render, player }) {
     display.append(kind, status);
     caption.append(label, display);
     const select = el('select', { id: `voice-${layer}` });
-    const hint = el('p', { id: `voice-hint-${layer}`, className: 'hint', hidden: true });
+    // nur für Vorleser: sichtbar steht "ohne Wirkung" über jedem ausgegrauten Knopf, sobald man ihn überfährt (timbre-panel.js); das Modul bleibt eine Reihe hoch
+    const hint = el('p', { id: `voice-hint-${layer}`, className: 'hint visually-hidden', hidden: true });
     slot.append(caption, select, hint);
     createLcdSelect(select, { prevKey: 'ui.lcdPrev', nextKey: 'ui.lcdNext' });
 
@@ -82,6 +87,10 @@ export function initVoices({ render, player }) {
 
   function renderVoices() {
     const voices = completeVoices(state.track.voices);
+    // Wahl von außen geändert (Stil, Profil, Weitermachen): Pack laden und verfolgen, die neuen Stimmen live an den Player
+    const changed = VOICE_LAYERS.filter((layer) => watched[layer] !== `${voices[layer].id}/${voices[layer].variant}`);
+    for (const layer of changed) watch(layer);
+    if (changed.length) player()?.setVoices(voices);
     for (const layer of CHOOSABLE) {
       const r = rows[layer], { id, variant } = voices[layer];
       setText(r.label, t('ui.voice'));

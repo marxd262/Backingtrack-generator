@@ -223,3 +223,39 @@ test('Lockerheit: Knopf im Modul Rhythmus, Standard 50 %, ein neuer Wert steht i
   await expect(loose).toHaveAttribute('aria-valuetext', '80 %');
   await expect(complexity(page)).toHaveValue('50'); // der Nachbar bleibt
 });
+
+// Phase 3: Verzierungen (Artikulations-Schicht) als vierter Knopf der Knopfzeile
+test('Verzierungen: Knopf im Modul Rhythmus, Standard 50 %, steht im Track, wirkt live ohne Neustart; 0 % spielt ohne Verzierungen', async ({ page }) => {
+  const knob = page.locator('#mod-rhythm #ornaments');
+  await expect(knob).toHaveValue('50');
+  await expect(page.locator('label[for="ornaments"]')).toHaveText('Verzierungen');
+  await expect(page.getByRole('slider', { name: 'Verzierungen' })).toHaveCount(1);
+  const track = () => page.evaluate(async () => structuredClone((await import('/ui/state.js')).state.track));
+  expect((await track()).ornaments).toBeUndefined(); // Standard: nicht gesetzt (0,5)
+  // Töne und Schläge mit Artikulation im Ereignisstrom des Tracks der Seite
+  const arts = (ornaments) => page.evaluate(async (value) => {
+    const { state } = await import('/ui/state.js');
+    const { buildEvents } = await import('/index.js');
+    return buildEvents({ ...state.track, ornaments: value }).filter((e) => e.art).length;
+  }, ornaments);
+  expect(await arts(0)).toBe(0);
+  expect(await arts(0.5)).toBeGreaterThan(0);
+
+  await page.locator('#tuning-tempo').fill('200');
+  await page.locator('#play-go').click();
+  await expect(page.locator('#play-position')).toHaveText(/^Takt 1 von/, { timeout: 15_000 });
+  const before = { sets: await sets(page), contexts: await contexts(page) };
+  await knob.fill('0');
+  await expect(page.locator('#ornaments-out')).toHaveText('0 %');
+  await expect(knob).toHaveAttribute('aria-valuetext', '0 %');
+  expect((await track()).ornaments).toBe(0);
+  await expect(page.locator('#play-position')).toHaveText(/^Takt [2-9] von/, { timeout: 15_000 });
+  expect({ sets: await sets(page), contexts: await contexts(page) }).toEqual(before); // kein Neustart
+  await page.locator('#play-go').click();
+  // Doppelklick stellt 50 % wieder her; die Nachbarn bleiben
+  await page.locator('.knob:has(#ornaments)').dblclick();
+  await expect(knob).toHaveValue('50');
+  await expect(page.locator('#loose')).toHaveValue('50');
+  await page.getByRole('button', { name: /^EN/i }).click();
+  await expect(page.locator('label[for="ornaments"]')).toHaveText('Ornaments');
+});

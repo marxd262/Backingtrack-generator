@@ -44,11 +44,15 @@ test('1600 × 960 im Zustand Einstellen: Seite scrollt nicht, Visualisierung und
   expect(overlaps(viz, box)).toBe(false);
   expect(box.y + box.height).toBeLessThanOrEqual(960);
   expect(await rack(page).evaluate((el) => getComputedStyle(el).overflow)).toBe('auto');
-  // Module in einer Reihe, von links nach rechts
-  const xs = await page.locator('#rack .module, #rack-instruments').evaluateAll((els) => els.map((el) => el.getBoundingClientRect().x));
-  expect(xs).toEqual([...xs].sort((a, b) => a - b));
+  // Module in Reihen (Lied, Instrumente, Mischung): das Rack scrollt nur senkrecht, kein Modul ragt über den Rand, die Instrumente sind gleich breit
+  expect(await rack(page).evaluate((el) => el.scrollWidth - el.clientWidth)).toBe(0);
+  const boxes = await page.locator('#rack .module').evaluateAll((els) => els.map((el) => { const r = el.getBoundingClientRect(); return { x: r.x, right: r.right, y: r.y, w: Math.round(r.width), inst: el.classList.contains('instrument') }; }));
+  for (const b of boxes) expect(b.x >= box.x && b.right <= box.x + box.width + 0.5, JSON.stringify(b)).toBe(true);
+  expect(new Set(boxes.filter((b) => b.inst).map((b) => b.w)).size).toBe(1);
+  const ys = boxes.map((b) => b.y); // Reihen von oben nach unten in DOM-Reihenfolge
+  expect(ys).toEqual([...ys].sort((a, b) => a - b));
   const ids = await page.locator('#rack > .rack-row > *').evaluateAll((els) => els.map((el) => el.id));
-  expect(ids).toEqual(['mod-harmony', 'mod-rhythm', 'mod-character', 'rack-instruments', 'mod-mixer']);
+  expect(ids).toEqual(['mod-harmony', 'mod-rhythm', 'mod-character', 'rack-instruments', 'mod-mixer', 'mod-master']);
 });
 
 test('1366 × 768: Griffbrett, Akkordkreis und Spuren ganz sichtbar, die Seite scrollt nicht, das Rack schon', async ({ page }) => {
@@ -57,7 +61,7 @@ test('1366 × 768: Griffbrett, Akkordkreis und Spuren ganz sichtbar, die Seite s
   await expect(rack(page)).toBeVisible();
   for (const id of ['.play-head', '#fretboard', '#wheel', '#lanes']) await expect(page.locator(id), id).toBeInViewport({ ratio: 1 });
   expect(await pageScroll(page)).toEqual({ y: 0, x: 0 });
-  expect(await rack(page).evaluate((el) => el.scrollHeight > el.clientHeight || el.scrollWidth > el.clientWidth)).toBe(true);
+  expect(await rack(page).evaluate((el) => ({ down: el.scrollHeight > el.clientHeight, across: el.scrollWidth > el.clientWidth }))).toEqual({ down: true, across: false });
   const boxes = await Promise.all(['.play-head', '#mod-fretboard', '#mod-wheel', '#mod-song'].map((s) => page.locator(s).boundingBox()));
   for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) expect(overlaps(boxes[i], boxes[j]), `${i} ${j}`).toBe(false);
 });
@@ -184,10 +188,67 @@ test('1280 × 720 im Zustand Einstellen: die Seite scrollt nicht, das Rack hat m
   for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) expect(overlaps(boxes[i], boxes[j]), `${i} ${j}`).toBe(false);
 });
 
-test('1600 × 960 im Zustand Einstellen: das Rack hat mindestens 300 px, das Feld "Ganzes Lied" scrollt nicht in sich', async ({ page }) => {
+test('1600 × 960 im Zustand Einstellen: das Rack hat mindestens 200 px, das Feld "Ganzes Lied" scrollt nicht in sich', async ({ page }) => {
   await page.locator('#tune-btn').click();
   await expect(rack(page)).toBeVisible();
-  expect((await rack(page).boundingBox()).height).toBeGreaterThanOrEqual(300);
+  // beide Reihen der Visualisierung sind eine volle Rack-Reihe hoch (336 px): dem Rack bleiben 960 - 52 - 2 * 336 - Fugen
+  expect((await rack(page).boundingBox()).height).toBeGreaterThanOrEqual(200);
   const song = await page.locator('#form-song').evaluate((el) => ({ scroll: el.scrollHeight, client: el.clientHeight }));
   expect(song.scroll).toBeLessThanOrEqual(song.client + 1);
+});
+
+test('großer Monitor (2560 × 1440) im Fokus: beide Reihen gleich hoch, höchstens 480 px und senkrecht mittig, ringsum leerer Rackplatz', async ({ page }) => {
+  await page.setViewportSize({ width: 2560, height: 1440 });
+  await page.locator('#tune-btn').click();
+  await modeSwitch(page).click();
+  await expect(page.locator('#play')).toHaveAttribute('data-mode', 'focus');
+  const [head, viz, top, bottom] = await Promise.all(['.play-head', '#viz', '.viz-top', '.viz-bottom'].map((s) => page.locator(s).boundingBox()));
+  expect(top.height).toBeLessThanOrEqual(480.5);
+  expect(Math.abs(top.height - bottom.height)).toBeLessThanOrEqual(0.5);
+  for (const row of [head, top, bottom]) expect(row.width).toBeGreaterThanOrEqual(2550); // keine schwarzen Ränder links und rechts
+  // Griffbrett höchstens 1440 px, mittig zwischen Tonart (ganz links) und Akkorden (ganz rechts), dazwischen gleich viel leerer Rackplatz
+  const [key, fret, wheel] = await Promise.all(['#mod-key', '#mod-fretboard', '#mod-wheel'].map((s) => page.locator(s).boundingBox()));
+  expect(fret.width).toBeLessThanOrEqual(1440.5);
+  expect(key.x).toBeLessThanOrEqual(top.x + 0.5);
+  expect(wheel.x + wheel.width).toBeGreaterThanOrEqual(top.x + top.width - 0.5);
+  const [left, right] = [fret.x - (key.x + key.width), wheel.x - (fret.x + fret.width)];
+  expect(left).toBeGreaterThan(100);
+  expect(Math.abs(left - right)).toBeLessThanOrEqual(1);
+  // senkrecht mittig: gleich viel leerer Rackplatz über und unter den beiden Reihen
+  const above = top.y - viz.y;
+  const below = viz.y + viz.height - (bottom.y + bottom.height);
+  expect(above).toBeGreaterThan(100);
+  expect(Math.abs(above - below)).toBeLessThanOrEqual(1);
+  expect(await pageScroll(page)).toEqual({ y: 0, x: 0 });
+});
+
+test('eine Reihenhöhe wie im Eurorack: Startseite, Visualisierung und alle Rack-Module sind gleich hoch (336 px), im Fokus beide Reihen gleich', async ({ page }) => {
+  const heights = (selector) => page.locator(selector).evaluateAll((els) => els.filter((el) => el.checkVisibility()).map((el) => Math.round(el.getBoundingClientRect().height)));
+  // Startseite: beide Module eine Reihe hoch
+  expect(await heights('#start .module')).toEqual([336, 336]);
+  // die Reihe steht senkrecht mittig im Bereich unter der Kopfzeile
+  const mid = await page.evaluate(() => {
+    const row = document.querySelector('.start-row').getBoundingClientRect();
+    const area = document.querySelector('#start').getBoundingClientRect();
+    return { above: row.top - area.top, below: area.bottom - row.bottom };
+  });
+  expect(Math.abs(mid.above - mid.below)).toBeLessThanOrEqual(1);
+  await page.locator('#tune-btn').click();
+  await expect(rack(page)).toBeVisible();
+  // Einstellen (1600 × 960): 4 Module der Visualisierung, 3 + 6 + 2 im Rack
+  const setup = await heights('#play .module');
+  expect(setup).toHaveLength(15);
+  expect(new Set(setup)).toEqual(new Set([336]));
+  // kein Rack-Modul muss in sich scrollen
+  const inner = await page.locator('#rack .module').evaluateAll((els) => els.map((el) => el.scrollHeight - el.clientHeight));
+  expect(Math.max(...inner)).toBeLessThanOrEqual(0);
+  // die Reihen liegen im Raster von Reihenhöhe plus 3 px Fuge
+  const tops = [...new Set(await page.locator('#rack .module').evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().top - document.querySelector('#rack').getBoundingClientRect().top + document.querySelector('#rack').scrollTop))))];
+  expect(tops).toEqual([0, 339, 678]);
+  // Fokus: beide Reihen gleich hoch und größer als im Einstellen-Zustand
+  await modeSwitch(page).click();
+  const focus = await heights('#play .module');
+  expect(focus).toHaveLength(4);
+  expect(new Set(focus).size).toBe(1);
+  expect(focus[0]).toBeGreaterThan(336);
 });

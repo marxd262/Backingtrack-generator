@@ -6,7 +6,7 @@
 // Wahrscheinlichkeiten der Regelgruppe, 0 = Gruppe ohne Artikulationen), lead, band (über 0: die Band-Regeln 1, 2 und 6 aus SPIELREGELN Abschnitt 5
 // gelten für Bass und Gitarre: Slides nur auf einem Kick, während eines Drum-Fills spielt der Bass einfach und die Gitarre lässt klingen, der
 // Bass rutscht in die Eins des Refrains). Standard an ist alles außer chordsB (Urteil des Nutzers, 2026-11-14). Dazu das Track-Feld `ornaments` (Regler "Verzierungen", 0..1, fehlend 0,5):
-// Faktor 2 · ornaments auf jede Wahrscheinlichkeit unter 0,8, höchstens 0,9; 0 = alles aus.
+// Faktor auf jede Wahrscheinlichkeit unter 0,8 (ornamentFactor: 0 = alles aus, 0,5 = 1, 1 = 4; höchstens 0,9).
 import { r6 } from './timeline.js';
 import { byTime, roundVel } from './event-helpers.js';
 import { chordTones, diatonicChords, noteToPc } from './music.js';
@@ -85,6 +85,12 @@ export function planRoll(rng, c, name) {
  * events: sortierter Strom nach der Songform; bars: barTimeline; sections: Abschnitte; params: aufgelöste Schlagworte; rng: eigener Zweig;
  * options: completeArt(). Liefert einen neuen, sortierten Strom (die Eingabe bleibt unverändert).
  */
+/**
+ * Faktor des Reglers "Verzierungen" auf die Wahrscheinlichkeiten: bis 0,5 linear von 0 auf 1 (wie von Anfang an), darüber steiler bis 4 bei 1
+ * (Wunsch des Nutzers 2026-11-15: bei 100 % noch mehr; vorher 2). Der Standard 0,5 bleibt genau 1.
+ */
+export const ornamentFactor = (amount) => (amount <= 0.5 ? 2 * amount : 1 + 6 * (amount - 0.5));
+
 export function articulate(events, { track: given, bars, sections, params, rng, options }) {
   const track = { ...given, voices: resolveVoices(given) }; // die Regeln fragen nach der gespielten Stimme, auch wenn der Track sie nicht nennt (Standard)
   const amount = track.ornaments ?? 0.5;
@@ -94,7 +100,7 @@ export function articulate(events, { track: given, bars, sections, params, rng, 
     band: options.band > 0,
     track, bars, params, tempo, profile: profileOf(track), ctx: barContexts(bars, sections, params),
     /** Wahrscheinlichkeit einer Regel nach Regler, Tempo und Feinwert der Schicht; stilprägende Regeln (ab 0,8) werden nicht skaliert. */
-    p: (base, layer) => (base >= 0.8 ? base : Math.min(0.9, base * 2 * amount * tempo * options[layer])),
+    p: (base, layer) => (base >= 0.8 ? base : Math.min(0.9, base * ornamentFactor(amount) * tempo * options[layer])),
     roll: (c, layer, name, slot = 0) => planRoll(rng, c, `${layer}:${name}:${slot}`),
     /** Zeit eines Rasterschritts mit Swing, ohne Zufall (den Rest macht das Mikrotiming). */
     slotTime: (b, s) => r6(b.start + s * b.stepSec + (b.sub === 4 && s % 2 ? (params.swing * b.stepSec) / 3 : 0)),

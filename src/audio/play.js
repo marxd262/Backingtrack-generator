@@ -21,9 +21,12 @@ const FADE = 0.05;
  * startBar (ganze Zahl 0..length-1, Standard 0): beginnt mit diesem Takt; frühere Ereignisse entfallen, `bar` und `t` zählen ab
  * dort wie beim Durchspielen weiter, der angefangene Durchlauf zählt als erster. startPerf ist der Beginn des ersten gespielten Takts.
  * levels (je Schicht aus LAYER_IDS, je 0..1, fehlend 1) und master (0..1) sind die Reglerstellungen des Mischpults von Beginn an;
- * ungültig wirft RangeError (unbekannte Schicht Error) noch vor dem ersten Ton. timing: Feinwerte des Mikrotimings (core/microtiming.js), ornaments: Feinwerte der Artikulations-Schicht (core/articulation.js).
+ * ungültig wirft RangeError (unbekannte Schicht Error) noch vor dem ersten Ton. pans (je Schicht -1 links .. 1 rechts) ist die Lage im Panorama vom
+ * Mischpult, fehlend gilt die Lage aus den Feinwerten; setPan(name, pan) ändert sie live, level(name) liefert den Spitzenpegel 0..1 einer Schicht
+ * ('master': am Ausgang) für Pegelanzeigen. tuning: Feinwerte der Stimmen und der Summe (voices/tunables.js), z. B. Leslie und Zerre der Orgel;
+ * setTuning(tuning) ersetzt sie live (wirkt auf neue Töne). timing: Feinwerte des Mikrotimings (core/microtiming.js), ornaments: Feinwerte der Artikulations-Schicht (core/articulation.js).
  */
-export function play(ctx, trackInput, { loops = 1, startBar = 0, levels, master, onEvent, onBar, onEnd, createInstruments = synthInstruments, timing, ornaments } = {}) {
+export function play(ctx, trackInput, { loops = 1, startBar = 0, levels, master, pans, tuning, onEvent, onBar, onEnd, createInstruments = synthInstruments, timing, ornaments } = {}) {
   let events = buildEvents(trackInput, { timing, ornaments }); // wirft bei ungültigem Track, bevor ein Knoten entsteht; setTrack tauscht ihn
   if (!(loops === Infinity || (Number.isInteger(loops) && loops >= 1))) {
     throw new RangeError(`loops must be an integer >= 1 or Infinity, got ${loops}`);
@@ -43,7 +46,7 @@ export function play(ctx, trackInput, { loops = 1, startBar = 0, levels, master,
   }
 
   // Schlagworte sind durch buildEvents geprüft, resolveTimbre wirft hier nicht
-  const instruments = createInstruments(ctx, { bpm, timbre: resolveTrackTimbre(track), voices: resolveVoices(track), levels, master });
+  const instruments = createInstruments(ctx, { bpm, timbre: resolveTrackTimbre(track), voices: resolveVoices(track), levels, master, pans, tuning });
   for (const e of events) {
     if (e.layer && !Object.hasOwn(instruments.layers, e.layer)) throw new Error(`Instruments lack layer: ${e.layer}`);
   }
@@ -155,6 +158,12 @@ export function play(ctx, trackInput, { loops = 1, startBar = 0, levels, master,
       sliderGain(value);
       instruments.setMaster?.(value);
     },
+    setPan(name, pan) {
+      if (!(Number.isFinite(pan) && pan >= -1 && pan <= 1)) throw new RangeError(`pan must be a number in [-1, 1], got ${pan}`);
+      instruments.setPan?.(name, pan);
+    },
+    // nach stop() und bei Instrumenten ohne Pegelmessung 0
+    level: (name) => (stopped ? 0 : instruments.level?.(name) ?? 0),
     // Ereignisstrom live tauschen (z. B. nach einem Schlagwort mit Mustereffekt): ab dem nächsten noch nicht geplanten Ereignis
     // spielt der neue Strom, schon geplante Töne laufen weiter. Die Liedzeit der Ereignisse bezieht sich auf das Starttempo (das
     // bpm des übergebenen Tracks zählt nicht; Tempowechsel macht setTempo). false ohne Änderung, wenn der Player gestoppt ist oder
@@ -181,6 +190,10 @@ export function play(ctx, trackInput, { loops = 1, startBar = 0, levels, master,
     // Stimmen live wechseln (siehe createInstruments in synth.js): neue Töne klingen in der neuen Stimme; nach stop() ohne Wirkung
     setVoices(voices) {
       if (!stopped) instruments.setVoices?.(voices);
+    },
+    // Feinwerte live ersetzen (siehe createInstruments in synth.js); nach stop() ohne Wirkung
+    setTuning(next) {
+      if (!stopped) instruments.setTuning?.(next);
     },
     setTempo(newBpm) {
       if (!(Number.isFinite(newBpm) && newBpm >= 20 && newBpm <= 400)) throw new RangeError(`bpm must be in [20, 400], got ${newBpm}`);

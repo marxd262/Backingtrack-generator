@@ -216,7 +216,7 @@ test('Werksprofil: Kopie in „Meine Profile“, gleichnamig mit „ (2)“; Aus
   await item(page, 'Blues-Shuffle').first().click();
   await page.locator('#profile-factory-copy').click();
   await expect(items(page).filter({ hasText: 'Blues-Shuffle' })).toHaveText(['Blues-Shuffle', 'Blues-Shuffle', 'Blues-Shuffle (2)']);
-  expect(await storedParts(page, 'Blues-Shuffle')).toEqual(['tempo', 'style', 'sound']);
+  expect(await storedParts(page, 'Blues-Shuffle')).toEqual(['tempo', 'style', 'sound', 'voices']);
   await item(page, 'Blues-Shuffle').first().click(); // Austausch des Werksprofils
   await page.locator('#profile-copy').click();
   const file = JSON.parse(await page.locator('#profile-text').inputValue());
@@ -834,16 +834,16 @@ test('Import in einen Ordner: ein einzelnes Profil wird dort aufgenommen und gew
   expect(paket.items[1].parts).toEqual({ tempo: { bpm: 90 } });
 });
 
-test('Werksprofil kopieren: „Funk-Rock“, beim zweiten Mal „Funk-Rock (2)“, mit den Teilen Tempo, Stil, Klangregler', async ({ page }) => {
+test('Werksprofil kopieren: „Funk-Rock“, beim zweiten Mal „Funk-Rock (2)“, mit den Teilen Tempo, Stil, Klangregler, Stimmen', async ({ page }) => {
   await item(page, 'Funk-Rock').click();
   await page.locator('#profile-factory-copy').click();
   await item(page, 'Funk-Rock').first().click();
   await page.locator('#profile-factory-copy').click();
   await expect(items(page).filter({ hasText: 'Funk-Rock' })).toHaveText(['Funk-Rock', 'Funk-Rock', 'Funk-Rock (2)']);
-  expect(await storedParts(page, 'Funk-Rock (2)')).toEqual(['tempo', 'style', 'sound']);
+  expect(await storedParts(page, 'Funk-Rock (2)')).toEqual(['tempo', 'style', 'sound', 'voices']);
   await expect(item(page, 'Funk-Rock (2)')).toHaveAttribute('aria-selected', 'true');
   await expect(item(page, 'Funk-Rock (2)')).toBeFocused();
-  await expect(info(page)).toHaveText('Inhalt: Tempo, Stil & Schlagworte, Klangregler');
+  await expect(info(page)).toHaveText('Inhalt: Tempo, Stil & Schlagworte, Klangregler, Stimmen & Aufgaben');
   await expect(page.locator('#profile-overwrite')).toBeVisible();
 });
 

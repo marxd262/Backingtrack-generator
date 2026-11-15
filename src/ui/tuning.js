@@ -8,6 +8,7 @@ import { loopBars } from './position.js';
 import { nextDistinctChord, progressionRoles, romanDegree } from '../core/fretboard.js';
 import { createFretboard, chordSentence } from './fretboard.js';
 import { buildTags, renderTags, toggleTag } from './tags-ui.js';
+import { tagEffect } from './tag-effects.js';
 import { isSoundOnlyChange } from '../core/tags.js';
 import { initProgressionEditor, addChord } from './progression-editor.js';
 import { initChordColor } from './chord-color.js';
@@ -33,6 +34,7 @@ export function initTuning({ render, restartIfPlaying, applyLive }) {
     render();
   });
 
+  $('tags').addEventListener('tagshown', render); // ein anderes Wort berührt: die Anzeige neu schreiben
   const renderProgression = initProgressionEditor(changed, render);
   const renderChordColor = initChordColor({ changed });
   // Folgender Akkord (erster andere, auch über die Naht); im Stand beginnt die Folge bei Takt 0
@@ -126,19 +128,20 @@ export function initTuning({ render, restartIfPlaying, applyLive }) {
 
   // gewählte Schlagworte als Schilder (nur Anzeige); nur bei Änderung neu bauen, render() läuft je Takt
   let wordsKey = '';
-  function renderWords(tags) {
-    const words = TAG_CATEGORIES.flatMap((c) => (tags[c.id] ?? []).map((tag) => t(`tag.${c.id}.${tag}`)));
-    const key = words.join('|');
+  // Wörter, die im jetzigen Zustand nichts bewirken (z. B. Klangwörter bei einer Sample-Stimme), sind blass wie im Schlagwort-Fenster
+  function renderWords(track) {
+    const words = TAG_CATEGORIES.flatMap((c) => (track.tags[c.id] ?? []).map((tag) => ({ text: t(`tag.${c.id}.${tag}`), inert: !tagEffect(tag, track).effective })));
+    const key = words.map((w) => `${w.text}${w.inert ? '~' : ''}`).join('|');
     if (key === wordsKey) return;
     wordsKey = key;
-    $('char-words').replaceChildren(...words.map((w) => Object.assign(document.createElement('li'), { className: 'word-tag', textContent: w })));
+    $('char-words').replaceChildren(...words.map((w) => Object.assign(document.createElement('li'), { className: w.inert ? 'word-tag inert' : 'word-tag', textContent: w.text, title: w.inert ? t('tagfx.none') : '' })));
   }
 
   return function renderTuning() {
     if (state.page !== 'play') return;
     const { track } = state;
-    renderTags($('tags'), track.tags);
-    renderWords(track.tags);
+    renderTags($('tags'), track, $('tag-fx'));
+    renderWords(track);
     // nur bei Änderung: <output>.value ersetzt den Textknoten
     const shown = `${track.bpm} ${t('ui.bpm')}`;
     for (const [id, v] of [['tuning-tempo', String(track.bpm)], ['tuning-tempo-out', shown]]) {

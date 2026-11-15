@@ -93,7 +93,7 @@ test('laneKey ändert sich mit Form, Aufgaben, Stimmen und Vielfalt, nicht mit T
   const k = laneKey(base);
   assert.equal(laneKey({ ...base, bpm: 200, layers: { drums: false } }), k);
   const form = { template: 'pop', sections: [{ type: 'verse', bars: 8 }], feel: FEEL_DEFAULTS };
-  for (const change of [{ form }, { jobs: { lead: 'melody' } }, { voices: { lead: 'saw' } }, { variety: false }]) {
+  for (const change of [{ form }, { jobs: { lead: 'melody' } }, { voices: { lead: 'saw' } }, { variety: false }, { ornaments: 0 }, { loose: 1 }]) {
     assert.notEqual(laneKey({ ...base, ...change }), k, Object.keys(change)[0]);
   }
   assert.notEqual(laneKey({ ...base, form }), laneKey({ ...base, form: { ...form, feel: { ...FEEL_DEFAULTS, pauses: 1 } } }));

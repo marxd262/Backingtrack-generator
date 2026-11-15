@@ -42,7 +42,7 @@ test('captureParts: alle 10 Teile als tiefe Kopie', () => {
   assert.deepEqual(Object.keys(parts), PART_IDS);
   assert.deepEqual(parts.harmony, { key: { root: 'A', mode: 'minor' }, scale: 'blues', bars: s.track.bars, chordColor: 'sevenths', chordColorFromStyle: false, meter: [4, 4] });
   assert.deepEqual(parts.tempo, { bpm: 96, meter: [4, 4] }, 'bpm zählt den Puls dieser Taktart');
-  assert.deepEqual(parts.rhythm, { groove: 'straight', complexity: 0.7, loose: null, length: 48 });
+  assert.deepEqual(parts.rhythm, { groove: 'straight', complexity: 0.7, loose: null, ornaments: null, length: 48 });
   assert.deepEqual(parts.style, { style: 'funk', tags: s.track.tags });
   assert.deepEqual(parts.sound, { timbre: { master: { echo: 0.2 } } });
   // vollständige Stimmen- und Aufgabenwahl (nicht nur die gesetzten Einträge): sonst ließe sich der Standard nie wieder laden
@@ -67,7 +67,7 @@ test('captureParts: nicht gesetzte groove/complexity werden null; Auswahl der Te
   const t = track(); delete t.groove; delete t.complexity;
   const parts = captureParts(session({ track: t }), ['rhythm', 'tempo']);
   assert.deepEqual(Object.keys(parts), ['tempo', 'rhythm'], 'in PART_IDS-Reihenfolge');
-  assert.deepEqual(parts.rhythm, { groove: null, complexity: null, loose: null, length: 48 });
+  assert.deepEqual(parts.rhythm, { groove: null, complexity: null, loose: null, ornaments: null, length: 48 });
   assert.deepEqual(captureParts(session(), PART_PRESETS.none), {});
 });
 
@@ -130,6 +130,45 @@ test('applyParts rhythm: groove null entfernt, fehlendes Feld bleibt', () => {
   assert.equal(Object.hasOwn(r2.session.track, 'complexity'), false);
   assert.equal(r2.session.track.groove, 'straight');
   assert.equal(r2.session.track.length, 24);
+});
+
+test('Profil-Teil rhythm: ornaments (Verzierungen, 0..1) wird festgehalten, geprüft und angewendet; null stellt den Standard wieder her, ältere Profile lassen den Wert', () => {
+  const t = track(); t.ornaments = 0.8;
+  const s = session({ track: t });
+  assert.equal(captureParts(s, ['rhythm']).rhythm.ornaments, 0.8);
+  assert.deepEqual(sanitizeParts({ rhythm: { ornaments: 0 } }).parts, { rhythm: { ornaments: 0 } });
+  assert.deepEqual(sanitizeParts({ rhythm: { ornaments: null } }).parts, { rhythm: { ornaments: null } });
+  for (const bad of [1.5, -0.1, 'x', NaN]) assert.equal(sanitizeParts({ rhythm: { ornaments: bad } }).skipped, 1, String(bad));
+  assert.equal(applyParts(s, { rhythm: { ornaments: 0.2 } }).session.track.ornaments, 0.2);
+  assert.equal(Object.hasOwn(applyParts(s, { rhythm: { ornaments: null } }).session.track, 'ornaments'), false);
+  assert.equal(applyParts(s, { rhythm: { complexity: 0.3 } }).session.track.ornaments, 0.8); // Profil ohne das Feld
+});
+
+test('Profil-Teil sound: organ (Leslie-Wähler, Zerre der Orgel) wird festgehalten, feldweise geprüft und gemischt; ältere Profile lassen die Wahl', () => {
+  const s = session({ organ: { leslie: 'fast', drive: 0.6 } });
+  assert.deepEqual(captureParts(s, ['sound']).sound, { timbre: s.track.timbre ?? {}, organ: { leslie: 'fast', drive: 0.6 } });
+  assert.equal(Object.hasOwn(captureParts(session(), ['sound']).sound, 'organ'), false); // Sitzung ohne organ
+  assert.deepEqual(sanitizeParts({ sound: { organ: { leslie: 'slow', drive: null } } }).parts, { sound: { organ: { leslie: 'slow', drive: null } } });
+  const mixed = sanitizeParts({ sound: { organ: { leslie: 'turbo', drive: 0.2, zither: 1 } } });
+  assert.deepEqual(mixed.parts, { sound: { organ: { drive: 0.2 } } });
+  assert.equal(mixed.skipped, 1);
+  for (const bad of [{ leslie: 3 }, { drive: 1.5 }, { drive: 'x' }]) assert.equal(sanitizeParts({ sound: { organ: bad } }).skipped, 1, JSON.stringify(bad));
+  assert.equal(sanitizeParts({ sound: { organ: [] } }).skipped, 1);
+  assert.deepEqual(applyParts(s, { sound: { organ: { leslie: 'off' } } }).session.organ, { leslie: 'off', drive: 0.6 });
+  assert.deepEqual(applyParts(s, { sound: { organ: { drive: null } } }).session.organ, { leslie: 'fast', drive: null });
+  assert.deepEqual(applyParts(s, { sound: { timbre: {} } }).session.organ, { leslie: 'fast', drive: 0.6 }); // Profil ohne organ
+});
+
+test('Profil-Teil mixer: pan (Lage je Schicht, -1..1) wird festgehalten, einzeln geprüft und je Schicht gemischt; ältere Profile ohne pan bleiben gültig', () => {
+  const s = session({ pan: { chords: 0.3, pad: -0.2 } });
+  assert.deepEqual(captureParts(s, ['mixer']).mixer, { mix: { drums: 0.5, master: 0.8 }, pan: { chords: 0.3, pad: -0.2 } });
+  assert.deepEqual(captureParts(session(), ['mixer']).mixer, { mix: { drums: 0.5, master: 0.8 } }); // Sitzung ohne pan
+  const clean = sanitizeParts({ mixer: { pan: { chords: -1, pad: 1.5, bass: 'x', lead: 0, zither: 0.2 } } });
+  assert.deepEqual(clean.parts, { mixer: { pan: { chords: -1, lead: 0 } } });
+  assert.equal(clean.skipped, 2);
+  assert.deepEqual(applyParts(s, clean.parts).session.pan, { chords: -1, pad: -0.2, lead: 0 });
+  assert.deepEqual(applyParts(s, { mixer: { mix: { drums: 0.3 } } }).session.pan, { chords: 0.3, pad: -0.2 }); // Profil ohne pan: Lage bleibt
+  assert.equal(sanitizeParts({ mixer: { pan: [] } }).skipped, 1);
 });
 
 test('applyParts: layers, mixer, voices, jobs mischen je Schlüssel', () => {

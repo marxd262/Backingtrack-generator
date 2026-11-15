@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildEvents as build, STYLE_PRESETS, GROOVES, DRUM_NAMES } from '../../src/index.js';
-import { profileOf, completeArt, planRoll, ART_DEFAULTS } from '../../src/core/articulation.js';
+import { profileOf, completeArt, planRoll, ART_DEFAULTS, ornamentFactor } from '../../src/core/articulation.js';
 import { barTimeline, checkedTrack } from '../../src/core/timeline.js';
 import { createRng } from '../../src/core/rng.js';
 import { pickArtZone } from '../../src/audio/voices/sample-zones.js';
@@ -122,6 +122,19 @@ test('Bass Blues: Annäherungston auf dem letzten Achtel vor dem Akkordwechsel, 
   for (const seed of SEEDS) for (const n of bassOf(mk('country', { seed, ornaments: 1 }), { on: 1 })) if (n.art === 'approach') assert.ok(scale.has(n.midi % 12), JSON.stringify(n));
 });
 
+test('Regler Verzierungen: Faktor 0 bei 0, genau 1 beim Standard 0,5 (wie zuvor 2 · Wert), 4 bei 1; über alle Stile verziert 1 deutlich mehr als 0,5', () => {
+  assert.equal(ornamentFactor(0), 0);
+  assert.equal(ornamentFactor(0.25), 0.5);
+  assert.equal(ornamentFactor(0.5), 1);
+  assert.equal(ornamentFactor(0.75), 2.5);
+  assert.equal(ornamentFactor(1), 4);
+  // gezählt werden die Verzierungen, die der Regler skaliert (stilprägende wie Chuck oder Staccato im Funk stehen unabhängig von ihm fest)
+  const SCALED = ['dead', 'slideIn', 'approach', 'octavePop', 'flam', 'hammer', 'pull'];
+  const arts = (ornaments) => ['funk', 'rock', 'blues', 'reggae', 'dreamy', 'country'].reduce((n, id) => n + buildEvents(mk(id, { ornaments, length: 16 }), ON).filter((e) => SCALED.includes(e.art)).length, 0);
+  assert.ok(arts(1) > 1.3 * arts(0.5), `${arts(1)} gegen ${arts(0.5)}`);
+  assert.ok(arts(0.5) > arts(0.25));
+});
+
 test('Schicht an: sortiert, im Takt, Bass einstimmig, keine negative Dauer, reproduzierbar; Regler 1 verziert mindestens so viel wie 0,5', () => {
   for (const id of ['funk', 'rock', 'blues', 'reggae', 'dreamy', 'country', 'psych', 'hardrock']) for (const seed of [1, 2, 3]) for (const ornaments of [0.5, 1]) {
     const track = mk(id, { seed, ornaments, length: 16 }), events = buildEvents(track, ON), bars = barTimeline(checkedTrack(track)), label = `${id} s=${seed} o=${ornaments}`;
@@ -161,16 +174,22 @@ test('Gitarre Funk: Chucks auf freien 16teln sind die Mehrheit der Anschläge, C
 });
 
 test('Gitarre Rock mit Songform: Palm Mute in der Strophe öfter als im Refrain, die Eins im Refrain klingt aus, vor dem Stopp ein Choke', () => {
-  let verse = 0, chorus = 0;
+  let verse = 0, chorus = 0, verseStd = 0, chorusStd = 0;
   for (const seed of SEEDS) {
     const on = chordsOf(mk('rock', { seed, ornaments: 1, ...form([['verse', 8], ['chorus', 8], ['break', 4], ['verse', 4]]) }));
     verse += on.filter((e) => e.art === 'palmMute' && e.bar < 8).length;
     chorus += on.filter((e) => e.art === 'palmMute' && e.bar >= 8 && e.bar < 16).length;
+    const std = chordsOf(mk('rock', { seed, ...form([['verse', 8], ['chorus', 8], ['break', 4], ['verse', 4]]) })); // Regler auf dem Standard 0,5
+    verseStd += std.filter((e) => e.art === 'palmMute' && e.bar < 8).length;
+    chorusStd += std.filter((e) => e.art === 'palmMute' && e.bar >= 8 && e.bar < 16).length;
     assert.ok(on.filter((e) => e.bar >= 8 && e.bar < 15 && stepOf(e) === 0).every((e) => e.art === 'letRing' && e.ring === true));
     const stopBar = on.filter((e) => e.bar === 15); // letzter Takt des Refrains: der Break danach beginnt mit einem Stopp
     if (stopBar.length) assert.ok(stopBar.filter((e) => e.t === stopBar.at(-1).t).every((e) => e.art === 'choke'), JSON.stringify(stopBar.at(-1)));
   }
-  assert.ok(verse > 3 * chorus && verse > 0, `${verse} gegen ${chorus}`);
+  // beim Standard deutlich (Strophe 0,7 gegen Refrain 0,1); auf Anschlag (Faktor 4) nähern sich die Wahrscheinlichkeiten der Obergrenze 0,9,
+  // der Unterschied bleibt, wird aber kleiner
+  assert.ok(verseStd > 3 * chorusStd && verseStd > 0, `Standard: ${verseStd} gegen ${chorusStd}`);
+  assert.ok(verse > 2 * chorus && verse > 0, `${verse} gegen ${chorus}`);
 });
 
 test('Gitarre: Reggae würgt jeden Stab ab; der letzte Stab des Tracks klingt aus; Arpeggios (Psych) überlappen bis zum Taktende', () => {

@@ -7,7 +7,8 @@ export const factoryProfiles = () => STYLE_PRESETS.map((p) => ({ key: `factory:$
 
 /**
  * Teile eines Werksprofils (in PART_IDS-Reihenfolge): das Stiltempo als Viertel-Tempo mit meter 4/4 (applyParts rechnet es beim Laden
- * wie applyStyle auf die Taktart um, egal in welcher Taktart die Kopie entstand), Stil mit Schlagworten, Klangregler zurückgesetzt.
+ * wie applyStyle auf die Taktart um, egal in welcher Taktart die Kopie entstand), Stil mit Schlagworten, Klangregler zurückgesetzt,
+ * die vom Stil vorgeschlagenen Stimmen (Bass, Akkorde, Schlagzeug).
  */
 export function factoryParts(styleId) {
   const p = STYLE_PRESETS.find((s) => s.id === styleId);
@@ -15,5 +16,6 @@ export function factoryParts(styleId) {
     tempo: { bpm: p.bpm, meter: [4, 4] },
     style: { style: p.id, tags: structuredClone(p.tags) },
     sound: { timbre: {} },
+    voices: { voices: structuredClone(p.voices) },
   };
 }

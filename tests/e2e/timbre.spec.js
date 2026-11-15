@@ -75,8 +75,9 @@ test('47 Knöpfe in 5 Modulen und im Mixer, alle beschriftet ohne rohen Schlüss
   expect(await page.locator('.instrument').evaluateAll((els) => els.map((e) => e.dataset.layer))).toEqual(LAYER_IDS);
   for (const [g, fields] of Object.entries(DEFAULT_TIMBRE)) {
     await expect(group(page, g), g).toHaveCount(1);
-    await expect(group(page, g).locator('input[type="range"]'), g).toHaveCount(Object.keys(fields).length);
-    await expect(group(page, g).locator('.knob'), g).toHaveCount(Object.keys(fields).length);
+    // gezählt werden die Klangfelder (timbre-…); das Akkord-Modul hat dazu die zwei Orgel-Knöpfe (voices-ui.spec.js)
+    await expect(group(page, g).locator('input[type="range"][id^="timbre-"]'), g).toHaveCount(Object.keys(fields).length);
+    await expect(group(page, g).locator('.knob:has([id^="timbre-"])'), g).toHaveCount(Object.keys(fields).length);
   }
   for (const [g, f] of FIELDS) {
     const label = await page.locator(`label[for="timbre-${g}-${f}"]`).textContent();
@@ -182,11 +183,11 @@ test('Fuzz schnell von 0 bis 100 ziehen während der Wiedergabe: keine Fehler, e
   await playGo(page).click();
 });
 
-test('Rack mit allen Modulen (1366 × 768): scrollt in sich, letzter Knopf erreichbar, die Seite scrollt nicht', async ({ page }) => {
+test('Rack mit allen Modulen (1366 × 768): scrollt nur senkrecht in sich, letzter Knopf erreichbar, die Seite scrollt nicht', async ({ page }) => {
   await page.setViewportSize({ width: 1366, height: 768 });
   await expect(page.locator('#rack')).toBeVisible(); // Feintuning öffnet den Zustand Einstellen
   const rack = await page.locator('#rack').evaluate((el) => ({ down: el.scrollHeight > el.clientHeight, across: el.scrollWidth > el.clientWidth }));
-  expect(rack).toEqual({ down: true, across: true });
+  expect(rack).toEqual({ down: true, across: false });
   const last = slider(page, 'master', 'reverb');
   await last.scrollIntoViewIfNeeded();
   await expect(last).toBeInViewport();
@@ -274,7 +275,7 @@ test('Tab-Reihenfolge im Modul: Stimme, Aufgabe, Detailknöpfe in Lesereihenfolg
     if (!/lcd-btn/.test(at.key)) seen.push(at.key); // die Tasten ‹ › am Display sind Teil von Stimme und Aufgabe
     await page.keyboard.press('Tab');
   }
-  expect(seen).toEqual(['voice-lead', 'job-lead', ...Object.keys(DEFAULT_TIMBRE.lead).map((f) => `timbre-lead-${f}`), 'chip timbre-reset']);
+  expect(seen).toEqual(['voice-lead', 'job-lead', ...Object.keys(DEFAULT_TIMBRE.lead).map((f) => `timbre-lead-${f}`), 'push timbre-reset']);
 });
 
 test('Aktivitäts-LED: bei laufender Wiedergabe leuchtet das Schlagzeug-Modul samt Spur, das stumme Percussion-Modul nicht', async ({ page }) => {
@@ -291,4 +292,91 @@ test('Aktivitäts-LED: bei laufender Wiedergabe leuchtet das Schlagzeug-Modul sa
   await expect(led('drums')).not.toHaveClass(/\bon\b/);
   await playGo(page).click();
   await expect(led('bass')).not.toHaveClass(/\bon\b/);
+});
+
+test('Knopfraster und Anzeige: Verzerrer, Vibrato, Chorus und Zurücksetzen in jedem Instrument am selben Platz; beim Überfahren steht der Wert oder "ohne Wirkung" über dem Knopf', async ({ page }) => {
+  // Mittelpunkt eines Knopfs relativ zu seinem Modul (auf 2 px gerundet)
+  const spot = (layer, id) => page.locator(`.instrument[data-layer="${layer}"]`).evaluate((mod, sel) => {
+    const [m, k] = [mod.getBoundingClientRect(), mod.querySelector(sel).getBoundingClientRect()];
+    return [Math.round((k.x + k.width / 2 - m.x) / 2), Math.round((k.y + k.height / 2 - m.y) / 2)];
+  }, id);
+  for (const field of ['fuzz', 'overdrive', 'distortion', 'vibrato', 'chorus']) {
+    const places = await Promise.all(['bass', 'chords', 'pad', 'lead'].map((layer) => spot(layer, `.knob:has(#timbre-${layer}-${field})`)));
+    expect(new Set(places.map(String)).size, field).toBe(1);
+  }
+  // Zurücksetzen: in jedem Modul mit Knöpfen am selben Platz, rechts unten (rechte Spalte, unterste Knopfzeile)
+  const resets = await Promise.all(['drums', 'bass', 'chords', 'pad', 'lead'].map((layer) => spot(layer, '.timbre-reset')));
+  expect(new Set(resets.map(String)).size).toBe(1);
+  const [chorus, distortion] = await Promise.all([spot('bass', '.knob:has(#timbre-bass-chorus)'), spot('bass', '.knob:has(#timbre-bass-distortion)')]);
+  expect(Math.abs(resets[0][1] - chorus[1])).toBeLessThanOrEqual(1); // gleiche Zeile wie Chorus
+  expect(Math.abs(resets[0][0] - distortion[0])).toBeLessThanOrEqual(1); // gleiche Spalte wie Distortion
+  // Tab-Reihenfolge = Leserichtung im Raster
+  const order = await page.locator('.instrument[data-layer="bass"] .inst-knobs input').evaluateAll((els) => els.map((el) => el.id.replace('timbre-bass-', '')));
+  expect(order).toEqual(['sub', 'pluck', 'roundness', 'cutoff', 'resonance', 'fuzz', 'overdrive', 'distortion', 'vibrato', 'chorus']);
+
+  // Anzeige über dem Knopf: Wert bei bedienbaren, "ohne Wirkung" bei ausgegrauten (Sample-Bass benutzt Sub nicht)
+  const hint = (id) => page.locator(`.knob-cell:has(#${id})`).evaluate((cell) => getComputedStyle(cell, '::after').content);
+  expect(await hint('timbre-bass-fuzz')).toBe('none'); // ohne Maus nichts
+  await page.locator('.knob-cell:has(#timbre-bass-fuzz)').hover();
+  expect(await hint('timbre-bass-fuzz')).toBe('"0 %"');
+  await slider(page, 'bass', 'fuzz').fill('35');
+  expect(await hint('timbre-bass-fuzz')).toBe('"35 %"');
+  await expect(slider(page, 'bass', 'sub')).toBeDisabled();
+  await page.locator('.knob-cell:has(#timbre-bass-sub)').hover();
+  expect(await hint('timbre-bass-sub')).toBe('"ohne Wirkung"');
+});
+
+test('Lichter: LED an Modul und Spur blitzt bei jedem Anschlag der Schicht, die Schlag-LED auf jedem Schlag; stumm und im Stand blitzt nichts', async ({ page }) => {
+  const led = (layer) => page.locator(`.instrument[data-layer="${layer}"] .led`);
+  const lane = (layer) => page.locator(`#lane-buttons [data-layer="${layer}"]`);
+  const beat = page.locator('#beat-led');
+  // zählt, wie oft eine LED aufblitzt (Klasse hit kommt dazu)
+  const countFlashes = (selector) => page.evaluate((sel) => {
+    window.__flashes ??= {};
+    window.__flashes[sel] = 0;
+    const el = document.querySelector(sel);
+    let was = el.classList.contains('hit');
+    new MutationObserver(() => { const is = el.classList.contains('hit'); if (is && !was) window.__flashes[sel]++; was = is; }).observe(el, { attributes: true, attributeFilter: ['class'] });
+  }, selector);
+  const flashes = (selector) => page.evaluate((sel) => window.__flashes[sel], selector);
+  await expect(beat).not.toHaveClass(/\bhit\b/);
+  await page.locator('#form-template').selectOption('off'); // ohne Form spielt das Schlagzeug von Anfang an
+  for (const sel of ['#beat-led', '.instrument[data-layer="drums"] .led', '#lane-buttons [data-layer="drums"]', '.instrument[data-layer="percussion"] .led']) await countFlashes(sel);
+  await playFast(page);
+  // 200 bpm: mehrere Schläge je Sekunde, das Schlagzeug spielt mindestens auf jedem Schlag
+  await expect.poll(() => flashes('#beat-led'), { timeout: BAR_TIMEOUT }).toBeGreaterThanOrEqual(4);
+  await expect.poll(() => flashes('.instrument[data-layer="drums"] .led'), { timeout: BAR_TIMEOUT }).toBeGreaterThanOrEqual(4);
+  await expect.poll(() => flashes('#lane-buttons [data-layer="drums"]'), { timeout: BAR_TIMEOUT }).toBeGreaterThanOrEqual(4);
+  expect(await flashes('.instrument[data-layer="percussion"] .led')).toBe(0); // Percussion ist im Standard stumm
+  // klingender Ton: die LED der Schicht leuchtet für die Dauer des Tons voll (ohne Lichtschein), an Modul und Spur; stumm geht sie sofort aus
+  await expect(led('bass')).toHaveClass(/\bsound\b/, { timeout: BAR_TIMEOUT });
+  await expect(lane('bass')).toHaveClass(/\bsound\b/, { timeout: BAR_TIMEOUT });
+  expect(await led('drums').evaluate((el) => el.classList.contains('sound'))).toBe(false); // Schläge haben keine Dauer
+  await page.locator('#mixer button[data-mute="bass"]').click();
+  await expect(led('bass')).not.toHaveClass(/\b(sound|hit)\b/);
+  await page.waitForTimeout(700);
+  await expect(led('bass')).not.toHaveClass(/\b(sound|hit)\b/);
+  await playGo(page).click();
+  for (const el of [beat, led('drums'), lane('drums'), led('chords'), lane('chords')]) await expect(el).not.toHaveClass(/\b(sound|hit)\b/);
+  const after = await flashes('#beat-led');
+  await page.waitForTimeout(600);
+  expect(await flashes('#beat-led')).toBe(after); // im Stand blitzt nichts mehr
+});
+
+test.describe('Bewegung reduzieren', () => {
+  test.use({ reducedMotion: 'reduce' });
+  test('die LEDs blitzen nicht, die LED einer spielenden Schicht leuchtet voll', async ({ page }) => {
+    const led = page.locator('.instrument[data-layer="drums"] .led');
+    await page.locator('#form-template').selectOption('off');
+    await page.evaluate(() => {
+      window.__hits = 0;
+      new MutationObserver((list) => { for (const m of list) if (m.target.classList.contains('hit') || m.target.classList.contains('sound')) window.__hits++; }).observe(document.querySelector('#play'), { attributes: true, attributeFilter: ['class'], subtree: true });
+    });
+    await playFast(page);
+    await expect(led).toHaveClass(/\bon\b/, { timeout: BAR_TIMEOUT });
+    expect(await led.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgb(227, 70, 94)');
+    await page.waitForTimeout(1500);
+    expect(await page.evaluate(() => window.__hits)).toBe(0);
+    await playGo(page).click();
+  });
 });

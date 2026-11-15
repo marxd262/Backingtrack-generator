@@ -288,7 +288,8 @@ test('Legende: jede Rolle hat ohne Farbe ein eigenes Zeichen, "außerhalb" ist n
   const board = await signatures(page, '#fretboard .fret-note[data-string="5"]:is([data-fret="1"], [data-fret="4"])');
   for (const n of board) expect(JSON.parse(n.sig), n.role).toMatchObject({ dashed: true, pale: true });
   // Formen wie in der Legende: jetzig rund, folgend eckig
-  const shape = (sig) => { const { rx, transform } = JSON.parse(sig); return { rx, transform }; };
+  // rund = Eckenradius so groß wie die Note (auf dem Brett hängt der Radius vom Platz ab), eckig = wenige Pixel
+  const shape = (sig) => { const { rx, transform } = JSON.parse(sig); return { round: Number.parseFloat(rx) > 5, transform }; };
   expect(shape(board[0].sig)).toEqual(shape(legend.find((l) => l.role === 'current').sig));
   expect(shape(board[1].sig)).toEqual(shape(legend.find((l) => l.role === 'next').sig));
 });
@@ -412,14 +413,22 @@ test('echte Bünde / gleich breit: Umschalter im Modulkopf, gleich breit macht B
   expect(await fretWidth(page, 1)).toBeGreaterThan(2 * await fretWidth(page, 21));
 });
 
-test('Notenradius höchstens 40 % der Bundbreite, in weiten Bünden wie bisher (11)', async ({ page }) => {
+test('Notenradius höchstens 44 % der Bundbreite, in weiten Bünden groß (über 13 px), Namen halbfett und mindestens 12 px', async ({ page }) => {
   await openPlayPage(page);
   const rows = await page.evaluate(() => [1, 12, 21].map((fret) => {
     const x = (f) => document.querySelector(f === 0 ? '#fretboard .nut' : `#fretboard .fret-wire[data-fret="${f}"]`).getBoundingClientRect().x;
     const note = document.querySelector(`#fretboard .fret-note[data-string="0"][data-fret="${fret}"]`);
     return { width: x(fret) - x(fret - 1), r: Number.parseFloat(note.style.getPropertyValue('--r')) }; // Radius je Bund (die Form je Rolle ändert rx)
   }));
-  for (const { width, r } of rows) expect(r).toBeLessThanOrEqual(0.4 * width + 0.1);
-  expect(rows[0].r).toBeCloseTo(11, 0);
-  expect(rows[2].r).toBeLessThan(11);
+  for (const { width, r } of rows) expect(r).toBeLessThanOrEqual(0.44 * width + 0.1);
+  expect(rows[0].r).toBeGreaterThan(13);
+  expect(rows[0].r).toBeLessThanOrEqual(17);
+  expect(rows[2].r).toBeLessThan(rows[0].r);
+  // Schrift wächst mit dem Radius und bleibt lesbar
+  const fonts = await page.evaluate(() => [1, 21].map((fret) => {
+    const css = getComputedStyle(document.querySelector(`#fretboard .fret-note[data-string="0"][data-fret="${fret}"] text`));
+    return { size: Number.parseFloat(css.fontSize), weight: Number(css.fontWeight) };
+  }));
+  for (const f of fonts) { expect(f.size).toBeGreaterThanOrEqual(12); expect(f.weight).toBeGreaterThanOrEqual(600); }
+  expect(fonts[0].size).toBeGreaterThan(fonts[1].size);
 });

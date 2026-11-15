@@ -1,7 +1,7 @@
 // Start- und Spielseite: ein Zustandsobjekt (state.js), render() schreibt daraus alle Texte und Attribute neu.
 import { play, STYLE_PRESETS, validateTrack, t, setLanguage } from '../index.js';
 import { positionLabel, chordAtBar, loopBars } from './position.js';
-import { $, LAYERS, ALL_LAYERS, state, layoutStorage, chordName, rollVariant, preset, pressed, setText, setAttr, saveLang, deriveBars, applyStyle, rollNewForm, setFormTemplate } from './state.js';
+import { $, LAYERS, ALL_LAYERS, ROOTS, state, layoutStorage, chordName, rollVariant, preset, pressed, setText, setAttr, saveLang, deriveBars, applyStyle, rollNewForm, setFormTemplate } from './state.js';
 import { saveLayout } from './layout-state.js';
 import { initTuning } from './tuning.js';
 import { initMixer } from './mixer.js';
@@ -16,11 +16,19 @@ import { initTimbrePanel } from './timbre-panel.js';
 import { initVoices } from './voices-panel.js';
 import { loadVoices, missingPacks } from '../audio/load-voices.js';
 import { initJobs } from './jobs-panel.js';
+import { initOrgan } from './organ-panel.js';
+import { organTuning } from './organ-tuning.js';
 import { initRhythm } from './rhythm.js';
 import { syncKnobs } from './knob.js';
 import { syncLcdSelects } from './lcd-select.js';
 import { initFormPanel } from './form-panel.js';
 import { initFormStrip } from './form-strip.js';
+import { readSession, writeSession } from './profile-session.js';
+import { saveLast, loadLast } from './session-store.js';
+import { applyParts } from '../core/profile-parts.js';
+import { chooseRoot } from './key-scale.js';
+import { SCALE_NAMES } from '../core/music.js';
+import { convertTempo, meterKey } from '../core/grooves.js';
 
 // Dekoratives 16tel-Bild je Stil, 1 = Schlag
 const RHYTHMS = {
@@ -36,7 +44,7 @@ let loadingPacks = false; // Start wartet auf die Sample-Packs
 
 // Start erst, wenn die Packs der gewählten Sample-Stimmen da sind (Wunsch des Nutzers 2026-11-15), sonst spielte der Synth-Rückfall die
 // ersten Takte. Ein Pack, das nicht lädt, gibt nach seinem Fehler (spätestens nach dem Zeitlimit des Samplers) frei; dann spielt dort der Synth.
-async function startWhenLoaded() {
+async function startWhenLoaded(startBar = 0) {
   if (loadingPacks) return; // zweiter Klick während des Ladens
   if (missingPacks(state.track).length) {
     try { ctx ??= new AudioContext(); } catch { /* start() meldet den Fehler */ } // noch im Klick anlegen: nach dem Warten zählt er nicht mehr als Nutzergeste
@@ -45,16 +53,59 @@ async function startWhenLoaded() {
     await loadVoices(state.track);
     loadingPacks = false;
   }
-  start();
+  start(startBar);
 }
 
-// Countdown bis zum nächsten Akkordwechsel: eigene Bildzeitschleife (nicht über render()), nur bei laufender Wiedergabe, schreibt
-// nur bei Änderung. Die Liedzeit des Players bezieht sich auf das Starttempo, daher dessen bpm.
+// Lichter der Schichten (LED im Modultitel und vor dem Spurnamen), drei Stufen über dem Grundzustand "spielt in diesem Takt" (.on, gedämpft):
+// .sound: ein Ton der Schicht klingt gerade (volle Helligkeit, so lange wie der Ton; ein gehaltener Pad-Akkord leuchtet also durch),
+// .hit: Anschlag (Lichtschein für FLASH_MS; ein Anschlag, der in dieses Leuchten fällt, verlängert es nicht, sonst blinkte dichtes Spiel nicht).
+// Schläge (Schlagzeug, Percussion) haben keine Dauer und blitzen nur. Die Schlag-LED im Start/Stopp-Taster blitzt auf jedem Schlag.
+// Mit "Bewegung reduzieren" ändert sich nichts im Takt: die LEDs der Schichten leuchten dann wie bisher den ganzen Takt voll.
+const FLASH_MS = 70;
+const calm = matchMedia('(prefers-reduced-motion: reduce)');
+const flashing = new Set(); // LED-Gruppen, die gerade leuchten
+function flash(key, selector) {
+  if (calm.matches || state.page !== 'play' || flashing.has(key)) return;
+  const leds = document.querySelectorAll(selector);
+  for (const el of leds) el.classList.add('hit');
+  flashing.add(key);
+  setTimeout(() => { flashing.delete(key); for (const el of leds) el.classList.remove('hit'); }, FLASH_MS);
+}
+const layerLeds = (layer) => `.led[data-activity="${layer}"], #lane-buttons [data-layer="${layer}"]`;
+const sounding = new Map(); // Schicht -> { until, timer }: bis wann ihr längster Ton klingt
+function endSound(layer) {
+  clearTimeout(sounding.get(layer)?.timer);
+  sounding.delete(layer);
+  for (const el of document.querySelectorAll(layerLeds(layer))) el.classList.remove('sound');
+}
+function holdSound(layer, ms) {
+  if (calm.matches || state.page !== 'play') return;
+  const until = performance.now() + ms;
+  if (sounding.get(layer)?.until >= until) return; // ein längerer Ton klingt schon
+  clearTimeout(sounding.get(layer)?.timer);
+  for (const el of document.querySelectorAll(layerLeds(layer))) el.classList.add('sound');
+  sounding.set(layer, { until, timer: setTimeout(() => endSound(layer), ms) });
+}
+// jedes gespielte Ereignis einer hörbaren Schicht (stumme leuchten nicht); die Dauer zählt beim Starttempo, also mal Starttempo durch jetziges
+function flashEvent(e) {
+  if (!(e.type === 'note' || e.type === 'hit') || !state.track.layers[e.layer]) return;
+  flash(e.layer, layerLeds(e.layer));
+  if (e.type === 'note') holdSound(e.layer, (e.dur * 1000 * playBpm) / state.track.bpm);
+}
+
+// Countdown bis zum nächsten Akkordwechsel und Schlag-LED: eigene Bildzeitschleife (nicht über render()), nur bei laufender Wiedergabe,
+// schreibt nur bei Änderung. Die Liedzeit des Players bezieht sich auf das Starttempo, daher dessen bpm.
 let countdownFrame = 0;
 let playBpm = 0;
+let lastBeat = -1;
 function tickCountdown() {
   const n = player ? beatsUntilChange({ ...state.track, bpm: playBpm }, player.songTime()) : null;
   setText($('play-countdown'), n === null ? '' : t(n === 1 ? 'ui.countdownOne' : 'ui.countdownMany', { n }));
+  const beat = player ? Math.floor((player.songTime() * playBpm) / 60 + 1e-6) : -1;
+  if (beat !== lastBeat) {
+    lastBeat = beat;
+    if (player) flash('beat', '#beat-led');
+  }
   countdownFrame = player ? requestAnimationFrame(tickCountdown) : 0;
 }
 
@@ -79,6 +130,9 @@ function start(startBar = 0) {
       startBar,
       levels: layerLevels, // Mischpult von der ersten Note an
       master,
+      pans: state.pan,
+      tuning: organTuning(state.organ), // Leslie und Zerre der Orgel; im Standard leer
+      onEvent: flashEvent,
       onBar: (b) => { state.current = b; render(); },
       onEnd: () => { stop(); render(); },
     });
@@ -95,10 +149,20 @@ function start(startBar = 0) {
   }
 }
 
+// Zuletzt gespielt (Startseite, "Weitermachen"): beim Stopp und beim Verlassen der Seite wird die Sitzung samt laufendem Takt gemerkt
+let lastPlayed = loadLast(layoutStorage);
+const rememberSession = () => {
+  if (state.playing && state.current) lastPlayed = saveLast(layoutStorage, readSession(state), state.current.bar % loopBars(state.track));
+};
+addEventListener('pagehide', rememberSession);
+
 function stop() {
+  rememberSession();
   player?.stop();
   player = null;
   cancelAnimationFrame(countdownFrame);
+  for (const layer of [...sounding.keys()]) endSound(layer);
+  lastBeat = -1;
   setText($('play-countdown'), '');
   state.playing = false;
   state.current = null;
@@ -134,7 +198,42 @@ function applyLive({ patterns = false, tempo = false } = {}) {
 function toggleLayer(name) {
   state.track.layers = { ...state.track.layers, [name]: !state.track.layers[name] };
   player?.setLayer(name, state.track.layers[name]);
+  if (!state.track.layers[name]) endSound(name); // stumm: die LED geht sofort aus
 }
+
+// Was der Nutzer auf der Startseite selbst gewählt hat (Tonart oder Skala, Stil, Tempo, Variantennummer): "Überrasch mich" lässt es stehen
+const touched = { key: false, style: false, tempo: false, variant: false };
+$('key-pop').addEventListener('click', (e) => { if (e.target.closest('button')) touched.key = true; });
+
+// Überrasch mich: würfelt Stil (mit seinen Schlagworten), Tempo (Stiltempo ±10 %), Tonart, Skala und Variante neu
+const pick = (list) => list[Math.floor(Math.random() * list.length)];
+$('surprise').addEventListener('click', () => {
+  const bpm = state.track.bpm;
+  if (!touched.style) applyStyle(pick(STYLE_PRESETS).id);
+  const styleBpm = convertTempo(preset(state.style).bpm, '4/4', meterKey(state.track.meter));
+  state.track.bpm = touched.tempo ? bpm : Math.min(200, Math.max(40, Math.round(styleBpm * (0.9 + Math.random() * 0.2))));
+  if (!touched.variant) state.track.seed = rollVariant();
+  if (!touched.key) {
+    state.scale = pick(SCALE_NAMES);
+    chooseRoot(pick(ROOTS)); // setzt den Modus der Skala und leitet die Folge neu ab
+  } else deriveBars();
+  rollNewForm();
+  restartIfPlaying({ inPlace: true });
+  render();
+});
+
+// Weitermachen: die gemerkte Sitzung ganz wiederherstellen (wie ein Profil laden) und am gemerkten Takt weiterspielen, Spielseite im Fokus
+$('resume').addEventListener('click', async () => {
+  const last = lastPlayed;
+  if (!last) return;
+  if (state.playing) stop();
+  const r = applyParts(readSession(state), last.parts);
+  if (!r.ok) { state.errors = r.errors; render(); return; } // ganz oder gar nicht
+  writeSession(state, r.session);
+  await startWhenLoaded(Math.min(last.bar, loopBars(state.track) - 1));
+  if (state.playing) openFrom('resume', { mode: 'focus' });
+  else render();
+});
 
 // --- Aufbau der Auswahl (einmal), Texte kommen aus render() ---
 function chip(parent, data, onClick) {
@@ -156,6 +255,7 @@ const keyScales = [
 for (const { id } of STYLE_PRESETS) {
   const card = chip($('style-cards'), { style: id }, () => {
     applyStyle(id);
+    touched.style = true;
     applyLive({ patterns: true, tempo: true });
     $('style-pop').hidePopover();
   });
@@ -181,6 +281,7 @@ styleSelect.addEventListener('change', () => {
 // Tempo-Regler im Popover und im Modul Rhythmus teilen sich den Zustand
 for (const id of ['tempo', 'tuning-tempo']) {
   $(id).addEventListener('input', (e) => {
+    if (id === 'tempo') touched.tempo = true;
     state.track.bpm = Number(e.target.value);
     player?.setTempo(state.track.bpm); // live, ohne Neustart
     render();
@@ -251,7 +352,7 @@ $('variant-next').addEventListener('click', () => setVariant(stepVariant(state.t
 // Eingabe übernehmen (Enter oder Verlassen); Ungültiges ignorieren, beim Verlassen zeigt das Feld wieder die Variante
 $('variant').addEventListener('change', (e) => {
   const n = Number(e.target.value);
-  if (e.target.value !== '' && Number.isInteger(n) && n >= 1 && n <= 9999) setVariant(n);
+  if (e.target.value !== '' && Number.isInteger(n) && n >= 1 && n <= 9999) { touched.variant = true; setVariant(n); }
 });
 $('variant').addEventListener('blur', (e) => { e.target.value = String(state.track.seed); });
 
@@ -284,6 +385,7 @@ const renderStrip = initFormStrip({ render: () => render(), restartIfPlaying, ap
 const renderTimbre = initTimbrePanel({ render: () => render(), player: () => player }); // baut die Instrument-Module
 const voices = initVoices({ render: () => render(), player: () => player }); // nach dem Klangpanel: füllt den Platz Stimme in dessen Modulen
 const renderJobs = initJobs({ render: () => render(), changed: () => applyLive({ patterns: true }) }); // ebenso: Aufgabe
+const renderOrgan = initOrgan({ render: () => render(), player: () => player }); // ebenso: Leslie und Zerre der Orgel im Akkord-Modul
 
 // Akkordart-Gruppen im Popover sind <details>: immer offen (keine Klappgruppen)
 for (const el of document.querySelectorAll('#add-qualities details[data-group]')) el.open = true;
@@ -338,9 +440,24 @@ function render() {
     setText($(id), text);
   }
 
+  // im Stand zeigen die leeren Displays der Kopfleiste gedämpft die Länge und den ersten Akkord (nur als Bild: der Text bleibt leer)
+  setAttr($('play-position'), 'data-idle', t('ui.positionIdle', { n: loopBars(track) }));
+  setAttr($('play-now'), 'data-idle', track.bars.length ? chordName(track.bars[0].chord) : '');
   show($('start'), page === 'start');
   show($('play'), page === 'play');
   show($('to-play'), playing);
+  show($('last'), Boolean(lastPlayed));
+  if (lastPlayed) {
+    const p = lastPlayed.parts;
+    setText($('last-summary'), t('ui.lastSummary', {
+      key: t('ui.keyScale', { root: p.harmony.key.root, scale: t(`scale.${p.harmony.scale}`) }),
+      style: t(`style.${p.style.style}`),
+      bpm: p.tempo.bpm,
+      variant: p.variant.seed,
+      bar: lastPlayed.bar + 1,
+      when: lastPlayed.at ? new Date(lastPlayed.at).toLocaleString(lang, { dateStyle: 'medium', timeStyle: 'short' }) : '',
+    }));
+  }
   // vor renderTuning: das Akkordrad zeichnet nur, wenn es sichtbar ist
   setAttr($('play'), 'data-mode', state.layout.mode);
   setAttr($('mode-switch'), 'aria-checked', String(state.layout.mode === 'setup'));
@@ -355,6 +472,7 @@ function render() {
   renderProfiles();
   voices.render();
   renderJobs();
+  renderOrgan();
   renderTimbre();
   renderRhythm();
   renderForm();

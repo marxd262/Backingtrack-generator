@@ -6,7 +6,7 @@ import { meterKey } from '../core/grooves.js';
 import { isValidForm } from '../core/form.js';
 import { TARGET_SIZES } from '../core/form-roll.js';
 
-const FIELDS = ['track', 'scale', 'style', 'chordColor', 'chordColorFromStyle', 'mix'];
+const FIELDS = ['track', 'scale', 'style', 'chordColor', 'chordColorFromStyle', 'mix', 'pan', 'organ'];
 
 /** Sitzung aus dem Zustand (ohne Kopie: captureParts und applyParts kopieren selbst). */
 export const readSession = (state) => Object.fromEntries(FIELDS.map((k) => [k, state[k]]));
@@ -23,7 +23,7 @@ export function writeSession(state, session) {
     state.formTarget = TARGET_SIZES.reduce((x, y) => (Math.abs(y - session.track.length) < Math.abs(x - session.track.length) ? y : x));
   }
   for (const k of FIELDS) state[k] = session[k];
-  saveMix(layoutStorage, state.mix);
+  saveMix(layoutStorage, state.mix, state.pan);
   state.notice = null;
   state.errors = [];
 }

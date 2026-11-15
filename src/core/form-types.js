@@ -4,7 +4,7 @@
 import { LAYER_IDS, LAYERS } from './layers.js';
 
 /** Teil-Typen in Anzeigereihenfolge. */
-export const PART_TYPES = Object.freeze(['intro', 'verse', 'build', 'chorus', 'break', 'outro']);
+export const PART_TYPES = Object.freeze(['intro', 'verse', 'build', 'chorus', 'bridge', 'break', 'outro']);
 /** Übergang vor einem Teil: keiner, Schlagzeug-Fill, Snare-Wirbel, Stopp (ein bis zwei Schläge Stille). */
 export const TRANSITIONS = Object.freeze(['none', 'fill', 'roll', 'stop']);
 
@@ -28,6 +28,9 @@ export const TYPE_TABLE = Object.freeze({
   verse: freezeRow({ layers: ['bass', 'drums', 'chords'], density: [-0.15, -0.15], level: [-3, -3], transition: 'fill', crash: false }),
   build: freezeRow({ layers: ['bass', 'drums', 'chords', 'pad'], density: [-0.1, 0.25], level: [-4, -1], transition: 'roll', crash: false }),
   chorus: freezeRow({ layers: LAYER_IDS.filter((id) => !LAYERS[id].follows), density: [0.2, 0.2], level: [0, 0], transition: 'fill', crash: true }),
+  // Bridge (SPEC_PHASE3, Antwort auf Frage 3): der kontrastierende Teil nach einem Refrain. Volle Band, etwas leiser und ruhiger als der Refrain;
+  // die Artikulations-Schicht spielt sie wie eine Strophe (alles außer dem Refrain zählt dort als Strophe), also mit der Haltung, die der Refrain nicht hat.
+  bridge: freezeRow({ layers: ['bass', 'drums', 'chords', 'pad'], density: [-0.05, -0.05], level: [-2, -2], transition: 'fill', crash: false }),
   break: freezeRow({ layers: ['pad', 'chords'], density: [-0.4, -0.4], level: [-7, -7], transition: 'stop', crash: false }),
   outro: freezeRow({ layers: ['bass', 'chords', 'pad', 'drums'], density: [-0.15, -0.3], level: [-4, -8], transition: 'none', crash: false }),
 });

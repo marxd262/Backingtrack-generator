@@ -12,7 +12,7 @@ export const TARGET_SIZES = Object.freeze([24, 32, 48, 64, 96, 128, 192]);
 const DEFAULT_TARGET = 96;
 const FALLBACK_TEMPLATE = 'pop';
 /** Leitplanke 6: Mindestlänge je Typ und Höchstlänge eines Teils. */
-const MIN_BARS = Object.freeze({ intro: 2, build: 2, break: 2, outro: 2, verse: 4, chorus: 4 });
+const MIN_BARS = Object.freeze({ intro: 2, build: 2, break: 2, outro: 2, verse: 4, chorus: 4, bridge: 4 });
 const MAX_BARS = 32;
 const STEP = 2; // Anpassung an die Zielgröße in Schritten von 2 Takten
 const TOLERANCE = 4; // so weit darf die Summe vom Ziel abweichen (Spec: höchstens 4); die Notlösung in fit() hört dann auf
@@ -23,12 +23,17 @@ const MIN_CHORUS_LENGTH = 24; // Leitplanke 5: ab dieser Gesamtlänge (außer Ja
 const MAX_BODY_PARTS = 60; // Schutz vor endlosem Anhängen
 const ATTEMPTS = 24; // Versuche, bis die Leitplanken halten; sonst der beste
 const SEARCH_BUDGET = 3000; // Knoten der Typ-Suche je Versuch
-const TYPE_ORDER = Object.freeze(['verse', 'chorus', 'outro', 'intro', 'break', 'build']); // Ersatzreihenfolge bei Reparatur
+const TYPE_ORDER = Object.freeze(['verse', 'chorus', 'outro', 'intro', 'break', 'build']); // Ersatzreihenfolge bei Reparatur (nie Bridge: die kommt nur über insertBridge)
+// Bridge: höchstens eine je Lied, nur in Vorlagen mit `bridge` (Wahrscheinlichkeit beim Struktur-Standard) und erst ab dieser Zielgröße;
+// sie steht direkt hinter einem Refrain (dem vorletzten) und führt in Strophe, Aufbau oder Refrain
+const BRIDGE_MIN_TARGET = 48;
+const BRIDGE_BARS = Object.freeze([4, 8]);
+const AFTER_BRIDGE = Object.freeze(['chorus', 'verse', 'build']);
 const CHORUS_STOP_P = 0.3; // Refrain nach Strophe/Intro beginnt mit Stopp (bei Struktur-Standard)
 const STOP_AFTER = Object.freeze(['verse', 'intro']);
 
 /** Wahrscheinlichkeits-Faktoren der Entwicklungs-Schlagworte je Typ (Spec, Entscheidung 1). */
-const DEV_FACTORS = Object.freeze({
+export const DEV_FACTORS = Object.freeze({
   buildsSlowly: { intro: 1.6, build: 1.6 },
   fullFromStart: { intro: 0.2, build: 0.3 },
   withBreakouts: { break: 2.2 },
@@ -39,10 +44,10 @@ const slot = (type, bars, p = 1, repeat) => ({ types: [].concat(type), bars, p, 
 /** `unit`: alle Teile haben diese Länge (Blues), die Summe ist ein Vielfaches davon. `jam`: Regel 4 und 5 gelten nicht. */
 const TEMPLATES = Object.freeze({
   jam: { jam: true, head: [slot('intro', [4, 8], 0.3)], cycle: [slot('verse', [8, 16], 1, [1, 3]), slot('chorus', [8, 16], 0.6), slot('break', [4, 8], 0.12)], tail: [slot('chorus', [8, 16]), slot('outro', [4, 8], 0.35)] },
-  pop: { head: [slot('intro', [4, 8], 0.65)], cycle: [slot('verse', [8, 16]), slot('build', [4], 0.35), slot('chorus', [8, 16]), slot('break', [4, 8], 0.2)], tail: [slot('chorus', [8, 16], 0.5), slot('outro', [4, 8], 0.6)] },
+  pop: { bridge: 0.35, head: [slot('intro', [4, 8], 0.65)], cycle: [slot('verse', [8, 16]), slot('build', [4], 0.35), slot('chorus', [8, 16]), slot('break', [4, 8], 0.2)], tail: [slot('chorus', [8, 16], 0.5), slot('outro', [4, 8], 0.6)] },
   buildDrop: { head: [slot(['intro', 'verse'], [8, 16])], cycle: [slot('verse', [8, 16], 0.3), slot('build', [4, 8], 0.9), slot('chorus', [8, 16]), slot('break', [8, 16], 0.45)], tail: [slot('chorus', [8, 16], 0.4), slot('outro', [8, 16], 0.6)] },
   blues: { unit: 12, head: [slot('intro', [12], 0.3)], cycle: [slot('verse', [12], 1, [1, 2]), slot('chorus', [12], 0.8)], tail: [slot('chorus', [12], 0.5), slot('outro', [12], 0.3)] },
-  rock: { head: [slot('intro', [4, 8], 0.45)], cycle: [slot('verse', [8, 16]), slot('verse', [8], 0.3), slot('build', [4], 0.15), slot('chorus', [8, 16]), slot('break', [4, 8], 0.15)], tail: [slot('chorus', [8, 16], 0.4), slot('outro', [4, 8], 0.5)] },
+  rock: { bridge: 0.3, head: [slot('intro', [4, 8], 0.45)], cycle: [slot('verse', [8, 16]), slot('verse', [8], 0.3), slot('build', [4], 0.15), slot('chorus', [8, 16]), slot('break', [4, 8], 0.15)], tail: [slot('chorus', [8, 16], 0.4), slot('outro', [4, 8], 0.5)] },
 });
 
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -116,6 +121,29 @@ function drawItems(tpl, ctx, rng) {
   let cycles = 0;
   do { body.push(...run(tpl.cycle, cycles > 0)); cycles++; } while (sumBars(head) + sumBars(body) + sumBars(tail) < ctx.target && head.length + body.length + tail.length < MAX_BODY_PARTS && cycles < MAX_BODY_PARTS);
   return [...head, ...body, ...tail];
+}
+
+/**
+ * Bridge in die fertig gewürfelte Form einfügen: hinter dem vorletzten Refrain, wenn danach Strophe, Aufbau oder Refrain kommt und dahinter
+ * kein gesperrter Teil seinen Platz verlöre. Die Summe bleibt gleich: der längste freie Hauptteil (Strophe oder Refrain) gibt die Takte ab,
+ * wenn ihm mindestens 8 bleiben. Die Entscheidung zieht ein eigener Zweig des Zufalls und sie fällt erst nach dem Würfeln: eine Form ohne
+ * Bridge ist darum genau die, die sie vor diesem Teil-Typ war.
+ */
+function insertBridge(sections, tpl, ctx, rng, lastLocked) {
+  const p = (tpl.bridge ?? 0) * ctx.structure;
+  if (!(p > 0) || ctx.target < BRIDGE_MIN_TARGET || sections.length >= FORM_LIMITS.parts || sections.some((s) => s.type === 'bridge')) return;
+  const own = rng.fork('bridge');
+  if (own.next() >= p) return;
+  const types = sections.map((s) => s.type);
+  const last = types.lastIndexOf('chorus');
+  if (last < 1) return;
+  const prev = types.lastIndexOf('chorus', last - 1);
+  if (prev < 0 || prev < lastLocked || !AFTER_BRIDGE.includes(types[prev + 1])) return;
+  const bars = own.pick(BRIDGE_BARS);
+  const donor = sections.filter((s) => s.locked !== true && (s.type === 'verse' || s.type === 'chorus') && s.bars - bars >= 2 * PHRASE).sort((x, y) => y.bars - x.bars)[0];
+  if (!donor) return;
+  donor.bars -= bars;
+  sections.splice(prev + 1, 0, { type: 'bridge', bars });
 }
 
 /** Gesperrte Teile an ihren Index setzen, die Ziehung füllt die Lücken davor, der Rest kommt dahinter. */
@@ -205,13 +233,15 @@ function fit(items, target, unit, last, rng) {
 
 // --- Leitplanken (lokale Fenster, damit die Suche nur prüft, was sie gerade ändert) ---
 const singleBad = (s, i) => (i === 0 && s[0] !== undefined && s[0] !== 'intro' && s[0] !== 'verse') || (i === s.length - 1 && s[i] !== undefined && s[i] !== 'outro' && s[i] !== 'chorus');
-const pairBad = (s, i) => s[i] !== undefined && s[i + 1] !== undefined && ((s[i] === 'build' && s[i + 1] !== 'chorus') || (s[i] === 'break' && s[i + 1] === 'break'));
+const pairBad = (s, i) => s[i] !== undefined && s[i + 1] !== undefined && ((s[i] === 'build' && s[i + 1] !== 'chorus') || (s[i] === 'break' && s[i + 1] === 'break')
+  || (s[i + 1] === 'bridge' && s[i] !== 'chorus') || (s[i] === 'bridge' && !AFTER_BRIDGE.includes(s[i + 1])));
 const tripleBad = (s, i, jam) => !jam && s[i] !== undefined && s[i] === s[i + 1] && s[i] === s[i + 2];
 const windowBad = (s, i, jam) => singleBad(s, i) || pairBad(s, i - 1) || pairBad(s, i) || tripleBad(s, i - 2, jam) || tripleBad(s, i - 1, jam) || tripleBad(s, i, jam);
 function countViolations(s, jam, total) {
   let n = 0;
   for (let i = 0; i < s.length; i++) n += +singleBad(s, i) + +pairBad(s, i) + +tripleBad(s, i, jam);
   if (!jam && total >= MIN_CHORUS_LENGTH && !s.includes('chorus')) n++;
+  if (s.filter((t) => t === 'bridge').length > 1) n++;
   return n;
 }
 
@@ -282,6 +312,7 @@ export function rollForm(args) {
       if (!best || a.score < best.score) best = a;
     }
     const sections = best.sections;
+    if (best.score === 0) insertBridge(sections, tpl, ctx, rng, locks.size ? Math.max(...locks.keys()) : -1);
     while (sections.length > FORM_LIMITS.parts || (sumBars(sections) > FORM_LIMITS.length && sections.length > 1)) sections.pop(); // nur bei absurden Sperren
     return { template, auto, feel, sections };
   };

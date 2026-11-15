@@ -7,8 +7,8 @@ const SECTION = 8; // Abschnittsgrenze alle 8 Takte, solange der Track keine Son
 const summaries = new WeakMap();
 
 /** Memo-Schlüssel des Verlaufs: alles, was den Ereignisstrom ändert. Tempo und Schichten fehlen (x-Achse sind Takte, stumme Spuren werden nur gedimmt). */
-export const laneKey = ({ key, bars, tags, seed, length, meter, groove, complexity, loose, form, jobs, voices, variety }) =>
-  JSON.stringify([key, bars, tags, seed, length, meter, groove, complexity, loose, form, jobs, voices, variety]);
+export const laneKey = ({ key, bars, tags, seed, length, meter, groove, complexity, loose, ornaments, form, jobs, voices, variety }) =>
+  JSON.stringify([key, bars, tags, seed, length, meter, groove, complexity, loose, ornaments, form, jobs, voices, variety]);
 
 // Je Takt: Startzeit, Anzahl Ereignisse je Schicht, Fill-Marker und Teilanfänge der Form. Einmal je Ereignisliste.
 function summarize(events) {
@@ -56,15 +56,15 @@ export function drawLanes(canvas, events, positionSec, layers = {}) {
     ctx.globalAlpha = 1;
     ctx.fillStyle = c.staff;
     ctx.fillRect(0, y + 4, width, lh - 8);
-    ctx.fillStyle = c.ink;
+    ctx.fillStyle = c.accent2;
     for (let b = 0; b < bars; b++) {
       const n = s.counts[lane][b];
       if (!n) continue;
-      // Block: Schicht spielt in diesem Takt; dunkler Sockel: Dichte relativ zum vollsten Takt der Schicht
+      // Block: Schicht spielt in diesem Takt; kräftiger Sockel: Dichte relativ zum vollsten Takt der Schicht
       ctx.globalAlpha = 0.25 * dim;
       ctx.fillRect(b * bw, y + 8, bw - gap, lh - 16);
       const dh = ((lh - 16) * n) / s.max[lane];
-      ctx.globalAlpha = 0.8 * dim;
+      ctx.globalAlpha = 0.9 * dim;
       ctx.fillRect(b * bw, y + lh - 8 - dh, bw - gap, dh);
     }
   });
@@ -85,7 +85,12 @@ export function drawLanes(canvas, events, positionSec, layers = {}) {
     ctx.fill();
   }
 
+  // Abspielmarke: der laufende Takt ist pink hinterlegt, an seinem Anfang steht ein pinker Strich
   let bar = 0;
   while (bar + 1 < bars && s.starts[bar + 1] <= positionSec) bar++;
-  ctx.fillRect(bar * bw, 0, 2, height);
+  ctx.fillStyle = c.accent;
+  ctx.globalAlpha = 0.18;
+  ctx.fillRect(bar * bw, 0, Math.max(bw, 3), height);
+  ctx.globalAlpha = 1;
+  ctx.fillRect(bar * bw, 0, 3, height);
 }

@@ -9,6 +9,7 @@ import { DEFAULT_TIMBRE, resolveTrackTimbre } from '../core/timbre.js';
 import { usesTimbreField } from '../core/voices.js';
 import { LAYER_IDS } from '../core/layers.js';
 import { createKnob } from './knob.js';
+import { KNOB_SLOTS, RESET_SLOT } from './knob-slots.js';
 
 const el = (tag, props) => Object.assign(document.createElement(tag), props);
 
@@ -17,11 +18,18 @@ export function initTimbrePanel({ render, player }) {
   const resets = {}; // Zurücksetzen-Knopf je Gruppe
   const push = () => player()?.setTimbre(resolveTrackTimbre(state.track)); // live, ohne Neustart
 
-  // Knöpfe einer Gruppe in host; Ursprung des Bogens: Mitte, wenn der Standard 0,5 ist, sonst linker Anschlag
-  function buildKnobs(group, host, size) {
+  // Platz im Raster: Knopfzeilen 1 und 2 sind die Rasterzeilen 1 und 2, dann die Punktlinie (Rasterzeile 3), Knopfzeilen 3 und 4 darunter
+  const place = (cell, [row, col]) => { cell.style.gridArea = `${row > 2 ? row + 1 : row} / ${col}`; };
+
+  // Knöpfe einer Gruppe in host; Ursprung des Bogens: Mitte, wenn der Standard 0,5 ist, sonst linker Anschlag.
+  // slots (Instrument-Module): fester Platz je Feld; die Knöpfe stehen dann auch im Dokument in dieser Reihenfolge (Tab = Leserichtung).
+  function buildKnobs(group, host, size, slots) {
     const fields = DEFAULT_TIMBRE[group] ?? {};
-    for (const field of Object.keys(fields)) {
+    const order = Object.keys(fields);
+    if (slots) order.sort((a, b) => slots[a][0] - slots[b][0] || slots[a][1] - slots[b][1]);
+    for (const field of order) {
       const cell = el('div', { className: 'knob-cell' });
+      if (slots) place(cell, slots[field]);
       const input = el('input', { type: 'range', id: `timbre-${group}-${field}`, min: '0', max: '100', step: '1' });
       const label = el('label', { htmlFor: input.id, className: 'lbl' });
       label.dataset.i18n = `timbre.${group}.${field}`;
@@ -37,8 +45,13 @@ export function initTimbrePanel({ render, player }) {
       rows.push({ group, field, input });
     }
     if (!Object.keys(fields).length) return; // ohne Knöpfe kein Zurücksetzen
-    const reset = el('button', { type: 'button', className: 'chip timbre-reset' });
-    reset.dataset.i18n = 'ui.timbreReset';
+    // Zurücksetzen: runder Taster als letzte Zelle des Rasters, Name darunter wie bei den Knöpfen (so bleibt das Modul eine Reihe hoch)
+    const cell = el('div', { className: 'knob-cell' });
+    const reset = el('button', { type: 'button', className: 'push timbre-reset', textContent: '\u21BA' });
+    reset.dataset.i18nLabel = 'ui.timbreReset';
+    const caption = el('span', { className: 'lbl' });
+    caption.dataset.i18n = 'ui.timbreReset';
+    caption.setAttribute('aria-hidden', 'true'); // der Taster trägt den Namen (aria-label)
     reset.addEventListener('click', () => {
       const { [group]: removed, ...rest } = state.track.timbre;
       state.track.timbre = rest;
@@ -49,7 +62,9 @@ export function initTimbrePanel({ render, player }) {
       rows.find((r) => r.group === group && !r.input.disabled)?.input.focus();
     });
     resets[group] = reset;
-    host.after(reset);
+    cell.append(reset, caption);
+    if (slots) place(cell, RESET_SLOT);
+    host.append(cell);
   }
 
   // ein Modul je Schicht (Reihenfolge LAYER_IDS); Percussion hat keine Klangfelder und teilt den Raum mit dem Schlagzeug
@@ -63,12 +78,22 @@ export function initTimbrePanel({ render, player }) {
     const name = el('span');
     name.dataset.i18n = `layer.${layer}`;
     title.append(led, name);
+    // jedes Modul gleich aufgebaut: Stimme, darunter das Raster. Die Aufgabe (Lead, Percussion) belegt im Raster die Zeilen 1 und 2,
+    // wo die anderen ihre eigenen Klangknöpfe haben; ohne Klangfelder (Percussion) steht unten der Hinweis statt der Knöpfe.
     const fields = DEFAULT_TIMBRE[layer];
-    const knobs = el(fields ? 'div' : 'p', { className: fields ? 'inst-knobs' : 'hint' });
-    if (!fields) knobs.dataset.i18n = 'ui.percussionHint';
-    module.append(title, el('div', { className: 'inst-voice' }), el('div', { className: 'inst-job' }), knobs);
+    const knobs = el('div', { className: 'inst-knobs' });
+    const divider = el('div', { className: 'inst-divider' });
+    divider.setAttribute('aria-hidden', 'true');
+    knobs.append(el('div', { className: 'inst-job' }));
+    module.append(title, el('div', { className: 'inst-voice' }), knobs);
     $('rack-instruments').append(module);
-    if (fields) buildKnobs(layer, knobs, 's');
+    if (fields) buildKnobs(layer, knobs, 's', KNOB_SLOTS[layer]);
+    else {
+      const hint = el('p', { className: 'hint' });
+      hint.dataset.i18n = 'ui.percussionHint';
+      knobs.append(hint);
+    }
+    knobs.append(divider);
   }
   // die übrigen Gruppen (Gesamt) gehören zum Mixer
   for (const group of Object.keys(DEFAULT_TIMBRE).filter((id) => !LAYER_IDS.includes(id))) buildKnobs(group, $('mixer-master'), 'm');
@@ -82,6 +107,8 @@ export function initTimbrePanel({ render, player }) {
       // Knöpfe, die die gewählte Stimme nicht benutzt, sind ausgegraut (die Verzerrer gelten für jede Stimme)
       const off = !usesTimbreField(state.track.voices, `${group}.${field}`);
       if (input.disabled !== off) input.disabled = off;
+      // kleine Anzeige über dem Knopf beim Überfahren und Bedienen (CSS, .knob-cell[data-hint]): der Wert, bei ausgegrauten Knöpfen der Grund
+      setAttr(input.closest('.knob-cell'), 'data-hint', off ? t('ui.knobUnused') : t('ui.percent', { n: percent }));
       setAttr(input, 'aria-valuetext', t('ui.percent', { n: percent }));
     }
     for (const [group, button] of Object.entries(resets)) {

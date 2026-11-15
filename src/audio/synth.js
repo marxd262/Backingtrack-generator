@@ -40,8 +40,11 @@ const LEVEL_TC = 0.02; // Zeitkonstante der Pegelrampe (s), gegen Knacken
  * die festen Knoten (Hall, Echo, Helligkeit, Raum-Sendeweg, Summenpegel) folgen über Rampen; schon laufende Töne bleiben.
  * `levels` (je Schicht aus LAYER_IDS, je 0..1) und `master` (0..1) sind Reglerstellungen des Mischpults (mix.js), Standard 1;
  * setLevel/setMaster ändern sie live. Der Gesamtpegel liegt hinter dem Begrenzer und ändert dessen Verhalten nicht.
+ * `pans` (je Schicht -1 links .. 1 rechts) ersetzt die Lage aus den Feinwerten 'mix/pan' (Pan-Knöpfe des Mischpults); fehlt eine Schicht, gilt
+ * ihr Feinwert wie bisher. setPan(name, pan) ändert sie live. level(name) liefert den Spitzenpegel 0..1 einer Schicht hinter Fader, Stumm und
+ * Pan ('master': am Ausgang) für die Pegelanzeigen; der Analyser dazu entsteht erst beim ersten Aufruf und hört nur mit.
  */
-export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, timbre = DEFAULT_TIMBRE, levels = {}, master: masterLevel = 1, voices, tuning } = {}) {
+export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, timbre = DEFAULT_TIMBRE, levels = {}, master: masterLevel = 1, voices, tuning, pans: panInput } = {}) {
   let sound = completeTimbre(timbre);
   // Parameterobjekte bleiben dieselben, setTimbre überschreibt nur ihre Felder (die Stimmen halten sie als Referenz)
   const mix = {}, drum = {}, bass = {}, chord = {}, pad = {};
@@ -164,9 +167,10 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
     };
   };
   const pans = {}, kitPans = {};
+  const panState = { ...panInput }; // Lage je Schicht vom Mischpult; ohne Eintrag gilt der Feinwert
   const applyPan = (tuning, live) => {
     const v = (name) => tunedValue('mix/pan', name, tuning);
-    for (const [name, pan] of Object.entries(pans)) pan.set(mix.width * v(name), live);
+    for (const [name, pan] of Object.entries(pans)) pan.set(mix.width * (Number.isFinite(panState[name]) ? panState[name] : v(name)), live);
     for (const [name, pan] of Object.entries(kitPans)) pan.set(mix.width * v('kit') * KIT_PAN[name], live);
   };
 
@@ -229,6 +233,7 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
   };
   applyFx({ immediate: true });
   applyPan(tuningState, false);
+  const meters = {}, meterData = new Float32Array(1024); // Pegelanzeige (level)
   return {
     output: volume,
     layers,
@@ -239,6 +244,21 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
     },
     setMaster(v) {
       ramp(volume.gain, sliderGain(v));
+    },
+    // pan: -1 (links) .. 1 (rechts), wird begrenzt; unbekannte Schicht wirft
+    setPan(name, pan) {
+      if (!Object.hasOwn(pans, name)) throw new Error(`Unknown layer: ${name}`);
+      panState[name] = pan;
+      applyPan(tuningState, true);
+    },
+    level(name) {
+      const source = name === 'master' ? volume : pans[name]?.output;
+      if (!source) throw new Error(`Unknown layer: ${name}`);
+      if (!meters[name]) { meters[name] = ctx.createAnalyser(); meters[name].fftSize = 1024; source.connect(meters[name]); }
+      meters[name].getFloatTimeDomainData(meterData);
+      let peak = 0;
+      for (const x of meterData) peak = Math.max(peak, Math.abs(x));
+      return Math.min(1, peak);
     },
     // timbre: wie die Option gleichen Namens (unvollständig oder ungültig wird aufgefüllt)
     // Wartet, bis alle Packs der gewählten Stimmen geladen sind (oder gescheitert; wirft nie). Bis dahin spielt der klassische Synth.

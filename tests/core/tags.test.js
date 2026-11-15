@@ -3,6 +3,26 @@ import assert from 'node:assert/strict';
 import { createRng } from '../../src/core/rng.js';
 import { TAG_CATEGORIES, STYLE_PRESETS, INERT_TAGS, resolveTags, isSoundOnlyChange } from '../../src/core/tags.js';
 import { resolveTimbre, DEFAULT_TIMBRE } from '../../src/core/timbre.js';
+import { isVoice, completeVoices, VOICES } from '../../src/core/voices.js';
+
+test('Stile schlagen Stimmen vor: je Stil gültige Sample-Stimmen für Bass, Akkorde und Schlagzeug, sonst nichts; die Vorlage ist eingefroren', () => {
+  for (const preset of STYLE_PRESETS) {
+    assert.deepEqual(Object.keys(preset.voices).sort(), ['bass', 'chords', 'drums'], preset.id);
+    for (const [layer, v] of Object.entries(preset.voices)) {
+      assert.ok(isVoice(layer, v.id, v.variant), `${preset.id} ${layer} ${v.id}/${v.variant}`);
+      assert.equal(VOICES[layer][v.id].kind, 'sample', `${preset.id} ${layer}`);
+    }
+    assert.ok(Object.isFrozen(preset.voices) && Object.isFrozen(preset.voices.bass), preset.id);
+    // aufgefüllt bleiben die übrigen Schichten beim Standard
+    const full = completeVoices(preset.voices);
+    assert.deepEqual(full.pad, completeVoices().pad);
+    assert.deepEqual(full.lead, completeVoices().lead);
+  }
+  const of = (id) => Object.fromEntries(Object.entries(STYLE_PRESETS.find((p) => p.id === id).voices).map(([layer, v]) => [layer, v.variant]));
+  assert.deepEqual(of('funk'), { bass: 'finger', chords: 'funk', drums: 'standard' });
+  assert.deepEqual(of('country'), { bass: 'upright', chords: 'steel', drums: 'brushes' });
+  assert.deepEqual(of('rock'), { bass: 'pick', chords: 'guitar', drums: 'standard' });
+});
 
 const NUMBERS = ['drive', 'swing', 'syncopation', 'bassLow', 'bassMovement', 'padWidth'];
 const seeds = Array.from({ length: 40 }, (_, i) => i + 1);

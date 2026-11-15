@@ -16,15 +16,17 @@ test('factoryProfiles: ein Eintrag je Stil, Reihenfolge und Schlüssel wie STYLE
 
 const uiState = () => ({
   track: { key: { root: 'A', mode: 'minor' }, bpm: 100, bars: [{ chord: { root: 'A', quality: 'min' }, beats: 4 }], tags: {}, timbre: {}, layers: {}, seed: 1, variety: true, length: 96, meter: [4, 4] },
-  scale: 'minorPentatonic', style: 'funk', chordColor: 'triads', chordColorFromStyle: true, mix: { drums: 1, master: 1 },
+  scale: 'minorPentatonic', style: 'funk', chordColor: 'triads', chordColorFromStyle: true, mix: { drums: 1, master: 1 }, pan: { chords: 0.3, pad: -0.2 }, organ: { leslie: 'auto', drive: null },
   playing: true, lang: 'de', tempoRef: { key: '4/4', quarter: 100, shown: 100 }, notice: 'ui.progressionFull', errors: [{ code: 'playFailed', params: {} }],
 });
 
-test('factoryParts: Stil mit kopierten Schlagworten, Tempo der Vorlage in 4/4 (Laden rechnet es wie applyStyle um), Klangregler zurückgesetzt', () => {
+test('factoryParts: Stil mit kopierten Schlagworten, Tempo der Vorlage in 4/4 (Laden rechnet es wie applyStyle um), Klangregler zurückgesetzt, Stimmen des Stils', () => {
   const funk = STYLE_PRESETS.find((p) => p.id === 'funk');
   const parts = factoryParts('funk');
-  assert.deepEqual(Object.keys(parts), PART_IDS.filter((id) => ['tempo', 'style', 'sound'].includes(id)));
-  assert.deepEqual(parts, { tempo: { bpm: 100, meter: [4, 4] }, style: { style: 'funk', tags: funk.tags }, sound: { timbre: {} } });
+  assert.deepEqual(Object.keys(parts), PART_IDS.filter((id) => ['tempo', 'style', 'sound', 'voices'].includes(id)));
+  const voices = { bass: { id: 'sample', variant: 'finger' }, chords: { id: 'sample', variant: 'funk' }, drums: { id: 'sample', variant: 'standard' } };
+  assert.deepEqual(parts, { tempo: { bpm: 100, meter: [4, 4] }, style: { style: 'funk', tags: funk.tags }, sound: { timbre: {} }, voices: { voices } });
+  assert.notEqual(parts.voices.voices, funk.voices, 'Kopie, nicht die Vorlage');
   assert.notEqual(parts.style.tags, funk.tags, 'Kopie, nicht die Vorlage');
   parts.style.tags.drums.push('heavy');
   assert.ok(!funk.tags.drums.includes('heavy'));
@@ -37,15 +39,16 @@ test('factoryParts: Stil mit kopierten Schlagworten, Tempo der Vorlage in 4/4 (L
   for (const { id } of STYLE_PRESETS) assert.equal(sanitizeParts(factoryParts(id)).skipped, 0, id); // überlebt den Import
 });
 
-test('readSession liest nur die sechs Sitzungsfelder; writeSession setzt sie, löscht tempoRef, Hinweis und Fehler, lässt den Rest', () => {
+test('readSession liest nur die acht Sitzungsfelder; writeSession setzt sie, löscht tempoRef, Hinweis und Fehler, lässt den Rest', () => {
   const state = uiState();
-  assert.deepEqual(Object.keys(readSession(state)), ['track', 'scale', 'style', 'chordColor', 'chordColorFromStyle', 'mix']);
-  const r = applyParts(readSession(state), { tempo: { bpm: 77 }, style: { style: 'rock' }, mixer: { mix: { drums: 0.5 } } });
+  assert.deepEqual(Object.keys(readSession(state)), ['track', 'scale', 'style', 'chordColor', 'chordColorFromStyle', 'mix', 'pan', 'organ']);
+  const r = applyParts(readSession(state), { tempo: { bpm: 77 }, style: { style: 'rock' }, mixer: { mix: { drums: 0.5 }, pan: { pad: 0.5 } } });
   assert.ok(r.ok);
   writeSession(state, r.session);
   assert.equal(state.track.bpm, 77);
   assert.equal(state.style, 'rock');
   assert.deepEqual(state.mix, { drums: 0.5, master: 1 });
+  assert.deepEqual(state.pan, { chords: 0.3, pad: 0.5 }); // je Schicht gemischt
   assert.equal(Object.hasOwn(state, 'tempoRef'), false);
   assert.equal(state.notice, null);
   assert.deepEqual(state.errors, []);
