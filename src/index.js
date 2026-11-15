@@ -1,6 +1,8 @@
 // Öffentliche Schnittstelle (für Interactive Scales); lädt auch in reinem Node ohne Browser-Globals.
 import { normalizeTrack, validateTrack as coreValidateTrack } from './core/track.js';
 export { play } from './audio/play.js';
+export { loadVoices } from './audio/load-voices.js';
+export { DRUM_FALLBACK } from './core/event-helpers.js';
 export { buildEvents, DRUM_NAMES, PERCUSSION_NAMES } from './core/events.js';
 export { chordTimeline } from './core/timeline.js';
 export { TAG_CATEGORIES, STYLE_PRESETS } from './core/tags.js';

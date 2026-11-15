@@ -5,7 +5,7 @@ import { DRUM_FALLBACK } from '../../core/event-helpers.js';
 // bisherigen Konstanten) und wird beim Anschlag gelesen. Toms folgen dem Klangmodell nicht.
 const TOMS = { tomHigh: 200, tomMid: 150, tomLow: 110 };
 
-export function drumKitVoice(ctx, { params: p, noise }) {
+export function drumKitVoice(ctx, { params: p, noise, tuned = () => 1 }) {
   const kick = (out, t, v) => {
     const o = ctx.createOscillator(), a = ctx.createGain();
     o.frequency.setValueAtTime(p.kickStart, t); o.frequency.exponentialRampToValueAtTime(p.kickEnd, t + p.kickDrop);
@@ -54,6 +54,11 @@ export function drumKitVoice(ctx, { params: p, noise }) {
   };
   const kit = { kick, snare, hat: hat(false), openHat: hat(true), crash };
   for (const [name, f] of Object.entries(TOMS)) kit[name] = tom(f);
-  // Schlagarten der Artikulations-Schicht spielen ihren Grundschlag (die halboffene Hi-Hat die geschlossene: die offene würde hier nicht abgewürgt)
-  return (out, t, e) => e.type === 'hit' && (kit[e.name] ?? kit[e.name === 'hatHalf' ? 'hat' : DRUM_FALLBACK[e.name]])?.(out, t, e.vel);
+  // Schlagarten der Artikulations-Schicht spielen ihren Grundschlag (die halboffene Hi-Hat die geschlossene: die offene würde hier nicht abgewürgt);
+  // der Side-Stick leiser als die Snare, die getretene Hi-Hat entfällt (Feinwerte sideStick, hatPedal)
+  return (out, t, e) => {
+    if (e.type !== 'hit' || (e.name === 'hatPedal' && tuned('hatPedal') < 1)) return;
+    const vel = e.name === 'sideStick' ? e.vel * tuned('sideStick') : e.vel;
+    (kit[e.name] ?? kit[e.name === 'hatHalf' ? 'hat' : DRUM_FALLBACK[e.name]])?.(out, t, vel);
+  };
 }

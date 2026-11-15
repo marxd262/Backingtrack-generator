@@ -58,6 +58,9 @@ const organ = (bars, level, over) => ({
 // Gemeinsame Namen der Saitenstimmen (Bedeutung: string-model.js STRING_DEFAULTS); die Startwerte sind nach bestem Wissen gesetzt und
 // werden in der Hörprobe nach Gehör verändert. level gleicht den Pegel an den klassischen Synth an (gemessen, siehe voices-string-sound.spec.js).
 export const TUNABLES = deepFreeze({
+  // Synth-Kit, Schlagarten ohne eigenen Klang (Urteil des Nutzers 2026-11-15: fehlt die Artikulation, entfällt die Verzierung): sideStick Faktor auf die
+  // Lautstärke der Snare, die ihn vertritt (1 = volle Snare wie bisher); hatPedal 0 = entfällt, 1 = geschlossene Hi-Hat wie bisher
+  'drums/synth/classic': { sideStick: spec(0, 1, 0.05, 0.45), hatPedal: spec(0, 1, 1, 0) },
   'bass/string/finger': {
     pluckPos: spec(0, 0.5, 0.01, 0.28), brightness: spec(0, 1, 0.01, 0.45), decay: spec(0.2, 6, 0.05, 1.2), excite: spec(0, 1, 0.01, 0.25),
     stiffness: spec(0, 1, 0.01, 0.05), pickupPos: spec(0, 0.5, 0.01, 0.12), pickupLp: spec(500, 12000, 100, 2500), body: spec(0, 1, 0.01, 0.25),

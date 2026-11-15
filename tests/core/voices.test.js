@@ -1,7 +1,7 @@
 // Stimmen-Register: Konsistenz über alle Einträge (neue Stimmen werden automatisch erfasst), Auflösung und Validierung.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { VOICES, VOICE_LAYERS, DEFAULT_VOICE, isVoice, voicesFor, completeVoices, resolveVoices, usesTimbreField, setAllVoices, voiceKind } from '../../src/core/voices.js';
+import { VOICES, VOICE_LAYERS, DEFAULT_VOICES, isVoice, voicesFor, completeVoices, resolveVoices, usesTimbreField, setAllVoices, voiceKind } from '../../src/core/voices.js';
 import { DEFAULT_TIMBRE } from '../../src/core/timbre.js';
 import { validateTrack } from '../../src/index.js';
 import de from '../../src/i18n/de.js';
@@ -18,7 +18,7 @@ const track = (voices) => ({ key: { root: 'A', mode: 'minor' }, bpm: 100, bars, 
 test('Register: Schlagzeug, Bass, Akkorde, Pad, dazu die stummen Lead und Percussion; jede Stimme hat Art, Varianten und Reglerliste; tief eingefroren', () => {
   assert.deepEqual(VOICE_LAYERS, ['drums', 'bass', 'chords', 'pad', 'lead', 'percussion']);
   assert.deepEqual(Object.keys(VOICES), VOICE_LAYERS);
-  assert.ok(deepFrozen(VOICES) && deepFrozen(DEFAULT_VOICE));
+  assert.ok(deepFrozen(VOICES) && deepFrozen(DEFAULT_VOICES));
   for (const [layer, id, v] of entries()) {
     const label = `${layer}/${id}`;
     assert.ok(KINDS.includes(v.kind), `${label}: Art`);
@@ -29,8 +29,8 @@ test('Register: Schlagzeug, Bass, Akkorde, Pad, dazu die stummen Lead und Percus
   }
 });
 
-test('Standard je Instrument ist synth/classic und steht im Register als erste Variante', () => {
-  assert.deepEqual(DEFAULT_VOICE, { id: 'synth', variant: 'classic' });
+test('Standard je Instrument ist die erste Sample-Variante (seit 2026-11-15); synth/classic steht im Register als erste Stimme', () => {
+  assert.deepEqual(DEFAULT_VOICES, { drums: { id: 'sample', variant: 'standard' }, bass: { id: 'sample', variant: 'finger' }, chords: { id: 'sample', variant: 'guitar' }, pad: { id: 'sample', variant: 'strings' }, lead: { id: 'sample', variant: 'flute' }, percussion: { id: 'sample', variant: 'studio' } });
   for (const layer of VOICE_LAYERS) {
     assert.ok(isVoice(layer, 'synth', 'classic'), layer);
     assert.equal(VOICES[layer].synth.variants[0], 'classic', layer);
@@ -62,18 +62,18 @@ test('isVoice und voicesFor: bekannte und unbekannte Eingaben', () => {
 });
 
 test('completeVoices: ungültig oder fehlend ergibt den Standard, gültige Stimme ohne Variante die erste Variante, Eingabe bleibt unverändert', () => {
-  const standard = Object.fromEntries(VOICE_LAYERS.map((l) => [l, DEFAULT_VOICE]));
+  const standard = DEFAULT_VOICES;
   for (const input of [undefined, null, [], 'x', 3, {}, { drums: { id: 'nope' } }, { bass: null }, { bass: 7 }, { bass: { id: 'nope' } }]) {
     assert.deepEqual(completeVoices(input), standard, JSON.stringify(input));
   }
   assert.deepEqual(completeVoices({ bass: 'string' }).bass, { id: 'string', variant: 'finger' });
   assert.deepEqual(completeVoices({ bass: { id: 'string' } }).bass, { id: 'string', variant: 'finger' });
   assert.deepEqual(completeVoices({ chords: { id: 'string', variant: 'nope' } }).chords, { id: 'string', variant: 'electric' });
-  assert.deepEqual(completeVoices({ chords: { variant: 'rhodes' } }).chords, DEFAULT_VOICE, 'Variante ohne Stimme: Standard');
+  assert.deepEqual(completeVoices({ chords: { variant: 'rhodes' } }).chords, DEFAULT_VOICES.chords, 'Variante ohne Stimme: Standard');
   const input = Object.freeze({ bass: Object.freeze({ id: 'string', variant: 'finger' }) });
   assert.deepEqual(completeVoices(input).bass, { id: 'string', variant: 'finger' });
   assert.notEqual(completeVoices(input), completeVoices(input), 'neue Kopie');
-  assert.deepEqual(resolveVoices({ voices: { pad: { id: 'synth' } } }), standard);
+  assert.deepEqual(resolveVoices({ voices: { pad: { id: 'synth' } } }), { ...standard, pad: { id: 'synth', variant: 'classic' } });
   assert.deepEqual(resolveVoices(null), standard);
 });
 
@@ -118,12 +118,13 @@ test('Schlüssel der Objekt-Prototypen (__proto__, constructor, toString, length
 
 test('usesTimbreField: Verzerrer und alles außerhalb von Bass, Akkorden und Pad gelten immer; sonst die Liste der gewählten Stimme', () => {
   for (const voices of [undefined, { bass: 'string', chords: 'sample', pad: 'sample' }]) {
-    for (const path of ['bass.fuzz', 'chords.overdrive', 'pad.distortion', 'drums.kickPunch', 'master.echo']) assert.equal(usesTimbreField(voices, path), true, `${JSON.stringify(voices)} ${path}`);
+    for (const path of ['bass.fuzz', 'chords.overdrive', 'pad.distortion', 'master.echo']) assert.equal(usesTimbreField(voices, path), true, `${JSON.stringify(voices)} ${path}`);
   }
-  // Standard: der klassische Synth benutzt alle Regler seines Instruments
+  // der klassische Synth benutzt alle Regler seines Instruments
+  const synth = setAllVoices({}, 'synth');
   for (const [layer, fields] of Object.entries(DEFAULT_TIMBRE)) {
     if (!VOICE_LAYERS.includes(layer)) continue;
-    for (const field of Object.keys(fields)) assert.equal(usesTimbreField(undefined, `${layer}.${field}`), true, `${layer}.${field}`);
+    for (const field of Object.keys(fields)) assert.equal(usesTimbreField(synth, `${layer}.${field}`), true, `${layer}.${field}`);
   }
   assert.equal(usesTimbreField({ chords: 'string' }, 'chords.chorus'), false);
   assert.equal(usesTimbreField({ chords: 'string' }, 'chords.brightness'), true);
@@ -133,7 +134,8 @@ test('usesTimbreField: Verzerrer und alles außerhalb von Bass, Akkorden und Pad
   assert.equal(usesTimbreField({ drums: 'sample' }, 'drums.kickPunch'), false);
   assert.equal(usesTimbreField({ drums: 'sample' }, 'drums.room'), true);
   // ungültige Wahl gilt wie der Standard; Unbekanntes meldet true (nie ein Regler wegen eines Tippfehlers sperren)
-  assert.equal(usesTimbreField({ chords: 'nope' }, 'chords.chorus'), true);
+  assert.equal(usesTimbreField({ chords: 'nope' }, 'chords.chorus'), false, 'wie die Sample-Gitarre des Standards');
+  assert.equal(usesTimbreField({ chords: 'nope' }, 'chords.brightness'), true);
   assert.equal(usesTimbreField(undefined, 'nope.field'), true);
   assert.equal(usesTimbreField(undefined, 'chords'), true);
 });
@@ -141,7 +143,7 @@ test('usesTimbreField: Verzerrer und alles außerhalb von Bass, Akkorden und Pad
 test('hidden: nur ein Wahrheitswert, der Standard ist sichtbar, jedes Instrument hat sichtbare Stimmen; versteckte bleiben gültig', () => {
   for (const [layer, id, v] of entries()) assert.ok(v.hidden === undefined || typeof v.hidden === 'boolean', `${layer}/${id}`);
   for (const layer of VOICE_LAYERS) {
-    assert.ok(!VOICES[layer][DEFAULT_VOICE.id].hidden, `${layer}: Standard sichtbar`);
+    assert.ok(!VOICES[layer][DEFAULT_VOICES[layer].id].hidden, `${layer}: Standard sichtbar`);
     if (Object.keys(VOICES[layer]).length > 1) assert.ok(Object.values(VOICES[layer]).some((v) => v.kind === 'sample' && !v.hidden), `${layer}: sichtbare Sample-Stimme`);
   }
   // die Saitenmodelle stehen nicht in der Auswahl, sind aber weiter gültig (Track-Feld, setVoices, Hörprobe)
@@ -150,23 +152,24 @@ test('hidden: nur ein Wahrheitswert, der Standard ist sichtbar, jedes Instrument
   assert.deepEqual(validateTrack(track({ bass: { id: 'string' }, chords: { id: 'string' } })).filter((e) => e.code === 'badVoice'), []);
 });
 
-test('lead: Stimme synth/classic als Standard, Verzerrerregler gelten immer, keine Klangregler in uses', () => {
-  assert.deepEqual(completeVoices({}).lead, { id: 'synth', variant: 'classic' });
+test('lead: erste Sample-Variante als Standard, Verzerrerregler gelten immer, keine Klangregler in uses', () => {
+  assert.deepEqual(completeVoices({}).lead, { id: 'sample', variant: 'flute' });
   assert.deepEqual(VOICES.lead.synth.uses, []);
   assert.equal(usesTimbreField(undefined, 'lead.fuzz'), true);
 });
 
-test('percussion: Stimme synth/classic als Standard, keine Klangregler in uses, Verzerrerregler gelten immer', () => {
-  assert.deepEqual(completeVoices({}).percussion, { id: 'synth', variant: 'classic' });
+test('percussion: erste Sample-Variante als Standard, keine Klangregler in uses, Verzerrerregler gelten immer', () => {
+  assert.deepEqual(completeVoices({}).percussion, { id: 'sample', variant: 'studio' });
   assert.deepEqual(VOICES.percussion.synth.uses, []);
   assert.equal(usesTimbreField(undefined, 'percussion.fuzz'), true);
 });
 
-test('drums: Stimme synth/classic als Standard, alle Schlagzeugregler in uses, alter Track ohne voices.drums gilt unverändert', () => {
-  assert.deepEqual(completeVoices({}).drums, { id: 'synth', variant: 'classic' });
-  assert.deepEqual(completeVoices({ bass: 'string' }).drums, { id: 'synth', variant: 'classic' });
+test('drums: Sample-Kit standard als Standard, der Synth benutzt alle Schlagzeugregler, Track ohne voices.drums bleibt gültig', () => {
+  assert.deepEqual(completeVoices({}).drums, { id: 'sample', variant: 'standard' });
+  assert.deepEqual(completeVoices({ bass: 'string' }).drums, { id: 'sample', variant: 'standard' });
   assert.deepEqual(VOICES.drums.synth.uses, Object.keys(DEFAULT_TIMBRE.drums).map((f) => `drums.${f}`));
-  assert.equal(usesTimbreField(undefined, 'drums.kickPunch'), true);
+  assert.equal(usesTimbreField({ drums: 'synth' }, 'drums.kickPunch'), true);
+  assert.equal(usesTimbreField(undefined, 'drums.kickPunch'), false, 'Sample-Kit: nur der Raum');
   assert.deepEqual(validateTrack(track({ bass: 'string' })).filter((e) => e.code === 'badVoice'), [], 'gespeicherter Track ohne voices.drums');
 });
 
@@ -177,7 +180,8 @@ test('setAllVoices und voiceKind: alle Schichten auf Sample oder Synth, Art der 
   assert.notEqual(setAllVoices(input, 'sample'), input);
   assert.deepEqual(input, {});
   assert.equal(voiceKind(setAllVoices({}, 'sample')), 'sample');
-  assert.equal(voiceKind({}), 'synth');
-  assert.equal(voiceKind({ bass: { id: 'sample', variant: 'pick' } }), 'mixed');
-  assert.equal(voiceKind({ bass: { id: 'string', variant: 'finger' } }), 'synth'); // Modell zählt als Synth
+  assert.equal(voiceKind({}), 'sample');
+  assert.equal(voiceKind(setAllVoices({}, 'synth')), 'synth');
+  assert.equal(voiceKind({ bass: { id: 'synth' } }), 'mixed');
+  assert.equal(voiceKind({ ...setAllVoices({}, 'synth'), bass: { id: 'string', variant: 'finger' } }), 'synth'); // Modell zählt als Synth
 });

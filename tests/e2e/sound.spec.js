@@ -2,6 +2,7 @@
 import { test, expect } from '@playwright/test';
 import { STYLE_PRESETS } from '../../src/core/tags.js';
 import { LAYER_IDS } from '../../src/core/layers.js';
+import { SYNTH } from './synth-voices.js';
 
 const LAYERS = ['drums', 'bass', 'chords', 'pad'];
 // Basistrack wie in levels.spec.js: Am Am Dm E, 100 bpm, Seed 1, alle Schichten ab Takt 1
@@ -13,6 +14,7 @@ const track = (extra = {}) => ({
   seed: 1,
   length: 24,
   tags: { development: ['fullFromStart'] },
+  voices: SYNTH, // die Klangregler wirken auf den Synth
   ...extra,
 });
 
@@ -92,7 +94,7 @@ test('createInstruments verträgt unvollständiges oder ungültiges timbre', asy
     const results = [];
     for (const timbre of [undefined, null, 3, 'x', [], {}, { bass: { fuzz: 0.6 } }, { bass: { fuzz: NaN }, nope: {} }]) {
       try {
-        const inst = createInstruments(new OfflineAudioContext(2, 4410, 44100), { bpm: 100, timbre });
+        const inst = createInstruments(new OfflineAudioContext(2, 4410, 44100), { voices: (await import('/core/voices.js')).setAllVoices({}, 'synth'), bpm: 100, timbre });
         results.push(Object.keys(inst.layers).join());
       } catch (err) {
         results.push(err.message);
@@ -310,7 +312,7 @@ async function measureWindows(page, input, layer) {
     const rate = 44100, offset = 0.1, seconds = 8, tail = 3;
     const events = buildEvents(track).filter((e) => e.layer && e.t < seconds);
     const ctx = new OfflineAudioContext(2, Math.ceil(rate * (offset + seconds + tail + 3)), rate);
-    const { output, layers } = createInstruments(ctx, { bpm: track.bpm, limiter: false, timbre: resolveTimbre(track.tags) });
+    const { output, layers } = createInstruments(ctx, { voices: (await import('/core/voices.js')).setAllVoices({}, 'synth'), bpm: track.bpm, limiter: false, timbre: resolveTimbre(track.tags) });
     output.connect(ctx.destination);
     if (solo) for (const name of Object.keys(layers)) layers[name].setMuted(name !== solo);
     for (const e of events) layers[e.layer].trigger(e, offset + e.t);
@@ -345,7 +347,7 @@ async function padLateRatio(page, tags, bpm) {
     const timbre = resolveTimbre(tags);
     timbre.master = { ...timbre.master, echo: 0, reverb: 0 };
     const ctx = new OfflineAudioContext(2, Math.ceil(rate * (offset + dur + 2)), rate);
-    const { output, layers } = createInstruments(ctx, { bpm, limiter: false, timbre });
+    const { output, layers } = createInstruments(ctx, { voices: (await import('/core/voices.js')).setAllVoices({}, 'synth'), bpm, limiter: false, timbre });
     output.connect(ctx.destination);
     layers.pad.trigger({ type: 'note', layer: 'pad', midi: 57, vel: 0.8, dur }, offset);
     const d = (await ctx.startRendering()).getChannelData(0);
@@ -516,7 +518,7 @@ const renderLive = (page, args) => page.evaluate(async ({ tags, create, after, a
     : Object.fromEntries(Object.entries(DEFAULT_TIMBRE).map(([g, f]) => [g, Object.fromEntries(Object.keys(f).map((k) => [k, s === 'zeros' ? 0 : 1]))])));
   const run = async (createWith, afterWith) => {
     const ctx = new OfflineAudioContext(2, 44100 * 6, 44100);
-    const inst = createInstruments(ctx, { bpm: 100, timbre: spec(createWith) });
+    const inst = createInstruments(ctx, { voices: (await import('/core/voices.js')).setAllVoices({}, 'synth'), bpm: 100, timbre: spec(createWith) });
     inst.output.connect(ctx.destination);
     if (afterWith) inst.setTimbre(spec(afterWith));
     for (const e of events) if (e.t < 4 && e.layer) inst.layers[e.layer].trigger(e, 1 + e.t);
@@ -720,7 +722,7 @@ test('createInstruments: setTimbre schaltet die Verzerrer mitten im Spiel um und
       const ctx = new OfflineAudioContext(1, 66150, 44100);
       // Echo und Hall aus: sie spielten sonst noch verzerrte Töne nach dem Ausschalten weiter
       const room = { echo: 0, reverb: 0 };
-      const inst = createInstruments(ctx, { bpm: 100, limiter: false, timbre: { master: room } });
+      const inst = createInstruments(ctx, { voices: (await import('/core/voices.js')).setAllVoices({}, 'synth'), bpm: 100, limiter: false, timbre: { master: room } });
       inst.output.connect(ctx.destination);
       const note = (layer, midi, dur) => ({ type: 'note', layer, midi, dur, vel: 1 });
       for (const layer of ['bass', 'chords', 'pad']) inst.layers[layer].trigger(note(layer, layer === 'bass' ? 40 : 57, 0.7), 0.05);
@@ -753,7 +755,7 @@ test('Verzerrer: Stille bleibt praktisch still, auch wenn der Fuzz-Regler verste
   const r = await page.evaluate(async () => {
     const { createInstruments } = await import('/audio/synth.js');
     const ctx = new OfflineAudioContext(1, 44100, 44100);
-    const inst = createInstruments(ctx, { bpm: 100, limiter: false, timbre: { bass: { fuzz: 0.3 }, chords: { fuzz: 0.3 }, pad: { fuzz: 0.3 } } });
+    const inst = createInstruments(ctx, { voices: (await import('/core/voices.js')).setAllVoices({}, 'synth'), bpm: 100, limiter: false, timbre: { bass: { fuzz: 0.3 }, chords: { fuzz: 0.3 }, pad: { fuzz: 0.3 } } });
     inst.output.connect(ctx.destination);
     ctx.suspend(0.2).then(() => { inst.setTimbre({ bass: { fuzz: 1 }, chords: { fuzz: 0.6 }, pad: { fuzz: 0.4 } }); ctx.resume(); });
     ctx.suspend(0.5).then(() => { inst.setTimbre({ bass: { fuzz: 0.05 }, chords: { overdrive: 0.5 }, pad: { distortion: 0.5 } }); ctx.resume(); });

@@ -14,6 +14,7 @@ import { grooveIdFor } from './grooves.js';
 import { phrasesOf } from './form-arrange.js';
 import { densityAt } from './form-types.js';
 import { organRules } from './organ.js';
+import { resolveVoices } from './voices.js';
 
 // Standard nach dem Urteil des Nutzers (2026-11-14): alles an bis auf Gitarre B (Boogie im Mix nicht zu hören, slideChord noch ohne Urteil)
 export const ART_DEFAULTS = Object.freeze({ on: 1, bass: 1, chords: 1, drums: 1, keys: 1, pad: 1, lead: 1, band: 1, bassB: 1, chordsB: 0, keysB: 1, drumsB: 1 });
@@ -84,7 +85,8 @@ export function planRoll(rng, c, name) {
  * events: sortierter Strom nach der Songform; bars: barTimeline; sections: Abschnitte; params: aufgelöste Schlagworte; rng: eigener Zweig;
  * options: completeArt(). Liefert einen neuen, sortierten Strom (die Eingabe bleibt unverändert).
  */
-export function articulate(events, { track, bars, sections, params, rng, options }) {
+export function articulate(events, { track: given, bars, sections, params, rng, options }) {
+  const track = { ...given, voices: resolveVoices(given) }; // die Regeln fragen nach der gespielten Stimme, auch wenn der Track sie nicht nennt (Standard)
   const amount = track.ornaments ?? 0.5;
   if (!options.on || !(amount > 0)) return events;
   const tempo = clamp(110 / track.bpm, 0.5, 1.2); // Regel 7: schnell = weniger und kürzer

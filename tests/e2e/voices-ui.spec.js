@@ -44,15 +44,15 @@ const hint = (page, layer) => page.locator(`#voice-hint-${layer}`);
 const slider = (page, layer, field) => page.locator(`#timbre-${layer}-${field}`);
 const contexts = (page) => page.evaluate(() => window.__audioContexts);
 
-test('je Instrument ein Select Stimme, nach Art gruppiert, eine Zeile je Variante; Standard ist Synth; kein eigenes Variantenfeld mehr', async ({ page }) => {
+test('je Instrument ein Select Stimme, nach Art gruppiert, eine Zeile je Variante; Standard ist die erste Sample-Variante; kein eigenes Variantenfeld mehr', async ({ page }) => {
   const groups = (layer) => voice(page, layer).locator('optgroup').evaluateAll((els) => els.map((e) => e.label));
   // Saitenmodelle sind aus der Auswahl genommen (hidden im Register); das E-Piano gehört zur Synthese
   expect(await groups('bass')).toEqual(['Synthese', 'Samples']);
   expect(await groups('chords')).toEqual(['Synthese', 'Samples']);
   expect(await groups('pad')).toEqual(['Synthese', 'Samples']);
   for (const layer of LAYERS) {
-    await expect(voice(page, layer)).toHaveValue('synth/classic');
-    await expect(kind(page, layer)).toHaveText('SYN');
+    await expect(voice(page, layer)).toHaveValue(`sample/${VOICES[layer].sample.variants[0]}`);
+    await expect(kind(page, layer)).toHaveText('SMP');
     await expect(page.locator(`#variant-${layer}`)).toHaveCount(0);
     await expect(page.locator(`label[for="voice-${layer}"]`)).toHaveText('Stimme');
   }
@@ -76,8 +76,9 @@ test('Sample-Stimme wählen: Kennung SMP, Ladezustand bereit im Display; Variant
   await expect(kind(page, 'chords')).toHaveText('SYN');
 });
 
-test('deaktivierte Knöpfe: Standard alle aktiv; je Stimme nur die von ihr benutzten, Verzerrer immer; Hinweis nur dann', async ({ page }) => {
+test('deaktivierte Knöpfe: Synth alle aktiv; je Stimme nur die von ihr benutzten, Verzerrer immer; Hinweis nur dann', async ({ page }) => {
   for (const layer of LAYERS) {
+    await voice(page, layer).selectOption('synth/classic');
     await expect(module(page, layer).locator('input[type="range"]:disabled')).toHaveCount(0);
     await expect(hint(page, layer)).toBeHidden();
   }
@@ -114,7 +115,7 @@ test('Schlagzeug, Lead und Percussion: Select Stimme (Synth, Samples), bei Sampl
   const VARIANTS = { drums: ['standard', 'brushes', 'rimshot', 'jazz', 'electronic', '808'], lead: ['flute', 'sax', 'synth', 'guitar'], percussion: ['studio'] };
   for (const [layer, list] of Object.entries(VARIANTS)) {
     expect(await voice(page, layer).locator('optgroup').evaluateAll((els) => els.map((e) => e.label))).toEqual(['Synthese', 'Samples']);
-    await expect(voice(page, layer)).toHaveValue('synth/classic');
+    await expect(voice(page, layer)).toHaveValue(`sample/${list[0]}`);
     expect(await voice(page, layer).locator('optgroup').last().locator('option').evaluateAll((els) => els.map((e) => e.value))).toEqual(list.map((v) => `sample/${v}`));
     await voice(page, layer).selectOption(`sample/${list[0]}`);
     await expect(status(page, layer)).toHaveText('bereit', { timeout: 20_000 });
@@ -184,6 +185,9 @@ test('Ein schon geladenes Pack zeigt direkt bereit, ohne zwischendurch lädt', a
 
 test('Tastatur: das Select ist fokussierbar und mit den Pfeiltasten umschaltbar, die Tasten ‹ › gehen eine Zeile weiter', async ({ page }) => {
   await voice(page, 'bass').focus();
+  await page.keyboard.press('ArrowUp');
+  await expect(voice(page, 'bass')).toHaveValue('synth/classic');
+  await expect(kind(page, 'bass')).toHaveText('SYN');
   await page.keyboard.press('ArrowDown');
   await expect(voice(page, 'bass')).toHaveValue('sample/finger');
   await expect(kind(page, 'bass')).toHaveText('SMP');

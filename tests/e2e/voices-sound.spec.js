@@ -23,12 +23,12 @@ test.afterEach(() => {
 
 const compare = (page, a, b, seconds, options) => page.evaluate(([x, y, s, o]) => window.__compare(x, y, s, o), [a, b, seconds, options]);
 
-test('Standardstimme: renderNote ohne voices, mit synth/classic und mit Unbrauchbarem ist gleich (alle drei Instrumente; Chrome-Summenrauschen unter 1e-6)', async ({ page }) => {
+test('Standardstimme: renderNote ohne voices, mit der ersten Sample-Variante und mit Unbrauchbarem ist gleich (alle drei Instrumente; Chrome-Summenrauschen unter 1e-6)', async ({ page }) => {
   const same = await page.evaluate(async () => {
     const out = [];
     for (const [layer, midi] of [['bass', 40], ['chords', 57], ['pad', 60]]) {
       const base = await window.__renderNote(layer, { midi });
-      for (const voices of [{ [layer]: { id: 'synth', variant: 'classic' } }, { [layer]: { id: 'nope' } }, null, 3, [], 'x']) {
+      for (const voices of [{ [layer]: { id: 'sample' } }, { [layer]: { id: 'nope' } }, null, 3, [], 'x']) {
         const other = await window.__renderNote(layer, { midi, voices });
         out.push(`${layer} ${JSON.stringify(voices)}: ${base.length === other.length && base.every((v, i) => Math.abs(v - other[i]) < 1e-6)}`);
       }
@@ -38,9 +38,9 @@ test('Standardstimme: renderNote ohne voices, mit synth/classic und mit Unbrauch
   expect(same.filter((line) => !line.endsWith('true')), same.join('\n')).toEqual([]);
 });
 
-test('Stimmen im Track: gültige Formen ohne Wirkung auf den Standard (voices fehlt, null, {}, nur synth) rendern gleich (rms-Differenz unter 1e-5, Chrome-Summenrauschen)', async ({ page }) => {
+test('Stimmen im Track: gültige Formen ohne Wirkung auf den Standard (voices fehlt, null, {}, nur die Sample-Standards) rendern gleich (rms-Differenz unter 1e-5, Chrome-Summenrauschen)', async ({ page }) => {
   test.setTimeout(120_000);
-  for (const voices of [null, {}, { bass: { id: 'synth' } }, { chords: 'synth', pad: { id: 'synth', variant: 'classic' } }]) {
+  for (const voices of [null, {}, { bass: { id: 'sample' } }, { chords: 'sample', pad: { id: 'sample', variant: 'strings' } }]) {
     const r = await compare(page, track(), track({ voices }), 6);
     expect(r.diff, JSON.stringify(voices)).toBeLessThan(1e-5);
   }
@@ -66,12 +66,12 @@ test('Unbrauchbare Eingaben an die Instrumente werfen nicht: voices, setVoices, 
   expect(r).toEqual(Array(9).fill('ok'));
 });
 
-test('setVoices mitten im Render: kein Fehler, vor dem Wechsel gleich dem Standard', async ({ page }) => {
+test('setVoices mitten im Render: kein Fehler, eine gleichwertige Wahl ändert nichts (Synth)', async ({ page }) => {
   const r = await page.evaluate(async () => {
     const { createInstruments } = await import('/audio/synth.js');
     const render = async (switchTo) => {
       const ctx = new OfflineAudioContext(1, 44100, 44100);
-      const inst = createInstruments(ctx, { bpm: 100, limiter: false });
+      const inst = createInstruments(ctx, { voices: (await import('/core/voices.js')).setAllVoices({}, 'synth'), bpm: 100, limiter: false });
       inst.output.connect(ctx.destination);
       const note = (layer, midi) => ({ type: 'note', layer, midi, dur: 0.3, vel: 1 });
       for (const layer of ['bass', 'chords', 'pad']) inst.layers[layer].trigger(note(layer, layer === 'bass' ? 40 : 57), 0.05);
@@ -83,7 +83,7 @@ test('setVoices mitten im Render: kein Fehler, vor dem Wechsel gleich dem Standa
       return (await ctx.startRendering()).getChannelData(0);
     };
     const clean = await render(null);
-    const other = await render({ bass: { id: 'nope' }, chords: 'synth' });
+    const other = await render({ ...(await import('/core/voices.js')).setAllVoices({}, 'synth'), bass: { id: 'synth', variant: 'nope' }, chords: 'synth' });
     return { same: clean.length === other.length && clean.every((v, i) => Math.abs(v - other[i]) < 1e-6) };
   });
   expect(r.same).toBe(true);
@@ -106,7 +106,7 @@ test('Percussion: jeder Name klingt (nicht stumm, Spitze unter 1); Unbekanntes u
     const { spectralCentroid } = await import('/audio/spectrum.js');
     const render = async (event) => {
       const ctx = new OfflineAudioContext(1, 44100, 44100);
-      const { output, layers } = createInstruments(ctx, { limiter: false, timbre: { master: { echo: 0, reverb: 0 } } });
+      const { output, layers } = createInstruments(ctx, { voices: (await import('/core/voices.js')).setAllVoices({}, 'synth'), limiter: false, timbre: { master: { echo: 0, reverb: 0 } } });
       output.connect(ctx.destination);
       layers.percussion.trigger({ layer: 'percussion', ...event }, 0.05);
       return (await ctx.startRendering()).getChannelData(0);
@@ -142,7 +142,7 @@ test('Schlagzeug: der Crash klingt, ist endlich, übersteuert nicht und hallt l�
     const out = {};
     for (const name of ['crash', 'openHat']) {
       const ctx = new OfflineAudioContext(1, 88200, 44100);
-      const { output, layers } = createInstruments(ctx, { limiter: false, timbre: { master: { echo: 0, reverb: 0 } } });
+      const { output, layers } = createInstruments(ctx, { voices: (await import('/core/voices.js')).setAllVoices({}, 'synth'), limiter: false, timbre: { master: { echo: 0, reverb: 0 } } });
       output.connect(ctx.destination);
       layers.drums.trigger({ type: 'hit', layer: 'drums', name, vel: 0.8 }, 0.05);
       const d = (await ctx.startRendering()).getChannelData(0);
@@ -175,7 +175,7 @@ test('Schlagzeug: jeder Schlag klingt wie vor dem Umzug in die Registry; Unbekan
     const out = {};
     for (const name of names) {
       const ctx = new OfflineAudioContext(1, 44100, 44100);
-      const { output, layers, whenReady } = createInstruments(ctx, { limiter: false, tuning: { 'mix/room': { wet: 0 } } }); // ohne den gemeinsamen Raum (Klang v2), wie render.js
+      const { output, layers, whenReady } = createInstruments(ctx, { voices: (await import('/core/voices.js')).setAllVoices({}, 'synth'), limiter: false, tuning: { 'mix/room': { wet: 0 } } }); // ohne den gemeinsamen Raum (Klang v2), wie render.js
       await whenReady();
       output.connect(ctx.destination);
       layers.drums.trigger({ type: 'hit', layer: 'drums', name, vel: 0.8 }, 0.05);

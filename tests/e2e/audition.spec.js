@@ -35,7 +35,7 @@ test('je Instrument eine Stimmenauswahl mit allen Stimmen des Registers, Variant
   expect(await values('#voice-pad')).toEqual(['sample', 'synth']);
   // nach Art gruppiert
   expect(await page.locator('#voice-chords optgroup').evaluateAll((els) => els.map((e) => e.label))).toEqual(['Synthese', 'Saitenmodell', 'Samples']);
-  await expect(page.locator('#voice-chords')).toHaveValue('synth');
+  await expect(page.locator('#voice-chords')).toHaveValue('sample'); // Standard seit 2026-11-15
   await page.locator('#voice-chords').selectOption('string');
   expect(await page.locator('#variant-chords option').evaluateAll((els) => els.map((e) => e.value))).toEqual(['electric']);
   await expect(page.locator('#variant-chords')).toHaveValue('electric');
@@ -44,12 +44,18 @@ test('je Instrument eine Stimmenauswahl mit allen Stimmen des Registers, Variant
 });
 
 test('Tuning-Panel: ein Regler je Feinwert der gewählten Stimme, mit Grenzen und Standardwert aus der Tabelle', async ({ page }) => {
-  // Synth hat keine Feinwerte; die Feinwerte der Summe (mix/..., Klang v2) stehen immer da
-  const MIX = await page.evaluate(async () => Object.values((await import('/audio/voices/tunables.js')).MIX_TUNABLES).reduce((n, t) => n + Object.keys(t).length, 0));
-  await expect(page.locator('#tuning input[type="range"]')).toHaveCount(MIX);
+  // je Instrument die Feinwerte der Standardstimme (der Synth der Tonschichten hat keine); die Feinwerte der Summe (mix/..., Klang v2) stehen immer da
+  const [MIX, start] = await page.evaluate(async () => {
+    const { MIX_TUNABLES, TUNABLES: all } = await import('/audio/voices/tunables.js');
+    const { completeVoices } = await import('/core/voices.js');
+    const count = (t) => Object.keys(t ?? {}).length;
+    return [Object.values(MIX_TUNABLES).reduce((n, t) => n + count(t), 0), Object.entries(completeVoices()).map(([l, v]) => [l, count(all[`${l}/${v.id}/${v.variant}`])])];
+  });
+  const base = MIX + start.reduce((n, [, k]) => n + k, 0), chordsBefore = Object.fromEntries(start).chords;
+  await expect(page.locator('#tuning input[type="range"]')).toHaveCount(base);
   await page.locator('#voice-chords').selectOption('string');
   const key = 'chords/string/electric';
-  await expect(page.locator('#tuning input[type="range"]')).toHaveCount(MIX + Object.keys(TUNABLES[key]).length);
+  await expect(page.locator('#tuning input[type="range"]')).toHaveCount(base - chordsBefore + Object.keys(TUNABLES[key]).length);
   for (const [name, spec] of Object.entries(TUNABLES[key])) {
     const input = page.locator(`#tuning input[data-key="${key}"][data-name="${name}"]`);
     await expect(input).toHaveAttribute('min', String(spec.min));
@@ -57,7 +63,7 @@ test('Tuning-Panel: ein Regler je Feinwert der gewählten Stimme, mit Grenzen un
     await expect(input).toHaveValue(String(spec.value));
   }
   await page.locator('#voice-bass').selectOption('string');
-  await expect(page.locator('#tuning input[type="range"]')).toHaveCount(MIX + Object.keys(TUNABLES[key]).length + Object.keys(TUNABLES['bass/string/finger']).length);
+  await expect(page.locator('#tuning input[type="range"]')).toHaveCount(base - chordsBefore - Object.fromEntries(start).bass + Object.keys(TUNABLES[key]).length + Object.keys(TUNABLES['bass/string/finger']).length);
 });
 
 test('Export: gültiges JSON mit dem geänderten Wert und allen Werten der gewählten Stimmen', async ({ page }) => {

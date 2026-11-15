@@ -183,7 +183,8 @@ test('Mit Form: dieselben Ereignisformen wie bisher, nur der neue Marker kommt d
   const withForm = buildEvents(mk());
   const shape = (e) => `${e.type}:${e.layer ?? ''}:${Object.keys(e).sort().join()}`;
   const old = new Set(buildEvents(mk({ form: undefined, length: 24 })).map(shape));
-  for (const e of withForm.filter((x) => x.name !== 'section')) assert.ok(old.has(shape(e)), `bekannte Form ${shape(e)}`);
+  for (const e of withForm.filter((x) => x.name !== 'section' && x.art !== 'choke')) // Crash mit Choke vor einem Stopp gibt es nur mit Songform
+    assert.ok(old.has(shape(e)), `bekannte Form ${shape(e)}`);
   const ts = withForm.map((e) => e.t);
   assert.deepEqual(ts, [...ts].sort((x, y) => x - y), 'nach t sortiert');
 });

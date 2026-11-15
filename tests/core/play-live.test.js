@@ -225,7 +225,7 @@ test('setVoices reicht die Eingabe genau einmal an die Instrumente weiter, nach 
 
 test('play gibt die aufgefüllte Stimmenwahl des Tracks an die Instrumente (Standard, wenn fehlend); Ungültiges wirft wie bei den anderen Feldern', async () => {
   for (const [voices, expected] of [
-    [undefined, 'synth/classic'], [null, 'synth/classic'], [{}, 'synth/classic'], [{ bass: 'string' }, 'string/finger'], [{ bass: { id: 'string', variant: 'finger' } }, 'string/finger'],
+    [undefined, 'sample/finger'], [null, 'sample/finger'], [{}, 'sample/finger'], [{ bass: 'string' }, 'string/finger'], [{ bass: { id: 'string', variant: 'finger' } }, 'string/finger'],
   ]) {
     const { calls, create } = spy();
     const h = play(makeCtx(), track(voices === undefined ? {} : { voices }), { loops: Infinity, createInstruments: create });

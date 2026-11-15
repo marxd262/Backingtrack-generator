@@ -44,6 +44,10 @@ export const STEPS = {
   // 'demo/fixedtime' ist kein Feinwert, er überschreibt artTime im Render), B = Standard (aus Raster und Notenlänge)
   27: { name: 'bendtime', cases: 'art', a: { 'demo/fixedtime': { vibrato: 0.22 } }, b: {}, extra: { voices: { lead: { id: 'sample', variant: 'guitar' } }, track: { layers: { drums: true, bass: true, chords: true, pad: true, lead: true, percussion: true }, jobs: { lead: 'melody', percussion: 'mixed' } } } },
   // Lead-Aufgabe riff auf der Lead-Gitarre: A = ohne Lead (der Schlüssel 'demo/mute' ist kein Feinwert, er nimmt die Schicht aus dem Render), B = mit Riff
+  // Synth-Kit (Aufruf mit "synth"): A = Side-Stick als volle Snare und getretene Hi-Hat als geschlossene wie bisher, B = Standard (Side-Stick leiser, getretene entfällt)
+  28: { name: 'synthkit', cases: 'art', a: { 'drums/synth/classic': { sideStick: 1, hatPedal: 1 } } },
+  // Standardstimmen der App: A = alles Synth (bis 2026-11-14), B = alles Samples (erste Variante); beide ohne die Stimmen der Testfälle
+  29: { name: 'defaultvoices', cases: 'art', a: { 'demo/default': { kind: 'synth' } }, b: { 'demo/default': { kind: 'sample' } } },
   26: { name: 'riff', cases: 'art', a: { 'demo/mute': { layer: 'lead' } }, b: {}, extra: { voices: { lead: { id: 'sample', variant: 'guitar' } }, track: { layers: { drums: true, bass: true, chords: true, pad: true, lead: true, percussion: true }, jobs: { lead: 'riff', percussion: 'mixed' } } } },
   // Artikulationen (Vorbereitung Phase 3): keine Regeln, nur eine feste Demo-Verteilung in renderInPage; der Schlüssel 'demo/art' ist kein Feinwert,
   // er lässt in beiden Renders eine Gitarre (FreePats) die Lead-Linie statt der Akkorde spielen und schaltet in B die Artikulationen ein
@@ -86,7 +90,7 @@ export const ART_CASES = [
 ];
 
 const RATE = 44100;
-const wav = (bytes) => {
+export const wav = (bytes) => {
   const head = Buffer.alloc(44);
   head.write('RIFF', 0); head.writeUInt32LE(36 + bytes.length, 4); head.write('WAVE', 8);
   head.write('fmt ', 12); head.writeUInt32LE(16, 16); head.writeUInt16LE(1, 20); head.writeUInt16LE(2, 22);
@@ -117,6 +121,8 @@ async function renderInPage([style, bpm, kind, tuning, limiter, extra]) {
     voices: { ...setAllVoices(null, kind), ...extra.voices },
     ...extra.track,
   };
+  // 'demo/default' ist kein Feinwert: der Track nennt keine Stimmen (Standard der App), mit kind 'synth' alle Schichten auf synth/classic (Standard bis 2026-11-14)
+  if (tuning['demo/default']) track.voices = tuning['demo/default'].kind === 'synth' ? setAllVoices(null, 'synth') : undefined;
   const demo = tuning['demo/art'];
   if (demo) { track.layers.lead = true; track.jobs.lead = 'melody'; track.voices.chords = { id: 'sample', variant: 'freepats' }; }
   const events = buildEvents(track, { timing: tuning['mix/timing'], ornaments: tuning['mix/art'] });
@@ -156,7 +162,7 @@ async function renderInPage([style, bpm, kind, tuning, limiter, extra]) {
 }
 
 /** Hörseite zum Paar: beide Dateien laufen synchron, nur eine ist hörbar; Leertaste schaltet ohne Unterbrechung um. */
-const abPage = (base, starts) => {
+export const abPage = (base, starts) => {
   const jumps = starts.map(([label, at]) => `<button onclick="seek(${at.toFixed(1)})">${label}</button>`).join(' ');
   return `<!doctype html><meta charset="utf-8"><title>${base}</title>
 <style>body{font:16px system-ui;max-width:640px;margin:40px auto}#now{font-size:96px;font-weight:700;margin:16px 0}button{font-size:16px;padding:8px 14px}input{width:100%}</style>
@@ -176,7 +182,7 @@ pos.oninput = () => seek(pos.value * a.duration);
 </script>`;
 };
 
-const decode = (b64) => { const b = Buffer.from(b64, 'base64'); return new Float32Array(b.buffer, b.byteOffset, b.length / 4); };
+export const decode = (b64) => { const b = Buffer.from(b64, 'base64'); return new Float32Array(b.buffer, b.byteOffset, b.length / 4); };
 const db = (x) => 20 * Math.log10(Math.max(x, 1e-9));
 /** Spitze, RMS, Crest (dB, beide Kanäle) und Seite/Mitte (dB; -inf = mono). */
 export function measure([l, r]) {

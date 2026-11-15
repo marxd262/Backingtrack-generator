@@ -1,7 +1,7 @@
 // Vertrag mit Interactive Scales: Track im alten Format, Seed-Regel, Ebenen, Fehler, Presets und Schlagworte.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildEvents, chordTimeline, validateTrack, TAG_CATEGORIES, STYLE_PRESETS } from '../../src/index.js';
+import { buildEvents, chordTimeline, validateTrack, TAG_CATEGORIES, STYLE_PRESETS, DRUM_NAMES, DRUM_FALLBACK, loadVoices } from '../../src/index.js';
 import { createRng } from '../../src/core/rng.js';
 
 const bar = (root, quality, beats = 4) => ({ chord: { root, quality }, beats });
@@ -144,4 +144,18 @@ test('Stichprobe aus 200 seltsamen Tracks: buildEvents wirft genau dann, wenn va
     }
   }
   assert.ok(accepted >= 10 && accepted <= 190, `angenommen: ${accepted}`);
+});
+
+test('DRUM_FALLBACK führt jeden Schlagnamen aus der Artikulation auf einen der acht Grundschläge zurück', () => {
+  const basic = ['kick', 'snare', 'hat', 'openHat', 'tomHigh', 'tomMid', 'tomLow', 'crash'];
+  for (const name of DRUM_NAMES.filter((n) => !basic.includes(n))) assert.ok(basic.includes(DRUM_FALLBACK[name]), name);
+  for (const e of buildEvents(legacy())) if (e.type === 'hit' && e.layer === 'drums') assert.ok(basic.includes(e.name) || DRUM_FALLBACK[e.name], e.name);
+});
+
+test('loadVoices wirft nie: Synth braucht nichts, ohne Netz (Node) meldet es die fehlenden Packs', async () => {
+  const synth = Object.fromEntries(['drums', 'bass', 'chords', 'pad', 'lead', 'percussion'].map((l) => [l, 'synth']));
+  assert.deepEqual(await loadVoices({ ...legacy(), voices: synth }), []);
+  const failed = await loadVoices(legacy()); // file:-Adressen lädt fetch in Node nicht
+  assert.ok(Array.isArray(failed) && failed.length > 0);
+  assert.ok(Array.isArray(await loadVoices(null)));
 });
