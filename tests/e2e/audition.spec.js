@@ -30,7 +30,7 @@ const contexts = (page) => page.evaluate(() => window.__audioContexts);
 
 test('je Instrument eine Stimmenauswahl mit allen Stimmen des Registers, Variante folgt der Stimme', async ({ page }) => {
   const values = (id) => page.locator(`${id} option`).evaluateAll((els) => els.map((e) => e.value).sort());
-  expect(await values('#voice-chords')).toEqual(['epiano', 'sample', 'string', 'synth']);
+  expect(await values('#voice-chords')).toEqual(['epiano', 'organ', 'sample', 'string', 'synth']);
   expect(await values('#voice-bass')).toEqual(['sample', 'string', 'synth']);
   expect(await values('#voice-pad')).toEqual(['sample', 'synth']);
   // nach Art gruppiert

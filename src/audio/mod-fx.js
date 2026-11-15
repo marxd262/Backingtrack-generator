@@ -39,15 +39,19 @@ export function createModFx(ctx, destination) {
   const sources = []; // laufende LFOs, dispose hält sie an
   let chain = null, disposed = false;
 
-  const build = () => {
+  const build = (p) => {
     const gain = (value) => { const g = ctx.createGain(); g.gain.value = value; return g; };
+    // Konstruktor statt ctx.createDelay(): die Live-Tests greifen das Echo der Summe an createDelay ab (genau eine Verzögerung je Satz)
+    const delayOf = (seconds) => { const d = new DelayNode(ctx, { maxDelayTime: 0.05 }); d.delayTime.value = seconds; return d; };
     const lfo = (to) => { const o = ctx.createOscillator(); o.connect(to); o.start(); sources.push(o); return o; };
     // Vibrato: entweder gerade durch oder ganz durch die bewegte Verzögerung (kein Mischen: das gäbe einen Kammfilter)
-    const straight = gain(1), vibWet = gain(0), vibDepth = gain(0), post = gain(1), vib = ctx.createDelay(0.05);
-    vib.delayTime.value = MOD.vibBase;
+    const straight = gain(1), vibWet = gain(0), vibDepth = gain(0), post = gain(1), vib = delayOf(MOD.vibBase);
     input.connect(straight).connect(post);
     input.connect(vib).connect(vibWet).connect(post);
     const vibLfo = lfo(vibDepth);
+    // gleich mit dem richtigen Tempo starten: eine Rampe vom Standard des Oszillators (440 Hz) her verschöbe die Phase gegenüber einer
+    // Kette, die von Anfang an lief (Browser-Test "setTimbre zwischen Extremen")
+    vibLfo.frequency.value = p.vibrato.hz;
     vibDepth.connect(vib.delayTime);
     // Chorus: Original plus zwei Kopien; out gleicht den Pegel aus und blendet die Kette ein
     const wet = gain(0), out = gain(0);
@@ -55,8 +59,7 @@ export function createModFx(ctx, destination) {
     wet.connect(out);
     out.connect(destination);
     MOD.chorusHz.forEach((hz, i) => {
-      const copy = ctx.createDelay(0.05), depth = gain(MOD.chorusDepth), pan = ctx.createStereoPanner();
-      copy.delayTime.value = MOD.chorusBase;
+      const copy = delayOf(MOD.chorusBase), depth = gain(MOD.chorusDepth), pan = ctx.createStereoPanner();
       pan.pan.value = (i ? 1 : -1) * MOD.chorusPan;
       lfo(depth).frequency.value = hz;
       depth.connect(copy.delayTime);
@@ -71,7 +74,7 @@ export function createModFx(ctx, destination) {
       if (disposed) return;
       if (!chain) {
         if (!p.active) return;
-        build();
+        build(p);
       }
       const now = ctx.currentTime;
       const to = (param, value) => {
