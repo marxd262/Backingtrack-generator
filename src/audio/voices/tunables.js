@@ -31,7 +31,7 @@ const NOTE_NEUTRAL = { velExp: spec(0.5, 3, 0.05, 1), softHz: spec(800, 20000, 1
 const STRUM = { strum: spec(0, 0.05, 0.002, 0.012), strumUp: spec(0, 2, 1, 2), strumTilt: spec(0, 0.6, 0.05, 0.25) };
 // Tonewheel-Orgel (organ.js; alles Startwerte, nicht gehört): je Variante ein Zugriegel-Preset. d16 … d1 sind die neun Zugriegel (0 bis 8, je Stufe
 // 3 dB) in der Reihenfolge 16', 5⅓', 8', 4', 2⅔', 2', 1⅗', 1⅓', 1'. level gleicht den Pegel an chords/sample/organ an (gemessen mit
-// `node scripts/render-organ.mjs level`: Akkord-Schicht allein, ohne Begrenzer, rms Sample / Synth bei level 1).
+// `node scripts/render-organ.mjs level`, Werte bei den Tabellen unten).
 // Schritt 2: click Pegel des Key-Clicks (0 = aus; SPIELREGELN 4.6: immer leicht, stärker bei Rock), clickOff Anteil davon bei Note-Off;
 // perc Pegel der Percussion relativ zu einem Ton (0 = aus; nur das Preset jazz hat sie an: Jazz/Blues-Staccato, aus bei Flächen),
 // percHarm 2 oder 3 (Teilton der 8'-Lage), percDecay Zeit bis -20 dB in s (schnell etwa 0,2, langsam etwa 1).
@@ -40,6 +40,8 @@ const STRUM = { strum: spec(0, 0.05, 0.002, 0.012), strumUp: spec(0, 2, 1, 2), s
 // Bremsen (Zeit in s bis etwa 95 % der neuen Drehzahl); hornAm/drumAm Tiefe der Lautstärke-Modulation (1 ± Wert); hornDoppler/drumDoppler Hub der
 // Verzögerung in ms (0,4 ms sind bei 6,7 Hz etwa ±29 Cent, bei 0,8 Hz ±3,5 Cent); crossover Frequenzweiche in Hz; micAngle Winkel zwischen den
 // beiden Mikrofonen in Grad (wirkt beim Aufbau der Kette, also nach Stopp und Start).
+// Schritt 4: drive Vorstufen-Zerre (0 = aus, 1 = Verstärkung 6 vor der Röhren-Kennlinie; für Rock stärker), swell Schweller (0 = aus, 1 = das
+// Pedal folgt dem Pegel der Songform voll: Strophe -3 dB, Refrain 0 dB, im Takt vor dem Refrain zieht es auf).
 export const DRAWBARS = Object.freeze(['d16', 'd513', 'd8', 'd4', 'd223', 'd2', 'd135', 'd113', 'd1']);
 const organ = (bars, level, over) => ({
   level: spec(0.05, 8, 0.05, level), ...Object.fromEntries(DRAWBARS.map((name, i) => [name, spec(0, 8, 1, Number(bars[i]))])),
@@ -48,6 +50,7 @@ const organ = (bars, level, over) => ({
   hornUp: spec(0.1, 6, 0.1, 1), hornDown: spec(0.1, 8, 0.1, 1.5), drumUp: spec(0.5, 10, 0.1, 3.5), drumDown: spec(0.5, 12, 0.1, 5),
   hornAm: spec(0, 0.9, 0.05, 0.5), drumAm: spec(0, 0.9, 0.05, 0.25), hornDoppler: spec(0, 1, 0.05, 0.4), drumDoppler: spec(0, 1, 0.05, 0.15),
   crossover: spec(200, 2000, 50, 800), micAngle: spec(0, 180, 5, 90),
+  drive: spec(0, 1, 0.05, 0.25), swell: spec(0, 1, 0.05, 1),
   ...over,
 });
 // Gemeinsame Namen der Saitenstimmen (Bedeutung: string-model.js STRING_DEFAULTS); die Startwerte sind nach bestem Wissen gesetzt und
@@ -122,12 +125,13 @@ export const TUNABLES = deepFreeze({
     ratio: spec(0.5, 4, 0.01, 1), index: spec(0, 8, 0.05, 2.2), indexDecay: spec(0.05, 2, 0.01, 0.35), bell: spec(0, 1, 0.01, 0.2),
     bellRatio: spec(4, 20, 0.5, 14), decay: spec(0.2, 8, 0.1, 2.5), level: spec(0.1, 6, 0.05, 1.1),
   },
-  // Pegel gemessen 2026-11-15 (Schritt 1, nur Grundklang; Fälle aus render-organ.mjs, je Preset sein Fall, gospel im Rock-Fall): rms Synth gegen
-  // Sample bei level 1: jazz +0,98 dB, rock +3,27, ballad +1,35, gospel +6,27 (die Orgel folgt der Anschlagstärke nicht, das Sample schon;
-  // im Rock hebt außerdem die Klangkette der Schicht die hohen Zugriegel an)
-  'chords/organ/jazz': organ('888000000', 0.9, { perc: spec(0, 1, 0.05, 0.5) }),
-  'chords/organ/rock': organ('888800000', 0.7, { click: spec(0, 1, 0.01, 0.2) }),
-  'chords/organ/gospel': organ('888888888', 0.5),
+  // Pegel gemessen 2026-11-15 mit allen Standardwerten (Fälle aus render-organ.mjs ohne Songform, je Preset sein Fall, gospel im Rock-Fall;
+  // Akkord-Schicht allein, ohne Begrenzer): rms Synth gegen chords/sample/organ bei level 1: jazz +0,27 dB, rock +1,99, ballad +1,21, gospel +3,43;
+  // level = 10 ** (-dB / 20), auf 0,05 gerundet (Rest -0,3 bis +0,1 dB). Ohne Songform gemessen, weil die Orgel der Anschlagstärke nicht folgt:
+  // den Pegel der Songteile übernimmt der Schweller. Im Rock hebt die Klangkette der Schicht die hohen Zugriegel an (darum gospel leiser).
+  'chords/organ/jazz': organ('888000000', 0.95, { perc: spec(0, 1, 0.05, 0.5) }),
+  'chords/organ/rock': organ('888800000', 0.8, { click: spec(0, 1, 0.01, 0.2), drive: spec(0, 1, 0.05, 0.5) }),
+  'chords/organ/gospel': organ('888888888', 0.65),
   'chords/organ/ballad': organ('838000000', 0.85),
 });
 

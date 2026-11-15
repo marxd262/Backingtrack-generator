@@ -99,7 +99,7 @@ export function articulate(events, { track, bars, sections, params, rng, options
   };
   const out = events.map((e) => ({ ...e }));
   for (const [name, rules] of Object.entries(RULES)) if (options[name] > 0 && track.layers[RULE_LAYER[name] ?? name]) rules(out, env);
-  if (track.layers.chords) organRules(out, env);
+  if (track.layers.chords) organRules(out, { ...env, sections });
   // Vorlauf (Regel 6, der Zielton kommt pünktlich): das Ereignis bleibt auf seinem Platz, die Stimme beginnt artTime früher (sampler.js). So gilt
   // der Vertrag des Stroms weiter (Zeit und Dauer im Takt, Bass auf der Eins), und Stimmen ohne Artikulationen (Synth) spielen nicht zu früh
   return out.sort(byTime);

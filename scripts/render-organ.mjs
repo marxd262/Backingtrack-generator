@@ -2,7 +2,7 @@
 // Fälle: Blues-Shuffle 90 (Preset jazz), Rock 120 mit Strophe und Refrain (rock), Ballade 70 (ballad). Band: Schlagzeug, Bass, Orgel, Percussion;
 // ohne Pad, weil eine Streicherfläche in derselben Lage die Orgel verdeckt. Eine Seite ist { voice, tuning, solo }: voice ersetzt die Orgel
 // (A in Schritt o1: das Orgel-Sample), tuning sind Feinwerte der Orgel-Variante des Falls, solo rendert nur die Akkord-Schicht.
-// Aufruf: node scripts/render-organ.mjs <schritt> [sample|synth] [ausgabeordner]   (Schritte: o1, o2, o3a, o3b, level; Standard: sample, .superpowers/audio-ab)
+// Aufruf: node scripts/render-organ.mjs <schritt> [sample|synth] [ausgabeordner]   (Schritte: o1, o2, o3a, o3b, o4, level; Standard: sample, .superpowers/audio-ab)
 // Der Server läuft auf einem freien Port (start(0)), nicht auf 4173: das Skript stört keinen zweiten Arbeitsordner.
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -12,6 +12,7 @@ const pick = (style, preset) => { const [, bpm, own] = ART_CASES.find(([s]) => s
 // die Ballade ohne die Zusätze aus ART_CASES (Arpeggio und Stahlsaiten-Gitarre waren für die Gitarren-Regeln gedacht)
 export const CASES = [pick('blues', 'jazz'), pick('rock', 'rock'), ['dreamy', 70, { preset: 'ballad' }]];
 const SAMPLE = { id: 'sample', variant: 'organ' };
+const noForm = ([style, bpm, own]) => [style, bpm, { ...own, track: undefined }]; // der Rock-Fall hat in track nur die Songform
 
 // Feinwerte, die alles nach dem Grundklang abschalten; only(...) lässt die genannten Schritte auf ihrem Standard
 const OFF = { click: 0, perc: 0, leslie: 0, drive: 0, swell: 0 };
@@ -25,8 +26,11 @@ export const STEPS = {
   // Schritt 3, Leslie: (a) A = aus, B = dauerhaft langsam; (b) A = dauerhaft langsam, B = Umschalten nach den Regeln (nur der Rock-Fall hat einen Refrain)
   o3a: { name: 'leslie', a: { tuning: only('click', 'perc') }, b: { tuning: { ...only('click', 'perc'), leslie: 2 } } },
   o3b: { name: 'leslieswitch', a: { tuning: { ...only('click', 'perc'), leslie: 2 } }, b: { tuning: only('click', 'perc', 'leslie') } },
-  // Pegelmessung, keine Hörprobe: Akkord-Schicht allein; die Zeile "RMS A … B …" (dB, vor der Summe) ergibt level = 10 ** ((A - B) / 20)
-  level: { name: 'level', cases: [...CASES, pick('rock', 'gospel')], a: { voice: SAMPLE, solo: true }, b: { solo: true, tuning: { ...only(), level: 1 } } },
+  // Schritt 4, Vorstufen-Zerre und Schweller: A = ohne beides, B = Standard (der Schweller wirkt nur mit Songform, also im Rock-Fall)
+  o4: { name: 'driveswell', a: { tuning: only('click', 'perc', 'leslie') }, b: {} },
+  // Pegelmessung, keine Hörprobe: Akkord-Schicht allein, Orgel mit allen Standardwerten und level 1, ohne Songform (die Dynamik der Form ist
+  // Sache des Schwellers, nicht des Pegels); die Zeile "RMS A … B …" (dB, vor der Summe) ergibt level = 10 ** ((A - B) / 20)
+  level: { name: 'level', cases: [CASES[0], noForm(CASES[1]), CASES[2], noForm(pick('rock', 'gospel'))], a: { voice: SAMPLE, solo: true }, b: { solo: true, tuning: { level: 1 } } },
 };
 
 /** Läuft im Browser (wird serialisiert: keine Werte von außerhalb): rendert einen Fall, liefert L/R als base64 (Float32) und Zählungen der Akkord-Schicht. */

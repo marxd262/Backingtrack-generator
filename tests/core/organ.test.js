@@ -70,7 +70,7 @@ test('Leslie-Regel: schnell im Refrain und im letzten Takt davor, sonst langsam;
   const notes = chordNotes(formTrack({ id: 'organ', variant: 'rock' }));
   for (const bar of [0, 1, 2, 3, 4, 5, 6, 7]) assert.ok(notes.some((e) => e.bar === bar), `Takt ${bar} hat Töne`);
   for (const e of notes) assert.equal(e.leslie, e.bar >= 3 ? 1 : undefined, `Takt ${e.bar}`);
-  assert.ok(chordNotes(formTrack({ id: 'epiano', variant: 'rhodes' })).every((e) => !('leslie' in e)), 'andere Stimme: kein Feld');
+  assert.ok(chordNotes(formTrack({ id: 'epiano', variant: 'rhodes' })).every((e) => !('leslie' in e) && !('swell' in e)), 'andere Stimme: kein Feld');
   assert.ok(chordNotes(formTrack({ id: 'organ', variant: 'rock' }), { ornaments: { on: 0 } }).every((e) => !('leslie' in e)), 'Schicht aus: kein Feld');
   const noForm = { ...formTrack({ id: 'organ', variant: 'jazz' }), form: undefined };
   assert.ok(chordNotes(noForm).every((e) => !('leslie' in e)), 'ohne Songform: immer langsam');
@@ -79,4 +79,19 @@ test('Leslie-Regel: schnell im Refrain und im letzten Takt davor, sonst langsam;
 test('leslieFast: 0 aus und 2 immer langsam, 3 immer schnell, 1 folgt dem Feld des Tons', () => {
   assert.deepEqual([0, 1, 2, 3].map((mode) => leslieFast(mode, 1)), [false, true, false, true]);
   assert.deepEqual([0, 1, 2, 3].map((mode) => leslieFast(mode, undefined)), [false, false, false, true]);
+});
+
+test('Schweller-Regel: das Pedal steht auf dem Pegel der Songform (Strophe unter 0 dB, Refrain ganz auf) und zieht im Takt vor dem Refrain bis zu dessen Eins auf', () => {
+  const notes = chordNotes(formTrack({ id: 'organ', variant: 'rock' }));
+  for (const e of notes.filter((n) => n.bar < 3)) assert.ok(e.swell < 0 && e.swell >= -6 && e.art === undefined, `Strophe, Takt ${e.bar}: ${e.swell}`);
+  const rise = notes.filter((n) => n.bar === 3);
+  assert.ok(rise.length > 0);
+  for (const e of rise) {
+    assert.equal(e.art, 'swell');
+    assert.equal(e.swell, undefined, 'Ziel ist der Pegel des Refrains');
+    assert.ok(Math.abs(e.t + e.artTime - 8) < 0.03, `endet auf der Eins des Refrains (8 s): ${e.t + e.artTime}`); // das Mikrotiming verschiebt t danach um Millisekunden
+  }
+  for (const e of notes.filter((n) => n.bar > 3)) assert.ok(e.swell === undefined && e.art === undefined, `Refrain, Takt ${e.bar}`);
+  const noForm = { ...formTrack({ id: 'organ', variant: 'jazz' }), form: undefined };
+  assert.ok(chordNotes(noForm).every((e) => !('swell' in e) && e.art === undefined), 'ohne Songform: Pedal ganz auf');
 });

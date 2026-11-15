@@ -1,9 +1,14 @@
 // Tonewheel-Orgel (chords/organ/<preset>, versteckt): je Ton EIN Oszillator auf der Sub-Oktave (16'-Lage) mit einer PeriodicWave, deren Teiltöne
 // die neun Zugriegel sind. Die Orgel reagiert nicht auf die Anschlagstärke. Alle Zahlen sind Startwerte, nicht gehört. Feinwerte: tunables.js.
-// Kette (fest je Stimme, entsteht beim ersten Ton): Töne, Key-Click und Percussion -> pre -> Leslie (organ-leslie.js) -> level -> out.
+// Kette (fest je Stimme, entsteht beim ersten Ton): Töne, Key-Click und Percussion -> pre -> Schweller -> Vorstufe -> Leslie (organ-leslie.js)
+// -> level -> out.
 // Key-Click (click, clickOff): kurzer Rauschstoß bei Note-On und leiser bei Note-Off, Pegel und Ausschnitt des Rauschens je Klick aus dem Seed.
 // Percussion (perc, percHarm, percDecay): Sinus auf dem 2. oder 3. Teilton der 8'-Lage durch EINE gemeinsame Hüllkurve, single-trigger wie am Original.
 // Leslie (leslie: 0 aus, 1 folgt dem Feld `leslie` der Töne aus core/organ.js, 2 immer langsam, 3 immer schnell).
+// Schweller (swell: 0 aus, 1 = folgt dem Feld `swell` der Töne voll): Pedalstellung in dB aus der Songform (core/organ.js); ein Ton mit
+// art 'swell' zieht das Pedal über artTime auf, sonst gleitet es über die Länge des Tons (höchstens GLIDE).
+// Vorstufe (drive: 0 aus): weiche, leicht unsymmetrische Röhren-Kennlinie auf der Summe aller Töne, hinter dem Schweller wie am Original
+// (mehr Pedal = mehr Zerre). Der Pegel bleibt bei einem typischen Akkord etwa gleich (DRIVE_REF).
 // Bekannte Grenze: Quint- und Terz-Zugriegel sind hier reine Obertöne; am Original sind es temperierte Räder (2 bzw. 14 Cent daneben).
 import { hz } from '../nodes.js';
 import { DRAWBARS } from './tunables.js';
@@ -23,6 +28,11 @@ const CLICK_HP = 1000; // Hochpass des Key-Clicks (Hz): breitbandig, ohne Rumpel
 const CLICK_TC = 0.002; // Abklingen des Klicks (Zeitkonstante, s)
 const HELD_EPS = 0.005; // so kurz vor dem Ende der letzten Taste gilt die Tastatur schon als frei (Mikrotiming verschiebt um Millisekunden)
 const TAIL = 10; // so lange nach dem letzten Ton laufen die LFOs des Leslie weiter (s); danach baut der nächste Ton die Kette neu
+const GLIDE = 1; // längste Zeit, in der das Schweller-Pedal ohne swell-Ereignis seine neue Stellung erreicht (s)
+const DRIVE_MAX = 6; // Verstärkung vor der Kennlinie bei drive 1 (ein Akkord aus drei Tönen hat davor etwa rms 0,25, Spitzen bis 0,9)
+const DRIVE_REF = 0.4; // Pegel, der mit und ohne Vorstufe gleich laut bleibt; so gewählt, dass der rms der Akkord-Schicht in den drei Hörproben-Fällen etwa bleibt
+const RANGE = 4, BIAS = 0.2; // Kennlinie tanh(RANGE * x + BIAS) - tanh(BIAS) über den Eingangsbereich -1..1 des WaveShapers; BIAS macht sie unsymmetrisch (gerade Obertöne)
+const TUBE = Float32Array.from({ length: 4097 }, (_, i) => Math.tanh(RANGE * (i / 2048 - 1) + BIAS) - Math.tanh(BIAS));
 const PHASE = 2.399963; // Goldener Winkel: feste, verteilte Phasen der Teiltöne (Tonräder laufen nicht phasengleich; hält die Spitzen klein)
 
 /**
@@ -71,8 +81,14 @@ export function organVoice(layer, ctx, { tuned, rng, noise }) {
     clicks.type = 'highpass'; clicks.frequency.value = CLICK_HP;
     percEnv.gain.value = 0;
     const leslie = createLeslie(ctx, t, tuned('micAngle'));
-    clicks.connect(pre); percEnv.connect(pre); pre.connect(leslie.input); leslie.output.connect(level).connect(out);
-    return { out, pre, level, clicks, percEnv, leslie, held: -Infinity, dead: t, applied: new Map() };
+    const swell = ctx.createGain(), clean = ctx.createGain(), driveIn = ctx.createGain(), shaper = ctx.createWaveShaper(), dc = ctx.createBiquadFilter(), driveOut = ctx.createGain();
+    shaper.curve = TUBE; shaper.oversample = '2x';
+    dc.type = 'highpass'; dc.frequency.value = 20; // die unsymmetrische Kennlinie erzeugt einen Gleichanteil, der mit dem Pegel wandert
+    clicks.connect(pre); percEnv.connect(pre); pre.connect(swell);
+    swell.connect(clean).connect(leslie.input);
+    swell.connect(driveIn).connect(shaper).connect(dc).connect(driveOut).connect(leslie.input);
+    leslie.output.connect(level).connect(out);
+    return { out, pre, level, clicks, percEnv, leslie, swell, clean, driveIn, driveOut, pedal: undefined, held: -Infinity, dead: t, applied: new Map() };
   };
   // Feinwerte der Kette: nur setzen, wenn sich der Wert geändert hat (sonst wüchse die Automationsliste mit jedem Ton)
   const set = (param, value, t) => { if (chain.applied.get(param) !== value) { chain.applied.set(param, value); param.setValueAtTime(value, t); } };
@@ -86,6 +102,14 @@ export function organVoice(layer, ctx, { tuned, rng, noise }) {
     chain.leslie.keep(chain.dead);
     chain.leslie.tune(tuned, t, set);
     chain.leslie.speed(leslieFast(tuned('leslie'), e.leslie), tuned, t);
+    const pedal = 10 ** ((tuned('swell') * (e.swell ?? 0)) / 20);
+    if (chain.pedal === undefined) chain.swell.gain.setValueAtTime(pedal, t);
+    else if (pedal !== chain.pedal) chain.swell.gain.setTargetAtTime(pedal, t, (e.art === 'swell' && e.artTime > 0 ? e.artTime : Math.min(end - t, GLIDE)) / 3);
+    chain.pedal = pedal;
+    const gain = DRIVE_MAX * tuned('drive');
+    set(chain.clean.gain, gain > 0 ? 0 : 1, t);
+    set(chain.driveIn.gain, gain / RANGE, t);
+    set(chain.driveOut.gain, gain > 0 ? DRIVE_REF / Math.tanh(gain * DRIVE_REF) : 0, t);
     const cents = WHEEL_CENTS[((e.midi % 12) + 12) % 12];
     // Tastenkontakt: Oszillator durch eine kurze Rampe an `dest`
     const key = (o, freq, peak, dest) => {
