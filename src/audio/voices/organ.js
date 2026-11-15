@@ -1,11 +1,13 @@
 // Tonewheel-Orgel (chords/organ/<preset>, versteckt): je Ton EIN Oszillator auf der Sub-Oktave (16'-Lage) mit einer PeriodicWave, deren Teiltöne
 // die neun Zugriegel sind. Die Orgel reagiert nicht auf die Anschlagstärke. Alle Zahlen sind Startwerte, nicht gehört. Feinwerte: tunables.js.
-// Kette (fest je Stimme, entsteht beim ersten Ton): Töne, Key-Click und Percussion -> pre -> level -> out.
+// Kette (fest je Stimme, entsteht beim ersten Ton): Töne, Key-Click und Percussion -> pre -> Leslie (organ-leslie.js) -> level -> out.
 // Key-Click (click, clickOff): kurzer Rauschstoß bei Note-On und leiser bei Note-Off, Pegel und Ausschnitt des Rauschens je Klick aus dem Seed.
 // Percussion (perc, percHarm, percDecay): Sinus auf dem 2. oder 3. Teilton der 8'-Lage durch EINE gemeinsame Hüllkurve, single-trigger wie am Original.
+// Leslie (leslie: 0 aus, 1 folgt dem Feld `leslie` der Töne aus core/organ.js, 2 immer langsam, 3 immer schnell).
 // Bekannte Grenze: Quint- und Terz-Zugriegel sind hier reine Obertöne; am Original sind es temperierte Räder (2 bzw. 14 Cent daneben).
 import { hz } from '../nodes.js';
 import { DRAWBARS } from './tunables.js';
+import { createLeslie, leslieFast } from './organ-leslie.js';
 
 const HARMONIC = [1, 3, 2, 4, 6, 8, 10, 12, 16]; // Teilton je Zugriegel über der Sub-Oktave (16', 5⅓', 8', 4', 2⅔', 2', 1⅗', 1⅓', 1')
 const SEMIS = [-12, 7, 0, 12, 19, 24, 28, 31, 36]; // Lage des Tonrads je Zugriegel in Halbtönen über der Taste
@@ -20,6 +22,7 @@ const ATTACK = 0.004, RELEASE = 0.012; // Tastenkontakt: kurz, aber ohne Knacken
 const CLICK_HP = 1000; // Hochpass des Key-Clicks (Hz): breitbandig, ohne Rumpeln
 const CLICK_TC = 0.002; // Abklingen des Klicks (Zeitkonstante, s)
 const HELD_EPS = 0.005; // so kurz vor dem Ende der letzten Taste gilt die Tastatur schon als frei (Mikrotiming verschiebt um Millisekunden)
+const TAIL = 10; // so lange nach dem letzten Ton laufen die LFOs des Leslie weiter (s); danach baut der nächste Ton die Kette neu
 const PHASE = 2.399963; // Goldener Winkel: feste, verteilte Phasen der Teiltöne (Tonräder laufen nicht phasengleich; hält die Spitzen klein)
 
 /**
@@ -63,21 +66,26 @@ export function organVoice(layer, ctx, { tuned, rng, noise }) {
     return waves.get(key);
   };
   let chain = null;
-  const build = (out) => {
+  const build = (out, t) => {
     const level = ctx.createGain(), pre = ctx.createGain(), percEnv = ctx.createGain(), clicks = ctx.createBiquadFilter();
     clicks.type = 'highpass'; clicks.frequency.value = CLICK_HP;
     percEnv.gain.value = 0;
-    clicks.connect(pre); percEnv.connect(pre); pre.connect(level).connect(out);
-    return { out, pre, level, clicks, percEnv, held: -Infinity, applied: new Map() };
+    const leslie = createLeslie(ctx, t, tuned('micAngle'));
+    clicks.connect(pre); percEnv.connect(pre); pre.connect(leslie.input); leslie.output.connect(level).connect(out);
+    return { out, pre, level, clicks, percEnv, leslie, held: -Infinity, dead: t, applied: new Map() };
   };
   // Feinwerte der Kette: nur setzen, wenn sich der Wert geändert hat (sonst wüchse die Automationsliste mit jedem Ton)
   const set = (param, value, t) => { if (chain.applied.get(param) !== value) { chain.applied.set(param, value); param.setValueAtTime(value, t); } };
 
   return (out, t, e) => {
     if (e.type !== 'note') return;
-    if (chain?.out !== out) chain = build(out);
+    if (chain?.out !== out || t > chain.dead) chain = build(out, t);
     set(chain.level.gain, tuned('level'), t);
     const end = t + Math.max(0.03, e.dur);
+    chain.dead = Math.max(chain.dead, end + TAIL);
+    chain.leslie.keep(chain.dead);
+    chain.leslie.tune(tuned, t, set);
+    chain.leslie.speed(leslieFast(tuned('leslie'), e.leslie), tuned, t);
     const cents = WHEEL_CENTS[((e.midi % 12) + 12) % 12];
     // Tastenkontakt: Oszillator durch eine kurze Rampe an `dest`
     const key = (o, freq, peak, dest) => {

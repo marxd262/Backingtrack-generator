@@ -2,7 +2,7 @@
 // Fälle: Blues-Shuffle 90 (Preset jazz), Rock 120 mit Strophe und Refrain (rock), Ballade 70 (ballad). Band: Schlagzeug, Bass, Orgel, Percussion;
 // ohne Pad, weil eine Streicherfläche in derselben Lage die Orgel verdeckt. Eine Seite ist { voice, tuning, solo }: voice ersetzt die Orgel
 // (A in Schritt o1: das Orgel-Sample), tuning sind Feinwerte der Orgel-Variante des Falls, solo rendert nur die Akkord-Schicht.
-// Aufruf: node scripts/render-organ.mjs <schritt> [sample|synth] [ausgabeordner]   (Schritte: o1, o2, level; Standard: sample, .superpowers/audio-ab)
+// Aufruf: node scripts/render-organ.mjs <schritt> [sample|synth] [ausgabeordner]   (Schritte: o1, o2, o3a, o3b, level; Standard: sample, .superpowers/audio-ab)
 // Der Server läuft auf einem freien Port (start(0)), nicht auf 4173: das Skript stört keinen zweiten Arbeitsordner.
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -22,12 +22,15 @@ export const STEPS = {
   o1: { name: 'tonewheel', a: { voice: SAMPLE }, b: { tuning: only() } },
   // Schritt 2, Key-Click und Percussion: A = ohne, B = mit (Percussion hat nur das Preset jazz an, also der Blues)
   o2: { name: 'click', a: { tuning: only() }, b: { tuning: only('click', 'perc') } },
+  // Schritt 3, Leslie: (a) A = aus, B = dauerhaft langsam; (b) A = dauerhaft langsam, B = Umschalten nach den Regeln (nur der Rock-Fall hat einen Refrain)
+  o3a: { name: 'leslie', a: { tuning: only('click', 'perc') }, b: { tuning: { ...only('click', 'perc'), leslie: 2 } } },
+  o3b: { name: 'leslieswitch', a: { tuning: { ...only('click', 'perc'), leslie: 2 } }, b: { tuning: only('click', 'perc', 'leslie') } },
   // Pegelmessung, keine Hörprobe: Akkord-Schicht allein; die Zeile "RMS A … B …" (dB, vor der Summe) ergibt level = 10 ** ((A - B) / 20)
   level: { name: 'level', cases: [...CASES, pick('rock', 'gospel')], a: { voice: SAMPLE, solo: true }, b: { solo: true, tuning: { ...only(), level: 1 } } },
 };
 
 /** Läuft im Browser (wird serialisiert: keine Werte von außerhalb): rendert einen Fall, liefert L/R als base64 (Float32) und Zählungen der Akkord-Schicht. */
-async function renderOrgan([style, bpm, kind, side, limiter, extra]) {
+export async function renderOrgan([style, bpm, kind, side, limiter, extra]) {
   const { buildEvents } = await import('/core/events.js');
   const { resolveTrackTimbre } = await import('/core/timbre.js');
   const { resolveVoices, setAllVoices } = await import('/core/voices.js');

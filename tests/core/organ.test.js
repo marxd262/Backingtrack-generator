@@ -4,6 +4,8 @@ import assert from 'node:assert/strict';
 import { tonewheelPartials, WHEEL_CENTS, percussionGate } from '../../src/audio/voices/organ.js';
 import { TUNABLES, DRAWBARS } from '../../src/audio/voices/tunables.js';
 import { VOICES } from '../../src/core/voices.js';
+import { leslieFast } from '../../src/audio/voices/organ-leslie.js';
+import { buildEvents } from '../../src/core/events.js';
 
 const bars = (text) => [...text].map(Number);
 const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
@@ -53,4 +55,28 @@ test('Percussion ist single-trigger: nur der erste Ton nach freier Tastatur lös
   // Akkord aus drei Tönen: nur der erste; Anschluss genau am Ende: löst aus; in den gehaltenen Ton hinein: nicht; 2 ms vor dem Ende: löst aus; nach einer Pause: löst aus
   assert.deepEqual(fired, [true, false, false, true, false, true, true]);
   assert.equal(state.held, 3.2);
+});
+
+const formTrack = (chords) => ({
+  key: { root: 'A', mode: 'minor' }, bpm: 120, seed: 3, length: 8, tags: {},
+  bars: [['A', 'min'], ['A', 'min'], ['D', 'min'], ['E', 'maj']].map(([root, quality]) => ({ chord: { root, quality }, beats: 4 })),
+  layers: { drums: true, bass: true, chords: true, pad: false, lead: false, percussion: false },
+  form: { sections: [{ type: 'verse', bars: 4 }, { type: 'chorus', bars: 4 }] },
+  voices: { chords },
+});
+const chordNotes = (track, options) => buildEvents(track, options).filter((e) => e.layer === 'chords' && e.type === 'note');
+
+test('Leslie-Regel: schnell im Refrain und im letzten Takt davor, sonst langsam; nur an der Orgel-Stimme, nicht ohne die Artikulations-Schicht', () => {
+  const notes = chordNotes(formTrack({ id: 'organ', variant: 'rock' }));
+  for (const bar of [0, 1, 2, 3, 4, 5, 6, 7]) assert.ok(notes.some((e) => e.bar === bar), `Takt ${bar} hat Töne`);
+  for (const e of notes) assert.equal(e.leslie, e.bar >= 3 ? 1 : undefined, `Takt ${e.bar}`);
+  assert.ok(chordNotes(formTrack({ id: 'epiano', variant: 'rhodes' })).every((e) => !('leslie' in e)), 'andere Stimme: kein Feld');
+  assert.ok(chordNotes(formTrack({ id: 'organ', variant: 'rock' }), { ornaments: { on: 0 } }).every((e) => !('leslie' in e)), 'Schicht aus: kein Feld');
+  const noForm = { ...formTrack({ id: 'organ', variant: 'jazz' }), form: undefined };
+  assert.ok(chordNotes(noForm).every((e) => !('leslie' in e)), 'ohne Songform: immer langsam');
+});
+
+test('leslieFast: 0 aus und 2 immer langsam, 3 immer schnell, 1 folgt dem Feld des Tons', () => {
+  assert.deepEqual([0, 1, 2, 3].map((mode) => leslieFast(mode, 1)), [false, true, false, true]);
+  assert.deepEqual([0, 1, 2, 3].map((mode) => leslieFast(mode, undefined)), [false, false, false, true]);
 });

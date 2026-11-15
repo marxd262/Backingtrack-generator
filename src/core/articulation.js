@@ -13,6 +13,7 @@ import { chordTones, diatonicChords, noteToPc } from './music.js';
 import { grooveIdFor } from './grooves.js';
 import { phrasesOf } from './form-arrange.js';
 import { densityAt } from './form-types.js';
+import { organRules } from './organ.js';
 
 // Standard nach dem Urteil des Nutzers (2026-11-14): alles an bis auf Gitarre B (Boogie im Mix nicht zu hören, slideChord noch ohne Urteil)
 export const ART_DEFAULTS = Object.freeze({ on: 1, bass: 1, chords: 1, drums: 1, keys: 1, pad: 1, lead: 1, band: 1, bassB: 1, chordsB: 0, keysB: 1, drumsB: 1 });
@@ -98,6 +99,7 @@ export function articulate(events, { track, bars, sections, params, rng, options
   };
   const out = events.map((e) => ({ ...e }));
   for (const [name, rules] of Object.entries(RULES)) if (options[name] > 0 && track.layers[RULE_LAYER[name] ?? name]) rules(out, env);
+  if (track.layers.chords) organRules(out, env);
   // Vorlauf (Regel 6, der Zielton kommt pünktlich): das Ereignis bleibt auf seinem Platz, die Stimme beginnt artTime früher (sampler.js). So gilt
   // der Vertrag des Stroms weiter (Zeit und Dauer im Takt, Bass auf der Eins), und Stimmen ohne Artikulationen (Synth) spielen nicht zu früh
   return out.sort(byTime);

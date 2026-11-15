@@ -35,10 +35,19 @@ const STRUM = { strum: spec(0, 0.05, 0.002, 0.012), strumUp: spec(0, 2, 1, 2), s
 // Schritt 2: click Pegel des Key-Clicks (0 = aus; SPIELREGELN 4.6: immer leicht, stärker bei Rock), clickOff Anteil davon bei Note-Off;
 // perc Pegel der Percussion relativ zu einem Ton (0 = aus; nur das Preset jazz hat sie an: Jazz/Blues-Staccato, aus bei Flächen),
 // percHarm 2 oder 3 (Teilton der 8'-Lage), percDecay Zeit bis -20 dB in s (schnell etwa 0,2, langsam etwa 1).
+// Schritt 3, Leslie (organ-leslie.js): leslie 0 = aus, 1 = folgt den Regeln (schnell im Refrain und im Takt davor, core/organ.js), 2 = immer
+// langsam, 3 = immer schnell; hornSlow/hornFast/drumSlow/drumFast Drehzahl in Hz; hornUp/hornDown/drumUp/drumDown Trägheit beim Beschleunigen und
+// Bremsen (Zeit in s bis etwa 95 % der neuen Drehzahl); hornAm/drumAm Tiefe der Lautstärke-Modulation (1 ± Wert); hornDoppler/drumDoppler Hub der
+// Verzögerung in ms (0,4 ms sind bei 6,7 Hz etwa ±29 Cent, bei 0,8 Hz ±3,5 Cent); crossover Frequenzweiche in Hz; micAngle Winkel zwischen den
+// beiden Mikrofonen in Grad (wirkt beim Aufbau der Kette, also nach Stopp und Start).
 export const DRAWBARS = Object.freeze(['d16', 'd513', 'd8', 'd4', 'd223', 'd2', 'd135', 'd113', 'd1']);
 const organ = (bars, level, over) => ({
   level: spec(0.05, 8, 0.05, level), ...Object.fromEntries(DRAWBARS.map((name, i) => [name, spec(0, 8, 1, Number(bars[i]))])),
   click: spec(0, 1, 0.01, 0.1), clickOff: spec(0, 1, 0.05, 0.5), perc: spec(0, 1, 0.05, 0), percHarm: spec(2, 3, 1, 3), percDecay: spec(0.05, 2, 0.05, 0.2),
+  leslie: spec(0, 3, 1, 1), hornSlow: spec(0.1, 2, 0.05, 0.8), hornFast: spec(3, 10, 0.1, 6.7), drumSlow: spec(0.1, 2, 0.05, 0.7), drumFast: spec(3, 10, 0.1, 5.7),
+  hornUp: spec(0.1, 6, 0.1, 1), hornDown: spec(0.1, 8, 0.1, 1.5), drumUp: spec(0.5, 10, 0.1, 3.5), drumDown: spec(0.5, 12, 0.1, 5),
+  hornAm: spec(0, 0.9, 0.05, 0.5), drumAm: spec(0, 0.9, 0.05, 0.25), hornDoppler: spec(0, 1, 0.05, 0.4), drumDoppler: spec(0, 1, 0.05, 0.15),
+  crossover: spec(200, 2000, 50, 800), micAngle: spec(0, 180, 5, 90),
   ...over,
 });
 // Gemeinsame Namen der Saitenstimmen (Bedeutung: string-model.js STRING_DEFAULTS); die Startwerte sind nach bestem Wissen gesetzt und
