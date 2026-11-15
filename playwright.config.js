@@ -13,5 +13,9 @@ export default defineConfig({
   projects: [
     { name: 'offline', testMatch: /(levels|sound|mix)\.spec\.js$/ },
     { name: 'realtime', testIgnore: /(levels|sound|mix)\.spec\.js$/, dependencies: ['offline'] },
+    // Dekodieren der Format-2-Packs (FLAC) auch in Firefox und WebKit (npx playwright install firefox webkit). WebKit ist nicht Safari (andere
+    // Codec-Grundlage, nur ein Hinweis); unter Windows hat es gar kein Web Audio, dort werden die Tests übersprungen.
+    { name: 'firefox', testMatch: /sample-v2\.spec\.js$/, use: { browserName: 'firefox', launchOptions: {} } },
+    { name: 'webkit', testMatch: /sample-v2\.spec\.js$/, use: { browserName: 'webkit', launchOptions: {} } },
   ],
 });

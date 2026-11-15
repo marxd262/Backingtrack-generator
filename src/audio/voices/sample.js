@@ -6,9 +6,9 @@
 //   Lead:    keine (nur die Verzerrer hinter der Stimme)
 // Feinwerte (level; decay als zusätzliches Abklingen bei Bass (finger, pick, upright), Gitarre, E-Piano und gedämpfter Gitarre; bei der Gitarre strum und ein Entzerrer lowDb, midDb,
 // midHz, highDb, highHz gegen die nasale Mitte des Presets; bei allen Gitarren velExp (Anschlagkurve), softHz (Tiefpass bei leisem Anschlag),
-// oneShot (ohne Endschleife), humanCents und humanDb (Zufallsabweichung je Anschlag)): tunables.js.
+// oneShot (ohne Endschleife), humanCents und humanDb (Zufallsabweichung je Anschlag); bei Format-2-Packs release (Faktor der Release-Samples, fehlt = aus)): tunables.js.
 import { loadPack, peekPack, playNote, buffersFor } from './sampler.js';
-import { brightnessHz, velocityGain, velocityBrightnessHz, dbToGain } from './sample-zones.js';
+import { brightnessHz, velocityGain, velocityBrightnessHz, dbToGain, pickZones, artZones, roundRobin, playbackRate } from './sample-zones.js';
 
 /**
  * Lädt das Pack für eine Stimme und meldet den Zustand ('loading'|'ready'|'error') über setStatus, den Ladevorgang über track (Promise-Sammler).
@@ -35,6 +35,7 @@ export function watchPack(packId, ctx, { setStatus, track }) {
  */
 export function sampleVoice(packId, layer, ctx, { getTimbre, tuned, classic, setStatus, track, rng }) {
   const current = watchPack(packId, ctx, { setStatus, track });
+  const lastZone = new Map(); // Round-Robin (Format 2): zuletzt gespielte Zone je Taste
   let lastSong = -Infinity, strumIndex = 0;
 
   return (out, t, e) => {
@@ -83,6 +84,16 @@ export function sampleVoice(packId, layer, ctx, { getTimbre, tuned, classic, set
       filter = Math.min(filter, velocityBrightnessHz(e.vel, tuned('softHz')));
       oneShot = tuned('oneShot') >= 0.5;
     }
-    playNote(ctx, out, when, { pack, midi: e.midi, dur: e.dur, vel: e.vel, gain, timeScale, filter, naturalDecay: tuned('decay'), eq, cents, oneShot, art: e.art, artSemi: e.artSemi, artTime: e.artTime, artTone: e.artTone, artRate: e.artRate, ring: e.ring === true });
+    // Format 2: Round-Robin unter den gleich guten Zonen (Format 1 wählt in playNote wie bisher)
+    const v2 = pack.meta.version === 2, zones = pack.meta.zones;
+    const zone = v2 ? roundRobin(pickZones(artZones(zones, e.art), e.midi, e.vel), lastZone, `${e.midi} ${e.art ?? ''}`, rng) : undefined;
+    playNote(ctx, out, when, { pack, zone, midi: e.midi, dur: e.dur, vel: e.vel, gain, timeScale, filter, naturalDecay: tuned('decay'), eq, cents, oneShot, art: e.art, artSemi: e.artSemi, artTime: e.artTime, artTone: e.artTone, artRate: e.artRate, ring: e.ring === true });
+    // Release-Sample (Format 2, Feinwert release > 0 als Faktor): am Notenende, je gehaltene Sekunde um rtDecay dB leiser
+    const release = tuned('release');
+    if (v2 && release > 0 && Number.isFinite(e.dur)) {
+      const rel = roundRobin(pickZones(zones.filter((z) => z.trigger === 'release'), e.midi, e.vel), lastZone, `${e.midi} release`, rng);
+      const sample = rel && pack.meta.samples[rel.sample];
+      if (rel) playNote(ctx, out, when + e.dur, { pack, zone: rel, midi: e.midi, dur: sample.frames / sample.rate / playbackRate(rel, e.midi), vel: e.vel, gain: gain * release * dbToGain((rel.rtDecay ?? 0) * e.dur), filter, cents });
+    }
   };
 }

@@ -8,28 +8,55 @@ const distance = (x, lo, hi) => (x < lo ? lo - x : x > hi ? x - hi : 0);
  * engsten Tastenbereich, bei Gleichstand die erste. Passt keine, gilt die Zone mit der nächsten Taste, dann dem nächsten Anschlagbereich.
  * Leere oder fehlende Liste: null.
  */
-export function pickZone(zones, midi, vel01) {
-  if (!Array.isArray(zones) || zones.length === 0) return null;
+export const pickZone = (zones, midi, vel01) => pickZones(zones, midi, vel01)[0] ?? null;
+
+/** Alle Zonen, die so gut passen wie die von pickZone gewählte (gleiche Wertung), in Listenreihenfolge: die Round-Robins eines Format-2-Packs. */
+export function pickZones(zones, midi, vel01) {
+  if (!Array.isArray(zones) || zones.length === 0) return [];
   const vel = Number.isFinite(vel01) ? Math.round(clamp(vel01, 0, 1) * 127) : 127;
-  let best = null, bestScore = null;
+  let best = [], bestScore = null;
   for (const z of zones) {
     const score = [distance(midi, z.keyLo, z.keyHi), distance(vel, z.velLo, z.velHi), z.keyHi - z.keyLo];
-    if (!bestScore || score[0] < bestScore[0] || (score[0] === bestScore[0] && (score[1] < bestScore[1] || (score[1] === bestScore[1] && score[2] < bestScore[2])))) {
-      best = z;
-      bestScore = score;
-    }
+    const order = bestScore ? score.findIndex((x, i) => x !== bestScore[i]) : -1;
+    if (!bestScore || (order >= 0 && score[order] < bestScore[order])) { best = [z]; bestScore = score; } else if (order < 0) best.push(z);
   }
   return best;
 }
 
 /**
- * Zone für eine Artikulation: hat das Pack Zonen mit diesem `art` (eigene Sample-Gruppe, Format 2 aus SPEC_PHASE2), eine davon; sonst eine
- * normale Zone (ohne `art`), die Stimme rechnet die Artikulation dann selbst. Die heutigen Packs haben keine `art`-Zonen.
+ * Zonen für eine Artikulation: hat das Pack Zonen mit diesem `art` (eigene Sample-Gruppe, Format 2 aus SPEC_PHASE2), diese; sonst die normalen
+ * Zonen (ohne `art`), die Stimme rechnet die Artikulation dann selbst. Release-Zonen (`trigger: 'release'`) gehören nie dazu.
  */
-export function pickArtZone(zones, midi, vel01, art) {
-  if (!Array.isArray(zones)) return null;
-  const own = art ? zones.filter((z) => z.art === art) : [];
-  return pickZone(own.length ? own : zones.filter((z) => !z.art), midi, vel01);
+export function artZones(zones, art) {
+  if (!Array.isArray(zones)) return [];
+  const attack = zones.filter((z) => z.trigger !== 'release');
+  const own = art ? attack.filter((z) => z.art === art) : [];
+  return own.length ? own : attack.filter((z) => !z.art);
+}
+
+export const pickArtZone = (zones, midi, vel01, art) => (Array.isArray(zones) ? pickZone(artZones(zones, art), midi, vel01) : null);
+
+/**
+ * Wählt eine der gleich guten Zonen (Round-Robin): nie dieselbe wie zuletzt unter `key` (`memory`: Map je Stimme), sonst Zufall aus `rng.next()`.
+ * Nur eine Zone (oder keine): ohne Ziehung, damit die Zufallsfolge der Stimme gleich bleibt.
+ */
+export function roundRobin(zones, memory, key, rng) {
+  if (zones.length <= 1) return zones[0] ?? null;
+  const pool = zones.filter((z) => z !== memory.get(key));
+  const zone = pool[Math.min(pool.length - 1, Math.floor(rng.next() * pool.length))];
+  memory.set(key, zone);
+  return zone;
+}
+
+/**
+ * Pegelfaktor des Anschlags (0..1, ungültig zählt wie kräftig) für eine Zone: linear wie bisher; Format-2-Zonen tragen `velGain` (Faktor am
+ * unteren und oberen Ende ihres Anschlagbereichs, aus der Anschlagkurve der Library), dazwischen linear.
+ */
+export function zoneVelocity(zone, vel01) {
+  const v = Number.isFinite(vel01) ? clamp(vel01, 0, 1) : 1;
+  if (!zone.velGain) return v;
+  const x = zone.velHi > zone.velLo ? clamp((v * 127 - zone.velLo) / (zone.velHi - zone.velLo), 0, 1) : 1;
+  return zone.velGain[0] + (zone.velGain[1] - zone.velGain[0]) * x;
 }
 
 /** Abspielgeschwindigkeit, damit das Sample der Zone auf der Taste `midi` erklingt (Grundton und Feinstimmung der Zone). */
