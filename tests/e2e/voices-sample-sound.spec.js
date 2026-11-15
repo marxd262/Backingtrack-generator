@@ -10,7 +10,7 @@ const track = (extra = {}) => ({
   tags: { development: ['fullFromStart'] }, ...extra,
 });
 // [Instrument, Variante, Töne für die Prüfung, Tonhöhe prüfen?, erlaubte Abweichung in Cent (Standard 15)]
-// Gemessen 2026-11-10 (Cent am Grundton): upright 5 / -1 / 6; organ 7 / 2 / 1 / 1 / 1; muted -11 / -1 / -20 / 2 / 5; flute 7 / 4 / 2 / -2;
+// Gemessen 2026-11-10 (Cent am Grundton): upright 5 / -1 / 6; muted -11 / -1 / -20 / 2 / 5; flute 7 / 4 / 2 / -2;
 // sax -15 / -7 / -2 / 1; synth je 4. Die gedämpfte Gitarre und das Saxofon tragen ihre Verstimmung im Sample selbst (Feinstimmung der Zonen angewandt)
 const SAMPLES = [
   ['bass', 'finger', [28, 40, 52], true],
@@ -20,7 +20,6 @@ const SAMPLES = [
   ['pad', 'strings', [24, 48, 72, 100], false],
   ['pad', 'warm', [24, 48, 72, 100], false],
   ['bass', 'upright', [28, 40, 52], true],
-  ['chords', 'organ', [24, 40, 60, 84, 100], true],
   ['chords', 'muted', [40, 52, 64, 76, 90], true, 25],
   ['chords', 'jazz', [40, 52, 64, 76, 90], true],
   ['chords', 'funk', [40, 52, 64, 76, 90], true],
@@ -402,39 +401,6 @@ test('Wechsel vor dem Laden und zurück: kein Fehler, voiceStatus stimmt, nur ei
   });
   expect(r.log).toEqual(['loading', 'none', 'loading', 'none', 'loading', 'none', 'ready']);
   expect(r.packFetches).toBe(1);
-});
-
-// Orgel: ein Sample (Grundton 72, Feinstimmung -2400 Cent, wie in der SoundFont). Das Sample enthält nur Oktaven (C5, C6, C7, C8 ...);
-// mit der Feinstimmung liegt der gespielte Ton auf seinem C7-Anteil, darunter klingen zwei Suboktaven (16- und 32-Fuß-Lage). Ohne die
-// Feinstimmung läge der tiefste starke Anteil auf dem gespielten Ton selbst. Gemessen 2026-11-10: der tiefste Anteil bis 12 dB unter dem
-// stärksten liegt bei allen Tönen zwei Oktaven unter dem Ton, der Ton selbst ist vorhanden und auf 1 bis 7 Cent genau (pitchCents oben).
-test('chords/sample/organ: Feinstimmung der Zone wirkt (Spektrum mit FFT: tiefster starker Anteil zwei Oktaven unter dem Ton, Ton selbst vorhanden)', async ({ page }) => {
-  test.setTimeout(120_000);
-  const rows = await page.evaluate(async () => {
-    const { fft } = await import('/audio/spectrum.js');
-    const n = 2 ** 15, cos = new Float64Array(n / 2), sin = new Float64Array(n / 2);
-    for (let i = 0; i < n / 2; i++) { cos[i] = Math.cos((-2 * Math.PI * i) / n); sin[i] = Math.sin((-2 * Math.PI * i) / n); }
-    const out = [];
-    for (const midi of [48, 60, 72]) {
-      const d = await window.__renderNote('chords', { midi, dur: 0.9, seconds: 1, voices: { chords: { id: 'sample', variant: 'organ' } } });
-      const re = new Float64Array(n), im = new Float64Array(n);
-      for (let i = 0; i < n && 2205 + i < d.length; i++) re[i] = d[2205 + i] * (0.5 - 0.5 * Math.cos((2 * Math.PI * i) / n));
-      fft(re, im, cos, sin);
-      const mag = (k) => Math.hypot(re[k], im[k]);
-      // stärkster Bin innerhalb eines Halbtons um f
-      const around = (f) => { let best = 0; for (let k = Math.floor((f / 1.06 / 44100) * n); k <= Math.ceil(((f * 1.06) / 44100) * n); k++) best = Math.max(best, mag(k)); return best; };
-      const f0 = 440 * 2 ** ((midi - 69) / 12);
-      const steps = [-3, -2, -1, 0, 1, 2];
-      const octaves = steps.map((o) => around(f0 * 2 ** o));
-      const max = Math.max(...octaves);
-      out.push({ midi, lowest: steps[octaves.findIndex((m) => m >= max / 4)], atNote: octaves[3] / max });
-    }
-    return out;
-  });
-  for (const r of rows) {
-    expect(r.lowest, JSON.stringify(rows)).toBe(-2);
-    expect(r.atNote, JSON.stringify(rows)).toBeGreaterThan(0.05);
-  }
 });
 
 // Schlagzeug-Kits und Percussion aus Samples. Pegel gegen den Synth: Folge aus je einem Schlag pro Name (Abstand 0,8 s, vel 0.8), rms der

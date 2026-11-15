@@ -12,8 +12,8 @@ import { VOICES } from '../src/core/voices.js';
 // level vor der Neumessung (tunables.js bis e93653a): die Gitarren, die es vor Stufe 1 gab
 const OLD_LEVEL = { guitar: 1.7, muted: 1.2, jazz: 4.25, funk: 0.9, steel: 5, nylon: 1.85, twelve: 6.5 };
 export const LEGACY_GUITARS = Object.keys(OLD_LEVEL);
-/** Alle Gitarren unter den Sample-Stimmen der Akkorde (Register-Reihenfolge; E-Piano und Orgel sind keine). */
-export const GUITARS = VOICES.chords.sample.variants.filter((v) => v !== 'epiano' && v !== 'organ');
+/** Alle Gitarren unter den Sample-Stimmen der Akkorde (Register-Reihenfolge; das E-Piano ist keine). */
+export const GUITARS = VOICES.chords.sample.variants.filter((v) => v !== 'epiano');
 
 /** Feinwert-Überschreibungen, die den Klang vor Stufe 1 wiederherstellen (alte Anschlagkurve, keine Helligkeit, Schleife, kein Zufall, alter Entzerrer und Pegel). */
 export const legacyTuning = (variant) => ({

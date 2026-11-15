@@ -30,14 +30,14 @@ const NOTE_NEUTRAL = { velExp: spec(0.5, 3, 0.05, 1), softHz: spec(800, 20000, 1
 // strumTilt = wie viel leiser die zuletzt angeschlagene Saite ist (0,25 = -2,5 dB)
 const STRUM = { strum: spec(0, 0.05, 0.002, 0.012), strumUp: spec(0, 2, 1, 2), strumTilt: spec(0, 0.6, 0.05, 0.25) };
 // Tonewheel-Orgel (organ.js; alles Startwerte, nicht gehört): je Variante ein Zugriegel-Preset. d16 … d1 sind die neun Zugriegel (0 bis 8, je Stufe
-// 3 dB) in der Reihenfolge 16', 5⅓', 8', 4', 2⅔', 2', 1⅗', 1⅓', 1'. level gleicht den Pegel an chords/sample/organ an (gemessen mit
-// `node scripts/render-organ.mjs level`, Werte bei den Tabellen unten).
+// 3 dB) in der Reihenfolge 16', 5⅓', 8', 4', 2⅔', 2', 1⅗', 1⅓', 1'. level glich den Pegel an die frühere Sample-Orgel
+// (chords/sample/organ, entfernt 2026-11-15) an, Werte bei den Tabellen unten.
 // Schritt 2: click Pegel des Key-Clicks (0 = aus; SPIELREGELN 4.6: immer leicht, stärker bei Rock), clickOff Anteil davon bei Note-Off;
 // gemessen 2026-11-15 (Akkord-Schicht allein, Click gegen Orgel bei click 0,1): Blues -39,0 dB, Ballade -40,1, Rock -24,4 (kurze Akkorde, Klangkette
 // der Schicht hebt die Höhen). Der Rock-Wert 0,2 (-18,4 dB) war im Hörtest irritierend, 0,05 (-30,4 dB) noch leicht störend, darum 0,03 (-34,9 dB): die Mitte in dB zwischen 0,05 und dem Blues-Abstand (-39,0 dB, wäre 0,02);
 // perc Pegel der Percussion relativ zu einem Ton (0 = aus; nur das Preset jazz hat sie an: Jazz/Blues-Staccato, aus bei Flächen),
 // percHarm 2 oder 3 (Teilton der 8'-Lage), percDecay Zeit bis -20 dB in s (schnell etwa 0,2, langsam etwa 1).
-// Schritt 3, Leslie (organ-leslie.js): leslie 0 = aus, 1 = folgt den Regeln (schnell im Refrain und im Takt davor, core/organ.js), 2 = immer
+// Schritt 3, Leslie (organ-leslie.js): leslie 0 = aus, 1 = folgt den Regeln (schnell in Refrain, Aufbau und im Takt vor dem Refrain, core/organ.js), 2 = immer
 // langsam, 3 = immer schnell; hornSlow/hornFast/drumSlow/drumFast Drehzahl in Hz; hornUp/hornDown/drumUp/drumDown Trägheit beim Beschleunigen und
 // Bremsen (Zeit in s bis etwa 95 % der neuen Drehzahl); hornAm/drumAm Tiefe der Lautstärke-Modulation (1 ± Wert); hornDoppler/drumDoppler Hub der
 // Verzögerung in ms (0,4 ms sind bei 6,7 Hz etwa ±29 Cent, bei 0,8 Hz ±3,5 Cent); crossover Frequenzweiche in Hz; micAngle Winkel zwischen den
@@ -91,13 +91,12 @@ export const TUNABLES = deepFreeze({
   'pad/sample/strings': { level: spec(0.05, 8, 0.05, 1.95) },
   'pad/sample/warm': { level: spec(0.05, 8, 0.05, 1.15) },
   // Neue Varianten, gleiches Verfahren (gemessen 2026-11-10, Track aus voices-sample-sound.spec.js, 8 s, Schicht allein, ohne Begrenzer; Lead mit Job
-  // melody, Percussion mit Job mixed): rms Sample / Synth bei level 1 (decay auf dem Maximum 10): upright 0.422, organ 1.096, muted 0.989, flute 0.413,
+  // melody, Percussion mit Job mixed): rms Sample / Synth bei level 1 (decay auf dem Maximum 10): upright 0.422, muted 0.989, flute 0.413,
   // sax 0.776, synth 0.232, Kits standard 0.832, brushes 0.850, rimshot 0.755, jazz 0.854, electronic 0.948, 808 1.400, percussion studio 0.518;
   // mit decay 2.5 (upright) und 1.5 (muted) bei level 1: 0.334 und 0.839; level = 1 / Verhältnis, mit den ausgelieferten Werten 0.98 bis 1.02.
   // Kits: die Balance der Schläge folgt der SoundFont, einzeln (rms je Schlag gegen den Synth-Schlag gleichen Namens, mit level) z. B. Snare 1.4
   // bis 2.9, Hi-Hat 0.5 bis 1.7, Shaker 2.3, Tamburin 2.9, Kuhglocke 0.55
   'bass/sample/upright': { level: spec(0.05, 8, 0.05, 3), decay: spec(0.2, 10, 0.1, 2.5), ...BASS_HUMAN },
-  'chords/sample/organ': { level: spec(0.05, 8, 0.05, 0.9) },
   'chords/sample/muted': { level: spec(0.05, 8, 0.05, 1.35), decay: spec(0.2, 10, 0.1, 1.5), ...REALISM },
   // Jazz- und Funk-Gitarre (gemessen 2026-11-11, Track wie oben, rms Sample / Synth bei level 1.7 und decay 3: jazz 0.398, funk 1.930, steel 0.341, nylon 0.907, twelve 0.262; level = 1.7 / Verhältnis; mit den ausgelieferten Werten 0.91 bis 1.02);
   // strum wie bei der Clean Guitar, ohne Entzerrer (Klang unbeurteilt, nicht gehört)

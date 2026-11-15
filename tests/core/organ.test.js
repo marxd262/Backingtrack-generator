@@ -40,8 +40,8 @@ test('Räder: je Tonklasse unter 0,8 Cent neben der gleichstufigen Stimmung, A s
   assert.ok(WHEEL_CENTS.some((c) => Math.abs(c) > 0.3), 'die Verstimmung ist nicht null');
 });
 
-test('Register und Feinwerte: versteckt, vier Presets mit den neun Zugriegeln als Startwert', () => {
-  assert.equal(VOICES.chords.organ.hidden, true);
+test('Register und Feinwerte: sichtbar, vier Presets mit den neun Zugriegeln als Startwert', () => {
+  assert.equal(VOICES.chords.organ.hidden, undefined);
   const presets = { jazz: '888000000', rock: '888800000', gospel: '888888888', ballad: '838000000' };
   assert.deepEqual(VOICES.chords.organ.variants, Object.keys(presets));
   for (const [variant, text] of Object.entries(presets)) {
@@ -66,13 +66,17 @@ const formTrack = (chords) => ({
 });
 const chordNotes = (track, options) => buildEvents(track, options).filter((e) => e.layer === 'chords' && e.type === 'note');
 
-test('Leslie-Regel: schnell im Refrain und im letzten Takt davor, sonst langsam; nur an der Orgel-Stimme, nicht ohne die Artikulations-Schicht', () => {
+test('Leslie-Regel: schnell in Refrain, Aufbau und im letzten Takt vor dem Refrain, sonst langsam; nur an der Orgel-Stimme, nicht ohne die Artikulations-Schicht', () => {
   const notes = chordNotes(formTrack({ id: 'organ', variant: 'rock' }));
   for (const bar of [0, 1, 2, 3, 4, 5, 6, 7]) assert.ok(notes.some((e) => e.bar === bar), `Takt ${bar} hat Töne`);
   for (const e of notes) assert.equal(e.leslie, e.bar >= 3 ? 1 : undefined, `Takt ${e.bar}`);
   assert.ok(chordNotes(formTrack({ id: 'epiano', variant: 'rhodes' })).every((e) => !('leslie' in e) && !('swell' in e)), 'andere Stimme: kein Feld');
   assert.ok(chordNotes(formTrack({ id: 'organ', variant: 'rock' }), { ornaments: { on: 0 } }).every((e) => !('leslie' in e)), 'Schicht aus: kein Feld');
-  const noForm = { ...formTrack({ id: 'organ', variant: 'jazz' }), form: undefined };
+  const build = { ...formTrack({ id: 'organ', variant: 'rock' }), length: 12, form: { sections: [{ type: 'verse', bars: 4 }, { type: 'build', bars: 4 }, { type: 'verse', bars: 4 }] } };
+  const built = chordNotes(build);
+  for (const bar of [0, 4, 7, 8]) assert.ok(built.some((e) => e.bar === bar), `Aufbau: Takt ${bar} hat Töne`);
+  for (const e of built) assert.equal(e.leslie, e.bar >= 4 && e.bar < 8 ? 1 : undefined, `Aufbau: Takt ${e.bar}`);
+  const noForm ={ ...formTrack({ id: 'organ', variant: 'jazz' }), form: undefined };
   assert.ok(chordNotes(noForm).every((e) => !('leslie' in e)), 'ohne Songform: immer langsam');
 });
 

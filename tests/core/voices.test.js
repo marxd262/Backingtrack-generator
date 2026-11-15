@@ -55,7 +55,10 @@ test('isVoice und voicesFor: bekannte und unbekannte Eingaben', () => {
   assert.deepEqual(voicesFor('lead'), ['synth', 'sample']);
   assert.deepEqual(voicesFor('percussion'), ['synth', 'sample']);
   assert.ok(isVoice('drums', 'sample', 'rimshot') && isVoice('drums', 'sample', '808') && isVoice('lead', 'sample', 'sax') && isVoice('percussion', 'sample', 'studio'));
-  assert.ok(isVoice('bass', 'sample', 'upright') && isVoice('chords', 'sample', 'organ') && isVoice('chords', 'sample', 'muted'));
+  assert.ok(isVoice('bass', 'sample', 'upright') && isVoice('chords', 'sample', 'muted'));
+  // die entfernte Sample-Orgel bleibt gültig und wird zur Tonewheel-Orgel (gespeicherte Profile und Tracks)
+  assert.ok(!VOICES.chords.sample.variants.includes('organ') && isVoice('chords', 'sample', 'organ') && !isVoice('chords', 'sample', 'constructor'));
+  assert.deepEqual(completeVoices({ chords: { id: 'sample', variant: 'organ' } }).chords, { id: 'organ', variant: 'jazz' });
   assert.ok(!isVoice('percussion', 'sample', 'standard') && !isVoice('lead', 'sample', 'organ'));
   assert.deepEqual(VOICES.drums.sample.uses, ['drums.room']);
   assert.deepEqual(voicesFor('nope'), []);

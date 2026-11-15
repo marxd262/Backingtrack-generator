@@ -33,7 +33,6 @@ export const PACKS = {
   'bass-upright': { bank: 0, program: 32 }, // Acoustic Bass
   'chords-guitar': { bank: 0, program: 27 }, // Clean Guitar
   'chords-epiano': { bank: 0, program: 4 }, // Tine Electric Piano
-  'chords-organ': { bank: 0, program: 16 }, // Drawbar Organ
   'chords-muted': { bank: 0, program: 28 }, // Palm Muted Guitar
   'chords-jazz': { bank: 0, program: 26 }, // Jazz Guitar
   'chords-funk': { bank: 8, program: 28 }, // Funk Guitar

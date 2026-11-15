@@ -26,9 +26,9 @@ export const VOICES = deepFreeze({
     synth: { kind: 'synth', variants: ['classic'], uses: ['chords.brightness', 'chords.length', 'chords.chorus', 'chords.tremolo'] },
     string: { kind: 'model', hidden: true, variants: ['electric'], uses: ['chords.brightness', 'chords.length'] },
     epiano: { kind: 'synth', variants: ['rhodes'], uses: ['chords.brightness', 'chords.length', 'chords.tremolo'] },
-    // Tonewheel-Orgel mit Leslie (audio/voices/organ.js); die Varianten sind Zugriegel-Presets. Versteckt, bis der Nutzer sie gehört hat
-    organ: { kind: 'synth', hidden: true, variants: ['jazz', 'rock', 'gospel', 'ballad'], uses: [] },
-    sample: { kind: 'sample', variants: ['guitar', 'epiano', 'organ', 'muted', 'jazz', 'funk', 'steel', 'nylon', 'twelve', 'freepats', 'freepatsjazz'], uses: ['chords.brightness', 'chords.length'] },
+    // Tonewheel-Orgel mit Leslie (audio/voices/organ.js); die Varianten sind Zugriegel-Presets
+    organ: { kind: 'synth', variants: ['jazz', 'rock', 'gospel', 'ballad'], uses: [] },
+    sample: { kind: 'sample', variants: ['guitar', 'epiano', 'muted', 'jazz', 'funk', 'steel', 'nylon', 'twelve', 'freepats', 'freepatsjazz'], uses: ['chords.brightness', 'chords.length'] },
   },
   pad: {
     synth: { kind: 'synth', variants: ['classic'], uses: ['pad.attack', 'pad.cutoff', 'pad.lfoSpeed', 'pad.lfoDepth', 'pad.shimmer', 'pad.thickness'] },
@@ -49,12 +49,17 @@ const SYNTH = deepFreeze({ id: 'synth', variant: 'classic' });
 // Standard je Schicht: die erste Sample-Variante (Urteil des Nutzers 2026-11-15; bis dahin synth/classic). Bis ihr Pack geladen ist, spielt der Synth.
 export const DEFAULT_VOICES = deepFreeze(Object.fromEntries(VOICE_LAYERS.map((layer) => [layer, { id: 'sample', variant: VOICES[layer].sample.variants[0] }])));
 
+// Entfernte Stimmen: wer sie noch nennt (gespeicherte Profile, Tracks), bekommt den Nachfolger statt eines Fehlers oder des Standards.
+// chords sample/organ (ein Sample über den ganzen Bereich) ist seit 2026-11-15 durch die Tonewheel-Orgel ersetzt.
+const MOVED = deepFreeze({ chords: { 'sample/organ': { id: 'organ', variant: 'jazz' } } });
+const moved = (layer, id, variant) => (Object.hasOwn(MOVED[layer] ?? {}, `${id}/${variant}`) ? MOVED[layer][`${id}/${variant}`] : undefined);
+
 const isRecord = (x) => typeof x === 'object' && x !== null && !Array.isArray(x);
 
-/** Ob `layer` die Stimme `id` (und, falls angegeben, die Variante) kennt. */
+/** Ob `layer` die Stimme `id` (und, falls angegeben, die Variante) kennt; eine entfernte Stimme mit Nachfolger (MOVED) zählt als bekannt. */
 export function isVoice(layer, id, variant) {
   if (!VOICE_LAYERS.includes(layer) || typeof id !== 'string' || !Object.hasOwn(VOICES[layer], id)) return false;
-  return variant === undefined || (typeof variant === 'string' && VOICES[layer][id].variants.includes(variant));
+  return variant === undefined || (typeof variant === 'string' && (VOICES[layer][id].variants.includes(variant) || moved(layer, id, variant) !== undefined));
 }
 
 /** Stimmen-IDs eines Instruments in Registerreihenfolge (leer für Unbekanntes). */
@@ -62,7 +67,7 @@ export const voicesFor = (layer) => (VOICE_LAYERS.includes(layer) ? Object.keys(
 
 /**
  * Füllt die Stimmenwahl auf: je Instrument { id, variant }. Fehlt etwas oder ist es ungültig, gilt der Standard (DEFAULT_VOICES);
- * eine gültige Stimme ohne oder mit ungültiger Variante bekommt ihre erste Variante. Ein Text zählt als Stimmen-ID.
+ * eine gültige Stimme ohne oder mit ungültiger Variante bekommt ihre erste Variante, eine entfernte ihren Nachfolger. Ein Text zählt als Stimmen-ID.
  * Neue Kopie, die Eingabe bleibt unverändert.
  */
 export function completeVoices(voices) {
@@ -72,7 +77,7 @@ export function completeVoices(voices) {
     const id = typeof given === 'string' ? given : isRecord(given) ? given.id : undefined;
     if (!isVoice(layer, id)) { out[layer] = { ...DEFAULT_VOICES[layer] }; continue; }
     const variant = isRecord(given) && given.variant !== undefined && isVoice(layer, id, given.variant) ? given.variant : VOICES[layer][id].variants[0];
-    out[layer] = { id, variant };
+    out[layer] = { ...(moved(layer, id, variant) ?? { id, variant }) };
   }
   return out;
 }

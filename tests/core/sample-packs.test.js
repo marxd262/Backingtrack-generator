@@ -18,7 +18,6 @@ const PACKS = {
   'pad-strings': ['pad', 48, 24, 100],
   'pad-warm': ['pad', 89, 24, 100],
   'bass-upright': ['bass', 32, 28, 52],
-  'chords-organ': ['chords', 16, 24, 100],
   'chords-muted': ['chords', 28, 40, 90],
   'chords-jazz': ['chords', 26, 40, 90],
   'chords-funk': ['chords', 28, 40, 90, 8],

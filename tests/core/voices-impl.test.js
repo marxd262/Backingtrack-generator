@@ -43,7 +43,7 @@ test('tunedValue: Überschreibung begrenzt, Ungültiges zählt nicht, Unbekannte
 });
 
 // Task 10: Sample-Varianten für Bass, Akkorde, Lead, Schlagzeug und Percussion
-const NEW_SAMPLES = [['bass', 'upright'], ['chords', 'organ'], ['chords', 'muted'], ['chords', 'jazz'], ['chords', 'funk'], ['chords', 'steel'], ['chords', 'nylon'], ['chords', 'twelve'], ['lead', 'flute'], ['lead', 'sax'], ['lead', 'synth'],
+const NEW_SAMPLES = [['bass', 'upright'], ['chords', 'muted'], ['chords', 'jazz'], ['chords', 'funk'], ['chords', 'steel'], ['chords', 'nylon'], ['chords', 'twelve'], ['lead', 'flute'], ['lead', 'sax'], ['lead', 'synth'],
   ...['standard', 'brushes', 'rimshot', 'jazz', 'electronic', '808'].map((v) => ['drums', v]), ['percussion', 'studio']];
 
 test('neue Sample-Varianten: im Register, mit Umsetzung, gültig für isVoice', () => {

@@ -26,7 +26,7 @@ const IMPLS = {
   chords: {
     'synth/classic': classicVoice, 'string/electric': stringVoice, 'epiano/rhodes': epianoVoice,
     'organ/jazz': organVoice, 'organ/rock': organVoice, 'organ/gospel': organVoice, 'organ/ballad': organVoice,
-    'sample/guitar': sample('guitar'), 'sample/epiano': sample('epiano'), 'sample/organ': sample('organ'), 'sample/muted': sample('muted'), 'sample/jazz': sample('jazz'), 'sample/funk': sample('funk'), 'sample/steel': sample('steel'), 'sample/nylon': sample('nylon'), 'sample/twelve': sample('twelve'),
+    'sample/guitar': sample('guitar'), 'sample/epiano': sample('epiano'), 'sample/muted': sample('muted'), 'sample/jazz': sample('jazz'), 'sample/funk': sample('funk'), 'sample/steel': sample('steel'), 'sample/nylon': sample('nylon'), 'sample/twelve': sample('twelve'),
     'sample/freepats': sample('freepats'), 'sample/freepatsjazz': sample('freepatsjazz'),
   },
   lead: { 'synth/classic': classicVoice, 'sample/flute': sample('flute'), 'sample/sax': sample('sax'), 'sample/synth': sample('synth'), 'sample/guitar': sample('guitar') },
