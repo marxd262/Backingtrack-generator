@@ -14,9 +14,7 @@ import { beatsUntilChange } from '../core/fretboard.js';
 import { sectionAt, formLength } from '../core/form.js';
 import { initTimbrePanel } from './timbre-panel.js';
 import { initVoices } from './voices-panel.js';
-import { completeVoices, VOICES } from '../core/voices.js';
-import { loadPack, peekPack } from '../audio/voices/sampler.js';
-import { packIdFor } from '../audio/voices/pack-id.js';
+import { loadVoices, missingPacks } from '../audio/load-voices.js';
 import { initJobs } from './jobs-panel.js';
 import { initRhythm } from './rhythm.js';
 import { syncKnobs } from './knob.js';
@@ -40,15 +38,11 @@ let loadingPacks = false; // Start wartet auf die Sample-Packs
 // ersten Takte. Ein Pack, das nicht lädt, gibt nach seinem Fehler (spätestens nach dem Zeitlimit des Samplers) frei; dann spielt dort der Synth.
 async function startWhenLoaded() {
   if (loadingPacks) return; // zweiter Klick während des Ladens
-  const missing = Object.entries(completeVoices(state.track.voices))
-    .filter(([layer, v]) => VOICES[layer][v.id].kind === 'sample')
-    .map(([layer, v]) => packIdFor(layer, v.variant))
-    .filter((id) => !peekPack(id));
-  if (missing.length) {
+  if (missingPacks(state.track).length) {
     try { ctx ??= new AudioContext(); } catch { /* start() meldet den Fehler */ } // noch im Klick anlegen: nach dem Warten zählt er nicht mehr als Nutzergeste
     loadingPacks = true;
     render();
-    await Promise.allSettled(missing.map(loadPack));
+    await loadVoices(state.track);
     loadingPacks = false;
   }
   start();
