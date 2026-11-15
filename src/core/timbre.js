@@ -10,10 +10,10 @@ const deepFreeze = (o) => {
 
 export const DEFAULT_TIMBRE = deepFreeze({
   drums: { kickPunch: 0.5, kickLength: 0.5, snareTone: 0.5, snareSnap: 0.5, hatBright: 0.5, hatLength: 0.5, room: 0 },
-  bass: { sub: 0, fuzz: 0, overdrive: 0, distortion: 0, pluck: 0.5, cutoff: 0.5, resonance: 0.5, roundness: 0 },
-  chords: { brightness: 0.5, length: 0.5, chorus: 0, tremolo: 0, fuzz: 0, overdrive: 0, distortion: 0 },
-  pad: { attack: 0.5, cutoff: 0.5, lfoSpeed: 0.5, lfoDepth: 0.5, shimmer: 0, thickness: 0.5, fuzz: 0, overdrive: 0, distortion: 0 },
-  lead: { fuzz: 0, overdrive: 0, distortion: 0 },
+  bass: { sub: 0, fuzz: 0, overdrive: 0, distortion: 0, pluck: 0.5, cutoff: 0.5, resonance: 0.5, roundness: 0, vibrato: 0, chorus: 0 },
+  chords: { brightness: 0.5, length: 0.5, vibrato: 0, chorus: 0, tremolo: 0, fuzz: 0, overdrive: 0, distortion: 0 },
+  pad: { attack: 0.5, cutoff: 0.5, lfoSpeed: 0.5, lfoDepth: 0.5, shimmer: 0, thickness: 0.5, fuzz: 0, overdrive: 0, distortion: 0, vibrato: 0, chorus: 0 },
+  lead: { fuzz: 0, overdrive: 0, distortion: 0, vibrato: 0, chorus: 0 },
   master: { brightness: 0.5, echo: 0.5, reverb: 0.5, width: 0.5, roomSize: 0.5, roomWet: 0.5 },
 });
 

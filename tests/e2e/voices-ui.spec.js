@@ -6,7 +6,7 @@ import { VOICES } from '../../src/core/voices.js';
 
 const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view|group|timbre|voice|variant|chord|groove|meter)\.[A-Za-z.]+$/;
 const LAYERS = ['bass', 'chords', 'pad'];
-const EFFECTS = ['fuzz', 'overdrive', 'distortion'];
+const EFFECTS = ['fuzz', 'overdrive', 'distortion', 'vibrato', 'chorus']; // gelten für jede Stimme
 
 let problems;
 
@@ -76,15 +76,18 @@ test('Sample-Stimme wählen: Kennung SMP, Ladezustand bereit im Display; Variant
   await expect(kind(page, 'chords')).toHaveText('SYN');
 });
 
-test('deaktivierte Knöpfe: Synth alle aktiv; je Stimme nur die von ihr benutzten, Verzerrer immer; Hinweis nur dann', async ({ page }) => {
+test('deaktivierte Knöpfe: Synth alle aktiv; je Stimme nur die von ihr benutzten, Verzerrer, Vibrato und Chorus immer; Hinweis nur dann', async ({ page }) => {
   for (const layer of LAYERS) {
     await voice(page, layer).selectOption('synth/classic');
     await expect(module(page, layer).locator('input[type="range"]:disabled')).toHaveCount(0);
     await expect(hint(page, layer)).toBeHidden();
   }
-  await voice(page, 'chords').selectOption('epiano/rhodes');
-  await expect(slider(page, 'chords', 'chorus')).toBeDisabled();
-  for (const field of ['brightness', 'length', 'tremolo', ...EFFECTS]) await expect(slider(page, 'chords', field)).toBeEnabled();
+  await voice(page, 'chords').selectOption('sample/guitar');
+  await expect(slider(page, 'chords', 'tremolo')).toBeDisabled();
+  for (const field of ['brightness', 'length', ...EFFECTS]) await expect(slider(page, 'chords', field)).toBeEnabled();
+  await voice(page, 'chords').selectOption('organ/jazz'); // die Orgel hat eigene Feinwerte, aber Vibrato, Chorus und die Verzerrer wirken auch auf sie
+  for (const field of ['brightness', 'length', 'tremolo']) await expect(slider(page, 'chords', field)).toBeDisabled();
+  for (const field of EFFECTS) await expect(slider(page, 'chords', field)).toBeEnabled();
   await expect(hint(page, 'chords')).toBeVisible();
   await voice(page, 'bass').selectOption('sample/finger');
   for (const field of ['sub', 'pluck', 'resonance', 'roundness']) await expect(slider(page, 'bass', field)).toBeDisabled();

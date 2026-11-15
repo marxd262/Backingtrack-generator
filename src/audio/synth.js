@@ -6,10 +6,11 @@ import { bassParams, drumParams, chordParams, padParams, masterParams } from './
 import { sliderGain } from './mix.js';
 import { createGuitarFx } from './guitar-fx.js';
 import { fxChainParams } from './fx-params.js';
+import { createModFx, modParams } from './mod-fx.js';
 import { noiseBuffer, gain } from './nodes.js';
 import { createVoice } from './voices/index.js';
 import { tunedValue } from './voices/tunables.js';
-import { completeVoices, VOICE_LAYERS } from '../core/voices.js';
+import { completeVoices, VOICES, VOICE_LAYERS } from '../core/voices.js';
 import { LAYERS, LAYER_IDS } from '../core/layers.js';
 import { DRUM_FALLBACK } from '../core/event-helpers.js';
 
@@ -171,7 +172,8 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
 
   const layers = {};
   const levelGains = {};
-  const guitarFx = {};
+  const guitarFx = {}, modFx = {};
+  let tempo = bpm; // das Vibrato der Schichten folgt dem Tempo
   for (const [name, voice] of Object.entries(play)) {
     const mute = ctx.createGain();
     // Schichtpegel vor dem Trim: Hall-, Raum- und Echo-Sendewege hängen hinter dem Trim und folgen ihm
@@ -183,8 +185,9 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
     // room: Teil der Schlagzeugsumme in den Hall, hinter mute und trim abgegriffen (Stummschalten schaltet den Sendeweg mit stumm)
     if (LAYER_AUDIO[name].room) trim.connect(roomSend);
     if (LAYER_AUDIO[name].echo) trim.connect(delay);
-    // Schichten mit fx (Registry) laufen durch ihre Verzerrerkette (Regler auf 0: unveränderter Durchgang); Schlagzeug und Percussion haben keine
-    const fx = LAYERS[name].fx ? (guitarFx[name] = createGuitarFx(ctx, name, mute)) : null;
+    // Schichten mit fx (Registry) laufen durch ihre Verzerrerkette und dahinter durch Vibrato und Chorus (Regler auf 0: unveränderter Durchgang);
+    // Schlagzeug und Percussion haben keine
+    const fx = LAYERS[name].fx ? (guitarFx[name] = createGuitarFx(ctx, name, (modFx[name] = createModFx(ctx, mute)).input)) : null;
     layers[name] = {
       trigger(event, when) {
         if (event.layer === name) voice(fx ? fx.input : name === 'drums' && kitPans[DRUM_FALLBACK[event.name] ?? event.name] ? kitPans[DRUM_FALLBACK[event.name] ?? event.name].input : mute, when, event);
@@ -217,8 +220,13 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
   };
   applyRoom(tuningState, false);
 
-  // Regler der Verzerrer aus dem Klangmodell auf die Ketten übertragen (live; Rampen statt Sprünge)
-  const applyFx = (options) => { for (const [name, fx] of Object.entries(guitarFx)) fx.set(fxChainParams(sound[name], name), options); };
+  // Regler der Verzerrer, des Vibratos und des Chorus aus dem Klangmodell auf die Ketten übertragen (live; Rampen statt Sprünge).
+  // Eine Stimme, die den Chorus selbst macht (uses nennt ihn: der klassische Akkord-Synth), bekommt ihn nicht ein zweites Mal aus der Kette.
+  const ownChorus = (name) => VOICES[name][chosen[name].id].uses.includes(`${name}.chorus`);
+  const applyFx = (options) => {
+    for (const [name, fx] of Object.entries(guitarFx)) fx.set(fxChainParams(sound[name], name), options);
+    for (const [name, fx] of Object.entries(modFx)) fx.set(modParams(ownChorus(name) ? { ...sound[name], chorus: 0 } : sound[name], tempo), options);
+  };
   applyFx({ immediate: true });
   applyPan(tuningState, false);
   return {
@@ -243,6 +251,7 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
     setVoices(next) {
       chosen = completeVoices(next);
       buildVoices();
+      applyFx(); // ob die Kette den Chorus übernimmt, hängt von der Stimme ab
     },
     // Feinwerte der Stimmen überschreiben ({ 'bass/string/finger': { name: Wert } }, siehe voices/tunables.js); wirkt auf neue Töne
     setTuning(next) {
@@ -264,13 +273,15 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
       applyRoom(tuningState, true);
       applyFx();
     },
-    // nach dem Stopp: hält die Quellen der Verzerrerketten an (sonst hielten sie den ganzen Graphen am Leben)
+    // nach dem Stopp: hält die Quellen der Verzerrer-, Vibrato- und Chorus-Ketten an (sonst hielten sie den ganzen Graphen am Leben)
     dispose() {
-      for (const fx of Object.values(guitarFx)) fx.dispose();
+      for (const fx of [...Object.values(guitarFx), ...Object.values(modFx)]) fx.dispose();
     },
-    // Echo folgt einem Live-Tempowechsel; weich nachgeführt (Zeitkonstante 50 ms) statt springend
+    // Echo und Vibrato folgen einem Live-Tempowechsel; das Echo weich nachgeführt (Zeitkonstante 50 ms) statt springend
     setTempo(newBpm) {
       delay.delayTime.setTargetAtTime(echoTime(newBpm), ctx.currentTime, 0.05);
+      tempo = newBpm;
+      applyFx();
     },
   };
 }

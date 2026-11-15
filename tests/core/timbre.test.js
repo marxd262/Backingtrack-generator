@@ -171,7 +171,7 @@ test('resolveTrackTimbre: ungültige Schlagworte werfen wie resolveTimbre', () =
   assert.throws(() => resolveTimbre({ nope: ['x'] }));
 });
 
-test('lead: drei Verzerrerregler im Standard, completeTimbre behält sie', () => {
-  assert.deepEqual(DEFAULT_TIMBRE.lead, { fuzz: 0, overdrive: 0, distortion: 0 });
-  assert.deepEqual(completeTimbre({ lead: { fuzz: 0.7, overdrive: 0.2, distortion: 1 } }).lead, { fuzz: 0.7, overdrive: 0.2, distortion: 1 });
+test('lead: drei Verzerrerregler, Vibrato und Chorus im Standard, completeTimbre behält sie', () => {
+  assert.deepEqual(DEFAULT_TIMBRE.lead, { fuzz: 0, overdrive: 0, distortion: 0, vibrato: 0, chorus: 0 });
+  assert.deepEqual(completeTimbre({ lead: { fuzz: 0.7, overdrive: 0.2, distortion: 1, vibrato: 0.4 } }).lead, { fuzz: 0.7, overdrive: 0.2, distortion: 1, vibrato: 0.4, chorus: 0 });
 });

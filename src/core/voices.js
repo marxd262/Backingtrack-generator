@@ -8,8 +8,9 @@ const deepFreeze = (o) => {
 };
 
 // kind: 'synth' | 'model' | 'sample' (steuert die Gruppen im Dropdown); variants: erste = Standard;
-// uses: Klangregler ('gruppe.feld' aus DEFAULT_TIMBRE), auf die die Stimme hörbar reagiert. Fuzz, Overdrive und Distortion gelten für
-// jede Stimme (Verzerrerkette hinter den Stimmen) und stehen darum nicht in uses. hidden: true nimmt die Stimme aus dem Dropdown der
+// uses: Klangregler ('gruppe.feld' aus DEFAULT_TIMBRE), auf die die Stimme hörbar reagiert. Fuzz, Overdrive, Distortion, Vibrato und Chorus gelten für
+// jede Stimme (Ketten hinter den Stimmen, audio/guitar-fx.js und mod-fx.js) und stehen darum nicht in uses; nur der klassische Akkord-Synth
+// nennt chords.chorus, weil er seinen Chorus selbst macht (verstimmte Oszillatoren; die Kette lässt ihn dann aus). hidden: true nimmt die Stimme aus dem Dropdown der
 // Hauptoberfläche (Track-Feld, setVoices, Validierung und die Hörprobe-Seite kennen sie weiter): so bleibt sie ohne Auswahl erhalten.
 export const VOICES = deepFreeze({
   drums: {
@@ -82,7 +83,7 @@ export function completeVoices(voices) {
   return out;
 }
 
-const ALWAYS_ON = ['fuzz', 'overdrive', 'distortion']; // die Verzerrerkette liegt hinter jeder Stimme
+const ALWAYS_ON = ['fuzz', 'overdrive', 'distortion', 'vibrato', 'chorus']; // Verzerrerkette, Vibrato und Chorus liegen hinter jeder Stimme
 
 /**
  * Ob die gewählte Stimme den Klangregler `path` ('gruppe.feld') benutzt. Verzerrer, alle Regler außerhalb der Instrumente

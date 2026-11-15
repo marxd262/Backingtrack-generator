@@ -119,9 +119,9 @@ test('Schlüssel der Objekt-Prototypen (__proto__, constructor, toString, length
   assert.ok(!('polluted' in {}), 'Object.prototype unverändert');
 });
 
-test('usesTimbreField: Verzerrer und alles außerhalb von Bass, Akkorden und Pad gelten immer; sonst die Liste der gewählten Stimme', () => {
+test('usesTimbreField: Verzerrer, Vibrato, Chorus und alles außerhalb von Bass, Akkorden und Pad gelten immer; sonst die Liste der gewählten Stimme', () => {
   for (const voices of [undefined, { bass: 'string', chords: 'sample', pad: 'sample' }]) {
-    for (const path of ['bass.fuzz', 'chords.overdrive', 'pad.distortion', 'master.echo']) assert.equal(usesTimbreField(voices, path), true, `${JSON.stringify(voices)} ${path}`);
+    for (const path of ['bass.fuzz', 'chords.overdrive', 'pad.distortion', 'chords.chorus', 'lead.vibrato', 'master.echo']) assert.equal(usesTimbreField(voices, path), true, `${JSON.stringify(voices)} ${path}`);
   }
   // der klassische Synth benutzt alle Regler seines Instruments
   const synth = setAllVoices({}, 'synth');
@@ -129,7 +129,7 @@ test('usesTimbreField: Verzerrer und alles außerhalb von Bass, Akkorden und Pad
     if (!VOICE_LAYERS.includes(layer)) continue;
     for (const field of Object.keys(fields)) assert.equal(usesTimbreField(synth, `${layer}.${field}`), true, `${layer}.${field}`);
   }
-  assert.equal(usesTimbreField({ chords: 'string' }, 'chords.chorus'), false);
+  assert.equal(usesTimbreField({ chords: 'string' }, 'chords.tremolo'), false);
   assert.equal(usesTimbreField({ chords: 'string' }, 'chords.brightness'), true);
   assert.equal(usesTimbreField({ bass: { id: 'sample', variant: 'pick' } }, 'bass.resonance'), false);
   assert.equal(usesTimbreField({ bass: { id: 'sample', variant: 'pick' } }, 'bass.cutoff'), true);
@@ -137,7 +137,7 @@ test('usesTimbreField: Verzerrer und alles außerhalb von Bass, Akkorden und Pad
   assert.equal(usesTimbreField({ drums: 'sample' }, 'drums.kickPunch'), false);
   assert.equal(usesTimbreField({ drums: 'sample' }, 'drums.room'), true);
   // ungültige Wahl gilt wie der Standard; Unbekanntes meldet true (nie ein Regler wegen eines Tippfehlers sperren)
-  assert.equal(usesTimbreField({ chords: 'nope' }, 'chords.chorus'), false, 'wie die Sample-Gitarre des Standards');
+  assert.equal(usesTimbreField({ chords: 'nope' }, 'chords.tremolo'), false, 'wie die Sample-Gitarre des Standards');
   assert.equal(usesTimbreField({ chords: 'nope' }, 'chords.brightness'), true);
   assert.equal(usesTimbreField(undefined, 'nope.field'), true);
   assert.equal(usesTimbreField(undefined, 'chords'), true);

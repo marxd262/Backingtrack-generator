@@ -45,7 +45,7 @@ test('Lead-Modul: Auswahl Job mit Standard "off", alle sechs Aufgaben; Percussio
   expect(await values(page, 'percussion')).toEqual(['mixed', 'shaker', 'tambourine', 'congas', 'bongos', 'claves', 'cowbell']);
   // Schichten ohne Aufgaben bekommen keine Auswahl; Lead hat die Verzerrer, Percussion keine Knöpfe, aber den Hinweis
   await expect(page.locator('select[id^="job-"]')).toHaveCount(2);
-  await expect(module(page, 'lead').locator('input[type="range"]')).toHaveCount(3);
+  await expect(module(page, 'lead').locator('input[type="range"]')).toHaveCount(5);
   await expect(module(page, 'percussion').locator('input[type="range"]')).toHaveCount(0);
   await expect(module(page, 'percussion')).toContainText('Raum des Schlagzeugs');
 });
