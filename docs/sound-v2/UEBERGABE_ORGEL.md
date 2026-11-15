@@ -19,7 +19,7 @@ Außerhalb der Stimme geändert: `src/core/articulation.js` (zwei Zeilen: Import
 
 - **Schalter je Schritt:** `click` 0, `perc` 0, `leslie` 0, `drive` 0, `swell` 0 schalten den Schritt ab.
 - Grundklang: `d16` … `d1` (0 bis 8), `level` jazz 0,95 · rock 0,8 · gospel 0,65 · ballad 0,85.
-- `click` 0,1 (rock 0,05, nach dem Hörtest von 0,2 gesenkt), `clickOff` 0,5, `perc` 0 (jazz 0,5), `percHarm` 3, `percDecay` 0,2 s (Zeit bis −20 dB).
+- `click` 0,1 (rock 0,03, nach dem Hörtest von 0,2 gesenkt), `clickOff` 0,5, `perc` 0 (jazz 0,5), `percHarm` 3, `percDecay` 0,2 s (Zeit bis −20 dB).
 - `leslie` 1 (1 folgt der Regel, 2 immer langsam, 3 immer schnell), Horn 0,8 / 6,7 Hz, Trommel 0,7 / 5,7 Hz, Trägheit bis 95 %: Horn 1 s hoch, 1,5 s runter, Trommel 3,5 s hoch, 5 s runter; `hornAm` 0,5, `drumAm` 0,25, `hornDoppler` 0,4 ms, `drumDoppler` 0,15 ms, `crossover` 800 Hz, `micAngle` 90°.
 - `drive` 0,25 (rock 0,5), `swell` 1 (Anteil am Pegel der Songform: Strophe −3 dB, Refrain 0 dB).
 
@@ -30,7 +30,7 @@ Außerhalb der Stimme geändert: `src/core/articulation.js` (zwei Zeilen: Import
 | Datei | A / B | Worauf hören | Messung |
 |---|---|---|---|
 | `stepo1-tonewheel-A/B.wav` | Orgel-Sample / Synth, alles Weitere aus | Klangfarbe der Akkorde; in der Rock-Strophe ist B lauter (ohne Schweller keine Dynamik) | Mischpegel A und B innerhalb 0,6 dB |
-| `stepo2-click-A/B.wav` | ohne / mit | Anschlag jedes Akkords; Percussion nur im Blues | B−A: Blues −21,9, Rock −34,0 (vorher −22,0), Ballade −41,6 dB |
+| `stepo2-click-A/B.wav` | ohne / mit | Anschlag jedes Akkords; Percussion nur im Blues | B−A: Blues −21,9, Rock −38,4 (vorher −22,0), Ballade −41,6 dB |
 | `stepo3a-leslie-A/B.wav` | aus / dauerhaft langsam | Schweben und Wandern gehaltener Akkorde | Pegel ±0,2 dB; Seite/Mitte der Orgel allein −10,3 → −8,8 dB |
 | `stepo3b-leslieswitch-A/B.wav` | dauerhaft langsam / Umschalten | nur Rock: Hochlaufen ab 41,2 s, schnell im Refrain | B−A Rock −13,7 dB, sonst gleich |
 | `stepo4-driveswell-A/B.wav` | ohne / mit | Rauheit der Akkorde, am stärksten im Rock; Rock-Strophe leiser, Anschwellen ab 41,2 s | Orgel allein: Zerre rms −0,8 bis +0,6 dB, Schweller im Rock −1,0 dB; Spitze der Mischung im Blues +4,8 → +0,4 dB |
@@ -39,7 +39,7 @@ Leslie einzeln gemessen (reiner Ton): Horn 0,80 → 6,64 Hz in der zweiten Sekun
 
 ## Hörurteil 2026-11-15
 
-o1: B (Synth) besser als das Sample. o2: der hörbare Tastendruck gefällt, das Klicken im Rock irritiert. o3a, o3b: B besser. o4: B ein wenig besser. Folge: `click` im Preset rock 0,2 → 0,05. Gemessen (Orgel allein, Click gegen Orgel bei gleichem `click` 0,1): Blues −39,0 dB, Ballade −40,1, Rock −24,4; der Click sitzt im Rock also rund 15 dB höher, mit 0,2 waren es 21 dB. Mit 0,05 bleiben 9 dB Abstand zum Blues; 0,02 wäre gleichauf. `stepo2-click-A/B.wav` ist neu gerendert, die anderen Proben haben im Rock noch den alten Click.
+o1: B (Synth) besser als das Sample. o2: der hörbare Tastendruck gefällt, das Klicken im Rock irritiert. o3a, o3b: B besser. o4: B ein wenig besser. Folge: `click` im Preset rock 0,2 → 0,05 (noch leicht störend) → 0,03. Gemessen (Orgel allein, Click gegen Orgel bei gleichem `click` 0,1): Blues −39,0 dB, Ballade −40,1, Rock −24,4; der Click sitzt im Rock also rund 15 dB höher (Klang-Schlagwort `biting` statt `mellow`, kurze und leisere Akkorde), mit 0,2 waren es 21 dB. 0,03 ist die Mitte in dB zwischen 0,05 und dem Blues-Abstand: 4 dB über dem Blues; 0,02 wäre gleichauf. Die Tastenhüllkurve allein liegt 32 dB unter dem Rauschstoß. `stepo2-click-A/B.wav` ist neu gerendert, die anderen Proben haben im Rock noch den alten Click.
 
 ## Offene Fragen
 

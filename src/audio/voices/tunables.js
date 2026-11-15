@@ -34,7 +34,7 @@ const STRUM = { strum: spec(0, 0.05, 0.002, 0.012), strumUp: spec(0, 2, 1, 2), s
 // `node scripts/render-organ.mjs level`, Werte bei den Tabellen unten).
 // Schritt 2: click Pegel des Key-Clicks (0 = aus; SPIELREGELN 4.6: immer leicht, stärker bei Rock), clickOff Anteil davon bei Note-Off;
 // gemessen 2026-11-15 (Akkord-Schicht allein, Click gegen Orgel bei click 0,1): Blues -39,0 dB, Ballade -40,1, Rock -24,4 (kurze Akkorde, Klangkette
-// der Schicht hebt die Höhen). Der Rock-Wert 0,2 (-18,4 dB) war im Hörtest irritierend, darum 0,05 (-30,4 dB, weiter stärker als Blues und Ballade);
+// der Schicht hebt die Höhen). Der Rock-Wert 0,2 (-18,4 dB) war im Hörtest irritierend, 0,05 (-30,4 dB) noch leicht störend, darum 0,03 (-34,9 dB): die Mitte in dB zwischen 0,05 und dem Blues-Abstand (-39,0 dB, wäre 0,02);
 // perc Pegel der Percussion relativ zu einem Ton (0 = aus; nur das Preset jazz hat sie an: Jazz/Blues-Staccato, aus bei Flächen),
 // percHarm 2 oder 3 (Teilton der 8'-Lage), percDecay Zeit bis -20 dB in s (schnell etwa 0,2, langsam etwa 1).
 // Schritt 3, Leslie (organ-leslie.js): leslie 0 = aus, 1 = folgt den Regeln (schnell im Refrain und im Takt davor, core/organ.js), 2 = immer
@@ -132,7 +132,7 @@ export const TUNABLES = deepFreeze({
   // level = 10 ** (-dB / 20), auf 0,05 gerundet (Rest -0,3 bis +0,1 dB). Ohne Songform gemessen, weil die Orgel der Anschlagstärke nicht folgt:
   // den Pegel der Songteile übernimmt der Schweller. Im Rock hebt die Klangkette der Schicht die hohen Zugriegel an (darum gospel leiser).
   'chords/organ/jazz': organ('888000000', 0.95, { perc: spec(0, 1, 0.05, 0.5) }),
-  'chords/organ/rock': organ('888800000', 0.8, { click: spec(0, 1, 0.01, 0.05), drive: spec(0, 1, 0.05, 0.5) }),
+  'chords/organ/rock': organ('888800000', 0.8, { click: spec(0, 1, 0.01, 0.03), drive: spec(0, 1, 0.05, 0.5) }),
   'chords/organ/gospel': organ('888888888', 0.65),
   'chords/organ/ballad': organ('838000000', 0.85),
 });
