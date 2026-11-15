@@ -90,7 +90,7 @@ export const ART_CASES = [
 ];
 
 const RATE = 44100;
-const wav = (bytes) => {
+export const wav = (bytes) => {
   const head = Buffer.alloc(44);
   head.write('RIFF', 0); head.writeUInt32LE(36 + bytes.length, 4); head.write('WAVE', 8);
   head.write('fmt ', 12); head.writeUInt32LE(16, 16); head.writeUInt16LE(1, 20); head.writeUInt16LE(2, 22);
@@ -162,7 +162,7 @@ async function renderInPage([style, bpm, kind, tuning, limiter, extra]) {
 }
 
 /** Hörseite zum Paar: beide Dateien laufen synchron, nur eine ist hörbar; Leertaste schaltet ohne Unterbrechung um. */
-const abPage = (base, starts) => {
+export const abPage = (base, starts) => {
   const jumps = starts.map(([label, at]) => `<button onclick="seek(${at.toFixed(1)})">${label}</button>`).join(' ');
   return `<!doctype html><meta charset="utf-8"><title>${base}</title>
 <style>body{font:16px system-ui;max-width:640px;margin:40px auto}#now{font-size:96px;font-weight:700;margin:16px 0}button{font-size:16px;padding:8px 14px}input{width:100%}</style>
@@ -182,7 +182,7 @@ pos.oninput = () => seek(pos.value * a.duration);
 </script>`;
 };
 
-const decode = (b64) => { const b = Buffer.from(b64, 'base64'); return new Float32Array(b.buffer, b.byteOffset, b.length / 4); };
+export const decode = (b64) => { const b = Buffer.from(b64, 'base64'); return new Float32Array(b.buffer, b.byteOffset, b.length / 4); };
 const db = (x) => 20 * Math.log10(Math.max(x, 1e-9));
 /** Spitze, RMS, Crest (dB, beide Kanäle) und Seite/Mitte (dB; -inf = mono). */
 export function measure([l, r]) {
