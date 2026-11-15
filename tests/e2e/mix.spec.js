@@ -1,5 +1,6 @@
 // Mischpult im Klang: Schichtpegel und Gesamtlautstärke durch die echten Instrumente (Offline-Render auf der Harness-Seite).
 import { test, expect } from '@playwright/test';
+import { SYNTH } from './synth-voices.js';
 
 const LAYERS = ['drums', 'bass', 'chords', 'pad'];
 const SECONDS = 6;
@@ -12,6 +13,7 @@ const track = (extra = {}) => ({
   seed: 1,
   length: 24,
   tags: { development: ['fullFromStart'] },
+  voices: SYNTH,
   ...extra,
 });
 const ONE = { levels: { drums: 1, bass: 1, chords: 1, pad: 1 }, master: 1 };
@@ -96,7 +98,7 @@ test('Ungültige Pegel: RangeError, unbekannte Schicht wirft; setLevel/setMaster
     const note = { layer: 'bass', type: 'note', midi: 45, dur: 0.4, vel: 1 };
     const run = async (setup) => {
       const ctx = new OfflineAudioContext(2, 44100, 44100);
-      const inst = createInstruments(ctx, { limiter: false });
+      const inst = createInstruments(ctx, { limiter: false, voices: (await import('/core/voices.js')).setAllVoices({}, 'synth') });
       inst.output.connect(ctx.destination);
       setup(inst);
       inst.layers.bass.trigger(note, 0.5);

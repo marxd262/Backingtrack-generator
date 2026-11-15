@@ -334,47 +334,61 @@ test('390 px: Fader und Stummtasten im Rack bleiben groß genug zum Bedienen', a
 // Schalter "Alle Samples" (Task 4)
 const allVoices = (page) => page.locator('#all-voices');
 
-test('Alle Samples: schaltet jede Schicht auf Sample und zurück; ein Instrument zurück auf Synth ergibt gemischt', async ({ page }) => {
+test('Alle Samples: Standard sind Samples; schaltet jede Schicht auf Synth und zurück; ein Instrument auf Synth ergibt gemischt', async ({ page }) => {
   await openPlayPage(page);
   await showMixer(page);
-  await expect(allVoices(page)).toHaveAttribute('aria-pressed', 'false');
-  await expect(allVoices(page)).toContainText('SYN');
-  await allVoices(page).click();
   await expect(allVoices(page)).toHaveAttribute('aria-pressed', 'true');
   await expect(allVoices(page)).toContainText('SMP');
   for (const layer of ['drums', 'bass', 'chords', 'pad']) await expect(page.locator(`#voice-${layer}`)).toHaveValue(/^sample\//);
-  // ein Instrument zurück auf Synth
-  await page.locator('#voice-bass').selectOption('synth/classic');
+  await allVoices(page).click();
+  await expect(allVoices(page)).toHaveAttribute('aria-pressed', 'false');
+  await expect(allVoices(page)).toContainText('SYN');
+  for (const layer of ['drums', 'bass', 'chords', 'pad']) await expect(page.locator(`#voice-${layer}`)).toHaveValue('synth/classic');
+  // ein Instrument auf Sample
+  await page.locator('#voice-bass').selectOption('sample/finger');
   await expect(allVoices(page)).toHaveAttribute('aria-pressed', 'mixed');
   await expect(allVoices(page)).toContainText('Gemischt');
   // bei gemischt schaltet der Klick auf Samples
   await allVoices(page).click();
   await expect(allVoices(page)).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.locator('#voice-bass')).toHaveValue('sample/finger');
-  // und wieder alles auf Synth
-  await allVoices(page).click();
-  await expect(allVoices(page)).toHaveAttribute('aria-pressed', 'false');
-  for (const layer of ['drums', 'bass', 'chords', 'pad']) await expect(page.locator(`#voice-${layer}`)).toHaveValue('synth/classic');
+  for (const layer of ['drums', 'bass', 'chords', 'pad']) await expect(page.locator(`#voice-${layer}`)).toHaveValue(/^sample\//);
 });
 
-test('Alle Samples, Pack lädt nicht: Fehler im Display des Instruments, die übrigen werden bereit, Seite bleibt bedienbar', async ({ page }) => {
+test('Pack lädt nicht: Fehler im Display des Instruments, die übrigen werden bereit, Los wartet und spielt, Seite bleibt bedienbar', async ({ page }) => {
   await page.route('**/assets/samples/bass-finger.*', (route) => route.fulfill({ status: 500, body: 'kaputt' }));
+  await page.reload(); // die Packs der Startwahl laden beim Öffnen: erst mit der Route
   await openPlayPage(page);
   await showMixer(page);
-  await allVoices(page).click();
   await expect(page.locator('#voice-status-bass')).toHaveText('nicht verfügbar', { timeout: BAR_TIMEOUT });
   for (const layer of ['drums', 'chords', 'pad']) await expect(page.locator(`#voice-status-${layer}`)).toHaveText('bereit', { timeout: 30_000 });
-  // Schalter bleibt bei Samples (die Wahl steht, nur das Pack fehlt) und ist bedienbar
-  await expect(allVoices(page)).toHaveAttribute('aria-pressed', 'true');
-  await allVoices(page).click();
-  await expect(allVoices(page)).toHaveAttribute('aria-pressed', 'false');
-  await expect(page.locator('#voice-status-bass')).toHaveText('');
+  await expect(allVoices(page)).toHaveAttribute('aria-pressed', 'true'); // die Wahl steht, nur das Pack fehlt
+  // Los versucht das fehlende Pack noch einmal und spielt dann (der Bass als Synth)
   await playGo(page).click();
   await expect(position(page)).toHaveText(/^Takt 1 von/, { timeout: BAR_TIMEOUT });
   await playGo(page).click();
+  await allVoices(page).click();
+  await expect(allVoices(page)).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('#voice-status-bass')).toHaveText('');
   // der 500er der Pack-Datei erscheint als Konsolenmeldung des Browsers: erwartet, aber nur dieser
   expect(problems.length).toBeGreaterThan(0);
   problems = problems.filter((p) => !/^console: Failed to load resource: .*status of 500/.test(p));
+});
+
+test('Los wartet auf die Sample-Packs: der Knopf zeigt lädt …, ein AudioContext, danach spielt es', async ({ page }) => {
+  let release;
+  const held = new Promise((resolve) => (release = resolve));
+  await page.route('**/assets/samples/bass-finger.*', async (route) => { await held; await route.continue(); });
+  await page.reload();
+  await openPlayPage(page);
+  await playGo(page).click();
+  await expect(playGo(page)).toHaveText('lädt …');
+  await expect(playGo(page)).toHaveAttribute('aria-busy', 'true');
+  await playGo(page).click(); // zweiter Klick während des Ladens: nichts
+  release();
+  await expect(position(page)).toHaveText(/^Takt 1 von/, { timeout: BAR_TIMEOUT });
+  await expect(playGo(page)).toHaveAttribute('aria-busy', 'false');
+  expect(await page.evaluate(() => window.__audioContexts)).toBe(1);
+  await playGo(page).click();
 });
 
 test('Fader springt während der Wiedergabe nicht: kein Schreiben ins Eingabefeld, weder nach Tastatur noch beim Ziehen', async ({ page }) => {

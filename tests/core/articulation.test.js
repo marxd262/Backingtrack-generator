@@ -233,7 +233,8 @@ test('Schlagzeug mit Songform: Rock-Refrain geschlossene Hi-Hat und Rimshot, son
   for (const seed of SEEDS) {
     const kit = { voices: { drums: { id: 'sample', variant: 'standard' } } };
     const rock = drumsOf(mk('rock', { seed, ...parts, ...kit }));
-    assert.ok(!drumsOf(mk('rock', { seed, ...parts })).some((e) => e.art === 'choke'), 'das Synth-Kit kann nicht abwürgen: kein Crash vor dem Stopp');
+    assert.ok(!drumsOf(mk('rock', { seed, ...parts, voices: { drums: 'synth' } })).some((e) => e.art === 'choke'), 'das Synth-Kit kann nicht abwürgen: kein Crash vor dem Stopp');
+    assert.ok(drumsOf(mk('rock', { seed, ...parts })).some((e) => e.art === 'choke'), 'ohne Stimmenwahl spielt das Sample-Kit (Standard)');
     assert.ok(rock.filter((e) => e.bar < 4).every((e) => !['hatHalf', 'rimshot', 'ride'].includes(e.name)), 'Strophe unverändert');
     assert.ok(rock.some((e) => e.bar >= 4 && e.bar < 8 && e.name === 'hat') && !rock.some((e) => ['hatHalf', 'ride'].includes(e.name)), 'Refrain: die Hi-Hat bleibt geschlossen');
     assert.ok(rock.some((e) => e.name === 'rimshot'));

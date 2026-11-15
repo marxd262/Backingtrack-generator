@@ -35,7 +35,7 @@ test('je Instrument eine Stimmenauswahl mit allen Stimmen des Registers, Variant
   expect(await values('#voice-pad')).toEqual(['sample', 'synth']);
   // nach Art gruppiert
   expect(await page.locator('#voice-chords optgroup').evaluateAll((els) => els.map((e) => e.label))).toEqual(['Synthese', 'Saitenmodell', 'Samples']);
-  await expect(page.locator('#voice-chords')).toHaveValue('synth');
+  await expect(page.locator('#voice-chords')).toHaveValue('sample'); // Standard seit 2026-11-15
   await page.locator('#voice-chords').selectOption('string');
   expect(await page.locator('#variant-chords option').evaluateAll((els) => els.map((e) => e.value))).toEqual(['electric']);
   await expect(page.locator('#variant-chords')).toHaveValue('electric');

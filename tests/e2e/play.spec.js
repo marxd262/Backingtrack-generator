@@ -271,8 +271,8 @@ test('setTempo erreicht setTempo der Instrumente (Echo), fehlende Methode ist ha
 });
 
 // Standard-Klangmodell als Literal (nicht aus src/core gelesen), damit der Test DEFAULT_TIMBRE mitprüft
-// Stimmenwahl, die play ohne Angabe im Track an die Instrumente gibt (heutiger Klang)
-const STANDARD_VOICES = { drums: { id: 'synth', variant: 'classic' }, bass: { id: 'synth', variant: 'classic' }, chords: { id: 'synth', variant: 'classic' }, pad: { id: 'synth', variant: 'classic' }, lead: { id: 'synth', variant: 'classic' }, percussion: { id: 'synth', variant: 'classic' } };
+// Stimmenwahl, die play ohne Angabe im Track an die Instrumente gibt (seit 2026-11-15 die erste Sample-Variante je Schicht)
+const STANDARD_VOICES = { drums: { id: 'sample', variant: 'standard' }, bass: { id: 'sample', variant: 'finger' }, chords: { id: 'sample', variant: 'guitar' }, pad: { id: 'sample', variant: 'strings' }, lead: { id: 'sample', variant: 'flute' }, percussion: { id: 'sample', variant: 'studio' } };
 const DEFAULT_SOUND = {
   drums: { kickPunch: 0.5, kickLength: 0.5, snareTone: 0.5, snareSnap: 0.5, hatBright: 0.5, hatLength: 0.5, room: 0 },
   bass: { sub: 0, fuzz: 0, overdrive: 0, distortion: 0, pluck: 0.5, cutoff: 0.5, resonance: 0.5, roundness: 0 },

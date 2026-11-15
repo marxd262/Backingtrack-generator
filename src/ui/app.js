@@ -14,6 +14,9 @@ import { beatsUntilChange } from '../core/fretboard.js';
 import { sectionAt, formLength } from '../core/form.js';
 import { initTimbrePanel } from './timbre-panel.js';
 import { initVoices } from './voices-panel.js';
+import { completeVoices, VOICES } from '../core/voices.js';
+import { loadPack, peekPack } from '../audio/voices/sampler.js';
+import { packIdFor } from '../audio/voices/pack-id.js';
 import { initJobs } from './jobs-panel.js';
 import { initRhythm } from './rhythm.js';
 import { syncKnobs } from './knob.js';
@@ -31,6 +34,25 @@ const RHYTHMS = {
 // --- Wiedergabe: ein AudioContext für alle Starts, nie zwei Player gleichzeitig ---
 let ctx = null;
 let player = null;
+let loadingPacks = false; // Start wartet auf die Sample-Packs
+
+// Start erst, wenn die Packs der gewählten Sample-Stimmen da sind (Wunsch des Nutzers 2026-11-15), sonst spielte der Synth-Rückfall die
+// ersten Takte. Ein Pack, das nicht lädt, gibt nach seinem Fehler (spätestens nach dem Zeitlimit des Samplers) frei; dann spielt dort der Synth.
+async function startWhenLoaded() {
+  if (loadingPacks) return; // zweiter Klick während des Ladens
+  const missing = Object.entries(completeVoices(state.track.voices))
+    .filter(([layer, v]) => VOICES[layer][v.id].kind === 'sample')
+    .map(([layer, v]) => packIdFor(layer, v.variant))
+    .filter((id) => !peekPack(id));
+  if (missing.length) {
+    try { ctx ??= new AudioContext(); } catch { /* start() meldet den Fehler */ } // noch im Klick anlegen: nach dem Warten zählt er nicht mehr als Nutzergeste
+    loadingPacks = true;
+    render();
+    await Promise.allSettled(missing.map(loadPack));
+    loadingPacks = false;
+  }
+  start();
+}
 
 // Countdown bis zum nächsten Akkordwechsel: eigene Bildzeitschleife (nicht über render()), nur bei laufender Wiedergabe, schreibt
 // nur bei Änderung. Die Liedzeit des Players bezieht sich auf das Starttempo, daher dessen bpm.
@@ -195,19 +217,19 @@ function openFrom(id, opts) {
 }
 
 // Los auf der Startseite: im Stand starten und zur Spielseite, beim Spielen stoppen und bleiben
-$('go').addEventListener('click', () => {
+$('go').addEventListener('click', async () => {
   if (state.playing) {
     stop();
     render();
     return;
   }
-  start();
+  await startWhenLoaded();
   if (state.playing) openFrom('go', { mode: 'focus' });
   else render(); // Start gescheitert: die Meldung steht auf der Startseite
 });
-$('play-go').addEventListener('click', () => {
+$('play-go').addEventListener('click', async () => {
   if (state.playing) stop();
-  else start();
+  else await startWhenLoaded();
   render();
 });
 $('tune-btn').addEventListener('click', () => openFrom('tune-btn', { mode: 'setup' }));
@@ -313,7 +335,8 @@ function render() {
   const bar = current ? positionLabel(current.bar, loopBars(track)) : '';
   const message = errors.map((e) => t(`err.${e.code}`, e.params)).join(' ');
   for (const id of ['go', 'play-go']) {
-    setText($(id), t(playing ? 'ui.stop' : 'ui.go'));
+    setText($(id), t(playing ? 'ui.stop' : loadingPacks ? 'voice.status.loading' : 'ui.go'));
+    setAttr($(id), 'aria-busy', String(loadingPacks));
     $(id).classList.toggle('playing', playing);
   }
   for (const [id, text] of [['now-chord', now], ['play-now', now], ['position', bar], ['play-position', bar], ['play-part', partLabel(track, current?.bar ?? 0)],

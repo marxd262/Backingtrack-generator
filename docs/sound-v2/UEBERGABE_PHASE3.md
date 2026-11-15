@@ -76,7 +76,7 @@ Hörproben dazu: Schritte 10 bis 26 in `scripts/render-step.mjs`. Seit dem Urtei
 3a. Gitarre B (`slideChord`, `embellish`): nie beurteilt, bleibt aus. Die Probe `step22-guitarsolo` fand der Nutzer „schwierig einzuschätzen“.
 4. Palm Mute am Bass in der Rock-Strophe: mit Bass B eingeschaltet, ohne eigenes Urteil.
 5. Staccato-Länge am Bass: gebaut sind 30 bis 60 % der Notenlänge, die Spec sagt „des Rasterschritts“.
-6. Wirkung auf die Synth-Stimmen: Der Nutzer hat nur mit Samples gehört, die Synth-Stimmen sind aber der Standard der App. Dort klingen `sideStick` und `rimshot` wie die Snare, `ride` wie die Hi-Hat, und im Refrain kommen zwei Hi-Hat-Schläge auf 2 und 4 dazu.
+6. **Gebaut 2026-11-15 (Schritte 28 und 29), Urteil offen.** Wirkung auf die Synth-Stimmen: Der Nutzer hat nur mit Samples gehört, die Synth-Stimmen sind aber der Standard der App. Dort klingen `sideStick` und `rimshot` wie die Snare, `ride` wie die Hi-Hat, und im Refrain kommen zwei Hi-Hat-Schläge auf 2 und 4 dazu.
 
 ## 7. Was aus Phase 3 fehlt
 

@@ -72,7 +72,7 @@ for (const [layer, id, variant, midis] of STRINGS) {
       const { createInstruments } = await import('/audio/synth.js');
       const render = async (live) => {
         const ctx = new OfflineAudioContext(1, 44100, 44100);
-        const inst = createInstruments(ctx, { bpm: 100, limiter: false });
+        const inst = createInstruments(ctx, { voices: (await import('/core/voices.js')).setAllVoices({}, 'synth'), bpm: 100, limiter: false });
         inst.output.connect(ctx.destination);
         const note = (midi) => ({ type: 'note', layer: layerName, midi, dur: 0.3, vel: 0.8 });
         for (const m of layerName === 'bass' ? [40] : [57, 64]) inst.layers[layerName].trigger(note(m), 0.05);

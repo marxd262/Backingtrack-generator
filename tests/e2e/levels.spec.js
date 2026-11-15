@@ -1,6 +1,7 @@
 // Pegeltests: rendert Tracks offline auf der Harness-Seite und prüft Spitze, Hörbarkeit und Stummschaltung.
 import { test, expect } from '@playwright/test';
 import { STYLE_PRESETS } from '../../src/core/tags.js';
+import { SYNTH } from './synth-voices.js';
 
 const SECONDS = 18;
 const LAYERS = ['drums', 'bass', 'chords', 'pad'];
@@ -14,6 +15,7 @@ const track = (id, extra = {}) => {
     bars: [['A', 'min'], ['A', 'min'], ['D', 'min'], ['E', 'maj']].map(([root, quality]) => ({ chord: { root, quality }, beats: 4 })),
     tags: { ...preset.tags, development: ['fullFromStart'] },
     seed: 1,
+    voices: SYNTH, // die Basiswerte gelten dem Synth
     ...extra,
   };
 };
@@ -162,6 +164,7 @@ const BASE_TRACK = {
   seed: 1,
   length: 24,
   tags: { development: ['fullFromStart'] },
+  voices: SYNTH, // aufgenommen mit dem Synth, bis 2026-11-14 der Standard
 };
 const BASELINE = {
   limiter: {

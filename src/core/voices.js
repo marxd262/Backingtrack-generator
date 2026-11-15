@@ -43,7 +43,9 @@ export const VOICES = deepFreeze({
 });
 
 export const VOICE_LAYERS = Object.freeze(Object.keys(VOICES));
-export const DEFAULT_VOICE = deepFreeze({ id: 'synth', variant: 'classic' });
+const SYNTH = deepFreeze({ id: 'synth', variant: 'classic' });
+// Standard je Schicht: die erste Sample-Variante (Urteil des Nutzers 2026-11-15; bis dahin synth/classic). Bis ihr Pack geladen ist, spielt der Synth.
+export const DEFAULT_VOICES = deepFreeze(Object.fromEntries(VOICE_LAYERS.map((layer) => [layer, { id: 'sample', variant: VOICES[layer].sample.variants[0] }])));
 
 const isRecord = (x) => typeof x === 'object' && x !== null && !Array.isArray(x);
 
@@ -57,7 +59,7 @@ export function isVoice(layer, id, variant) {
 export const voicesFor = (layer) => (VOICE_LAYERS.includes(layer) ? Object.keys(VOICES[layer]) : []);
 
 /**
- * Füllt die Stimmenwahl auf: je Instrument { id, variant }. Fehlt etwas oder ist es ungültig, gilt der Standard (synth/classic);
+ * Füllt die Stimmenwahl auf: je Instrument { id, variant }. Fehlt etwas oder ist es ungültig, gilt der Standard (DEFAULT_VOICES);
  * eine gültige Stimme ohne oder mit ungültiger Variante bekommt ihre erste Variante. Ein Text zählt als Stimmen-ID.
  * Neue Kopie, die Eingabe bleibt unverändert.
  */
@@ -66,7 +68,7 @@ export function completeVoices(voices) {
   for (const layer of VOICE_LAYERS) {
     const given = isRecord(voices) ? voices[layer] : undefined;
     const id = typeof given === 'string' ? given : isRecord(given) ? given.id : undefined;
-    if (!isVoice(layer, id)) { out[layer] = { ...DEFAULT_VOICE }; continue; }
+    if (!isVoice(layer, id)) { out[layer] = { ...DEFAULT_VOICES[layer] }; continue; }
     const variant = isRecord(given) && given.variant !== undefined && isVoice(layer, id, given.variant) ? given.variant : VOICES[layer][id].variants[0];
     out[layer] = { id, variant };
   }
@@ -90,7 +92,7 @@ export const resolveVoices = (track) => completeVoices(track?.voices);
 
 /** Jede Schicht auf Sample (erste Variante) oder Synth (Standard). Neue Kopie; die bisherige Wahl spielt keine Rolle. */
 export function setAllVoices(_voices, kind) {
-  return Object.fromEntries(VOICE_LAYERS.map((layer) => [layer, kind === 'sample' ? { id: 'sample', variant: VOICES[layer].sample.variants[0] } : { ...DEFAULT_VOICE }]));
+  return Object.fromEntries(VOICE_LAYERS.map((layer) => [layer, kind === 'sample' ? { ...DEFAULT_VOICES[layer] } : { ...SYNTH }]));
 }
 
 /** 'sample', wenn jede Schicht eine Sample-Stimme hat; 'synth', wenn keine; sonst 'mixed' (Saitenmodell zählt als Synth). */

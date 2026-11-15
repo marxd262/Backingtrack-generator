@@ -112,7 +112,7 @@ test('Wirbel: zweite Takthälfte nur Snare (und Kick wie vorher), Achtel dann Se
 test('Crash: genau einer zur Eins jedes Teils mit crash, nie im ersten Takt des Songs, nur mit Schlagzeug-Schalter', () => {
   const parts = [['chorus', 4, { crash: true }], ['verse', 4], ['chorus', 4], ['break', 4, { crash: true }], ['chorus', 4]];
   for (const seed of SEEDS.slice(0, 10)) {
-    const track = mk(parts, { dynamics: 0 }, { seed });
+    const track = mk(parts, { dynamics: 0 }, { seed, ornaments: 0 }); // ohne den Crash mit Choke vor einem Stopp (Artikulations-Schicht)
     const crashes = buildEvents(track).filter((e) => e.name === 'crash');
     assert.deepEqual(crashes.map((e) => e.bar), [8, 12, 16], 'nicht in Takt 0; Break mit crash:true zählt');
     for (const e of crashes) { assert.equal(e.beat, 0); assert.equal(e.vel, 0.9); assert.equal(e.layer, 'drums'); assert.equal(e.type, 'hit'); }
@@ -208,7 +208,7 @@ test('postProcess ist rein: Eingabe unverändert (auch eingefroren), neues Array
 
 test('Crash bleibt hörbar: im Break bei Dynamik 1,3 mindestens 0,6, im Refrain 0,9', () => {
   for (const seed of SEEDS.slice(0, 5)) {
-    const crashes = buildEvents(mk([['verse', 4], ['break', 4, { crash: true }], ['chorus', 4]], { dynamics: 1.3 }, { seed })).filter((e) => e.name === 'crash');
+    const crashes = buildEvents(mk([['verse', 4], ['break', 4, { crash: true }], ['chorus', 4]], { dynamics: 1.3 }, { seed, ornaments: 0 })).filter((e) => e.name === 'crash');
     assert.deepEqual(crashes.map((e) => e.bar), [4, 8]);
     assert.ok(crashes[0].vel >= 0.6 && crashes[0].vel < 0.9, `Break: ${crashes[0].vel}`);
     assert.equal(crashes[1].vel, 0.9);

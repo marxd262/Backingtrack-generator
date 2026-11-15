@@ -133,7 +133,7 @@ for (const [layer, variant, notes, checkPitch, cents = 15] of SAMPLES) {
       await warm.whenReady();
       const render = async (live) => {
         const ctx = new OfflineAudioContext(1, 44100, 44100);
-        const inst = createInstruments(ctx, { limiter: false, timbre: { master: { echo: 0, reverb: 0 } } });
+        const inst = createInstruments(ctx, { voices: (await import('/core/voices.js')).setAllVoices({}, 'synth'), limiter: false, timbre: { master: { echo: 0, reverb: 0 } } });
         inst.output.connect(ctx.destination);
         const note = (midi) => ({ type: 'note', layer: layerName, midi, dur: 0.3, vel: 0.8 });
         const notes = layerName === 'bass' ? [40] : [57, 64];
@@ -330,7 +330,7 @@ test('Laden: ohne auf whenReady zu warten spielt der Synth (gleich dem klassisch
       inst.layers.bass.trigger(note, 0.05);
       return { data: (await ctx.startRendering()).getChannelData(0), status };
     };
-    const classic = await render(undefined, false);
+    const classic = await render((await import('/core/voices.js')).setAllVoices({}, 'synth'), false);
     const early = await render({ bass: { id: 'sample', variant: 'finger' } }, false);
     const late = await render({ bass: { id: 'sample', variant: 'pick' } }, true); // anderes Pack: 'finger' ist durch den frühen Render schon geladen
     let same = 0, diff = 0;
@@ -384,12 +384,13 @@ test('Wechsel vor dem Laden und zurück: kein Fehler, voiceStatus stimmt, nur ei
     const realFetch = window.fetch;
     let packFetches = 0;
     window.fetch = (...args) => { if (String(args[0]).includes('/bass-pick.json')) packFetches++; return realFetch(...args); };
-    const inst = createInstruments(new OfflineAudioContext(1, 4410, 44100), { limiter: false });
+    const synth = (await import('/core/voices.js')).setAllVoices({}, 'synth');
+    const inst = createInstruments(new OfflineAudioContext(1, 4410, 44100), { limiter: false, voices: synth });
     const log = [];
     for (let i = 0; i < 3; i++) {
       inst.setVoices({ bass: { id: 'sample', variant: 'pick' } });
       log.push(inst.voiceStatus().bass);
-      inst.setVoices({});
+      inst.setVoices(synth);
       log.push(inst.voiceStatus().bass);
     }
     inst.setVoices({ bass: { id: 'sample', variant: 'pick' } });
@@ -532,7 +533,7 @@ test('Ladefehler bei Schlag-Stimmen: fetch lehnt ab, Schlagzeug und Percussion s
     // in diesem Test noch nicht geladene Packs (ein geladenes Pack bleibt im Zwischenspeicher der Seite)
     const failed = await render({ drums: { id: 'sample', variant: 'jazz' }, percussion: { id: 'sample', variant: 'studio' } });
     window.fetch = realFetch;
-    const synth = await render(undefined);
+    const synth = await render((await import('/core/voices.js')).setAllVoices({}, 'synth'));
     let peak = 0, same = 0;
     for (let i = 0; i < failed.data.length; i++) { peak = Math.max(peak, Math.abs(failed.data[i])); same = Math.max(same, Math.abs(failed.data[i] - synth.data[i])); }
     return { status: failed.status, peak, same };

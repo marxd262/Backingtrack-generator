@@ -99,5 +99,8 @@ export function initVoices({ render, player }) {
     }
   }
 
+  // die Packs der Startwahl gleich beim Öffnen laden (Samples sind der Standard), damit der erste Start nicht warten muss
+  for (const layer of VOICE_LAYERS) watch(layer);
+
   return { render: renderVoices, chooseAll };
 }
