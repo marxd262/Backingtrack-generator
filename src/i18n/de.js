@@ -245,6 +245,7 @@ export default {
   'variant.drums.sample.electronic': 'Elektronisches Kit (Sample)',
   'variant.drums.sample.808': 'TR-808 (Sample)',
   'variant.drums.sample.muldjord': 'Rock-Kit mit Raum (Muldjord, Sample)',
+  'variant.drums.sample.legacy': 'Legacy Drums (MuseScore, Sample)',
   'variant.percussion.sample.studio': 'Studio-Percussion (Sample)',
   'err.badMeter': 'Die Taktart {meter} wird nicht unterstützt. Erlaubt sind 4/4, 3/4, 6/8, 12/8 und 5/4.',
   'err.playFailed': 'Die Wiedergabe konnte nicht starten.',

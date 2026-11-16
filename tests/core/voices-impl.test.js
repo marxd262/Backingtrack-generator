@@ -45,7 +45,7 @@ test('tunedValue: Überschreibung begrenzt, Ungültiges zählt nicht, Unbekannte
 
 // Task 10: Sample-Varianten für Bass, Akkorde, Lead, Schlagzeug und Percussion
 const NEW_SAMPLES = [['bass', 'upright'], ['chords', 'muted'], ['chords', 'jazz'], ['chords', 'funk'], ['chords', 'steel'], ['chords', 'nylon'], ['chords', 'twelve'], ['lead', 'flute'], ['lead', 'sax'], ['lead', 'synth'],
-  ...['standard', 'brushes', 'rimshot', 'jazz', 'electronic', '808', 'muldjord'].map((v) => ['drums', v]), ['percussion', 'studio']];
+  ...['standard', 'brushes', 'rimshot', 'jazz', 'electronic', '808', 'muldjord', 'legacy'].map((v) => ['drums', v]), ['percussion', 'studio']];
 
 test('neue Sample-Varianten: im Register, mit Umsetzung, gültig für isVoice', () => {
   for (const [layer, variant] of NEW_SAMPLES) {
@@ -63,7 +63,9 @@ test('jede Sample-Stimme hat einen gemessenen Pegel (level) und ein vorhandenes 
       assert.ok(Object.hasOwn(SCRIPT_PACKS, packIdFor(layer, variant)) || Object.hasOwn(SFZ_PACKS, packIdFor(layer, variant)), `${key}: Pack ${packIdFor(layer, variant)}`);
     }
   }
-  assert.equal(packIdFor('drums', 'rimshot'), 'drums-standard');
+  assert.equal(packIdFor('drums', 'rimshot'), 'drums-naked'); // seit 2026-11-16 spielen Standard- und Rimshot-Kit Naked Drums
+  assert.equal(packIdFor('drums', 'standard'), 'drums-naked');
+  assert.equal(packIdFor('drums', 'legacy'), 'drums-standard'); // das alte MuseScore-Kit als Legacy Drums
   assert.equal(packIdFor('drums', '808'), 'drums-808');
   assert.equal(packIdFor('lead', 'guitar'), 'chords-freepats');
   assert.ok(isVoice('lead', 'sample', 'guitar') && hasVoice('lead', 'sample', 'guitar'));

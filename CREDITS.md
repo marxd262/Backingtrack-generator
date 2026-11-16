@@ -18,6 +18,14 @@ Die Sample-Klänge des Backingtrack Generators stammen aus freien Sammlungen. Je
 - Verändert: 13 Samples je Gitarre ausgeschnitten, unverändert als 16-Bit-PCM (`scripts/extract-samples.mjs`)
 - Lizenztext: `src/assets/samples/LICENSE-Freepats-FSBS.md`
 
+## Naked Drums (SFZ)
+
+- Urheber: Wilkinson Audio (Aufnahme), kinwie (SFZ-Mapping)
+- Lizenz: CC-BY 4.0, https://creativecommons.org/licenses/by/4.0/
+- Quelle: https://github.com/sfzinstruments/WilkinsonAudio.NakedDrums
+- Verändert: Auswahl von 13 Schlägen (90 Zonen), Mikrofone nach dem Standard-Mix des Mappings gemischt: Direkt (Direktmikrofone, Overheads, China/Wide OH) und Raum (Close Room, Far Rooms, Mid-Side), links und rechts getauscht, gekürzt mit Ausblendung, ein Pegelfaktor für das ganze Pack, 16 Bit / 44,1 kHz, FLAC (`scripts/import-sfz.mjs`)
+- Lizenztext: `src/assets/samples/LICENSE-drums-naked.md`
+
 ## MuldjordKit v1.0 (SFZ)
 
 - Urheber: Lars Muldjord (Aufnahme), kinwie (SFZ-Mapping)

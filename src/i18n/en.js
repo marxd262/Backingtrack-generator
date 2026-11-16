@@ -245,6 +245,7 @@ export default {
   'variant.drums.sample.electronic': 'Electronic kit (sample)',
   'variant.drums.sample.808': 'TR-808 (sample)',
   'variant.drums.sample.muldjord': 'Rock kit with room (Muldjord, sample)',
+  'variant.drums.sample.legacy': 'Legacy drums (MuseScore, sample)',
   'variant.percussion.sample.studio': 'Studio percussion (sample)',
   'err.badMeter': 'The time signature {meter} is not supported. Allowed are 4/4, 3/4, 6/8, 12/8 and 5/4.',
   'err.playFailed': 'Playback could not start.',

@@ -38,13 +38,13 @@ test('defaultRegions: Controller auf set_hdcc, Bedingungen locc/hicc, Modulation
       + '<region> key=36 sample=aftertouch.wav on_locc130=127 <region> key=36 sample=sw.wav sw_last=24 sw_default=24 '
       + '<region> key=36 sample=sw2.wav sw_last=25 sw_default=24 <region> key=36 sample=rel.wav trigger=release',
   });
-  assert.deepEqual(regions.map((r) => r.sample), ['oh.wav', 'sw.wav', 'rel.wav']);
+  assert.deepEqual(regions.map((r) => [r.sample, r.silent]), [['oh.wav', false], ['*silence', true], ['sw.wav', false], ['rel.wav', false]]); // stumm bleibt für Choke-Gruppen
   const [oh] = regions;
   assert.equal(oh.lokey, 36); // c2 = 36
   assert.equal(oh.path, resolve('/lib/Samples/oh.wav'));
   assert.ok(Math.abs(oh.gain + 1) < 1e-9, 'Pegel 0,5 · 200 % = 1, umgepolt'); // set_hdcc20 0,5 mal 200 %
   assert.equal(oh.pan, -100); // cc21 = 1 linear mal -100, cc10 Mitte bipolar 0
-  assert.equal(regions[2].trigger, 'release');
+  assert.equal(regions.at(-1).trigger, 'release');
 });
 
 test('keyNumber: Zahlen und Notennamen (c4 = 60)', () => {
@@ -67,9 +67,13 @@ test('binRanges und selectZones: Stufen zusammenfassen, Round-Robins aus dem lau
   assert.deepEqual(zones.map((z) => [z.velLo, z.velHi, z.regions.map((x) => x.sample).join('+')]), [[1, 50, 'b'], [1, 50, 'c'], [51, 127, 'e'], [51, 127, 'f+f-oh']]);
 });
 
-test('chokeGroups: Mikrofone mit eigenen Gruppennummern ergeben eine gemeinsame Gruppe je Schlag', () => {
+test('chokeGroups: Mikrofone mit eigenen Gruppennummern, ein Schlag würgt mehrere ab (auch über stumme Regionen)', () => {
   const hat = [{ group: '179' }, { group: '94' }], open = [{ group: '180', off_by: '179', off_time: '0.21' }, { group: '95', off_by: '94' }];
-  assert.deepEqual(chokeGroups({ kick: [{}], hat, openHat: open }), { kick: {}, hat: { group: 2 }, openHat: { offBy: 2, offTime: 0.21 } });
+  assert.deepEqual(chokeGroups({ kick: [{}], hat, openHat: open }), { kick: {}, hat: { chokes: [3] }, openHat: { offBy: 3, offTime: 0.21 } });
+  // Naked Drums: das Pedal löst stumme Regionen der Gruppen aus, auf die off_by der geschlossenen und der offenen Hi-Hat zeigt
+  const pedal = [{ group: '1' }, { group: '201', silent: true }, { group: '203', silent: true }];
+  const out = chokeGroups({ hat: [{ group: '13', off_by: '201' }], openHat: [{ group: '15', off_by: '203' }], hatPedal: pedal });
+  assert.deepEqual([out.hat.offBy, out.openHat.offBy, out.hatPedal.chokes], [1, 2, [1, 2]]);
 });
 
 test('Packs im Format 2 (SFZ_PACKS) in src/assets/samples: Datei da und unter 12 MB, Samples lückenlos, Zonen zeigen auf Samples, Lizenz liegt bei', () => {

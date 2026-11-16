@@ -42,6 +42,20 @@ export const SFZ_PACKS = {
     trimDb: { crash: 3 },
     seconds: { default: 1.2, kick: 0.8, snare: 1, sideStick: 0.5, hat: 0.5, crash: 2.5, ride: 2, rideBell: 2 },
   },
+  'drums-naked': {
+    sfz: 'Wilkinson Audio/Naked Drums/Stereo/Naked Drums.sfz',
+    title: 'Naked Drums (SFZ)', author: 'Wilkinson Audio (Aufnahme), kinwie (SFZ-Mapping)', license: 'CC-BY-4.0',
+    licenseUrl: 'https://creativecommons.org/licenses/by/4.0/', url: 'https://github.com/sfzinstruments/WilkinsonAudio.NakedDrums', licenseFile: 'LICENSE',
+    channels: 2,
+    // Data/keymap.txt (nicht die GM-Belegung): Snare 1 (Ayotte), Side-Stick 37, Toms 10" 48, 13" 45, 16" 41, Ride 51 mit Glocke 53, Crash 1 55,
+    // Hi-Hat im Modus ohne Controller: geschlossen 42, halboffen 46, offen 49, getreten 44 (39 "tight" bleibt draußen). Kein Rimshot.
+    hits: { kick: 36, snare: 38, sideStick: 37, hat: 42, hatHalf: 46, openHat: 49, hatPedal: 44, tomHigh: 48, tomMid: 45, tomLow: 41, crash: 55, ride: 51, rideBell: 53 },
+    room: /[\\/]-?(CloseRoom|FarRooms|MidSide|MS)_/i, // Mid-Side heißt bei den Trommeln MS_, bei den Becken MidSide_
+    mirror: true, // Mapping aus Sicht des Schlagzeugers (Hi-Hat-Mikrofon links, Ride rechts)
+    select: { default: [3, 2], kick: [4, 3], snare: [4, 4], hat: [4, 4], sideStick: [1, 3], hatPedal: [1, 3] },
+    trimDb: { crash: 6 }, // Crash nur über Overheads und Raum: 6,2 dB unter den Crashs der anderen Kits (Test „Crash innerhalb von 3 dB“)
+    seconds: { default: 1.2, kick: 0.8, snare: 1, sideStick: 0.5, hat: 0.5, hatPedal: 0.5, hatHalf: 1, crash: 2.5, ride: 2, rideBell: 2 },
+  },
 };
 
 // ---------- SFZ lesen ----------
@@ -149,7 +163,9 @@ const IGNORED_SILENTLY = /_label$|^label_cc|^set_(hd)?cc|polyphony$|^(lo|hi)cc\d
 
 /**
  * Regionen, die im Standardzustand klingen, mit ausgewerteten Werten: Tasten, Anschlag, Round-Robin (seq_position oder lorand), Trigger
- * (attack oder release), linearer Pegel und Panorama (-100..100) samt Controller-Modulation, Pfad des Samples. Dazu die Liste nicht ausgewerteter Opcodes.
+ * (attack oder release), linearer Pegel und Panorama (-100..100) samt Controller-Modulation, Pfad des Samples. Stumme Regionen (sample=*silence) bleiben
+ * mit `silent: true` drin: über ihre group würgen sie andere ab (Naked Drums: die geschlossene Hi-Hat löst stumme Regionen aus, auf die off_by der offenen zeigt).
+ * Dazu die Liste nicht ausgewerteter Opcodes.
  */
 export function defaultRegions({ control, regions }, sfzDir) {
   const cc = controllers(control), ignored = new Set();
@@ -158,7 +174,7 @@ export function defaultRegions({ control, regions }, sfzDir) {
   const out = [];
   for (const r of regions) {
     for (const k of Object.keys(r)) if (!KNOWN.has(k) && !IGNORED_SILENTLY.test(k)) ignored.add(k);
-    if (!r.sample || r.sample.startsWith('*')) continue;
+    if (!r.sample) continue;
     const trigger = r.trigger ?? 'attack';
     if (!['attack', 'first', 'release', 'release_key'].includes(trigger)) continue;
     if (Object.keys(r).some((k) => /^on_(lo|hi)cc\d+$/.test(k))) continue;
@@ -182,9 +198,9 @@ export function defaultRegions({ control, regions }, sfzDir) {
     const key = keyNumber(r.key);
     const lokey = (keyNumber(r.lokey) ?? key ?? 0) + offset, hikey = (keyNumber(r.hikey) ?? key ?? 127) + offset;
     const center = (keyNumber(r.pitch_keycenter) ?? key ?? 60) + offset - Number(r.transpose ?? 0);
-    const path = resolve(sfzDir, `${control.default_path ?? ''}${r.sample}`.replace(/\\/g, '/'));
+    const silent = r.sample.startsWith('*'), path = silent ? r.sample : resolve(sfzDir, `${control.default_path ?? ''}${r.sample}`.replace(/\\/g, '/'));
     out.push({
-      ...r, path, trigger: trigger.startsWith('release') ? 'release' : 'attack', lokey, hikey, center, gain, pan: Math.max(-100, Math.min(100, pan)),
+      ...r, path, silent, trigger: trigger.startsWith('release') ? 'release' : 'attack', lokey, hikey, center, gain, pan: Math.max(-100, Math.min(100, pan)),
       lovel: Number(r.lovel ?? 0), hivel: Number(r.hivel ?? 127), rr: Number(r.seq_position ?? r.lorand ?? 0),
     });
   }
@@ -214,19 +230,21 @@ export function selectZones(regions, [layers, roundRobins]) {
   });
 }
 
-/** Choke-Gruppen der Schläge: B wird von A abgewürgt, wenn ein off_by von B eine group von A ist (je Mikrofon eigene Nummern). Ergebnis: name -> { group, offBy, offTime }. */
+/**
+ * Choke der Schläge: B wird von A abgewürgt, wenn ein off_by von B eine group von A ist (je Mikrofon eigene Nummern; auch über stumme Regionen).
+ * Ergebnis: name -> { offBy: Nummer von B, offTime } für B und { chokes: [Nummern] } für A (ein Schlag kann mehrere abwürgen: getretene Hi-Hat).
+ */
 export function chokeGroups(byName) {
   const names = Object.keys(byName), out = Object.fromEntries(names.map((n) => [n, {}]));
   const set = (name, key) => new Set(byName[name].map((r) => r[key]).filter((x) => x !== undefined));
-  for (const victim of names) {
+  names.forEach((victim, i) => {
     const offBy = set(victim, 'off_by');
     const chokers = names.filter((n) => n !== victim && [...set(n, 'group')].some((g) => offBy.has(g)));
-    if (!chokers.length) continue;
-    const id = names.indexOf(chokers[0]) + 1;
-    out[victim].offBy = id;
+    if (!chokers.length) return;
+    out[victim].offBy = i + 1;
     out[victim].offTime = Number(byName[victim].find((r) => r.off_time !== undefined)?.off_time ?? 0.006);
-    for (const c of chokers) { if (out[c].group && out[c].group !== id) console.warn(`Choke: ${c} würgt mehrere Gruppen ab, nur die erste bleibt`); out[c].group ??= id; }
-  }
+    for (const c of chokers) (out[c].chokes ??= []).push(i + 1);
+  });
   return out;
 }
 
@@ -280,7 +298,7 @@ export function buildSfzPack(libDir, id, outDir, spec = SFZ_PACKS[id]) {
   if (!spec) throw new Error(`Pack ${id} steht nicht in SFZ_PACKS`);
   const sfzPath = resolve(libDir, spec.sfz);
   const { regions, ignored } = defaultRegions(parseSfz(expandSfz(sfzPath)), dirname(sfzPath));
-  const usable = regions.filter((r) => !spec.skip?.test(r.path));
+  const usable = regions.filter((r) => !r.silent && !spec.skip?.test(r.path));
   const pick = (name) => spec.select[name] ?? spec.select.default, seconds = (name) => (typeof spec.seconds === 'number' ? spec.seconds : spec.seconds[name] ?? spec.seconds.default);
 
   // Gruppen: je Schlagname die Regionen seiner Taste; bei Tönen je Tastenbereich, Trigger und Artikulation
@@ -301,7 +319,8 @@ export function buildSfzPack(libDir, id, outDir, spec = SFZ_PACKS[id]) {
     }
     groups.push(...byKey.values());
   }
-  const chokes = spec.hits ? chokeGroups(Object.fromEntries(groups.map((g) => [g.name, g.regions]))) : {};
+  // Choke mit allen Regionen der Taste, auch den stummen
+  const chokes = spec.hits ? chokeGroups(Object.fromEntries(groups.map((g) => [g.name, regions.filter((r) => r.trigger === 'attack' && r.lokey <= g.keyLo && g.keyLo <= r.hikey)]))) : {};
 
   // Audio je Zone: Direkt und (falls da) Raum als eigene Samples
   const audio = [], zones = [], report = {};
@@ -322,7 +341,8 @@ export function buildSfzPack(libDir, id, outDir, spec = SFZ_PACKS[id]) {
       });
       const r = (report[g.name] ??= { zones: 0, layers: new Set(), mics: new Set() });
       r.zones++; r.layers.add(`${z.velLo}-${z.velHi}`);
-      for (const x of z.regions) r.mics.add(x.path.split(/[\\/]/).pop().replace(/^\d+-[^-]+-/, '').replace(/\.\w+$/, ''));
+      // Mikrofon aus dem Dateinamen: Muldjord 1-Snare-AmbL.flac, Naked -TopOne_Black_D2_10_one-NDOX.flac
+      for (const x of z.regions) r.mics.add(x.path.split(/[\\/]/).pop().replace(/^\d+-[^-]+-/, '').replace(/^-/, '').replace(/[_.].*$/, ''));
     }
   }
 
@@ -353,8 +373,8 @@ export function buildSfzPack(libDir, id, outDir, spec = SFZ_PACKS[id]) {
   writeFileSync(join(outDir, file), flac);
   const meta = { id, version: 2, source: spec.title, author: spec.author, license: spec.license, url: spec.url, file, rate: RATE, channels: C, ...(spec.hits && { keys: spec.hits }), samples, zones };
   writeFileSync(join(outDir, `${id}.json`), `${JSON.stringify(meta)}\n`);
-  const changes = `Auswahl (${zones.length} Zonen aus ${regions.length} Regionen), Mikrofone nach dem Standard-Mix des Mappings gemischt${spec.room ? ' (Direkt und Raum getrennt)' : ''}${spec.mirror ? ', links und rechts getauscht' : ''}, gekürzt mit Ausblendung, ein Pegelfaktor für das ganze Pack, 16 Bit / 44,1 kHz, FLAC (scripts/import-sfz.mjs)`;
-  writeFileSync(join(outDir, `LICENSE-${id}.md`), `# ${spec.title}\n\n- Urheber: ${spec.author}\n- Quelle: ${spec.url}\n- Lizenz: ${spec.license} (${spec.licenseUrl})\n- Verändert: ${changes}\n\n---\n\n${readFileSync(join(libDir, spec.licenseFile), 'utf8')}`);
+  const changes = `Auswahl (${zones.length} Zonen aus ${regions.filter((r) => !r.silent).length} Regionen), Mikrofone nach dem Standard-Mix des Mappings gemischt${spec.room ? ' (Direkt und Raum getrennt)' : ''}${spec.mirror ? ', links und rechts getauscht' : ''}, gekürzt mit Ausblendung, ein Pegelfaktor für das ganze Pack, 16 Bit / 44,1 kHz, FLAC (scripts/import-sfz.mjs)`;
+  writeFileSync(join(outDir, `LICENSE-${id}.md`), `# ${spec.title}\n\n- Urheber: ${spec.author}\n- Quelle: ${spec.url}\n- Lizenz: ${spec.license} (${spec.licenseUrl})\n- Verändert: ${changes}\n\n---\n\n${readFileSync(join(libDir, spec.licenseFile), 'utf8').replace(/\r\n/g, '\n')}`);
   console.log(`geschrieben: ${join(outDir, file)}, ${id}.json, LICENSE-${id}.md`);
 }
 

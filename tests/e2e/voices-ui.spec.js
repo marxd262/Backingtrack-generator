@@ -116,7 +116,7 @@ test('während der Wiedergabe wechseln: ohne Fehler, ohne neuen AudioContext, di
 });
 
 test('Schlagzeug, Lead und Percussion: Select Stimme (Synth, Samples), bei Samples alle Varianten in derselben Liste', async ({ page }) => {
-  const VARIANTS = { drums: ['standard', 'brushes', 'rimshot', 'jazz', 'electronic', '808', 'muldjord'], lead: ['flute', 'sax', 'synth', 'guitar'], percussion: ['studio'] };
+  const VARIANTS = { drums: ['standard', 'brushes', 'rimshot', 'jazz', 'electronic', '808', 'muldjord', 'legacy'], lead: ['flute', 'sax', 'synth', 'guitar'], percussion: ['studio'] };
   for (const [layer, list] of Object.entries(VARIANTS)) {
     expect(await voice(page, layer).locator('optgroup').evaluateAll((els) => els.map((e) => e.label))).toEqual(['Synthese', 'Samples']);
     await expect(voice(page, layer)).toHaveValue(`sample/${list[0]}`);

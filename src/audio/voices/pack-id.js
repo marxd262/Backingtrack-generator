@@ -1,5 +1,7 @@
 // Pack-ID der Sample-Stimme (eigene Datei, damit die Oberfläche sie lesen kann, ohne alle Stimmen zu laden).
-const SHARED = { 'drums-rimshot': 'drums-standard', 'lead-guitar': 'chords-freepats' };
+// Standard- und Rimshot-Kit spielen seit 2026-11-16 Naked Drums (Format 2; das Rimshot-Kit nimmt den Side-Stick als Snare, hitKeysFor, sample-hits.js);
+// das alte MuseScore-Standard-Kit (Pack drums-standard) ist als Legacy Drums weiter wählbar
+const SHARED = { 'drums-standard': 'drums-naked', 'drums-rimshot': 'drums-naked', 'drums-legacy': 'drums-standard', 'lead-guitar': 'chords-freepats' };
 let overrides = {};
 
 /**
