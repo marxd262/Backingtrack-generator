@@ -124,6 +124,11 @@ export const TUNABLES = deepFreeze({
   'drums/sample/jazz': { level: spec(0.05, 8, 0.05, 1.15), ...KIT_HUMAN },
   'drums/sample/electronic': { level: spec(0.05, 8, 0.05, 1.05), ...KIT_HUMAN },
   'drums/sample/808': { level: spec(0.05, 8, 0.05, 0.7), ...KIT_HUMAN },
+  // Format 2 (scripts/import-sfz.mjs): Round-Robins und Choke kommen aus dem Pack, darum ohne layerSpread und choke. roomMic Pegel des Raum-Samples
+  // (0 = nur Direkt), velCurve Anschlag hoch velCurve vor Zonenwahl und Pegel (1 = wie die Library, darunter klingen leise Schläge lauter), kitPan 0:
+  // keine Lage je Schlag (das Stereo-Sample hat sein eigenes Bild). Gemessen, nicht gehört (2026-11-15): level 1,9 = RMS des Standard-Kits allein (mit 1,2 2,7 dB
+  // leiser; 1,65 blieb hinter dem Begrenzer 0,5 bis 0,9 dB darunter, dazu 0,7 dB weniger Pack-Faktor durch den angehobenen Crash), velCurve 0,8 = Pegel bei vel 0,2 bis 0,8 im Mittel 1,7 dB vom Standard-Kit (mit 1: 2,4 dB; Hi-Hat 1,1 statt 5,1 dB)
+  'drums/sample/muldjord': { level: spec(0.05, 8, 0.05, 1.9), humanCents: HIT_HUMAN.humanCents, humanDb: HIT_HUMAN.humanDb, roomMic: spec(0, 2, 0.05, 1), velCurve: spec(0.3, 1.5, 0.05, 0.8), kitPan: spec(0, 1, 1, 0) },
   'percussion/sample/studio': { level: spec(0.05, 8, 0.05, 1.95), ...HIT_HUMAN },
   'chords/epiano/rhodes': {
     ratio: spec(0.5, 4, 0.01, 1), index: spec(0, 8, 0.05, 2.2), indexDecay: spec(0.05, 2, 0.01, 0.35), bell: spec(0, 1, 0.01, 0.2),

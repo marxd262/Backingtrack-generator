@@ -407,7 +407,7 @@ test('Wechsel vor dem Laden und zurück: kein Fehler, voiceStatus stimmt, nur ei
 // Schicht allein ohne Begrenzer, Hall und Raum. Einzeln (rms Sample / rms Synth gleichen Namens) weicht die Balance innerhalb der Kits vom
 // Synth ab (Messwerte in tunables.js); geprüft wird darum die Folge (0,5 bis 2), je Schlag nur hörbar, endlich und Spitze.
 const KITS = [
-  ...['standard', 'brushes', 'rimshot', 'jazz', 'electronic', '808'].map((v) => ['drums', v]),
+  ...['standard', 'brushes', 'rimshot', 'jazz', 'electronic', '808', 'muldjord'].map((v) => ['drums', v]),
   ['percussion', 'studio'],
 ];
 const renderHits = (page, layer, voice, names, { seconds = 1, gap = 0.8 } = {}) => page.evaluate(async ([layerName, v, list, s, step]) => {

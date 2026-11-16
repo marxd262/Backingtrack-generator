@@ -44,10 +44,12 @@ export function sampleHitVoice(packId, keyMap, ctx, { tuned, classic, setStatus,
       gain *= dbToGain((2 * loud - 1) * tuned('humanDb'));
       pickVel = Math.min(1, Math.max(0, e.vel + (2 * layer - 1) * tuned('layerSpread')));
     }
-    const key = keys[name], zone = v2 ? roundRobin(pickZones(pack.meta.zones, key, e.vel), lastZone, key, rng) : pickZone(pack.meta.zones, key, pickVel);
+    // Format 2: Anschlagkurve velCurve (Anschlag hoch velCurve, für Zonenwahl und Pegel; fehlt = wie die Library)
+    const curve = tuned('velCurve'), vel = v2 && Number.isFinite(curve) && e.vel > 0 ? e.vel ** curve : e.vel;
+    const key = keys[name], zone = v2 ? roundRobin(pickZones(pack.meta.zones, key, vel), lastZone, key, rng) : pickZone(pack.meta.zones, key, pickVel);
     if (!zone) return;
     // Einmal-Sample: die Note dauert so lange wie das Sample (in seiner Abspielgeschwindigkeit), das Ausklingen danach hört man nicht mehr
-    const hit = (z, g) => { const sample = pack.meta.samples[z.sample]; return playNote(ctx, out, t, { pack, zone: z, midi: key, dur: sample.frames / sample.rate / playbackRate(z, key), vel: e.vel, gain: g, cents }); };
+    const hit = (z, g) => { const sample = pack.meta.samples[z.sample]; return playNote(ctx, out, t, { pack, zone: z, midi: key, dur: sample.frames / sample.rate / playbackRate(z, key), vel, gain: g, cents }); };
     const env = hit(zone, gain);
     if (v2) {
       const roomMic = tuned('roomMic'), envs = [env];

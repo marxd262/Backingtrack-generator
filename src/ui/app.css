@@ -92,6 +92,7 @@ button { cursor: pointer; }
 }
 
 .lang { display: flex; gap: 4px; }
+.top .credits { display: inline-flex; align-items: center; margin: 0 10px 0 auto; text-decoration: none; }
 .top .brand { display: flex; align-items: center; max-width: none; margin: 0; white-space: nowrap; } /* Name der App links, Sprache rechts */
 
 body:not(:has(.play:not([hidden]))) { display: flex; flex-direction: column; min-height: 100dvh; }

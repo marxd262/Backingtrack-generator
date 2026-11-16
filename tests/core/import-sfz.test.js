@@ -3,7 +3,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
-import { expandSfz, parseSfz, defaultRegions, velAmp, binRanges, selectZones, chokeGroups, keyNumber } from '../../scripts/import-sfz.mjs';
+import { readFileSync, statSync, existsSync } from 'node:fs';
+import { expandSfz, parseSfz, defaultRegions, velAmp, binRanges, selectZones, chokeGroups, keyNumber, SFZ_PACKS } from '../../scripts/import-sfz.mjs';
 
 const files = (map) => (path) => {
   const hit = Object.entries(map).find(([name]) => resolve('/lib', name) === path);
@@ -69,4 +70,17 @@ test('binRanges und selectZones: Stufen zusammenfassen, Round-Robins aus dem lau
 test('chokeGroups: Mikrofone mit eigenen Gruppennummern ergeben eine gemeinsame Gruppe je Schlag', () => {
   const hat = [{ group: '179' }, { group: '94' }], open = [{ group: '180', off_by: '179', off_time: '0.21' }, { group: '95', off_by: '94' }];
   assert.deepEqual(chokeGroups({ kick: [{}], hat, openHat: open }), { kick: {}, hat: { group: 2 }, openHat: { offBy: 2, offTime: 0.21 } });
+});
+
+test('Packs im Format 2 (SFZ_PACKS) in src/assets/samples: Datei da und unter 12 MB, Samples lückenlos, Zonen zeigen auf Samples, Lizenz liegt bei', () => {
+  const dir = new URL('../../src/assets/samples/', import.meta.url);
+  for (const [id, spec] of Object.entries(SFZ_PACKS)) {
+    const meta = JSON.parse(readFileSync(new URL(`${id}.json`, dir), 'utf8'));
+    assert.deepEqual([meta.version, meta.id, meta.channels, meta.license], [2, id, spec.channels, spec.license], id);
+    assert.match(meta.file, new RegExp(`^${id}\.[0-9a-f]{10}\.flac$`), id);
+    assert.ok(statSync(new URL(meta.file, dir)).size < 12e6, `${id}: Größe`);
+    meta.samples.forEach((s, i) => assert.equal(s.offset, i ? meta.samples[i - 1].offset + meta.samples[i - 1].frames : 0, `${id}: Sample ${i}`));
+    for (const z of meta.zones) for (const k of [z.sample, z.room].filter((x) => x !== undefined)) assert.ok(Number.isInteger(k) && k < meta.samples.length, `${id}: Zone`);
+    assert.ok(existsSync(new URL(`LICENSE-${id}.md`, dir)), `${id}: Lizenz`);
+  }
 });

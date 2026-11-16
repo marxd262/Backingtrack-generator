@@ -16,7 +16,7 @@ export const VOICES = deepFreeze({
   drums: {
     synth: { kind: 'synth', variants: ['classic'], uses: ['drums.kickPunch', 'drums.kickLength', 'drums.snareTone', 'drums.snareSnap', 'drums.hatBright', 'drums.hatLength', 'drums.room'] },
     // Raum wirkt über den Hall-Sendeweg der Schicht, also auch auf Sample-Kits
-    sample: { kind: 'sample', variants: ['standard', 'brushes', 'rimshot', 'jazz', 'electronic', '808'], uses: ['drums.room'] },
+    sample: { kind: 'sample', variants: ['standard', 'brushes', 'rimshot', 'jazz', 'electronic', '808', 'muldjord'], uses: ['drums.room'] },
   },
   bass: {
     synth: { kind: 'synth', variants: ['classic'], uses: ['bass.sub', 'bass.pluck', 'bass.cutoff', 'bass.resonance', 'bass.roundness'] },

@@ -24,7 +24,7 @@ const MAX_MB = 12; // Grenze je Pack (Nutzer, 2026-11-15)
 //   hits: Schlagname -> Taste der Library (Schlagzeug); keys: [tiefste, höchste] Taste (Töne)
 //   select: { name|default: [Anschlagstufen, Round-Robins] }, seconds: { name|default: höchstens s } (Töne: Zahl)
 //   room / skip: Muster für Sample-Pfade (Raum-Mikrofone als eigenes Sample; Kanäle, die nicht hineingehören)
-//   mirror: links und rechts tauschen (die App legt das Kit aus Sicht des Publikums, Hi-Hat rechts)
+//   mirror: links und rechts tauschen (die App legt das Kit aus Sicht des Publikums, Hi-Hat rechts); trimDb: { name: dB } Pegel einzelner Schläge
 //   art: [[Muster, art]] Sample-Gruppen für Artikulationen; releases: Round-Robins der Release-Samples (0 = keine)
 export const SFZ_PACKS = {
   'drums-muldjord': {
@@ -38,6 +38,8 @@ export const SFZ_PACKS = {
     room: /-Amb[LR]\.flac$/i,
     skip: /-Trigger\.flac$/i, // Triggersignal der Kick (DrumGizmo-Kanal 16), kein Mikrofon
     select: { default: [3, 2], kick: [4, 3], snare: [4, 4], hat: [4, 4], sideStick: [2, 2] },
+    // Crash nur über Overheads und Raum: 3,2 dB leiser als der Crash der anderen Kits (rms der ersten Sekunde bei vel 0,8; die sind seit 2026-11-12 auf ±3 dB gleich)
+    trimDb: { crash: 3 },
     seconds: { default: 1.2, kick: 0.8, snare: 1, sideStick: 0.5, hat: 0.5, crash: 2.5, ride: 2, rideBell: 2 },
   },
 };
@@ -307,7 +309,8 @@ export function buildSfzPack(libDir, id, outDir, spec = SFZ_PACKS[id]) {
     const choice = g.trigger === 'release' ? [1, spec.releases] : pick(g.name);
     for (const z of selectZones(g.regions, choice)) {
       const room = z.regions.filter((r) => spec.room?.test(r.path)), close = z.regions.filter((r) => !spec.room?.test(r.path));
-      const sampleOf = (rs) => { audio.push(trim(mix(rs, spec.channels), seconds(g.name))); return audio.length - 1; };
+      const gain = 10 ** ((spec.trimDb?.[g.name] ?? 0) / 20);
+      const sampleOf = (rs) => { audio.push(trim(mix(rs, spec.channels), seconds(g.name)).map((ch) => ch.map((x) => x * gain))); return audio.length - 1; };
       const first = z.regions[0];
       zones.push({
         keyLo: g.keyLo, keyHi: g.keyHi, velLo: z.velLo, velHi: z.velHi, sample: sampleOf(close.length ? close : room), rootKey: g.rootKey, tuneCents: g.tuneCents ?? 0,
