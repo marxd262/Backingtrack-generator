@@ -1,7 +1,7 @@
 // Zonenwahl und Umrechnungen des Samplers (rein): Ränder, Lücken, Überlappungen, Tonhöhe, Pegel, Helligkeit.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { pickZone, playbackRate, dbToGain, zoneGain, brightnessHz, velocityGain, velocityBrightnessHz } from '../../src/audio/voices/sample-zones.js';
+import { pickZone, pickZones, artZones, roundRobin, zoneVelocity, playbackRate, dbToGain, zoneGain, brightnessHz, velocityGain, velocityBrightnessHz } from '../../src/audio/voices/sample-zones.js';
 
 const zone = (keyLo, keyHi, velLo = 0, velHi = 127, extra = {}) => ({ keyLo, keyHi, velLo, velHi, rootKey: 60, tuneCents: 0, ...extra });
 
@@ -100,4 +100,37 @@ test('zoneGain: negative Dämpfung zählt wie 0 dB (nie lauter als 1), positive 
   assert.equal(zoneGain(-6), 1);
   assert.equal(zoneGain(0), 1);
   assert.equal(zoneGain(6), dbToGain(6));
+});
+
+test('pickZones: alle gleich guten Zonen (Round-Robins), pickZone nimmt davon die erste', () => {
+  const a = zone(60, 60, 0, 63), b = zone(60, 60, 0, 63, { sample: 1 }), loud = zone(60, 60, 64, 127);
+  assert.deepEqual(pickZones([a, loud, b], 60, 0.3), [a, b]);
+  assert.equal(pickZone([a, loud, b], 60, 0.3), a);
+  assert.deepEqual(pickZones([], 60, 0.3), []);
+});
+
+test('artZones: eigene Zonen der Artikulation, sonst die normalen; Release-Zonen nie', () => {
+  const plain = zone(60, 60), staccato = zone(60, 60, 0, 127, { art: 'staccato' }), rel = zone(60, 60, 0, 127, { trigger: 'release' });
+  assert.deepEqual(artZones([plain, staccato, rel], 'staccato'), [staccato]);
+  assert.deepEqual(artZones([plain, staccato, rel], 'dead'), [plain]);
+  assert.deepEqual(artZones([plain, staccato, rel]), [plain]);
+});
+
+test('roundRobin: nie zweimal dieselbe Zone je Taste hintereinander; eine Zone ohne Zufallsziehung', () => {
+  const zones = [zone(60, 60), zone(60, 60), zone(60, 60)], memory = new Map();
+  let draws = 0, last = null;
+  const rng = { next: () => (draws++ % 2 ? 0.99 : 0) };
+  for (let i = 0; i < 20; i++) { const z = roundRobin(zones, memory, 60, rng); assert.notEqual(z, last); last = z; }
+  const before = draws;
+  assert.equal(roundRobin([zones[0]], memory, 61, rng), zones[0]);
+  assert.equal(draws, before);
+});
+
+test('zoneVelocity: ohne velGain linear wie bisher; mit velGain zwischen den Werten am Rand des Anschlagbereichs', () => {
+  assert.equal(zoneVelocity(zone(60, 60), 0.4), 0.4);
+  assert.equal(zoneVelocity(zone(60, 60), NaN), 1);
+  const z = zone(60, 60, 27, 127, { velGain: [0.5, 1] });
+  assert.equal(zoneVelocity(z, 1), 1);
+  assert.equal(zoneVelocity(z, 77 / 127), 0.75);
+  assert.equal(zoneVelocity(z, 0), 0.5);
 });

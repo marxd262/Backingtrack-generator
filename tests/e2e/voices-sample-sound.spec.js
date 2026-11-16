@@ -287,17 +287,18 @@ for (const variant of GUITARS) {
 // Bezug vor Stufe 1 (aufgenommen 2026-11-12 mit e93653a/482f2a4, Track wie oben, 4 s, Schicht allein, ohne Begrenzer): rms und Schwerpunkt.
 // Zwischen zwei Browserläufen schwanken die Werte um bis zu 2e-9 (relativ), darum die Grenze 1e-6. Die Gitarren mit den alten Werten
 // (legacyTuning, scripts/render-ab.mjs) müssen den alten Klang wiederherstellen.
-// Klang v2, Schritt 5: Bass und Schlagzeug haben jetzt Zufall je Anschlag; die Referenz gilt mit den neutralen (alten) Feinwerten
+// Klang v2, Schritt 5: Bass und Schlagzeug haben jetzt Zufall je Anschlag; die Referenz gilt mit den neutralen (alten) Feinwerten. Das MuseScore-Kit
+// spielt seit 2026-11-16 als Legacy Drums (das Standard-Kit ist Naked Drums); seine Referenz gilt dort
 const NO_HUMAN = {
   bass: { 'bass/sample/finger': { velExp: 1, softHz: 20000, humanCents: 0, humanDb: 0 } },
-  drums: { 'drums/sample/standard': { humanCents: 0, humanDb: 0, layerSpread: 0, choke: 0 } },
+  drums: { 'drums/sample/legacy': { humanCents: 0, humanDb: 0, layerSpread: 0, choke: 0 } },
 };
 const REFERENCE = [
   ['chords', 'epiano', 0.06921231115196144, 627.6670757948046, {}],
   ['bass', 'finger', 0.08135153180452052, 299.5768354730511, NO_HUMAN.bass],
   ['pad', 'strings', 0.03879362725610885, 1709.2765362642458, {}],
   ['lead', 'flute', 0.05093956295317625, 2764.8405913788793, {}],
-  ['drums', 'standard', 0.04676808117726703, 4774.146728744033, NO_HUMAN.drums],
+  ['drums', 'legacy', 0.04676808117726703, 4774.146728744033, NO_HUMAN.drums],
   ['chords', 'guitar', 0.048016682314904906, 1830.6922262994242],
   ['chords', 'muted', 0.06477307441819671, 1387.6950202685991],
   ['chords', 'jazz', 0.06999652177652821, 1860.4150446219408],
@@ -407,7 +408,7 @@ test('Wechsel vor dem Laden und zurück: kein Fehler, voiceStatus stimmt, nur ei
 // Schicht allein ohne Begrenzer, Hall und Raum. Einzeln (rms Sample / rms Synth gleichen Namens) weicht die Balance innerhalb der Kits vom
 // Synth ab (Messwerte in tunables.js); geprüft wird darum die Folge (0,5 bis 2), je Schlag nur hörbar, endlich und Spitze.
 const KITS = [
-  ...['standard', 'brushes', 'rimshot', 'jazz', 'electronic', '808'].map((v) => ['drums', v]),
+  ...['standard', 'brushes', 'rimshot', 'jazz', 'electronic', '808', 'muldjord', 'legacy'].map((v) => ['drums', v]),
   ['percussion', 'studio'],
 ];
 const renderHits = (page, layer, voice, names, { seconds = 1, gap = 0.8 } = {}) => page.evaluate(async ([layerName, v, list, s, step]) => {

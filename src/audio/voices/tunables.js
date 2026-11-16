@@ -22,6 +22,10 @@ const REALISM = { velExp: spec(0.5, 3, 0.05, 1.6), softHz: spec(800, 20000, 100,
 // NOTE_NEUTRAL fürs E-Piano: dieselben Regler, aber neutral (aus), weil es in keiner Hörprobe vorkam. 0 bzw. velExp 1 und softHz 20000 = aus.
 const HIT_HUMAN = { humanCents: spec(0, 30, 1, 6), humanDb: spec(0, 3, 0.1, 0.7), layerSpread: spec(0, 0.3, 0.01, 0.08) };
 const KIT_HUMAN = { ...HIT_HUMAN, choke: spec(0, 1, 1, 1) };
+// Kits im Format 2 (scripts/import-sfz.mjs): Round-Robins und Choke kommen aus dem Pack, darum ohne layerSpread und choke. roomMic Pegel des Raum-Samples
+// (0 = nur Direkt), velCurve Anschlag hoch velCurve vor Zonenwahl und Pegel (1 = wie die Library, darunter klingen leise Schläge lauter), kitPan 0: keine
+// Lage je Schlag (das Stereo-Sample hat sein eigenes Bild)
+const kitV2 = (level, velCurve) => ({ level: spec(0.05, 8, 0.05, level), humanCents: HIT_HUMAN.humanCents, humanDb: HIT_HUMAN.humanDb, roomMic: spec(0, 2, 0.05, 1), velCurve: spec(0.3, 1.5, 0.05, velCurve), kitPan: spec(0, 1, 1, 0) });
 const BASS_HUMAN = { velExp: spec(0.5, 3, 0.05, 1.3), softHz: spec(800, 20000, 100, 2500), oneShot: spec(0, 1, 1, 0), humanCents: spec(0, 10, 0.5, 1.5), humanDb: spec(0, 3, 0.1, 0.6) };
 const NOTE_NEUTRAL = { velExp: spec(0.5, 3, 0.05, 1), softHz: spec(800, 20000, 100, 20000), oneShot: spec(0, 1, 1, 0), humanCents: spec(0, 10, 0.5, 0), humanDb: spec(0, 3, 0.1, 0) };
 // Strum der Sample-Gitarren (sample.js): strum Abstand der Akkordtöne in s. Klang v2, Schritt 6 (Urteil des Nutzers 2026-11-14 an der Clean
@@ -118,12 +122,20 @@ export const TUNABLES = deepFreeze({
   // decay 10 statt 3 wie bei den Akkorden: gezogene und bebende Töne klingen im Sampler gar nicht zusätzlich ab (Urteil des Nutzers: dem Bend fehlt
   // Sustain); mit decay 3 waren sie in der Melodie viel lauter als die übrigen Töne (Schritt 24: Unterschied B-A bis +0,5 dB, Spitze vor der Summe +5 dB)
   'lead/sample/guitar': { level: spec(0.05, 8, 0.05, 2.15), decay: spec(0.2, 10, 0.1, 10), ...REALISM },
-  'drums/sample/standard': { level: spec(0.05, 8, 0.05, 1.2), ...KIT_HUMAN },
+  // Standard- und Rimshot-Kit spielen Naked Drums (Format 2, pack-id.js; bis 2026-11-16 das MuseScore-Kit mit level 1,2 bzw. 1,3). velCurve 0,5 = Pegel
+  // bei vel 0,2 bis 0,8 im Mittel 1,5 dB vom MuseScore-Kit (mit 1: 6,4 dB; das Mapping nutzt die quadratische SFZ-Kurve). Gemessen, nicht gehört
+  'drums/sample/standard': kitV2(2.5, 0.5),
   'drums/sample/brushes': { level: spec(0.05, 8, 0.05, 1.2), ...KIT_HUMAN },
-  'drums/sample/rimshot': { level: spec(0.05, 8, 0.05, 1.3), ...KIT_HUMAN },
+  'drums/sample/rimshot': kitV2(2.5, 0.5),
   'drums/sample/jazz': { level: spec(0.05, 8, 0.05, 1.15), ...KIT_HUMAN },
   'drums/sample/electronic': { level: spec(0.05, 8, 0.05, 1.05), ...KIT_HUMAN },
   'drums/sample/808': { level: spec(0.05, 8, 0.05, 0.7), ...KIT_HUMAN },
+  // Muldjord (Urteil des Nutzers 2026-11-16: im Mix Proberaum, passt). level 1,9 = RMS des MuseScore-Standard-Kits allein (mit 1,2 2,7 dB leiser; 1,65 blieb
+  // hinter dem Begrenzer 0,5 bis 0,9 dB darunter, dazu 0,7 dB weniger Pack-Faktor durch den angehobenen Crash), velCurve 0,8 = Pegel bei vel 0,2 bis 0,8 im
+  // Mittel 1,7 dB vom MuseScore-Kit (mit 1: 2,4 dB; Hi-Hat 1,1 statt 5,1 dB)
+  'drums/sample/muldjord': kitV2(1.9, 0.8),
+  // Legacy Drums: das MuseScore-Standard-Kit (bis 2026-11-16 drums/sample/standard), auf Wunsch des Nutzers weiter wählbar, Werte wie damals
+  'drums/sample/legacy': { level: spec(0.05, 8, 0.05, 1.2), ...KIT_HUMAN },
   'percussion/sample/studio': { level: spec(0.05, 8, 0.05, 1.95), ...HIT_HUMAN },
   'chords/epiano/rhodes': {
     ratio: spec(0.5, 4, 0.01, 1), index: spec(0, 8, 0.05, 2.2), indexDecay: spec(0.05, 2, 0.01, 0.35), bell: spec(0, 1, 0.01, 0.2),

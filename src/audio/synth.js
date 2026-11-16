@@ -194,7 +194,9 @@ export function createInstruments(ctx, { bpm = 100, limiter: useLimiter = true, 
     const fx = LAYERS[name].fx ? (guitarFx[name] = createGuitarFx(ctx, name, (modFx[name] = createModFx(ctx, mute)).input)) : null;
     layers[name] = {
       trigger(event, when) {
-        if (event.layer === name) voice(fx ? fx.input : name === 'drums' && kitPans[DRUM_FALLBACK[event.name] ?? event.name] ? kitPans[DRUM_FALLBACK[event.name] ?? event.name].input : mute, when, event);
+        // Lage je Schlag im Kit, außer die Stimme schaltet sie mit dem Feinwert kitPan 0 ab (Stereo-Kits haben ihr eigenes Bild)
+        const kitPan = name === 'drums' && tunedValue(`drums/${built.drums.id}/${built.drums.variant}`, 'kitPan', tuningState) !== 0 && kitPans[DRUM_FALLBACK[event.name] ?? event.name];
+        if (event.layer === name) voice(fx ? fx.input : kitPan ? kitPan.input : mute, when, event);
       },
       setMuted(on) {
         // kurze Rampe gegen Knacken, endet exakt auf 0 bzw. 1

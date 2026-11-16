@@ -21,7 +21,7 @@ const kits = (...variants) => Object.fromEntries(variants.map((v) => [`sample/${
 
 // Schlüssel `${id}/${variante}`; was hier fehlt (noch nicht gebaute Stimmen), spielt als Synth/Klassisch
 const IMPLS = {
-  drums: { 'synth/classic': (layer, ctx, deps) => drumKitVoice(ctx, { params: deps.params, noise: deps.noise, tuned: deps.tuned }), ...kits('standard', 'brushes', 'rimshot', 'jazz', 'electronic', '808') },
+  drums: { 'synth/classic': (layer, ctx, deps) => drumKitVoice(ctx, { params: deps.params, noise: deps.noise, tuned: deps.tuned }), ...kits('standard', 'brushes', 'rimshot', 'jazz', 'electronic', '808', 'muldjord', 'legacy') },
   bass: { 'synth/classic': classicVoice, 'string/finger': stringVoice, 'sample/finger': sample('finger'), 'sample/pick': sample('pick'), 'sample/upright': sample('upright') },
   chords: {
     'synth/classic': classicVoice, 'string/electric': stringVoice, 'epiano/rhodes': epianoVoice,

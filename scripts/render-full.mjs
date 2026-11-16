@@ -5,17 +5,22 @@
 // Ausgabe: <ordner>/full-A.wav und full-B.wav (alle Fälle hintereinander, 1 s Stille dazwischen), full.html (Sprungmarke je Teil), dazu je Fall Lautheit vorher und
 // nachher, Pegel je Teil und die Takte mit den meisten Artikulationen in B.
 // Vorher: git worktree add --detach <basisordner> d06d42c
-// Aufruf: node scripts/render-full.mjs <basisordner> [ausgabeordner]   (Standard: .superpowers/audio-ab)
+// Aufruf: node scripts/render-full.mjs <basisordner> [ausgabeordner] [--pack alt=neu,…] [--voice schicht=id/variante,…] [--tuning json] [--solo schicht] [--name datei]
+//   (Standard-Ausgabe: .superpowers/audio-ab)
+//   --pack lenkt auf Seite B Packs um (setPackOverrides, z. B. drums-standard=drums-muldjord: ein neues Pack vor seiner Stimme hören),
+//   --voice und --tuning setzen auf Seite B Stimmen und Feinwerte ({"drums/sample/muldjord":{"level":1.7}}),
+//   --solo lässt nur eine Schicht klingen (die Ereignisse bleiben die des ganzen Songs), --name ersetzt "full" in den Dateinamen.
 import { mkdir, writeFile, access } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { parseArgs } from 'node:util';
 import { ART_CASES, wav, abPage, decode, measure } from './render-step.mjs';
 
 const RATE = 44100;
 const TARGET = { funk: 32, rock: 32, country: 32, blues: 24, dreamy: 24, reggae: 24 };
 
 /** Läuft im Browser beider Stände: nur Schnittstellen, die es vor Phase 3 schon gab. Liefert L/R (base64), Teile und Artikulationen je Takt. */
-async function renderInPage([style, bpm, own, target]) {
+async function renderInPage([style, bpm, own, target, { packs, solo, voices, tuning } = {}]) {
   const { buildEvents } = await import('/core/events.js');
   const { resolveTrackTimbre } = await import('/core/timbre.js');
   const { resolveVoices, setAllVoices } = await import('/core/voices.js');
@@ -33,7 +38,7 @@ async function renderInPage([style, bpm, own, target]) {
     bars: colorProgression((own.chords?.map(([root, quality]) => ({ root, quality })) ?? progressionFor(key, seed)).map((chord) => ({ chord, beats: 4 })), styleChordColor(p, seed, true), key),
     layers: { drums: true, bass: true, chords: true, pad: true, lead: false, percussion: true },
     jobs: { percussion: 'mixed' },
-    voices: { ...setAllVoices(null, 'sample'), ...own.voices },
+    voices: { ...setAllVoices(null, 'sample'), ...own.voices, ...voices },
     ...own.track,
   };
   delete track.length; // die Form bestimmt die Länge
@@ -44,12 +49,13 @@ async function renderInPage([style, bpm, own, target]) {
   const arts = {}; // je Takt: Zahl der Ereignisse mit Artikulation und ihre Arten
   for (const e of events) if (e.art || e.ring) { const b = (arts[e.bar] ??= { t: events.find((c) => c.type === 'chord' && c.bar === e.bar).t, n: 0, kinds: {} }); b.n++; const k = `${e.layer} ${e.art ?? 'ring'}`; b.kinds[k] = (b.kinds[k] ?? 0) + 1; }
   const ctx = new OfflineAudioContext(2, Math.ceil(RATE * (OFFSET + total + 2)), RATE);
-  const { output, layers, whenReady } = createInstruments(ctx, { bpm, limiter: true, timbre: resolveTrackTimbre(track), voices: resolveVoices(track) });
+  if (packs) (await import('/audio/voices/pack-id.js')).setPackOverrides(packs);
+  const { output, layers, whenReady, voiceStatus } = createInstruments(ctx, { bpm, limiter: true, timbre: resolveTrackTimbre(track), voices: resolveVoices(track), tuning });
   await whenReady();
   output.connect(ctx.destination);
-  for (const e of events) if (e.layer && e.t < total) layers[e.layer].trigger(e, OFFSET + e.t);
+  for (const e of events) if (e.layer && e.t < total && (!solo || e.layer === solo)) layers[e.layer].trigger(e, OFFSET + e.t);
   const buf = await ctx.startRendering();
-  return { parts, arts, total, offset: OFFSET, chans: [0, 1].map((c) => {
+  return { parts, arts, total, offset: OFFSET, status: voiceStatus(), chans: [0, 1].map((c) => {
     const bytes = new Uint8Array(buf.getChannelData(c).buffer);
     let bin = '';
     for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
@@ -67,7 +73,7 @@ const rmsDb = ([l, r], from, to) => {
 export const clock = (s) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, '0')}`;
 
 /** Rendert alle Fälle eines Stands; der Server liefert den src-Ordner des Stands. */
-async function renderTree(chromium, tree) {
+async function renderTree(chromium, tree, options) {
   const { start } = await import(pathToFileURL(join(tree, 'scripts/serve.js')).href);
   let server, browser;
   try {
@@ -80,7 +86,7 @@ async function renderTree(chromium, tree) {
     await page.goto(`http://localhost:${server.address().port}/ui/render-harness.html`);
     const out = [];
     for (const [style, bpm, own] of ART_CASES) {
-      const r = await page.evaluate(renderInPage, [style, bpm, own ?? {}, TARGET[style]]);
+      const r = await page.evaluate(renderInPage, [style, bpm, own ?? {}, TARGET[style], options]);
       out.push({ ...r, chans: r.chans.map(decode) });
     }
     if (errors.length) throw new Error(`${tree}: ${errors.join('\n')}`);
@@ -92,13 +98,18 @@ async function renderTree(chromium, tree) {
 }
 
 async function main() {
-  const base = process.argv[2] && resolve(process.argv[2]);
-  if (!base) throw new Error('Aufruf: node scripts/render-full.mjs <basisordner> [ausgabeordner]; vorher: git worktree add --detach <basisordner> d06d42c');
+  const { values: flags, positionals: [baseArg, outArg] } = parseArgs({ allowPositionals: true, options: { pack: { type: 'string' }, voice: { type: 'string' }, tuning: { type: 'string' }, solo: { type: 'string' }, name: { type: 'string', default: 'full' } } });
+  const base = baseArg && resolve(baseArg);
+  if (!base) throw new Error('Aufruf: node scripts/render-full.mjs <basisordner> [ausgabeordner] [--pack alt=neu,…] [--solo schicht] [--name datei]; vorher: git worktree add --detach <basisordner> d06d42c');
   await access(join(base, 'scripts/serve.js'));
-  const outDir = resolve(process.argv[3] ?? fileURLToPath(new URL('../.superpowers/audio-ab', import.meta.url)));
+  const outDir = resolve(outArg ?? fileURLToPath(new URL('../.superpowers/audio-ab', import.meta.url)));
   await mkdir(outDir, { recursive: true });
   const { chromium } = await import('@playwright/test');
-  const sides = { A: await renderTree(chromium, base), B: await renderTree(chromium, fileURLToPath(new URL('..', import.meta.url))) };
+  const packs = flags.pack && Object.fromEntries(flags.pack.split(',').map((pair) => pair.split('=')));
+  const voices = flags.voice && Object.fromEntries(flags.voice.split(',').map((pair) => { const [layer, v] = pair.split('='), [id, variant] = v.split('/'); return [layer, { id, variant }]; }));
+  const sides = { A: await renderTree(chromium, base, { solo: flags.solo }), B: await renderTree(chromium, fileURLToPath(new URL('..', import.meta.url)), { solo: flags.solo, packs, voices, tuning: flags.tuning && JSON.parse(flags.tuning) }) };
+  const name = flags.name;
+  for (const [side, cases] of Object.entries(sides)) for (const c of cases) if (Object.values(c.status).some((s) => s === 'error' || s === 'loading')) throw new Error(`${side}: Pack nicht bereit (Synth statt Sample): ${JSON.stringify(c.status)}`);
 
   const pieces = { A: [], B: [] }, marks = [];
   let at = 0;
@@ -132,12 +143,12 @@ async function main() {
       if (Math.abs(x) > 1) clipped++;
       int16[2 * i + c] = Math.round(Math.max(-1, Math.min(1, x)) * 32767);
     }
-    const file = join(outDir, `full-${label}.wav`);
+    const file = join(outDir, `${name}-${label}.wav`);
     await writeFile(file, wav(Buffer.from(int16.buffer)));
     console.log(`${file}  ${(total / RATE).toFixed(1)} s  übersteuerte Werte ${clipped}`);
   }
-  await writeFile(join(outDir, 'full.html'), abPage('full', marks));
-  console.log(`Anhören: ${join(outDir, 'full.html')}`);
+  await writeFile(join(outDir, `${name}.html`), abPage(name, marks));
+  console.log(`Anhören: ${join(outDir, `${name}.html`)}`);
   console.log(`Sprungmarken für den Hörführer:\n${JSON.stringify(marks.map(([label, t]) => [clock(t), label]))}`);
 }
 

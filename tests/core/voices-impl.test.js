@@ -9,6 +9,7 @@ import { hasVoice, createVoice, packIdFor, hitKeysFor } from '../../src/audio/vo
 import { HIT_KEYS } from '../../src/audio/voices/sample-hits.js';
 import { TUNABLES, tunedValue } from '../../src/audio/voices/tunables.js';
 import { PACKS as SCRIPT_PACKS } from '../../scripts/extract-samples.mjs';
+import { SFZ_PACKS } from '../../scripts/import-sfz.mjs';
 
 test('jeder Eintrag des Registers (Instrument, Stimme, Variante) hat eine Umsetzung', () => {
   for (const layer of VOICE_LAYERS) {
@@ -44,7 +45,7 @@ test('tunedValue: Überschreibung begrenzt, Ungültiges zählt nicht, Unbekannte
 
 // Task 10: Sample-Varianten für Bass, Akkorde, Lead, Schlagzeug und Percussion
 const NEW_SAMPLES = [['bass', 'upright'], ['chords', 'muted'], ['chords', 'jazz'], ['chords', 'funk'], ['chords', 'steel'], ['chords', 'nylon'], ['chords', 'twelve'], ['lead', 'flute'], ['lead', 'sax'], ['lead', 'synth'],
-  ...['standard', 'brushes', 'rimshot', 'jazz', 'electronic', '808'].map((v) => ['drums', v]), ['percussion', 'studio']];
+  ...['standard', 'brushes', 'rimshot', 'jazz', 'electronic', '808', 'muldjord', 'legacy'].map((v) => ['drums', v]), ['percussion', 'studio']];
 
 test('neue Sample-Varianten: im Register, mit Umsetzung, gültig für isVoice', () => {
   for (const [layer, variant] of NEW_SAMPLES) {
@@ -59,10 +60,12 @@ test('jede Sample-Stimme hat einen gemessenen Pegel (level) und ein vorhandenes 
     for (const variant of VOICES[layer].sample?.variants ?? []) {
       const key = `${layer}/sample/${variant}`;
       assert.ok(TUNABLES[key]?.level, `${key}: level`);
-      assert.ok(Object.hasOwn(SCRIPT_PACKS, packIdFor(layer, variant)), `${key}: Pack ${packIdFor(layer, variant)}`);
+      assert.ok(Object.hasOwn(SCRIPT_PACKS, packIdFor(layer, variant)) || Object.hasOwn(SFZ_PACKS, packIdFor(layer, variant)), `${key}: Pack ${packIdFor(layer, variant)}`);
     }
   }
-  assert.equal(packIdFor('drums', 'rimshot'), 'drums-standard');
+  assert.equal(packIdFor('drums', 'rimshot'), 'drums-naked'); // seit 2026-11-16 spielen Standard- und Rimshot-Kit Naked Drums
+  assert.equal(packIdFor('drums', 'standard'), 'drums-naked');
+  assert.equal(packIdFor('drums', 'legacy'), 'drums-standard'); // das alte MuseScore-Kit als Legacy Drums
   assert.equal(packIdFor('drums', '808'), 'drums-808');
   assert.equal(packIdFor('lead', 'guitar'), 'chords-freepats');
   assert.ok(isVoice('lead', 'sample', 'guitar') && hasVoice('lead', 'sample', 'guitar'));
@@ -99,7 +102,8 @@ test('Gitarren-Samples: die fünf Feinwerte der Natürlichkeit mit ihren Standar
       const table = TUNABLES[`${layer}/sample/${variant}`];
       if (table?.velExp) withCurve.push(`${layer}/${variant}`);
       if (table?.humanDb) withHuman.push(`${layer}/${variant}`);
-      if (layer === 'drums') assert.ok(table.layerSpread && table.choke, `${layer}/${variant}: layerSpread, choke`);
+      // Kits im Format 2 bringen Round-Robins und Choke mit; sie haben dafür Raum-Mikrofon, Anschlagkurve und den Schalter der Lage je Schlag
+      if (layer === 'drums') assert.ok(Object.hasOwn(SFZ_PACKS, packIdFor(layer, variant)) ? table.roomMic && table.velCurve && table.kitPan : table.layerSpread && table.choke, `${layer}/${variant}: Feinwerte des Kits`);
     }
   }
   const others = ['bass/finger', 'bass/pick', 'bass/upright', 'chords/epiano', 'lead/guitar']; // die Lead-Gitarre spielt die Freepats-Samples der Akkord-Schicht
@@ -119,8 +123,9 @@ test('Tastenbelegung der Schläge: jeder Name hat eine Taste (Schlagarten ohne T
   assert.deepEqual(Object.keys(HIT_KEYS.percussion).sort(), [...PERCUSSION_NAMES].sort());
   for (const [layer, variant] of NEW_SAMPLES.filter(([l]) => l === 'drums' || l === 'percussion')) {
     const id = packIdFor(layer, variant);
-    const { zones } = JSON.parse(readFileSync(new URL(`../../src/assets/samples/${id}.json`, import.meta.url), 'utf8'));
-    for (const [name, key] of Object.entries(hitKeysFor(layer, variant))) {
+    const { zones, keys } = JSON.parse(readFileSync(new URL(`../../src/assets/samples/${id}.json`, import.meta.url), 'utf8'));
+    if (keys) for (const n of DRUM_NAMES) assert.ok(Object.hasOwn(keys, n) || Object.hasOwn(keys, DRUM_FALLBACK[n]), `${id}: ${n}`); // Format 2: Tasten aus dem Pack
+    for (const [name, key] of Object.entries(keys ?? hitKeysFor(layer, variant))) {
       assert.ok(zones.some((z) => z.keyLo <= key && key <= z.keyHi), `${layer}/${variant} ${name}: Taste ${key} in ${id}`);
     }
   }
