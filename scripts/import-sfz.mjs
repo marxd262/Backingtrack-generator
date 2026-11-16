@@ -26,6 +26,7 @@ const MAX_MB = 12; // Grenze je Pack (Nutzer, 2026-11-15)
 //   room / skip: Muster für Sample-Pfade (Raum-Mikrofone als eigenes Sample; Kanäle, die nicht hineingehören)
 //   mirror: links und rechts tauschen (die App legt das Kit aus Sicht des Publikums, Hi-Hat rechts); trimDb: { name: dB } Pegel einzelner Schläge
 //   art: [[Muster, art]] Sample-Gruppen für Artikulationen; releases: Round-Robins der Release-Samples (0 = keine)
+//   transpose: Halbtöne, um die die Tasten des Mappings verschoben werden (Töne; Growlybass ist eine Oktave zu hoch gemappt, gemessen)
 export const SFZ_PACKS = {
   'drums-muldjord': {
     sfz: 'DrumGizmo/MuldjordKit/Stereo/DrumGizmo MuldjordKit.sfz',
@@ -41,6 +42,20 @@ export const SFZ_PACKS = {
     // Crash nur über Overheads und Raum: 3,2 dB leiser als der Crash der anderen Kits (rms der ersten Sekunde bei vel 0,8; die sind seit 2026-11-12 auf ±3 dB gleich)
     trimDb: { crash: 3 },
     seconds: { default: 1.2, kick: 0.8, snare: 1, sideStick: 0.5, hat: 0.5, crash: 2.5, ride: 2, rideBell: 2 },
+  },
+  // E-Bässe (Karoryfer, CC0, direkt aufgenommen, mono). Tasten 26 bis 55: der Bass spielt MIDI 28 bis 52, dazu Rand für Annäherungstöne.
+  // Growlybass: Squier Jazz Bass, beide Tonabnehmer; growlybass_angry.sfz enthält Halte-, Staccato- (eigene Zonen für art staccato) und Release-Samples.
+  'bass-growly': {
+    sfz: 'growlybass_angry.sfz', title: 'Growlybass', author: 'Karoryfer Lecolds (D. Smolken)', license: 'CC0-1.0',
+    licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/', url: 'https://github.com/sfzinstruments/karoryfer.growlybass', licenseFile: 'LICENSE',
+    // Stufen: f (96–120) und ff (121–127) als eine (die Bass-Töne liegen um vel 0,95 genau auf der Grenze; Urteil des Nutzers: „klingt wie zwei Instrumente“)
+    channels: 1, transpose: -12, keys: [26, 55], select: { default: [[61, 96], 2], staccato: [1, 3] }, seconds: 3, releases: 2, art: [[/[\\/]staccato[\\/]/, 'staccato']],
+  },
+  // Fashionbass: Killer KB-Simmony, Hals-Tonabnehmer, Quintstimmung; fashionbass.sfz mit Release-Samples (die gedämpften Saiten auf 84 bis 87 bleiben vorerst draußen)
+  'bass-fashion': {
+    sfz: 'fashionbass.sfz', title: 'Fashionbass', author: 'Karoryfer Lecolds (D. Smolken)', license: 'CC0-1.0',
+    licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/', url: 'https://github.com/sfzinstruments/karoryfer.fashionbass', licenseFile: 'LICENSE',
+    channels: 1, keys: [26, 55], select: { default: [4, 2] }, seconds: 3, releases: 2,
   },
   'drums-naked': {
     sfz: 'Wilkinson Audio/Naked Drums/Stereo/Naked Drums.sfz',
@@ -209,8 +224,12 @@ export function defaultRegions({ control, regions }, sfzDir) {
 
 // ---------- Auswahl ----------
 
-/** Teilt die nach Anschlag sortierten Bereiche in höchstens n zusammenhängende Gruppen (Anschlagstufen des Packs). */
+/**
+ * Teilt die nach Anschlag sortierten Bereiche in höchstens n zusammenhängende Gruppen (Anschlagstufen des Packs). n als Liste: die Anschläge, an denen
+ * eine neue Stufe beginnt (Growlybass [61, 96]: f und ff werden eine Stufe, sonst wechselt der Bass um vel 0,95 zufällig zwischen zwei Aufnahmen).
+ */
 export function binRanges(ranges, n) {
+  if (Array.isArray(n)) { const bins = []; for (const r of ranges) (bins[n.filter((s) => r[0] >= s).length] ??= []).push(r); return bins.filter(Boolean); }
   const k = Math.min(n, ranges.length);
   return Array.from({ length: k }, (_, i) => ranges.slice(Math.round((i * ranges.length) / k), Math.round(((i + 1) * ranges.length) / k)));
 }
@@ -310,11 +329,12 @@ export function buildSfzPack(libDir, id, outDir, spec = SFZ_PACKS[id]) {
       groups.push({ name, keyLo: key, keyHi: key, rootKey: key, trigger: 'attack', regions: own });
     }
   } else {
-    const [lo, hi] = spec.keys, byKey = new Map();
+    const [lo, hi] = spec.keys, byKey = new Map(), shift = spec.transpose ?? 0;
     for (const r of usable) {
-      if (r.hikey < lo || r.lokey > hi || (r.trigger === 'release' && !spec.releases)) continue;
-      const art = spec.art?.find(([pattern]) => pattern.test(r.path))?.[1] ?? null, k = `${r.lokey} ${r.hikey} ${r.center} ${r.trigger} ${art}`;
-      if (!byKey.has(k)) byKey.set(k, { name: art ?? r.trigger, keyLo: r.lokey, keyHi: r.hikey, rootKey: r.center, tuneCents: Number(r.tune ?? 0), trigger: r.trigger, art, regions: [] });
+      const keyLo = r.lokey + shift, keyHi = r.hikey + shift;
+      if (keyHi < lo || keyLo > hi || (r.trigger === 'release' && !spec.releases)) continue;
+      const art = spec.art?.find(([pattern]) => pattern.test(r.path))?.[1] ?? null, k = `${keyLo} ${keyHi} ${r.center} ${r.trigger} ${art}`;
+      if (!byKey.has(k)) byKey.set(k, { name: art ?? r.trigger, keyLo, keyHi, rootKey: r.center + shift, tuneCents: Number(r.tune ?? 0), trigger: r.trigger, art, regions: [] });
       byKey.get(k).regions.push(r);
     }
     groups.push(...byKey.values());

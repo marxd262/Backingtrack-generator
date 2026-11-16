@@ -5,6 +5,8 @@ import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
 import { readFileSync, statSync, existsSync } from 'node:fs';
 import { expandSfz, parseSfz, defaultRegions, velAmp, binRanges, selectZones, chokeGroups, keyNumber, SFZ_PACKS } from '../../scripts/import-sfz.mjs';
+import { VOICES } from '../../src/core/voices.js';
+import { packIdFor } from '../../src/audio/voices/pack-id.js';
 
 const files = (map) => (path) => {
   const hit = Object.entries(map).find(([name]) => resolve('/lib', name) === path);
@@ -76,9 +78,12 @@ test('chokeGroups: Mikrofone mit eigenen Gruppennummern, ein Schlag würgt mehre
   assert.deepEqual([out.hat.offBy, out.openHat.offBy, out.hatPedal.chokes], [1, 2, [1, 2]]);
 });
 
-test('Packs im Format 2 (SFZ_PACKS) in src/assets/samples: Datei da und unter 12 MB, Samples lückenlos, Zonen zeigen auf Samples, Lizenz liegt bei', () => {
+test('Packs im Format 2, die eine Stimme spielt: in src/assets/samples, unter 12 MB, Samples lückenlos, Zonen zeigen auf Samples, Lizenz liegt bei', () => {
   const dir = new URL('../../src/assets/samples/', import.meta.url);
-  for (const [id, spec] of Object.entries(SFZ_PACKS)) {
+  // angefangene Einträge ohne Stimme (Bässe, 2026-11-16 pausiert) liegen nicht im Repo
+  const used = new Set(Object.entries(VOICES).flatMap(([layer, voices]) => (voices.sample?.variants ?? []).map((v) => packIdFor(layer, v))));
+  assert.ok(used.has('drums-naked') && used.has('drums-muldjord'));
+  for (const [id, spec] of Object.entries(SFZ_PACKS).filter(([id]) => used.has(id))) {
     const meta = JSON.parse(readFileSync(new URL(`${id}.json`, dir), 'utf8'));
     assert.deepEqual([meta.version, meta.id, meta.channels, meta.license], [2, id, spec.channels, spec.license], id);
     assert.match(meta.file, new RegExp(`^${id}\.[0-9a-f]{10}\.flac$`), id);
@@ -87,4 +92,8 @@ test('Packs im Format 2 (SFZ_PACKS) in src/assets/samples: Datei da und unter 12
     for (const z of meta.zones) for (const k of [z.sample, z.room].filter((x) => x !== undefined)) assert.ok(Number.isInteger(k) && k < meta.samples.length, `${id}: Zone`);
     assert.ok(existsSync(new URL(`LICENSE-${id}.md`, dir)), `${id}: Lizenz`);
   }
+});
+
+test('binRanges mit Liste: neue Stufe an den genannten Anschlägen (Growlybass: f und ff zusammen)', () => {
+  assert.deepEqual(binRanges([[0, 60], [61, 95], [96, 120], [121, 127]], [61, 96]), [[[0, 60]], [[61, 95]], [[96, 120], [121, 127]]]);
 });

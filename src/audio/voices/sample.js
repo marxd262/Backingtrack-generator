@@ -87,7 +87,7 @@ export function sampleVoice(packId, layer, ctx, { getTimbre, tuned, classic, set
     // Format 2: Round-Robin unter den gleich guten Zonen (Format 1 wählt in playNote wie bisher)
     const v2 = pack.meta.version === 2, zones = pack.meta.zones;
     const zone = v2 ? roundRobin(pickZones(artZones(zones, e.art), e.midi, e.vel), lastZone, `${e.midi} ${e.art ?? ''}`, rng) : undefined;
-    playNote(ctx, out, when, { pack, zone, midi: e.midi, dur: e.dur, vel: e.vel, gain, timeScale, filter, naturalDecay: tuned('decay'), eq, cents, oneShot, art: e.art, artSemi: e.artSemi, artTime: e.artTime, artTone: e.artTone, artRate: e.artRate, ring: e.ring === true });
+    playNote(ctx, out, when, { pack, zone, midi: e.midi, dur: e.dur, vel: e.vel, gain, timeScale, filter, naturalDecay: tuned('decay'), eq, cents, oneShot, art: e.art, artSemi: e.artSemi, artTime: e.artTime, artTone: e.artTone, artRate: e.artRate, ring: e.ring === true, stopTime: tuned('stopTime') > 0 ? tuned('stopTime') : undefined });
     // Release-Sample (Format 2, Feinwert release > 0 als Faktor): am Notenende, je gehaltene Sekunde um rtDecay dB leiser
     const release = tuned('release');
     if (v2 && release > 0 && Number.isFinite(e.dur)) {
