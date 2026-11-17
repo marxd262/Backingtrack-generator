@@ -13,7 +13,7 @@
 juce::AudioProcessorEditor* createBackingtrackEditor (BackingtrackProcessor&); // PluginEditor.cpp
 
 // Part of the name under which an analysis is kept: raise it whenever the analysis reads tracks differently.
-static const char* const analysisVersion = "2026-11-17g";
+static const char* const analysisVersion = "2026-11-17h";
 
 static juce::AudioProcessorValueTreeState::ParameterLayout createParameters() {
     using Float = juce::AudioParameterFloat;

@@ -80,6 +80,8 @@ Ursachen und Belege stehen in [DIAGNOSE.md](DIAGNOSE.md). Stand nach Phase 1 (20
 
 ### 9. Knappe Akkordarten nach der Mehrheit im Track entscheiden, und sus4 nur bei schwacher Terz
 
+**Angenommen vom Nutzer am 2026-11-17 und auf `develop` umgesetzt** (`analysisVersion` `2026-11-17h`). Neu gemessen auf `develop`: `kind` im Satz „echt“ 76,2 → 77,8 %, `triads` 87,2 → 89,8 %, `others` 43,6 → 36,3 %; generiert 92,4 → 93,8 %, generiert-2 70,1 → 70,8 % (`triads` 94,7, `others` 39,0), verstimmt 78,1 → 81,2 %, tempo 95,1 → 96,2 %; `root`, `maj/min`, `timing` und alle Zähler unverändert. Der Text unten ist der Stand vor der Entscheidung.
+
 - **Was:** Zwei Regeln für die Akkordart, zusammen. (a) Ein Akkord, den 20 % strengere und 20 % lockerere Schwellen verschieden lesen, bekommt die Art, die derselbe Akkord (Grundton und Terz) im Track dort hat, wo er klar ist. (b) Ein sus4 wird nur gemeldet, wenn die Terz schwach ist (unter 0,5 von Grundton und Quinte).
 - **Warum:** Die Robustheitsprüfung hat gezeigt, dass die Akkordart an den Schwellen kippt: Derselbe Akkord ist in einem Takt ein Septakkord, im nächsten ein Dreiklang. (b) nimmt einen häufigen Fall weg: einen Dreiklang mit einem lauten Ton darüber (Hard Rock, Akkord F).
 - **Gemessen** (Versuche 5 bis 7 von Phase 2 in [ERGEBNISSE.md](ERGEBNISSE.md), auch an den Kopien in anderer Abtastrate und als MP3): `kind` im Satz „echt“ 76,2 → 77,8 % (mit halbierten `cycle`-Gewinnen +1,00, an den Kopien +1,23 und +1,14); `triads` steigt in jedem Satz (echt 87,2 → 89,8, generiert 92,4 → 93,8, generiert-2 93,7 → 94,8, verstimmt 78,1 → 81,2, tempo 95,1 → 96,2); `root`, `maj/min`, `timing` und alle Zähler unverändert.

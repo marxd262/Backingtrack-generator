@@ -150,6 +150,48 @@ int main() {
         CHECK(unheard[1] == bars / 4);     // nothing to go by: every one of them stays (without the floor for the bass one moved)
     }
 
+    // Close calls follow the track: a chord whose kind hangs on a threshold takes the kind the same chord clearly
+    // has elsewhere. C sounds six times, every other time with a B on top: faint (just enough for a major seventh
+    // by itself) it is the plain C of the other three times; strong it is Cmaj7 and stays that.
+    {
+        const auto kindsOfC = [&](double seventh) {
+            Bar withB = triadBar(2, 0);
+            withB.tones.push_back({ 11, seventh });
+            unsigned int n = 7;
+            const std::vector<float> track = buildBars({ triadBar(0, 0), triadBar(1, 0), triadBar(2, 0), triadBar(3, 0), triadBar(0, 0), triadBar(1, 0), withB, triadBar(3, 0) }, n);
+            const btg::Analysis found = btg::analyze(track.data(), track.size(), rate);
+            std::string kinds;
+            for (int bar = 2; bar < bars; bar += 4) kinds += chordAt(found, (bar + 0.5) * 4 * beat).kind + " ";
+            return kinds;
+        };
+        const std::string faint = kindsOfC(0.075), strong = kindsOfC(0.12); // stronger still, and the bar reads as E minor
+        std::printf("C, every other time with a faint B: %s| with a strong B: %s\n", faint.c_str(), strong.c_str());
+        CHECK(faint == "maj maj maj maj maj maj ");
+        CHECK(strong == "maj maj7 maj maj7 maj maj7 ");
+    }
+
+    // A sus chord has no clear third. C with a loud F on top is still C; C, F and G with only a faint E are Csus4.
+    // Two bars of silence before the music change neither.
+    {
+        const std::vector<std::pair<int, double>> loudFourth { { 0, 0.15 }, { 4, 0.15 }, { 7, 0.15 }, { 17, 0.25 } }; // the F an octave up: next to the E the window cannot tell them apart
+        const std::vector<std::pair<int, double>> faintThird { { 0, 0.15 }, { 4, 0.02 }, { 7, 0.15 }, { 5, 0.15 } };
+        const auto kindOfC = [&](const std::vector<std::pair<int, double>>& tones, int silentBars) {
+            unsigned int n = 7;
+            // C, F and G are the tones of Fsus2 as well, so the bar before is not F. With the loud F the bass of the
+            // bar sounds an octave up, where the analysis hears it, and holds the root.
+            std::vector<float> track = buildBars({ triadBar(1, 0), triadBar(0, 0), Bar { tones, &tones == &loudFourth ? 12 : 0 }, triadBar(3, 0) }, n);
+            track.insert(track.begin(), static_cast<size_t>(silentBars * 4 * beat * rate), 0.0f);
+            const btg::Analysis found = btg::analyze(track.data(), track.size(), rate);
+            return btg::chordName(chordAt(found, (silentBars + 10 + 0.5) * 4 * beat));
+        };
+        const std::string withFourth = kindOfC(loudFourth, 0), withoutThird = kindOfC(faintThird, 0);
+        std::printf("C with a loud F on top: %s; C, F and G with a faint E: %s\n", withFourth.c_str(), withoutThird.c_str());
+        CHECK(withFourth == "C");
+        CHECK(withoutThird == "Csus4");
+        CHECK(kindOfC(loudFourth, 2) == "C");
+        CHECK(kindOfC(faintThird, 2) == "Csus4");
+    }
+
 #ifdef BTG_BEAT_MODEL
     // The beat model on the same track (skipped where native/tools/get-models.mjs has not run): its beats lie on
     // the clicks, and the analysis takes them.

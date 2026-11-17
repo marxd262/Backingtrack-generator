@@ -1274,3 +1274,53 @@ Das Hauptziel von Phase 2, `kind` im Satz „echt“ um einen Punkt zu heben, is
 == verstimmt: 6 tracks | tempo 6/6 | meter 6/6 | key root 5/6, with mode 5/6 | scale 5/6 | chords root 82.2 %, maj/min 82.2 %, kind 78.1 % (triads 78.1 %, others –) | changes on the one 100.0 % | timing +12 ms, apart 22 ms, within 83.3 %, 90 % under 31 ms, drift 10 ms/min, missed 16.7 % | tempo steady 3.1 % at most, 0.3 % off | beats +14 ms, within 50 ms 98.7 %, bars 99.0 %
 == tempo: 8 tracks | tempo 0/0 | meter 8/8 | key root 8/8, with mode 8/8 | scale 8/8 | chords root 97.8 %, maj/min 96.2 %, kind 95.1 % (triads 95.1 %, others –) | changes on the one 90.9 % | timing +19 ms, apart 26 ms, within 92.2 %, 90 % under 154 ms, drift 109 ms/min, missed 0.0 % | tempo steady 27.4 % at most, 6.4 % off | beats +19 ms, within 50 ms 94.5 %, bars 85.9 %
 ```
+
+### Nach Phase 2: Vorschlag Nr. 9 angenommen und auf `develop` umgesetzt (2026-11-17)
+
+Der Nutzer hat nach dem Bericht entschieden, die Änderungen des Zweigs `exp/analysis-close-calls` zu nehmen (Versuch 7: knappe Akkordarten folgen der Mehrheit im Track, sus4 nur bei schwacher Terz). Damit gilt seine Vorgabe für Phase 2, an der Versuch 7 gescheitert war, für diese Änderung nicht mehr.
+
+- **Umsetzung:** Die zwei Commits des Zweigs sind auf `develop` angewendet (der Zweig lag vor den Korrekturen aus der Prüfung; der Konflikt im Abschnitt für die Akkordart ist zugunsten der neuen Fassung gelöst, die Regel aus Versuch 4 samt Untergrenze für den Bass bleibt unberührt). `analysisVersion` `2026-11-17h`.
+- **Geprüft:** `native\build.ps1 -NoApp` grün (5 von 5, darunter die beiden neuen Tests); zweimal gemessen, Ausgabe gleich; App und `btg_analyze` liefern für Letting Go, Late Night Groove und `pGi9fs2HhZ0` dasselbe JSON.
+- **Zahlen** (Endstand nach Phase 2 → `develop`):
+
+| | Original | andere Rate | MP3 |
+|---|---|---|---|
+| echt `kind` | 76,2 → 77,8 | 75,8 → 77,9 | 75,9 → 77,8 |
+| echt `triads` / `others` | 87,2 → 89,8 / 43,6 → 36,3 | 86,9 → 89,9 / 41,0 → 35,2 | 87,0 → 89,7 / 42,9 → 35,8 |
+| generiert `kind` | 92,4 → 93,8 | 94,0 → 95,7 | 92,0 → 93,8 |
+| generiert-2 `kind` (`triads` / `others`) | 70,1 → 70,8 (93,6 → 94,7 / 39,6 → 39,0) | 67,5 → 68,2 (89,8 → 92,1 / 39,9 → 37,4) | 70,4 → 70,9 (93,7 → 94,8 / 40,0 → 39,0) |
+| verstimmt `kind` | 78,1 → 81,2 | 78,0 → 81,0 | 77,2 → 80,2 |
+| tempo `kind` | 95,1 → 96,2 | 95,8 → 96,3 | 96,2 → 97,3 |
+
+  `root`, `maj/min`, `timing`, `tempo steady` und alle Zähler sind in allen Sätzen und Fassungen unverändert. Je echtem Track wie bei Versuch 7: Hard Rock 83,4 → 99,0, Back Door Blues 88,7 → 92,2, Losing Control 52,2 → 54,0, Before The Dawn 69,9 → 71,1, Letting Go 72,3 → 73,5, `9pH42-82Mz0` 87,5 → 87,9; One Last Time 73,4 → 71,5, `V1r4wWATS9Y` 49,9 → 47,9.
+- **Was damit in Kauf genommen ist:** `others` fällt im Satz „echt“ um 7,3 Punkte (fast ganz `9pH42-82Mz0`: 55,9 → 0,0 %) und in generiert-2 um 0,6; zwei Drittel des Gewinns im Satz „echt“ kommen aus Hard Rock.
+
+Originale:
+
+```
+== echt: 13 tracks | tempo 12/12 | meter 13/13 | key root 12/13, with mode 12/13 | scale 12/13 | chords root 95.2 %, maj/min 94.7 %, kind 77.8 % (triads 89.8 %, others 36.3 %) | changes on the one 80.6 % | timing +102 ms, apart 125 ms, within 93.1 %, 90 % under 250 ms, drift 9 ms/min, missed 0.5 % | tempo steady 15.4 % at most, 0.2 % off
+== generiert: 18 tracks | tempo 18/18 | meter 18/18 | key root 17/18, with mode 17/18 | scale 17/18 | chords root 98.5 %, maj/min 97.8 %, kind 93.8 % (triads 93.8 %, others –) | changes on the one 100.0 % | timing +16 ms, apart 24 ms, within 100.0 %, 90 % under 32 ms, drift 9 ms/min, missed 0.0 % | tempo steady 6.8 % at most, 1.4 % off | beats +15 ms, within 50 ms 99.0 %, bars 98.6 %
+== generiert-2: 18 tracks | tempo 17/18 | meter 15/18 | key root 17/18, with mode 17/18 | scale 17/18 | chords root 95.6 %, maj/min 95.4 %, kind 70.8 % (triads 94.7 %, others 39.0 %) | changes on the one 95.0 % | timing +20 ms, apart 20 ms, within 97.1 %, 90 % under 101 ms, drift 169 ms/min, missed 1.4 % | tempo steady 59.7 % at most, 6.4 % off | beats +23 ms, within 50 ms 98.9 %, bars 92.9 %
+== verstimmt: 6 tracks | tempo 6/6 | meter 6/6 | key root 5/6, with mode 5/6 | scale 5/6 | chords root 82.2 %, maj/min 82.2 %, kind 81.2 % (triads 81.2 %, others –) | changes on the one 100.0 % | timing +12 ms, apart 22 ms, within 83.3 %, 90 % under 31 ms, drift 10 ms/min, missed 16.7 % | tempo steady 3.1 % at most, 0.3 % off | beats +14 ms, within 50 ms 98.7 %, bars 99.0 %
+== tempo: 8 tracks | tempo 0/0 | meter 8/8 | key root 8/8, with mode 8/8 | scale 8/8 | chords root 97.8 %, maj/min 96.2 %, kind 96.2 % (triads 96.2 %, others –) | changes on the one 90.9 % | timing +19 ms, apart 26 ms, within 92.2 %, 90 % under 154 ms, drift 109 ms/min, missed 0.0 % | tempo steady 27.4 % at most, 6.4 % off | beats +19 ms, within 50 ms 94.5 %, bars 85.9 %
+```
+
+Andere Rate:
+
+```
+== echt: 13 tracks | tempo 12/12 | meter 13/13 | key root 12/13, with mode 12/13 | scale 12/13 | chords root 95.1 %, maj/min 94.6 %, kind 77.9 % (triads 89.9 %, others 35.2 %) | changes on the one 80.6 % | timing +102 ms, apart 130 ms, within 92.8 %, 90 % under 249 ms, drift 9 ms/min, missed 1.1 % | tempo steady 15.4 % at most, 0.2 % off
+== generiert: 18 tracks | tempo 18/18 | meter 18/18 | key root 17/18, with mode 17/18 | scale 17/18 | chords root 98.5 %, maj/min 97.8 %, kind 95.7 % (triads 95.7 %, others –) | changes on the one 100.0 % | timing +16 ms, apart 24 ms, within 99.6 %, 90 % under 31 ms, drift 12 ms/min, missed 0.0 % | tempo steady 6.8 % at most, 1.2 % off | beats +15 ms, within 50 ms 99.0 %, bars 98.6 %
+== generiert-2: 18 tracks | tempo 17/18 | meter 15/18 | key root 17/18, with mode 17/18 | scale 17/18 | chords root 94.2 %, maj/min 93.9 %, kind 68.2 % (triads 92.1 %, others 37.4 %) | changes on the one 93.0 % | timing +41 ms, apart 41 ms, within 93.5 %, 90 % under 142 ms, drift 97 ms/min, missed 4.7 % | tempo steady 59.7 % at most, 0.9 % off | beats +23 ms, within 50 ms 96.2 %, bars 91.2 %
+== verstimmt: 6 tracks | tempo 6/6 | meter 6/6 | key root 5/6, with mode 5/6 | scale 5/6 | chords root 82.0 %, maj/min 82.0 %, kind 81.0 % (triads 81.0 %, others –) | changes on the one 100.0 % | timing +12 ms, apart 22 ms, within 82.2 %, 90 % under 31 ms, drift 19 ms/min, missed 16.7 % | tempo steady 2.4 % at most, 0.0 % off | beats +14 ms, within 50 ms 99.5 %, bars 99.0 %
+== tempo: 8 tracks | tempo 0/0 | meter 8/8 | key root 8/8, with mode 8/8 | scale 8/8 | chords root 97.9 %, maj/min 96.3 %, kind 96.3 % (triads 96.3 %, others –) | changes on the one 90.3 % | timing +20 ms, apart 26 ms, within 93.1 %, 90 % under 163 ms, drift 67 ms/min, missed 0.0 % | tempo steady 26.0 % at most, 6.5 % off | beats +19 ms, within 50 ms 94.4 %, bars 85.9 %
+```
+
+MP3:
+
+```
+== echt: 13 tracks | tempo 12/12 | meter 13/13 | key root 12/13, with mode 12/13 | scale 12/13 | chords root 95.2 %, maj/min 94.7 %, kind 77.8 % (triads 89.7 %, others 35.8 %) | changes on the one 80.6 % | timing +106 ms, apart 128 ms, within 92.5 %, 90 % under 251 ms, drift 10 ms/min, missed 0.5 % | tempo steady 16.0 % at most, 0.4 % off
+== generiert: 18 tracks | tempo 18/18 | meter 18/18 | key root 17/18, with mode 17/18 | scale 17/18 | chords root 98.5 %, maj/min 97.8 %, kind 93.8 % (triads 93.8 %, others –) | changes on the one 97.4 % | timing +19 ms, apart 25 ms, within 100.0 %, 90 % under 31 ms, drift 11 ms/min, missed 0.0 % | tempo steady 14.0 % at most, 2.1 % off | beats +19 ms, within 50 ms 97.8 %, bars 96.2 %
+== generiert-2: 18 tracks | tempo 17/18 | meter 15/18 | key root 17/18, with mode 17/18 | scale 17/18 | chords root 95.7 %, maj/min 95.7 %, kind 70.9 % (triads 94.8 %, others 39.0 %) | changes on the one 95.4 % | timing +20 ms, apart 20 ms, within 97.4 %, 90 % under 101 ms, drift 147 ms/min, missed 1.4 % | tempo steady 37.3 % at most, 6.0 % off | beats +23 ms, within 50 ms 98.8 %, bars 93.6 %
+== verstimmt: 6 tracks | tempo 6/6 | meter 6/6 | key root 5/6, with mode 5/6 | scale 5/6 | chords root 82.3 %, maj/min 82.3 %, kind 80.2 % (triads 80.2 %, others –) | changes on the one 100.0 % | timing +12 ms, apart 21 ms, within 83.3 %, 90 % under 32 ms, drift 11 ms/min, missed 16.7 % | tempo steady 3.1 % at most, 0.3 % off | beats +14 ms, within 50 ms 99.2 %, bars 99.0 %
+== tempo: 8 tracks | tempo 0/0 | meter 8/8 | key root 8/8, with mode 8/8 | scale 8/8 | chords root 98.9 %, maj/min 97.3 %, kind 97.3 % (triads 97.3 %, others –) | changes on the one 96.7 % | timing +12 ms, apart 23 ms, within 94.4 %, 90 % under 56 ms, drift 47 ms/min, missed 0.0 % | tempo steady 27.4 % at most, 6.9 % off | beats +12 ms, within 50 ms 95.8 %, bars 92.2 %
+```

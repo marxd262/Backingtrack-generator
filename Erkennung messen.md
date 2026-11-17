@@ -1,6 +1,6 @@
 # Akkord- und Takterkennung verbessern: Auftrag und Messung
 
-Diese Datei ist für einen Agenten, der die Akkorderkennung und die Takterkennung der nativen App verbessern soll. Sie beschreibt den Auftrag, womit und wie man misst, und woran man erkennt, ob eine Änderung die Erkennung besser gemacht hat. Stand der Zahlen: 2026-11-17, Branch `exp/analysis-agent`. **Alle drei Phasen sind abgeschlossen; der Schlussbericht ist [native/BERICHT.md](native/BERICHT.md).** Der Abschnitt „Endstand nach Phase 2“ ist mit dem Commit `4179a5b` gemessen (`analysisVersion` `2026-11-17g`). Der Abschnitt „Ausgangsstand für Phase 2“ ist mit dem Commit `da62e4e` gemessen (gleich dem Stand nach Phase 1, `a622b53`, dazu nur eine Protokollzeile); „Ausgangsstand vor Phase 1“ ist mit `955b5e8` gemessen (nach dem gemeinsamen Dekodierweg, gleich dem Stand nach Phase 0). App und `btg_analyze` liefern für drei Tracks dasselbe JSON, vor und nach den Versuchen (siehe [native/ERGEBNISSE.md](native/ERGEBNISSE.md), „Phase 1“).
+Diese Datei ist für einen Agenten, der die Akkorderkennung und die Takterkennung der nativen App verbessern soll. Sie beschreibt den Auftrag, womit und wie man misst, und woran man erkennt, ob eine Änderung die Erkennung besser gemacht hat. Stand der Zahlen: 2026-11-17, Branch `exp/analysis-agent`. **Alle drei Phasen sind abgeschlossen; der Schlussbericht ist [native/BERICHT.md](native/BERICHT.md).** Danach hat der Nutzer Vorschlag Nr. 9 angenommen; was heute auf `develop` gilt, steht im Abschnitt „Stand auf `develop` nach Vorschlag Nr. 9“ (`analysisVersion` `2026-11-17h`). Der Abschnitt „Endstand nach Phase 2“ ist mit dem Commit `4179a5b` gemessen (`analysisVersion` `2026-11-17g`). Der Abschnitt „Ausgangsstand für Phase 2“ ist mit dem Commit `da62e4e` gemessen (gleich dem Stand nach Phase 1, `a622b53`, dazu nur eine Protokollzeile); „Ausgangsstand vor Phase 1“ ist mit `955b5e8` gemessen (nach dem gemeinsamen Dekodierweg, gleich dem Stand nach Phase 0). App und `btg_analyze` liefern für drei Tracks dasselbe JSON, vor und nach den Versuchen (siehe [native/ERGEBNISSE.md](native/ERGEBNISSE.md), „Phase 1“).
 
 ## Auftrag
 
@@ -129,6 +129,37 @@ Verglichen wird alle 0,1 s innerhalb der Strecke, die das Label abdeckt. Die Zah
 | `bars` | nur generierte Sätze: Anteil der Taktanfänge des Generators mit einem gefundenen Taktanfang innerhalb von ±50 ms. Misst die Lage der Eins direkt |
 
 Die Messung ist deterministisch: derselbe Stand ergibt dieselben Zahlen (in Phase 0 zweimal gemessen, Ausgabe identisch).
+
+## Stand auf `develop` nach Vorschlag Nr. 9 (gilt heute)
+
+Der Nutzer hat am 2026-11-17 Vorschlag Nr. 9 angenommen: Knappe Akkordarten folgen der Mehrheit im Track, und ein sus4 wird nur bei schwacher Terz gemeldet. Gemessen auf `develop`, zweimal, Ausgabe gleich; `analysisVersion` `2026-11-17h`. Gegenüber dem „Endstand nach Phase 2“ darunter ändern sich nur `kind`, `triads` und `others`; Tempo, Taktart, Tonart, `root`, `maj/min`, `timing`, `tempo steady`, `beats` und `bars` sind in allen Sätzen gleich geblieben.
+
+| Satz | `root` | `maj/min` | `kind` (`triads` / `others`) | vorher `kind` (`triads` / `others`) |
+|---|---|---|---|---|
+| echt (13) | 95,2 % | 94,7 % | 77,8 % (89,8 / 36,3) | 76,2 % (87,2 / 43,6) |
+| generiert (18) | 98,5 % | 97,8 % | 93,8 % (93,8 / –) | 92,4 % (92,4 / –) |
+| generiert-2 (18) | 95,6 % | 95,4 % | 70,8 % (94,7 / 39,0) | 70,1 % (93,6 / 39,6) |
+| verstimmt (6) | 82,2 % | 82,2 % | 81,2 % (81,2 / –) | 78,1 % (78,1 / –) |
+| tempo (8) | 97,8 % | 96,2 % | 96,2 % (96,2 / –) | 95,1 % (95,1 / –) |
+
+Die echten Tracks einzeln (`kind` / `triads` / `others`; alle anderen Werte wie in der Tabelle des Endstands nach Phase 2):
+
+| Track | Werte | vorher |
+|---|---|---|
+| 3/4 R&B  Backing Track in E Minor | 97,2 / 97,2 / – | gleich |
+| D Minor Emotional Rock Guitar Back (`9pH42-82Mz0`) | 87,9 / 91,6 / 0,0 | 87,5 / 88,9 / 55,9 |
+| Before The Dawn Guitar Backing Tra | 71,1 / 92,2 / 0,0 | 69,9 / 90,7 / 0,0 |
+| Late Night Groove Guitar Backing T | 69,1 / 69,1 / – | gleich |
+| Letting Go Guitar Backing Track Ja | 73,5 / 95,3 / 27,3 | 72,3 / 94,5 / 25,1 |
+| Losing Control Guitar Backing Trac | 54,0 / 91,0 / 0,0 | 52,2 / 87,9 / 0,0 |
+| Back Door Blues Guitar Backing Tra | 92,2 / 88,6 / 97,5 | 88,7 / 82,7 / 97,5 |
+| Soulful SMOOTH JAZZ Backing Track (`cycle`) | 73,7 / – / 73,7 | gleich |
+| Guitar Rock Ballad Backing Track i | 96,6 / 96,6 / – | gleich |
+| Hard Rock Metal Fast Guitar Backin (`cycle`) | 99,0 / 99,0 / – | 83,4 / 83,4 / – |
+| Raging Southern Rock Jam in A Mino (`cycle`) | 47,9 / 96,5 / 0,0 | 49,9 / 95,8 / 4,7 |
+| One Last Time Guitar Backing Track | 71,5 / 70,4 / 92,1 | 73,4 / 72,4 / 92,1 |
+
+An den Kopien der Robustheitsprüfung steigt `kind` im Satz „echt“ ebenso: andere Rate 75,8 → 77,9 %, MP3 75,9 → 77,8 %. Der Preis ist `others`: im Satz „echt“ 43,6 → 36,3 % (fast ganz `9pH42-82Mz0`), in generiert-2 39,6 → 39,0 %.
 
 ## Endstand nach Phase 2
 

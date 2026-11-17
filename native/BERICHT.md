@@ -2,6 +2,20 @@
 
 Stand 2026-11-17, Branch `exp/analysis-agent`, nicht gepusht, `analysisVersion` `2026-11-17g`. Auftrag und Regeln stehen in [Erkennung messen.md](../Erkennung%20messen.md), jeder Versuch mit seinen Zahlen in [ERGEBNISSE.md](ERGEBNISSE.md). Dieser Bericht fasst zusammen, was der Lauf ergeben hat und was der Nutzer jetzt entscheiden muss.
 
+## Nachtrag: Vorschlag Nr. 9 ist angenommen
+
+Nach diesem Bericht hat der Nutzer am 2026-11-17 Vorschlag Nr. 9 angenommen (knappe Akkordarten folgen der Mehrheit im Track; sus4 nur bei schwacher Terz). Die Änderung ist auf `develop` umgesetzt und dort neu gemessen; `analysisVersion` steht auf `2026-11-17h`. Der Bericht darunter beschreibt den Stand davor.
+
+| | Endstand nach Phase 2 | auf `develop` mit Vorschlag Nr. 9 |
+|---|---|---|
+| echt `kind` (`triads` / `others`) | 76,2 % (87,2 / 43,6) | **77,8 %** (89,8 / 36,3) |
+| generiert `kind` | 92,4 % | 93,8 % |
+| generiert-2 `kind` (`triads` / `others`) | 70,1 % (93,6 / 39,6) | 70,8 % (94,7 / 39,0) |
+| verstimmt `kind` | 78,1 % | 81,2 % |
+| tempo `kind` | 95,1 % | 96,2 % |
+
+`root`, `maj/min`, `timing`, `tempo steady` und alle Zähler sind unverändert. An den Kopien steigt `kind` im Satz „echt“ ebenso (andere Rate 75,8 → 77,9 %, MP3 75,9 → 77,8 %). App und `btg_analyze` liefern für drei Tracks weiter dasselbe JSON. Offen bleiben die Vorschläge Nr. 7, 10, 11 und 12; für Nr. 12 hört sich der Nutzer die Stellen an (Before The Dawn, Label „F“, 1:27 bis 1:30, 1:37 bis 1:39, 1:46 bis 1:48; One Last Time, Label „Eb“, 0:55 bis 0:58, 1:09 bis 1:13, 2:07 bis 2:11).
+
 ## Ergebnis in Kürze
 
 | Satz „echt“ (13 Tracks) | vor Phase 1 | nach Phase 1 | nach Phase 2 |

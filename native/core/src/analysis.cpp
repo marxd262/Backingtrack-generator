@@ -13,7 +13,10 @@
 #include <complex>
 #include <cstdio>
 #include <cstdlib>
+#include <map>
 #include <numeric>
+#include <string>
+#include <vector>
 
 namespace btg {
 namespace {
@@ -611,40 +614,78 @@ Analysis analyze(const float* mono, size_t frames, double sampleRate, const std:
     {
         const double seventh = knob("K_SEVENTH", 0.65), sixth = knob("K_SIXTH", 0.7), ninth = knob("K_NINTH", 0.8);
         const double hung = knob("K_SUS", 0.7), bare = knob("K_BARE", 0.2);
-        size_t b = 0;
-        for (auto& chord : result.chords) {
-            Chroma sum {}, low {};
-            for (; b < beatCount && result.beats[b] < chord.end - 1e-6; ++b)
-                for (int pc = 0; pc < 12; ++pc) { sum[pc] += beatChroma[b][pc] * loudness[b]; low[pc] += beatBass[b][pc] * loudness[b]; }
-            const auto at = [&](int interval) { return sum[(chord.root + interval) % 12]; };
-            const double ref = 0.5 * (at(0) + at(7)) + 1e-9;
-            std::array<double, 12> tones {}; // for the log: every tone above the root as read here, against root and fifth
-            for (int i = 0; i < 12; ++i) tones[static_cast<size_t>(i)] = at(i) / ref;
-            const bool minorRead = chord.minor;
-            chord.kind = chord.minor ? "min" : "maj";
-            if (std::max(at(3), at(4)) < bare * ref) chord.kind = at(5) > hung * ref ? "sus4" : at(2) > hung * ref ? "sus2" : "power";
-            else if (chord.minor) {
-                if (at(6) > at(7) && at(6) > hung * at(0)) chord.kind = at(9) > seventh * ref && at(9) > at(10) ? "dim7" : at(10) > seventh * ref ? "m7b5" : "dim";
-                else if (at(10) > seventh * ref) chord.kind = at(2) > ninth * ref ? "min9" : "min7";
-                else if (at(9) > sixth * ref) chord.kind = "min6";
-            } else {
-                if (at(5) > hung * ref && at(5) > at(4)) chord.kind = "sus4";
-                else if (at(11) > seventh * ref && at(11) > at(10)) chord.kind = "maj7";
-                else if (at(10) > seventh * ref) chord.kind = at(2) > ninth * ref ? "dom9" : "dom7";
-                else if (at(9) > sixth * ref) chord.kind = "maj6";
-                else if (at(2) > ninth * ref) chord.kind = "add9";
+        using Tones = std::array<double, 12>; // every tone above the root of a chord, against the mean of root and fifth
+        // `s`: how strictly the tones are read. Above 1 an added tone must be that much stronger and a missing
+        // third that much weaker to count; below 1 the other way round.
+        const auto read = [&](const Tones& t, bool minor, double s) -> std::string {
+            if (std::max(t[3], t[4]) < bare / s) return t[5] > hung * s ? "sus4" : t[2] > hung * s ? "sus2" : "power";
+            if (minor) {
+                if (t[6] > t[7] && t[6] > hung * s * t[0]) return t[9] > seventh * s && t[9] > t[10] ? "dim7" : t[10] > seventh * s ? "m7b5" : "dim";
+                if (t[10] > seventh * s) return t[2] > ninth * s ? "min9" : "min7";
+                return t[9] > sixth * s ? "min6" : "min";
             }
+            // a sus chord has no clear third: a fourth over a triad whose third is there is a melody note or a held tone
+            if (t[5] > hung * s && t[5] > t[4] && std::max(t[3], t[4]) < knob("K_SUS_THIRD", 0.5) / s) return "sus4";
+            if (t[11] > seventh * s && t[11] > t[10]) return "maj7";
+            if (t[10] > seventh * s) return t[2] > ninth * s ? "dom9" : "dom7";
+            if (t[9] > sixth * s) return "maj6";
+            return t[2] > ninth * s ? "add9" : "maj";
+        };
+        const size_t chordCount = result.chords.size();
+        std::vector<Tones> tones(chordCount);
+        std::vector<Chroma> lows(chordCount);
+        for (size_t c = 0, b = 0; c < chordCount; ++c) {
+            const auto& chord = result.chords[c];
+            Chroma sum {};
+            lows[c].fill(0.0);
+            for (; b < beatCount && result.beats[b] < chord.end - 1e-6; ++b)
+                for (int pc = 0; pc < 12; ++pc) { sum[pc] += beatChroma[b][pc] * loudness[b]; lows[c][pc] += beatBass[b][pc] * loudness[b]; }
+            const double ref = 0.5 * (sum[static_cast<size_t>(chord.root)] + sum[static_cast<size_t>((chord.root + 7) % 12)]) + 1e-9;
+            for (size_t i = 0; i < 12; ++i) tones[c][i] = sum[(static_cast<size_t>(chord.root) + i) % 12] / ref;
+        }
+        // Close calls follow the track. Where a tone sits near its threshold the kind of a chord flips with every
+        // small change of the sound (another sample rate, MP3): the same chord is a seventh chord in one bar and a
+        // triad in the next. A chord is close when a reading that much stricter and one that much looser disagree.
+        // It then takes, of those two readings and its own, the kind that the clear chords with the same root and
+        // third in this track have for the longest time: a track has few chords, and plays them the same way.
+        const double close = knob("K_CLOSE", 0.2);
+        const auto key = [](const Analysis::Chord& chord, const std::string& kind) { return std::to_string(chord.root) + (chord.minor ? "m " : " ") + kind; };
+        std::map<std::string, double> clear; // root, third and kind -> the seconds chords clearly have it
+        std::vector<std::string> own(chordCount), strict(chordCount), loose(chordCount);
+        std::vector<bool> moved(chordCount, false), minorRead(chordCount);
+        for (size_t c = 0; c < chordCount; ++c) {
+            auto& chord = result.chords[c];
+            minorRead[c] = chord.minor;
+            chord.kind = own[c] = strict[c] = loose[c] = read(tones[c], chord.minor, 1.0);
             // A sixth chord has the tones of the minor seventh chord a third below (Bb6 = Gm7). The bass tells
-            // them apart: on the lower root, and with that minor chord in the key, it is the minor seventh.
+            // them apart: on the lower root, and with that minor chord in the key, it is the minor seventh. That
+            // rests on the bass, not on a threshold, so such a chord is not a close call.
             const int relative = (chord.root + 9) % 12;
-            if (chord.kind == "maj6" && inKey[static_cast<size_t>(relative) + 12] > 0 && low[static_cast<size_t>(relative)] > knob("SIXTH_BASS", 1.0) * low[static_cast<size_t>(chord.root)]) {
+            if (own[c] == "maj6" && inKey[static_cast<size_t>(relative) + 12] > 0 && lows[c][static_cast<size_t>(relative)] > knob("SIXTH_BASS", 1.0) * lows[c][static_cast<size_t>(chord.root)]) {
                 chord.root = relative;
                 chord.minor = true;
                 chord.kind = "min7";
+                moved[c] = true;
+                continue;
             }
-            if (trace) { // the chord as named, and how strong each tone above its first root is, against root and fifth
-                std::fprintf(stderr, "kind: %.3f %.3f %s %s |", chord.start, chord.end, chordName(chord).c_str(), chord.minor != minorRead ? "moved" : minorRead ? "minor" : "major");
-                for (const double v : tones) std::fprintf(stderr, " %.3f", v);
+            strict[c] = read(tones[c], chord.minor, 1 + close);
+            loose[c] = read(tones[c], chord.minor, 1 - close);
+            if (strict[c] == own[c] && loose[c] == own[c]) clear[key(chord, own[c])] += chord.end - chord.start;
+        }
+        for (size_t c = 0; c < chordCount; ++c) {
+            auto& chord = result.chords[c];
+            const bool isClose = strict[c] != own[c] || loose[c] != own[c];
+            if (isClose) {
+                double most = clear.count(key(chord, own[c])) ? clear[key(chord, own[c])] : 0.0;
+                for (const std::string& other : { strict[c], loose[c] }) {
+                    const auto found = clear.find(key(chord, other));
+                    if (found != clear.end() && found->second > most) { most = found->second; chord.kind = other; }
+                }
+            }
+            if (trace) { // the chord as named; how it was read (moved: a sixth chord read as the minor seventh below); its tones
+                std::fprintf(stderr, "kind: %.3f %.3f %s %s |", chord.start, chord.end, chordName(chord).c_str(), moved[c] ? "moved" : minorRead[c] ? "minor" : "major");
+                for (const double v : tones[c]) std::fprintf(stderr, " %.3f", v);
+                if (isClose) std::fprintf(stderr, " | close: by itself %s, stricter %s, looser %s", own[c].c_str(), strict[c].c_str(), loose[c].c_str());
                 std::fprintf(stderr, "\n");
             }
         }
