@@ -13,7 +13,7 @@ const HOME = 79; // Ruhelage der Linie (G5), Mitte des Umfangs; die Linie wird s
  * Skala des Leads je Modus. Die Skalenwahl der Oberfläche liegt außerhalb des Tracks, darum hier ein fester Standard:
  * Moll -> Moll-Pentatonik, Dur -> Dur-Pentatonik, Dorisch -> dorisch.
  */
-export const LEAD_SCALE = Object.freeze({ minor: 'minorPentatonic', major: 'majorPentatonic', dorian: 'dorian' });
+export const LEAD_SCALE = Object.freeze({ minor: 'minorPentatonic', major: 'majorPentatonic', dorian: 'dorian', phrygian: 'phrygian', lydian: 'lydian', mixolydian: 'mixolydian' });
 
 const RANGE = Array.from({ length: LEAD_MAX - LEAD_MIN + 1 }, (_, i) => LEAD_MIN + i);
 const semitone = (a, b) => (a - b + 12) % 12 === 1 || (b - a + 12) % 12 === 1;

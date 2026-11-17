@@ -1,0 +1,33 @@
+# Lizenzen der nativen App
+
+Jede Abhängigkeit und jedes Modell (Code **und** Gewichte) steht hier, bevor sie benutzt wird. Regel: nichts unter AGPL/GPL oder mit NC-Klausel ohne Zustimmung des Nutzers. Die Lizenzen der Sample-Packs stehen in `CREDITS.md` und `docs/sound-v2/UEBERGABE_SAMPLES.md`; CC-BY verlangt die Namensnennung auch in der nativen App.
+
+„Geprüft“ heißt: Lizenztext der genannten Version gelesen. „Geplant“ heißt: noch nicht eingebunden, Lizenz aus Vorwissen, wird beim Einbinden geprüft.
+
+| Abhängigkeit | Wofür | Lizenz | Stand |
+|---|---|---|---|
+| JUCE 9 (`9.0.5`) | Hülle: Audio, Fenster, WebView | AGPLv3 **oder** JUCE-9-EULA; benutzt wird die EULA, Stufe Starter (kostenlos bis 20 000 US-Dollar Umsatz oder Finanzierung in 12 Monaten) | geprüft 2026-11-16 (juce.com: JUCE 8 EULA, JUCE 9 EULA, Preisseite). **Der Nutzer hat der EULA (Stufe Starter) am 2026-11-16 zugestimmt.** Eingebunden seit Schritt 1 |
+| WebView2-SDK 1.0.3485.44 (NuGet `Microsoft.Web.WebView2`) | WebView unter Windows, statisch gebunden | BSD-3-Clause (Microsoft) | geprüft 2026-11-17 (`LICENSE.txt` im Paket), eingebunden seit Schritt 2 |
+| WebView2-Laufzeit | läuft auf dem Rechner des Nutzers | Microsoft, Evergreen-Verteilung | geplant (Schritt 7: Installer) |
+| WebKitGTK 4.1 | WebView unter Linux, Systembibliothek | LGPL 2.1, dynamisch gebunden | geplant (nur CI-Build) |
+| dr_flac 0.13.5 (dr_libs, Commit `c2d31fe`) | FLAC der Sample-Packs im Kern | wahlweise gemeinfrei (Unlicense) oder MIT-0 | geprüft 2026-11-17 (Lizenztext am Ende der Datei), eingebunden seit Schritt 4 |
+| dr_mp3 0.7.5, dr_wav 0.14.7 (dr_libs, Commit `c2d31fe`) | Dekodieren im Werkzeug `btg_analyze` (ohne JUCE); nicht in der App | wahlweise gemeinfrei (Unlicense) oder MIT-0 | geprüft 2026-11-17 (Kopf der Dateien), eingebunden seit Schritt 5 |
+| Media Foundation, WASAPI | M4A/AAC dekodieren, Systemton mitschneiden (nur Windows, hinter `native/platform`) | Teil von Windows, nichts wird mitgeliefert | eingebunden seit Schritt 5 |
+| JUCE-Decoder (WAV, AIFF, FLAC, Ogg Vorbis, MP3) | eigene Tracks in der App laden | Teil von JUCE (dessen Lizenz); FLAC und Ogg Vorbis darin BSD-artig | eingebunden seit Schritt 5 |
+| yt-dlp | nur Werkzeug: lädt die Videos der Testtracks für die Labels; wird nicht ausgeliefert | Unlicense | auf dem Rechner des Nutzers installiert (winget), 2026-11-17 |
+| nlohmann/json 3.12.0 | JSON im Kern (Track, Groove-Daten, Packs, Testdaten) | MIT | geprüft 2026-11-17 (`LICENSE.MIT` der Version), eingebunden seit Schritt 3 |
+| ONNX Runtime 1.30.1 (fertige Bibliothek des Releases, per Prüfsumme) | Modelle ausführen (Beat This!) | MIT | eingebunden über FetchContent; `onnxruntime.dll` liegt neben dem Programm; Nutzer hat am 2026-11-17 zugestimmt |
+| DirectML | GPU unter Windows | Microsoft-Lizenz; Weitergabe-Text nicht gefunden; wird nur noch gepflegt | zurückgestellt |
+| Demucs (Code) | Quellentrennung, nur als Werkzeug auf dem Entwicklungsrechner (Python, außerhalb des Repos) | MIT | nicht eingebunden |
+| Demucs (Gewichte `htdemucs`) | Quellentrennung | **nicht auslieferbar**: laut Autor nicht von der MIT-Lizenz gedeckt, nur für Forschung (Issue 327 im Demucs-Repo); trainiert auf MUSDB18-HQ (nicht kommerziell) | geprüft 2026-11-17 (Recherche, Zitate in `ERGEBNISSE.md`); nur lokal zum Messen benutzt |
+| Spleeter (Deezer), Gewichte | Kandidat für eine auslieferbare Trennung | laut Veröffentlichung MIT (Code und Modelle); im README nicht bestätigt | nicht eingebunden; schriftliche Bestätigung von Deezer nötig |
+| Beat This! (CPJKU), Gewichte „final0“ als ONNX aus mosynthkey/beat_this_cpp (Commit `07ab790`) | Schläge und Taktanfänge | MIT, ausdrücklich auch die Gewichte („The code and the published model weights are released under the MIT license“); die ONNX-Umwandlung steht in einem MIT-Repo; trainiert auch auf geschützter Musik (Hinweis im README) | nicht im Repo: `native/tools/get-models.mjs` lädt die Datei (83 MB) mit Prüfsumme nach `native/models`; Vor- und Nachverarbeitung in `core/src/beat_model.cpp` selbst geschrieben nach der Referenz; Nutzer hat am 2026-11-17 zugestimmt |
+| signalsmith-stretch (Commit `88061fd`) mit signalsmith-linear 0.6.6 | Geschwindigkeit ohne Tonhöhenänderung im Datei-Abspieler | MIT (beide) | eingebunden über FetchContent mit Prüfsumme; Nutzer hat am 2026-11-17 zugestimmt |
+
+## JUCE: was die Stufe Starter bedeutet
+
+- Verteilen und Verkaufen eigener Produkte ist erlaubt, auch ohne Quelltext (EULA 1.9). Kein Startbildschirm verlangt.
+- Grenze 20 000 US-Dollar in den letzten 12 Monaten: bei Einzelpersonen der Umsatz aus der Nutzung von JUCE, bei Firmen der gesamte Umsatz samt verbundener Unternehmen (1.2.1). Darüber: Indie (800 $ einmalig oder 40 $ im Monat je Nutzer, bis 300 000 $) oder Entwicklung und Verteilung einstellen (1.14).
+- JUCE darf nicht einzeln weitergegeben werden (1.17) und nicht unter eine Open-Source-Lizenz mit Offenlegungspflicht geraten (2.3). Deshalb: JUCE per FetchContent, nie im Repo; der Kern (`native/core`) enthält kein JUCE.
+- Offene Frage vor der ersten veröffentlichten Binärdatei: öffentliches MIT-Repo mit JUCE-Hülle unter der EULA, bei sales@juce.com bestätigen lassen.
+- Eine JUCE-9-Lizenz gilt auch für JUCE 8 (EULA 9, 1.15); umgekehrt nicht.

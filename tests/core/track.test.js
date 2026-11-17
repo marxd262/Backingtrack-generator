@@ -157,7 +157,7 @@ test('validateTrack: fehlende oder kaputte Tonart ergibt badKey und keine Akkord
   const noKey = good();
   delete noKey.key;
   const keys = [undefined, null, 'A', 5, [], {}, { root: 'A' }, { mode: 'minor' }, { root: 'H', mode: 'minor' },
-    { root: ['A'], mode: 'minor' }, { root: 'A', mode: 'lydian' }, { root: 'A', mode: 'toString' }];
+    { root: ['A'], mode: 'minor' }, { root: 'A', mode: 'locrian' }, { root: 'A', mode: 'toString' }];
   for (const key of keys) {
     assert.deepEqual(codes({ ...good(), key, bars: [am('C#', 'maj')] }), ['badKey'], JSON.stringify(key));
   }

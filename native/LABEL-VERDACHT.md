@@ -1,0 +1,16 @@
+# Label-Verdachtsfälle
+
+Stellen, an denen das Label der Akkordanzeige im Video und das Spektrum der Aufnahme auseinandergehen. Geändert ist kein Label; der Nutzer entscheidet. Gehört hat der Agent nichts: „Was das Spektrum zeigt“ ist die Stärke der Töne über dem Grundton, gemessen an Grundton und Quinte (Protokollzeile `kind:` hinter `BTG_ANALYSIS_LOG`), und die Stärke der Grundtöne im Bass (Zeile `change:`). Stand: 2026-11-17, Phase 2. Einzelheiten in [ERGEBNISSE.md](ERGEBNISSE.md), „Phase 2“. Was die Fälle kosten, hat Versuch 9 gemessen: Eine sus-Regel, die in generiert-2 knapp zehn Punkte bei den anderen Akkordarten gewinnt, verliert bei Before The Dawn 12,3 und bei One Last Time 6,7 Punkte `kind`, weil sie die Zeilen „F“ und „Eb“ dieser Tabelle als sus2 liest (Vorschlag Nr. 12 in [VORSCHLAEGE.md](VORSCHLAEGE.md)).
+
+| Track | Zeitstelle | Label | Was das Spektrum zeigt | Warum es zählt |
+|---|---|---|---|---|
+| Late Night Groove | alle Gm im Jam-Teil (73 s, wo der Grundton stimmt) | Gm | kleine Septime (F) im Median 0,94, Terz 0,75: die Septime ist so stark wie die Akkordtöne. Sieht aus wie Gm7 | 70 s gelten als falsch (`min → min7`), `triads` des Tracks 69,1 % |
+| One Last Time | alle Gm (91 s) | Gm | kleine Septime 0,61 bis 0,78 (Median 0,75), Terz 0,89: schwächer als bei Late Night Groove, aber durchgehend da | 75 s als Gm7 gemeldet |
+| Before The Dawn | F im Jam-Teil (105 s) | F | in 54 s ist die Sekunde (G) über 0,7 und lauter als die Terz: sieht aus wie Fsus2 oder Fadd9 | eine sus2-Regel spräche hier an und gälte als Fehler |
+| Before The Dawn | Dsus2 (97 s) | Dsus2 | Sekunde (E) 0,41, Terz (F) 0,41: die Mollterz ist so stark wie die Sekunde. Sieht aus wie Dm mit Sekunde | `others` des Tracks 0,0 %; 78 s als Dm gemeldet |
+| Letting Go | Bb (51 s) | Bb | in 18 s Sekunde über 0,7 und lauter als die Terz, wie beim Bbsus2 desselben Tracks | Bb und Bbsus2 sind im Spektrum nicht zu trennen |
+| Letting Go | 150,10 / 251,16 / 326,96 / 352,22 / 428,00 / 453,28 s | Gm11 bis zum Taktanfang, dann Bbsus2 | der Bass liegt schon zwei Schläge vor dem Label auf Bb (zwei- bis dreimal so stark wie G) | sechs Wechsel gelten als 1 s zu früh |
+| Before The Dawn | 121,80 / 206,52 / 291,22 / 375,92 s | G bis zum Taktanfang, dann F | die Analyse hört F zwei Schläge früher; im Bass sind G und F vor und nach dem Taktanfang etwa gleich stark | vier Wechsel gelten als 1 s zu früh; offen, wer recht hat |
+| Hard Rock (`qmlHtyS_P8k`, `cycle`) | alle F (etwa 85 s) | F | Quarte (Bb) 0,72 bis 0,89 bei einer Terz von 0,57 bis 0,75: F mit einem Bb darüber | 51 bis 68 s als Fsus4 gemeldet, je nach Abtastrate |
+| Back Door Blues | je Durchgang die letzten zwei Schläge vor B7 und der Turnaround-Takt (zusammen 23 s) | E | Basslauf über A, A#, H und der Turnaround über A: die Analyse meldet Asus4 und A | das Label ist gröber als die Musik, kein Fehler des Labels |
+| `9pH42-82Mz0` | drei Stellen, schon in Phase 1 notiert | Bb → C | die Analyse meldet Bb → F (halber Takt) → C | der Nutzer hört es sich selbst an; in Phase 2 nicht bearbeitet |

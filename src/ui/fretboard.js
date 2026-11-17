@@ -4,7 +4,7 @@
 import { fretboardNotes, STANDARD_TUNING, FRETS } from '../core/fretboard.js';
 import { chordMidi, noteName } from '../core/music.js';
 import { t } from '../index.js';
-import { chordName, setAttr, setText } from './state.js';
+import { chordName, pressed, setAttr, setText } from './state.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 const MIN_W = 640; // schmaler wird der Behälter waagerecht gescrollt, das Brett bleibt so breit
@@ -122,6 +122,48 @@ export function createFretboard(container) {
       layout(view.spacing);
       paint();
     },
+  };
+}
+
+// Inhalt des Griffbrett-Moduls: Titel, Umschalter im Modulkopf, Brett (das SVG baut createFretboard; zu schmal scrollt nur dieser
+// Bereich waagerecht, nie die Seite), Legende und Textfassung. Die Zeichen der Legende sind die des Bretts (dekorativ), die Bedeutung
+// steht als Text daneben. Die Texte setzt die Seite über data-i18n.
+const LEGEND = [['scale', 'ui.legendScale'], ['current', 'ui.legendCurrent'], ['current root', 'ui.legendRoot'], ['next', 'ui.legendNext'], ['both', 'ui.legendBoth'], ['outside', 'ui.legendOutside']];
+const MODULE = `
+  <h3 class="module-title" id="mod-fretboard-title" data-i18n="mod.fretboard"></h3>
+  <div class="module-head">
+    <div class="chips" role="group" data-i18n-label="ui.labelsGroup">
+      <button type="button" class="chip" id="labels-names" data-labels="names" data-i18n="ui.labelNames"></button>
+      <button type="button" class="chip" id="labels-degrees" data-labels="degrees" data-i18n="ui.labelDegrees"></button>
+    </div>
+    <div class="chips" role="group" data-i18n-label="ui.fretsGroup">
+      <button type="button" class="chip" id="frets-real" data-frets="real" data-i18n="ui.fretsReal"></button>
+      <button type="button" class="chip" id="frets-even" data-frets="even" data-i18n="ui.fretsEven"></button>
+    </div>
+  </div>
+  <div class="fretboard-scroll" id="fretboard" tabindex="0" role="region" data-i18n-label="mod.fretboard"></div>
+  <ul class="legend" id="fretboard-legend">${LEGEND.map(([role, text]) => `
+    <li><svg viewBox="-16 -16 32 32" aria-hidden="true"><g class="fret-note" data-role="${role}">${role.includes('root') ? '<circle class="ring"/>' : ''}<rect class="dot"/></g></svg><span data-i18n="${text}"></span></li>`).join('')}
+  </ul>
+  <p class="visually-hidden" id="fretboard-text"></p>`;
+
+// Das ganze Modul in `section` (ein leeres <section class="module" id="mod-fretboard">): derselbe Baustein für die Spielseite des
+// Generators und die Seite für eigene Tracks der App. Die Wahl der Umschalter gehört dem Aufrufer: `layout()` liefert sie als
+// { labels, frets }, `choose(attr, value)` nimmt eine neue entgegen (merken und neu zeichnen).
+export function createFretboardModule(section, { layout, choose }) {
+  section.innerHTML = MODULE;
+  const board = createFretboard(section.querySelector('#fretboard'));
+  const chips = [...section.querySelectorAll('[data-labels], [data-frets]')].map((b) => ({ b, attr: 'labels' in b.dataset ? 'labels' : 'frets' }));
+  for (const { b, attr } of chips) b.addEventListener('click', () => choose(attr, b.dataset[attr]));
+  return {
+    // view: { key, scale, current, next }
+    update(view) {
+      const now = layout();
+      board.update({ ...view, labels: now.labels, spacing: now.frets });
+      for (const { b, attr } of chips) pressed(b, b.dataset[attr] === now[attr]);
+      setText(section.querySelector('#fretboard-text'), chordSentence(view.key, view.current, view.next));
+    },
+    resize: board.resize,
   };
 }
 

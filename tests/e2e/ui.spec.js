@@ -179,7 +179,7 @@ test('andere Tonart und Skala: Satz und Akkorde folgen, auch während der Wieder
   await expect(page.locator('#now-chord')).toHaveText(/\S/, { timeout: BAR_TIMEOUT });
   await page.locator('#key-btn').click();
   await pop.getByRole('button', { name: 'Eb', exact: true }).click();
-  await pop.getByRole('button', { name: 'Blues' }).click();
+  await pop.getByRole('button', { name: 'Blues', exact: true }).click();
   await expect(sentence(page)).toContainText('Eb-Blues');
   await expect(go(page)).toHaveText('Stopp');
   const ebMinor = namesIn('Eb', 'minor');

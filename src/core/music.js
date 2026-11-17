@@ -5,26 +5,50 @@ import { CHORDS } from './chords.js';
 // Intervalle je Akkordart, abgeleitet aus dem Register: eine neue Akkordart ist ein Eintrag in src/core/chords.js.
 export const CHORD_QUALITIES = Object.freeze(Object.fromEntries(Object.entries(CHORDS).map(([id, c]) => [id, c.intervals])));
 
-const SCALES = {
+// Leitern: Stufen ab dem Grundton der Tonart, in der Reihenfolge der Auswahl. Das Griffbrett zeigt jede davon; der Generator
+// bietet nur die an, zu denen er eine passende Begleitung baut (SCALE_MODE).
+export const SCALES = Object.freeze({
   minorPentatonic: [0, 3, 5, 7, 10],
   majorPentatonic: [0, 2, 4, 7, 9],
   blues: [0, 3, 5, 6, 7, 10],
+  majorBlues: [0, 2, 3, 4, 7, 9],
+  major: [0, 2, 4, 5, 7, 9, 11],
+  minor: [0, 2, 3, 5, 7, 8, 10],
+  harmonicMinor: [0, 2, 3, 5, 7, 8, 11],
+  melodicMinor: [0, 2, 3, 5, 7, 9, 11],
   dorian: [0, 2, 3, 5, 7, 9, 10],
-};
+  phrygian: [0, 1, 3, 5, 7, 8, 10],
+  lydian: [0, 2, 4, 6, 7, 9, 11],
+  mixolydian: [0, 2, 4, 5, 7, 9, 10],
+  locrian: [0, 1, 3, 5, 6, 8, 10],
+  phrygianDominant: [0, 1, 4, 5, 7, 8, 10],
+  wholeTone: [0, 2, 4, 6, 8, 10],
+  diminished: [0, 1, 3, 4, 6, 7, 9, 10],
+  altered: [0, 1, 3, 4, 6, 8, 10],
+});
 
 // parentMajor: Abstand zum Grundton der Dur-Tonart mit derselben Vorzeichnung (für die Schreibweise);
-// dominant: Index der Dominanten-Stufe in diatonicChords (Dur V, Dorisch IV mit der Dur-Subdominante; Moll V, dort ist die Dur-Dominante ergänzt)
+// dominant: Index der Dominanten-Stufe in diatonicChords (Dur V, Dorisch IV mit der Dur-Subdominante; Moll V, dort ist die Dur-Dominante ergänzt);
+// in den übrigen Kirchentönen die Dur-Stufe, deren Septakkord in der Leiter ein Dominantseptakkord ist (Phrygisch bIII, Lydisch II, Mixolydisch I)
 const MODES = {
   minor: { steps: [0, 2, 3, 5, 7, 8, 10], qualities: ['min', 'dim', 'maj', 'min', 'min', 'maj', 'maj'], parentMajor: 3, dominant: 4 },
   major: { steps: [0, 2, 4, 5, 7, 9, 11], qualities: ['maj', 'min', 'min', 'maj', 'maj', 'min', 'dim'], parentMajor: 0, dominant: 4 },
   dorian: { steps: [0, 2, 3, 5, 7, 9, 10], qualities: ['min', 'min', 'maj', 'maj', 'min', 'dim', 'maj'], parentMajor: -2, dominant: 3 },
+  phrygian: { steps: [0, 1, 3, 5, 7, 8, 10], qualities: ['min', 'maj', 'maj', 'min', 'dim', 'maj', 'min'], parentMajor: -4, dominant: 2 },
+  lydian: { steps: [0, 2, 4, 6, 7, 9, 11], qualities: ['maj', 'maj', 'min', 'dim', 'maj', 'min', 'min'], parentMajor: -5, dominant: 1 },
+  mixolydian: { steps: [0, 2, 4, 5, 7, 9, 10], qualities: ['maj', 'min', 'dim', 'maj', 'min', 'min', 'maj'], parentMajor: 5, dominant: 0 },
 };
 
-// Namen für Beschriftungen (i18n) und deren Tests
-export const SCALE_NAMES = Object.keys(SCALES);
 export const MODE_NAMES = Object.keys(MODES);
-// Skala ist nur Oberflächen-Zustand; der Generator kennt nur den Modus
-export const SCALE_MODE = { minorPentatonic: 'minor', majorPentatonic: 'major', blues: 'minor', dorian: 'dorian' };
+// Skala ist nur Oberflächen-Zustand; der Generator kennt nur den Modus. Hier stehen die Leitern, die der Generator anbietet, mit dem
+// Modus ihrer Begleitung. Die übrigen (Melodisch Moll, Lokrisch, Phrygisch-Dominant, Ganzton, vermindert, alteriert) fehlen: zu ihnen
+// baut er keine Akkordfolge, die zur Leiter passt.
+export const SCALE_MODE = {
+  minorPentatonic: 'minor', majorPentatonic: 'major', blues: 'minor', majorBlues: 'major', major: 'major', minor: 'minor', harmonicMinor: 'minor',
+  dorian: 'dorian', phrygian: 'phrygian', lydian: 'lydian', mixolydian: 'mixolydian',
+};
+// Leitern des Generators: Namen für Auswahl, Beschriftungen (i18n) und deren Tests
+export const SCALE_NAMES = Object.keys(SCALE_MODE);
 
 const LETTER_PC = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
 const SHARP_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];

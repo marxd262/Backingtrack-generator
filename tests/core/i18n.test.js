@@ -5,7 +5,7 @@ import en from '../../src/i18n/en.js';
 import { t, setLanguage, getLanguage, detectLanguage } from '../../src/i18n/index.js';
 import { TAG_CATEGORIES, STYLE_PRESETS } from '../../src/core/tags.js';
 import { VALIDATION_CODES } from '../../src/core/track.js';
-import { SCALE_NAMES, MODE_NAMES } from '../../src/core/music.js';
+import { SCALES, MODE_NAMES } from '../../src/core/music.js';
 import { CHORDS, CHORD_GROUPS } from '../../src/core/chords.js';
 import { GROOVES } from '../../src/core/grooves.js';
 
@@ -32,7 +32,7 @@ test('jede Kategorie, jedes Schlagwort, Stil, Schicht, Skala, Modus und Fehlerco
   for (const s of STYLE_PRESETS) keys.push(`style.${s.id}`, `style.${s.id}.hint`);
   for (const l of LAYERS) keys.push(`layer.${l}`);
   for (const l of LAYERS) for (const j of jobsFor(l)) keys.push(`job.${l}.${j}`, `ui.job.${l}`);
-  for (const s of SCALE_NAMES) keys.push(`scale.${s}`);
+  for (const s of Object.keys(SCALES)) keys.push(`scale.${s}`); // alle Leitern des Griffbretts, nicht nur die des Generators
   for (const m of MODE_NAMES) keys.push(`mode.${m}`);
   for (const c of VALIDATION_CODES) keys.push(`err.${c}`);
   assert.ok(keys.length > 40);

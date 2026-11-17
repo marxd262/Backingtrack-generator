@@ -2,11 +2,11 @@
 // Griffbrett und Akkordrad (Visualisierung), Akkordfolge (Modul Harmonie). Teilt den Zustand mit der Startseite; app.js ruft die
 // zurückgegebene Funktion in jedem render() auf.
 import { buildEvents, t, TAG_CATEGORIES } from '../index.js';
-import { $, LAYERS, ALL_LAYERS, state, layoutStorage, chordName, pressed, setText, setAttr } from './state.js';
+import { $, LAYERS, ALL_LAYERS, state, layoutStorage, chordName, setText, setAttr } from './state.js';
 import { saveLayout } from './layout-state.js';
 import { loopBars } from './position.js';
 import { nextDistinctChord, progressionRoles, romanDegree } from '../core/fretboard.js';
-import { createFretboard, chordSentence } from './fretboard.js';
+import { createFretboardModule } from './fretboard.js';
 import { buildTags, renderTags, toggleTag } from './tags-ui.js';
 import { tagEffect } from './tag-effects.js';
 import { isSoundOnlyChange } from '../core/tags.js';
@@ -45,17 +45,15 @@ export function initTuning({ render, restartIfPlaying, applyLive }) {
     current: state.playing && state.current ? state.current.chord : null,
     next: state.playing && state.current ? nextChord() : null,
   });
-  const fretboard = createFretboard($('fretboard'));
-  // Umschalter im Modulkopf: gewählter Wert wird mit der Seite gemerkt
-  for (const attr of ['labels', 'frets']) {
-    for (const b of document.querySelectorAll(`[data-${attr}]`)) {
-      b.addEventListener('click', () => {
-        state.layout = { ...state.layout, [attr]: b.dataset[attr] };
-        saveLayout(layoutStorage, state.layout);
-        render();
-      });
-    }
-  }
+  const fretboard = createFretboardModule($('mod-fretboard'), {
+    layout: () => state.layout,
+    // Umschalter im Modulkopf: gewählter Wert wird mit der Seite gemerkt
+    choose(attr, value) {
+      state.layout = { ...state.layout, [attr]: value };
+      saveLayout(layoutStorage, state.layout);
+      render();
+    },
+  });
 
   // Tonart-Modul (Tonart, Skala, folgender Akkord), Griffbrett und Textfassung; im Stand der erste Akkord der Folge.
   // Der Countdown schreibt app.js über eigene Bildzeitschleife, nicht hier.
@@ -63,15 +61,11 @@ export function initTuning({ render, restartIfPlaying, applyLive }) {
     const { track } = state;
     const current = state.current?.chord ?? track.bars[0]?.chord ?? null;
     const next = nextChord();
-    fretboard.update({ key: track.key, scale: state.scale, current, next, labels: state.layout.labels, spacing: state.layout.frets });
-    for (const attr of ['labels', 'frets']) {
-      for (const b of document.querySelectorAll(`[data-${attr}]`)) pressed(b, b.dataset[attr] === state.layout[attr]);
-    }
+    fretboard.update({ key: track.key, scale: state.scale, current, next });
     setText($('play-key'), `${track.key.root}${track.key.mode === 'minor' ? 'm' : ''}`);
     setText($('play-scale'), t(`scale.${state.scale}`));
     setText($('play-next'), next ? chordName(next) : '');
     if ($('key-next').hidden !== !next) $('key-next').hidden = !next;
-    setText($('fretboard-text'), chordSentence(track.key, current, next));
   }
 
   // Folge unter dem Akkordkreis, nur Anzeige: Rollen-Klassen wie im Modul Harmonie

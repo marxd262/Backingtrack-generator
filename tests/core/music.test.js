@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CHORD_QUALITIES, MODE_NAMES, isNoteName, isValidKey, noteToPc, chordMidi, scalePcs, diatonicChords, allowedChords } from '../../src/core/music.js';
+import { CHORD_QUALITIES, MODE_NAMES, SCALES, SCALE_MODE, SCALE_NAMES, isNoteName, isValidKey, noteToPc, chordMidi, scalePcs, diatonicChords, allowedChords, dominantRoot } from '../../src/core/music.js';
 
 const aMinor = { root: 'A', mode: 'minor' };
 const name = (c) => `${c.root}:${c.quality}`;
@@ -80,6 +80,39 @@ test('Dorisch: eigener Modus mit eigenen Akkorden, Schreibweise über die Dur-To
   for (const c of allowedChords({ root: 'A', mode: 'dorian' })) {
     for (const m of chordMidi(c, 3)) assert.ok(pcs.includes(m % 12), `${c.root}${c.quality}`);
   }
+});
+
+test('Phrygisch, Lydisch, Mixolydisch: eigene Modi, Schreibweise über die Dur-Tonart mit denselben Tönen', () => {
+  assert.deepEqual(names({ root: 'E', mode: 'phrygian' }), ['Em', 'F', 'G', 'Am', 'Bdim', 'C', 'Dm']);
+  assert.deepEqual(names({ root: 'A', mode: 'phrygian' }), ['Am', 'Bb', 'C', 'Dm', 'Edim', 'F', 'Gm']);
+  assert.deepEqual(names({ root: 'F', mode: 'lydian' }), ['F', 'G', 'Am', 'Bdim', 'C', 'Dm', 'Em']);
+  assert.deepEqual(names({ root: 'C', mode: 'lydian' }), ['C', 'D', 'Em', 'F#dim', 'G', 'Am', 'Bm']);
+  assert.deepEqual(names({ root: 'G', mode: 'mixolydian' }), ['G', 'Am', 'Bdim', 'C', 'Dm', 'Em', 'F']);
+  assert.deepEqual(names({ root: 'C', mode: 'mixolydian' }), ['C', 'Dm', 'Edim', 'F', 'Gm', 'Am', 'Bb']);
+  // der Dominantseptakkord der Leiter: G7 liegt in allen dreien
+  for (const key of [{ root: 'E', mode: 'phrygian' }, { root: 'F', mode: 'lydian' }, { root: 'G', mode: 'mixolydian' }]) assert.equal(dominantRoot(key), 'G', key.mode);
+  // Akkordtöne liegen in der Leiter des Modus
+  for (const mode of ['phrygian', 'lydian', 'mixolydian']) {
+    const key = { root: 'A', mode };
+    const pcs = scalePcs(key, mode);
+    for (const c of allowedChords(key)) for (const m of chordMidi(c, 3)) assert.ok(pcs.includes(m % 12), `${mode}: ${c.root}${c.quality}`);
+  }
+});
+
+test('Leitern: beginnen beim Grundton und steigen; der Generator bietet nur Leitern mit einem Modus an, und jeder Modus hat eine', () => {
+  assert.equal(Object.keys(SCALES).length, 17);
+  for (const [name, steps] of Object.entries(SCALES)) {
+    assert.equal(steps[0], 0, name);
+    steps.forEach((s, i) => assert.ok(s < 12 && (i === 0 || s > steps[i - 1]), name));
+  }
+  assert.deepEqual(SCALE_NAMES, Object.keys(SCALE_MODE));
+  for (const [scale, mode] of Object.entries(SCALE_MODE)) {
+    assert.ok(Object.hasOwn(SCALES, scale), scale);
+    assert.ok(MODE_NAMES.includes(mode), scale);
+  }
+  for (const mode of MODE_NAMES) assert.ok(Object.values(SCALE_MODE).includes(mode), mode);
+  // die Leitern, mit denen gespeicherte Profile beginnen, bleiben die ersten ihres Modus
+  assert.deepEqual(['minor', 'major', 'dorian'].map((mode) => SCALE_NAMES.find((s) => SCALE_MODE[s] === mode)), ['minorPentatonic', 'majorPentatonic', 'dorian']);
 });
 
 test('Grundton mit Vorzeichen behält seine Schreibweise', () => {

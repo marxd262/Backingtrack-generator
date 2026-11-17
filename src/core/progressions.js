@@ -23,6 +23,27 @@ export const PROGRESSION_TEMPLATES = {
     { name: 'i-VII-IV-i', degrees: [0, 6, 3, 0] },
     { name: 'i-i-IV-i', degrees: [0, 0, 3, 0] },
   ],
+  // phrygisch lebt von der Dur-Stufe einen Halbton über dem Grundton (bII, z. B. F in E-Phrygisch)
+  phrygian: [
+    { name: 'i-bII-i-bII', degrees: [0, 1, 0, 1] },
+    { name: 'i-bII-bIII-bII', degrees: [0, 1, 2, 1] },
+    { name: 'i-bvii-bII-i', degrees: [0, 6, 1, 0] },
+    { name: 'i-i-bII-i', degrees: [0, 0, 1, 0] },
+  ],
+  // lydisch lebt von der Dur-Stufe einen Ganzton über dem Grundton (II, z. B. G in F-Lydisch)
+  lydian: [
+    { name: 'I-II-I-II', degrees: [0, 1, 0, 1] },
+    { name: 'I-II-vii-I', degrees: [0, 1, 6, 0] },
+    { name: 'I-II-I-vii', degrees: [0, 1, 0, 6] },
+    { name: 'I-I-II-I', degrees: [0, 0, 1, 0] },
+  ],
+  // mixolydisch lebt von der Dur-Stufe einen Ganzton unter dem Grundton (bVII, z. B. F in G-Mixolydisch)
+  mixolydian: [
+    { name: 'I-bVII-IV-I', degrees: [0, 6, 3, 0] },
+    { name: 'I-bVII-I-bVII', degrees: [0, 6, 0, 6] },
+    { name: 'I-IV-bVII-IV', degrees: [0, 3, 6, 3] },
+    { name: 'I-I-bVII-IV', degrees: [0, 0, 6, 3] },
+  ],
 };
 
 /** Vier Akkorde der Tonart, Vorlage per Seed gewählt (gleicher Seed, gleiche Folge). */

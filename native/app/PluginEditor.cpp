@@ -1,0 +1,296 @@
+#include "PluginProcessor.h"
+
+#include <juce_gui_extra/juce_gui_extra.h>
+
+#if JucePlugin_Build_Standalone
+ #include <juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h> // the app's audio device, for the measurements
+#endif
+
+namespace {
+
+// The web UI is served from disk: the repo's src/ plus replacements from native/app/web.
+// shortcut: absolute build-machine paths, works only where it was built; a release embeds or installs these files.
+const juce::File webRoot { BTG_WEB_ROOT };
+const juce::File shimRoot { BTG_WEB_SHIMS };
+
+// Files of the web app that the app replaces: the engine is the player, and it owns the samples.
+const juce::StringArray shims { "/audio/play.js", "/audio/load-voices.js" };
+
+juce::String mimeType (const juce::File& file) {
+    static const std::map<juce::String, juce::String> types {
+        { ".html", "text/html" }, { ".js", "text/javascript" }, { ".mjs", "text/javascript" }, { ".css", "text/css" },
+        { ".json", "application/json" }, { ".svg", "image/svg+xml" }, { ".png", "image/png" }, { ".flac", "audio/flac" },
+    };
+    const auto found = types.find (file.getFileExtension().toLowerCase());
+    return found != types.end() ? found->second : "application/octet-stream";
+}
+
+std::optional<juce::WebBrowserComponent::Resource> resource (const juce::String& url) {
+    const auto path = url.upToFirstOccurrenceOf ("?", false, false);
+    if (path.contains ("..")) return std::nullopt; // stay inside the two roots
+    // /native/...: pages of the app itself (native/app/web)
+    const auto file = shims.contains (path) ? shimRoot.getChildFile (path.fromLastOccurrenceOf ("/", false, false))
+                    : path.startsWith ("/native/") ? shimRoot.getChildFile (path.fromFirstOccurrenceOf ("/native/", false, false))
+                                                   : webRoot.getChildFile (path.trimCharactersAtStart ("/"));
+    juce::MemoryBlock bytes;
+    if (! file.existsAsFile() || ! file.loadFileAsData (bytes)) return std::nullopt;
+    const auto* begin = static_cast<const std::byte*> (bytes.getData());
+    return juce::WebBrowserComponent::Resource { { begin, begin + bytes.getSize() }, mimeType (file) };
+}
+
+juce::AudioDeviceManager* deviceManager() {
+   #if JucePlugin_Build_Standalone
+    if (auto* holder = juce::StandalonePluginHolder::getInstance()) return &holder->deviceManager;
+   #endif
+    return nullptr;
+}
+
+class Editor final : public juce::AudioProcessorEditor, private juce::Timer {
+public:
+    explicit Editor (BackingtrackProcessor& p) : AudioProcessorEditor (p), processor (p) {
+        // The strip: what holds for every page (which page, the language) and the measurements.
+        addAndMakeVisible (page);
+        page.onClick = [this] {
+            processor.transport.stop();
+            shows (! ownTrack);
+            browser.goToURL (juce::WebBrowserComponent::getResourceProviderRoot() + (ownTrack ? "native/track.html" : "ui/index.html"));
+        };
+        addAndMakeVisible (language);
+        language.addItem ("Deutsch", 1);
+        language.addItem ("English", 2);
+        language.setSelectedId (1, juce::dontSendNotification);
+        language.setTitle ("Sprache / Language");
+        language.onChange = [this] { // the page that shows switches and remembers the choice for the other one
+            english = language.getSelectedId() == 2;
+            shows (ownTrack);
+            browser.emitEventIfBrowserIsVisible ("language", juce::var (english ? "en" : "de"));
+        };
+        addAndMakeVisible (status);
+        status.setFont (juce::FontOptions (13.0f));
+
+        addAndMakeVisible (browser);
+        setResizable (true, true);
+        setSize (1440, 930);
+        browser.goToURL (juce::WebBrowserComponent::getResourceProviderRoot() + "ui/index.html");
+        startTimerHz (30);
+    }
+
+    void resized() override {
+        auto area = getLocalBounds();
+        auto strip = area.removeFromTop (30).reduced (4, 3);
+        page.setBounds (strip.removeFromLeft (110));
+        language.setBounds (strip.removeFromLeft (104).withTrimmedLeft (4));
+        status.setBounds (strip.withTrimmedLeft (10));
+        browser.setBounds (area);
+    }
+
+private:
+    // The strip's own texts in the language chosen.
+    juce::String text (const char* german, const char* inEnglish) const { return juce::String::fromUTF8 (english ? inEnglish : german); }
+
+    // Which page shows: the button leads to the other one.
+    void shows (bool track) {
+        ownTrack = track;
+        page.setButtonText (track ? "Generator" : text ("Eigener Track", "Own track"));
+    }
+
+    // UI -> engine. Messages come from native/app/web/play.js.
+    void handle (const juce::var& message) {
+        const auto type = message["type"].toString();
+        const auto layer = message["layer"].toString() == "drums" ? btg::Engine::drums : message["layer"].toString() == "bass" ? btg::Engine::bass : btg::Engine::layerCount;
+        const auto value = juce::jlimit (-1.0f, 1.0f, (float) message["value"]);
+        const auto setParameter = [this] (const char* id, float v) {
+            if (auto* parameter = processor.parameters.getParameter (id)) parameter->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, v));
+        };
+        if (type == "ping") { // measures the way UI -> app and back
+            if (positionLog.isNotEmpty()) { // diagnosis: the reply carries the engine's position
+                auto* reply = new juce::DynamicObject();
+                reply->setProperty ("id", message["id"]);
+                reply->setProperty ("beats", processor.transport.beats());
+                browser.emitEventIfBrowserIsVisible ("pong", juce::var (reply));
+                return;
+            }
+            browser.emitEventIfBrowserIsVisible ("pong", message);
+            return;
+        }
+        if (type == "positionLog") {
+            if (positionLog.isNotEmpty()) juce::File (positionLog).appendText (message["line"].toString() + "\n");
+            return;
+        }
+        if (type == "track") {
+            const auto started = juce::Time::getMillisecondCounterHiRes();
+            try {
+                processor.engine.setTrack (message["json"].toString().toStdString());
+                error = processor.packError;
+            } catch (const std::exception& e) {
+                error = e.what();
+            }
+            buildMs = juce::Time::getMillisecondCounterHiRes() - started;
+        } else if (type == "openFile") {
+            chooser = std::make_unique<juce::FileChooser> (text ("Track laden", "Load track"), juce::File(), "*.wav;*.flac;*.mp3;*.m4a;*.aac;*.ogg;*.aiff;*.aif;*.wma;*.mp4;*.m4v;*.mov;*.mkv;*.webm");
+            chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [this] (const juce::FileChooser& c) {
+                if (c.getResult().existsAsFile()) processor.loadTrack (c.getResult());
+            });
+        } else if (type == "loadFile") { // the same without the dialog, for the automatic check
+            processor.loadTrack (juce::File (message["path"].toString()));
+        } else if (type == "language") { // a page says which language it shows (it remembers the choice)
+            english = message["lang"].toString() == "en";
+            language.setSelectedId (english ? 2 : 1, juce::dontSendNotification);
+            shows (ownTrack);
+        } else if (type == "page") { // a page says it is leaving for the other one
+            shows ((bool) message["track"]);
+        } else if (type == "hello") {
+            shows (true);
+            sentTrack = -1; // a page that just opened gets the analysis of the loaded track again
+        } else if (type == "playFile") {
+            processor.playsFile = true; // the page sets and clears the loop itself
+            if (message.hasProperty ("rate")) fileRate = juce::jlimit (0.25, 2.0, (double) message["rate"]);
+            processor.transport.play ((double) message["from"], 60.0 * fileRate); // one beat = one second of the track
+        } else if (type == "fileRate") { // speed of the loaded track, 1 = as recorded
+            fileRate = juce::jlimit (0.25, 2.0, (double) message["rate"]);
+            if (processor.playsFile) processor.transport.setTempo (60.0 * fileRate);
+        } else if (type == "play") {
+            processor.playsFile = false;
+            run = (int) message["run"];
+            processor.transport.setLoop (0.0, 0.0);
+            processor.transport.play ((double) message["startBeats"], (double) message["bpm"]);
+        } else if (type == "stop") processor.transport.stop();
+        else if (type == "tempo") processor.transport.setTempo ((double) message["bpm"]);
+        else if (type == "seek") processor.transport.seek ((double) message["beats"]);
+        else if (type == "loop") processor.transport.setLoop ((double) message["start"], (double) message["end"]);
+        else if (type == "master") setParameter ("master", value);
+        else if (type == "drive") setParameter ("bassDrive", value);
+        else if (type == "level" && layer != btg::Engine::layerCount) processor.engine.setLevel (layer, value);
+        else if (type == "mute" && layer != btg::Engine::layerCount) processor.engine.setMuted (layer, (bool) message["on"]);
+        else if (type == "pan" && layer != btg::Engine::layerCount) processor.engine.setPan (layer, value);
+        else if (type == "buffer") { // measurement only: another buffer size of the audio device
+            if (auto* devices = deviceManager()) {
+                auto setup = devices->getAudioDeviceSetup();
+                setup.bufferSize = (int) message["frames"];
+                devices->setAudioDeviceSetup (setup, true);
+            }
+        }
+        processor.controlArrived();
+    }
+
+    // Engine -> UI: position, levels and measurements, 30 times a second; the UI interpolates the position in between.
+    void timerCallback() override {
+        // The window of JUCE's standalone shell comes without a maximise button; ask for all three. Only once the
+        // window is up: asked for earlier (when the editor is put in), the window takes its size before the editor
+        // has one and opens tiny.
+        if (! hasWindowButtons) {
+            if (auto* window = dynamic_cast<juce::DocumentWindow*> (getTopLevelComponent()); window != nullptr && window->isShowing()) {
+                window->setTitleBarButtonsRequired (juce::DocumentWindow::allButtons, false);
+                hasWindowButtons = true;
+            }
+        }
+        auto* state = new juce::DynamicObject();
+        state->setProperty ("run", run);
+        state->setProperty ("playing", processor.transport.playing());
+        state->setProperty ("beats", processor.transport.beats());
+        state->setProperty ("bpm", processor.transport.bpm());
+        auto* peaks = new juce::DynamicObject();
+        peaks->setProperty ("drums", processor.engine.takePeak (btg::Engine::drums));
+        peaks->setProperty ("bass", processor.engine.takePeak (btg::Engine::bass));
+        peaks->setProperty ("master", processor.engine.takePeak (btg::Engine::layerCount));
+        state->setProperty ("peaks", juce::var (peaks));
+        state->setProperty ("error", error);
+        state->setProperty ("reactionMs", processor.reactionMs.load());
+        state->setProperty ("buildMs", buildMs);
+        state->setProperty ("load", processor.load.load());
+        if (positionLog.isNotEmpty()) state->setProperty ("positionLog", true);
+        juce::String device = text ("kein Audiogerät", "no audio device");
+        if (auto* devices = deviceManager()) {
+            if (auto* d = devices->getCurrentAudioDevice()) {
+                const double rate = d->getCurrentSampleRate(), latency = 1000.0 * d->getOutputLatencyInSamples() / rate;
+                state->setProperty ("device", d->getName());
+                state->setProperty ("deviceType", d->getTypeName());
+                state->setProperty ("bufferFrames", d->getCurrentBufferSizeSamples());
+                state->setProperty ("sampleRate", rate);
+                state->setProperty ("outputLatencyMs", latency);
+                state->setProperty ("xruns", devices->getXRunCount());
+                juce::Array<juce::var> sizes;
+                for (const int size : d->getAvailableBufferSizes()) sizes.add (size);
+                state->setProperty ("bufferSizes", sizes);
+                device = juce::String (d->getCurrentBufferSizeSamples()) + text (" Frames bei ", " frames at ") + juce::String (rate / 1000.0, 1) + " kHz  |  "
+                       + text ("Ausgabelatenz ", "Output latency ") + juce::String (latency, 1) + " ms  |  " + text ("Aussetzer ", "Dropouts ") + juce::String (devices->getXRunCount());
+            }
+        }
+        const auto track = processor.trackState();
+        auto* file = new juce::DynamicObject();
+        file->setProperty ("loading", processor.trackLoading.load());
+        file->setProperty ("progress", processor.trackProgress.load());
+        file->setProperty ("name", track.name);
+        file->setProperty ("error", track.error);
+        state->setProperty ("file", juce::var (file));
+        browser.emitEventIfBrowserIsVisible ("engine", juce::var (state));
+        if (track.version != sentTrack && track.analysis.isNotEmpty()) {
+            auto* result = new juce::DynamicObject();
+            result->setProperty ("name", track.name);
+            result->setProperty ("seconds", track.seconds);
+            result->setProperty ("json", track.analysis);
+            result->setProperty ("peaks", track.peaks);
+            result->setProperty ("peakRate", 100);
+            result->setProperty ("loadMs", track.loadMs);
+            result->setProperty ("analysisMs", track.analysisMs);
+            result->setProperty ("video", track.video.isNotEmpty());
+            result->setProperty ("version", track.version);
+            browser.emitEventIfBrowserIsVisible ("analysis", juce::var (result));
+        }
+        sentTrack = track.version;
+
+        if (++ticks % 8 == 0) {
+            const double beats = processor.transport.beats();
+            const auto place = processor.playsFile ? text ("Sekunde ", "Second ") + juce::String (beats, 1)
+                                                   : text ("Takt ", "Bar ") + juce::String (1 + (int) std::floor (beats / processor.engine.beatsPerBar()));
+            status.setText (error.isNotEmpty() ? text ("Fehler: ", "Error: ") + error
+                                               : place + "  |  " + device + "  |  " + text ("Reaktion ", "Response ") + juce::String (processor.reactionMs.load(), 1)
+                                                     + " ms  |  " + text ("Last ", "Load ") + juce::String (100.0f * processor.load.load(), 1) + " %",
+                            juce::dontSendNotification);
+        }
+    }
+
+    // The loaded video file itself, for the page's <video>: it shows the picture, muted; the sound stays with the engine.
+    // shortcut: the whole file goes through memory in one answer; serve ranges when files over 1 GB matter.
+    std::optional<juce::WebBrowserComponent::Resource> video() const {
+        static const std::map<juce::String, juce::String> types {
+            { ".mp4", "video/mp4" }, { ".m4v", "video/mp4" }, { ".mov", "video/quicktime" }, { ".webm", "video/webm" },
+            { ".mkv", "video/x-matroska" }, { ".avi", "video/x-msvideo" }, { ".wmv", "video/x-ms-wmv" },
+        };
+        const juce::File file (processor.trackState().video);
+        const auto type = types.find (file.getFileExtension().toLowerCase());
+        juce::MemoryBlock bytes;
+        if (type == types.end() || ! file.existsAsFile() || file.getSize() > (juce::int64) 1 << 30 || ! file.loadFileAsData (bytes)) return std::nullopt;
+        const auto* begin = static_cast<const std::byte*> (bytes.getData());
+        return juce::WebBrowserComponent::Resource { { begin, begin + bytes.getSize() }, type->second };
+    }
+
+    BackingtrackProcessor& processor;
+    int run = 0; // which play() the position belongs to
+    int ticks = 0;
+    double buildMs = 0.0; // time the last track took to become events
+    juce::String error { processor.packError };
+    bool hasWindowButtons = false;
+    double fileRate = 1.0; // speed of the loaded track
+    // Diagnosis: BTG_POSITION_LOG=<file> in the environment makes the track page compare the position it shows
+    // with the engine's twice a second and write the result there.
+    const juce::String positionLog = juce::SystemStats::getEnvironmentVariable ("BTG_POSITION_LOG", {});
+    int sentTrack = 0;     // version of the track analysis the page has
+    bool ownTrack = false; // which page shows: the generator's UI or the page for a loaded track
+    bool english = false;  // the language of the app, as the page that shows last said or the strip chose
+    std::unique_ptr<juce::FileChooser> chooser;
+    juce::TextButton page { "Eigener Track" };
+    juce::ComboBox language;
+    juce::Label status;
+    juce::WebBrowserComponent browser { juce::WebBrowserComponent::Options()
+        .withBackend (juce::WebBrowserComponent::Options::Backend::webview2)
+        .withWinWebView2Options (juce::WebBrowserComponent::Options::WinWebView2().withUserDataFolder (
+            juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("BackingtrackGenerator/WebView2")))
+        .withNativeIntegrationEnabled()
+        .withResourceProvider ([this] (const juce::String& url) { return url.startsWith ("/media/video") ? video() : resource (url); })
+        .withEventListener ("btg", [this] (const juce::var& message) { handle (message); }) };
+};
+
+} // namespace
+
+juce::AudioProcessorEditor* createBackingtrackEditor (BackingtrackProcessor& p) { return new Editor (p); }
