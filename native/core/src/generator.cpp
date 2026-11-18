@@ -31,14 +31,6 @@ const std::map<std::string, std::pair<int, int>> CHORD_BASS {
     { "maj6", { 7, 9 } }, { "min6", { 7, 9 } }, { "add9", { 7, 10 } }, { "dom9", { 7, 10 } }, { "min9", { 7, 10 } },
 };
 
-int noteToPc(const std::string& name) {
-    static const std::map<char, int> letters { { 'C', 0 }, { 'D', 2 }, { 'E', 4 }, { 'F', 5 }, { 'G', 7 }, { 'A', 9 }, { 'B', 11 } };
-    const auto it = name.empty() ? letters.end() : letters.find(name[0]);
-    if (it == letters.end()) throw std::runtime_error("Unknown note name: " + name);
-    const int shift = name.size() > 1 ? (name[1] == '#' ? 1 : name[1] == 'b' ? -1 : 0) : 0;
-    return (it->second + shift + 12) % 12;
-}
-
 struct DrumTier {
     std::vector<std::vector<int>> kicks;
     std::vector<int> snare, ghosts;
@@ -364,13 +356,6 @@ Params withSection(Params p, const Resolved& resolved, int barInSection, double 
 
 // ---------- players (src/core/events.js, event-helpers.js) ----------
 
-double at(const Bar& b, int step, Rng& rng, double swing) {
-    const double shift = b.sub == 4 && step % 2 ? (swing * b.stepSec) / 3 : 0;
-    const double t = b.start + step * b.stepSec + shift + (rng.next() * 2 - 1) * 0.007 * b.jitterScale;
-    return r6(clamp(t, b.start, b.end - 0.001));
-}
-double humanVel(double base, Rng& rng) { return roundVel(base * (0.94 + rng.next() * 0.12)); }
-
 template <typename T> std::vector<const T*> pool(const std::vector<T>& base, const std::vector<T>& extra, const Params& params) {
     std::vector<const T*> out;
     for (const T& item : base) out.push_back(&item);
@@ -675,12 +660,14 @@ std::vector<Event> applyMicrotiming(std::vector<Event> out, const Track& track, 
         e.t = t;
     }
     sortByTime(out);
-    // one voice: no note sounds into the next
-    Event* previous = nullptr;
-    for (Event& e : out) {
-        if (!isNote(e, "bass")) continue;
-        if (previous && previous->t + previous->dur > e.t) previous->dur = r6(std::max(0.0, e.t - previous->t));
-        previous = &e;
+    // one voice (bass, lead): no note sounds into the next
+    for (const char* layer : { "bass", "lead" }) {
+        Event* previous = nullptr;
+        for (Event& e : out) {
+            if (!isNote(e, layer)) continue;
+            if (previous && previous->t + previous->dur > e.t) previous->dur = r6(std::max(0.0, e.t - previous->t));
+            previous = &e;
+        }
     }
     return out;
 }
@@ -703,6 +690,33 @@ std::vector<std::pair<int, int>> phrasesOf(const Section& sec) {
     return out;
 }
 
+int noteToPc(const std::string& name) {
+    static const std::map<char, int> letters { { 'C', 0 }, { 'D', 2 }, { 'E', 4 }, { 'F', 5 }, { 'G', 7 }, { 'A', 9 }, { 'B', 11 } };
+    const auto it = name.empty() ? letters.end() : letters.find(name[0]);
+    if (it == letters.end()) throw std::runtime_error("Unknown note name: " + name);
+    const int shift = name.size() > 1 ? (name[1] == '#' ? 1 : name[1] == 'b' ? -1 : 0) : 0;
+    return (it->second + shift + 12) % 12;
+}
+
+// src/core/music.js, MODES: the steps of the mode from the key's root
+std::vector<int> modePcs(const std::string& keyRoot, const std::string& keyMode) {
+    static const std::map<std::string, std::vector<int>> STEPS {
+        { "minor", { 0, 2, 3, 5, 7, 8, 10 } }, { "major", { 0, 2, 4, 5, 7, 9, 11 } }, { "dorian", { 0, 2, 3, 5, 7, 9, 10 } },
+        { "phrygian", { 0, 1, 3, 5, 7, 8, 10 } }, { "lydian", { 0, 2, 4, 6, 7, 9, 11 } }, { "mixolydian", { 0, 2, 4, 5, 7, 9, 10 } },
+    };
+    const int root = noteToPc(keyRoot);
+    std::vector<int> out;
+    for (const int s : STEPS.at(keyMode)) out.push_back((root + s) % 12);
+    return out;
+}
+
+double at(const Bar& b, int step, Rng& rng, double swing) {
+    const double shift = b.sub == 4 && step % 2 ? (swing * b.stepSec) / 3 : 0;
+    const double t = b.start + step * b.stepSec + shift + (rng.next() * 2 - 1) * 0.007 * b.jitterScale;
+    return r6(clamp(t, b.start, b.end - 0.001));
+}
+double humanVel(double base, Rng& rng) { return roundVel(base * (0.94 + rng.next() * 0.12)); }
+
 std::vector<int> chordTones(const Chord& chord, int octave) {
     static const std::map<std::string, std::vector<int>> INTERVALS { // src/core/chords.js
         { "maj", { 0, 4, 7 } }, { "min", { 0, 3, 7 } }, { "dim", { 0, 3, 6 } }, { "aug", { 0, 4, 8 } }, { "sus2", { 0, 2, 7 } }, { "sus4", { 0, 5, 7 } },
@@ -724,7 +738,7 @@ Song buildSong(const std::string& trackJson) {
     using namespace detail;
     const Track track = parseTrack(trackJson);
     for (const auto& [id, on] : track.layers)
-        if (on && (id == "lead" || id == "percussion")) throw std::runtime_error("layer not ported yet: " + id);
+        if (on && id == "percussion") throw std::runtime_error("layer not ported yet: " + id);
 
     const Rng master(track.seed);
     Rng tagRng = master.fork("tags");
@@ -818,6 +832,9 @@ Song buildSong(const std::string& trackJson) {
     run("pad",
         [](const Params&, Rng&, const Section&) { return 0; }, // the pad has no pattern to choose
         [&](const Bar& b, int, Rng& rng, const Params& p, bool) { playPad(events, b, rng, p); });
+    run("lead",
+        [](const Params&, Rng&, const Section& sec) { LeadState v; v.start = sec.start; v.bars = sec.bars; return v; },
+        [&](const Bar& b, LeadState& v, Rng& rng, const Params& p, bool fill) { playLead(events, b, v, rng, p, fill, g.arpStep, track); });
 
     sortByTime(events);
     if (track.hasForm) events = postProcess(std::move(events), track, bars, sections, master.fork("form"));

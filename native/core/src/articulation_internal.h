@@ -56,6 +56,7 @@ struct Env {
 void chordRules(Env& env); // rhythm guitar, sample guitars only
 void keyRules(Env& env);   // keys, the electric piano only
 void keyRulesB(Env& env);
+void leadRules(Env& env);  // lead: fall, bend, vibrato, scoop or slide, hammer and pull
 // organ.cpp: leslie and swell, when the chord layer plays the organ
 void organRules(Env& env, const std::vector<Section>& sections);
 

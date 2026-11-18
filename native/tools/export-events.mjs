@@ -149,6 +149,29 @@ for (const [g, id] of Object.keys(GROOVES).entries()) {
   }
 }
 
+// lead: every job in every mode, every lead voice (the rules differ for saxophone and guitar); every groove with the
+// riff (the shuffle has a rule of its own) and with one other job
+const WITH_LEAD = { ...WITH_CHORDS, lead: true };
+const LEAD_VOICES = [{ id: 'synth', variant: 'classic' }, ...['flute', 'sax', 'synth', 'guitar'].map((variant) => ({ id: 'sample', variant }))];
+const LEAD_JOBS = ['fills', 'arpeggio', 'melody', 'callResponse', 'riff'];
+const MODE_KEYS = [{ root: 'A', mode: 'minor' }, { root: 'C', mode: 'major' }, { root: 'D', mode: 'dorian' }, { root: 'E', mode: 'phrygian' }, { root: 'F', mode: 'lydian' }, { root: 'G', mode: 'mixolydian' }];
+let leadCase = 0;
+for (const job of LEAD_JOBS) {
+  for (const key of MODE_KEYS) {
+    for (let k = 0; k < 3; k++, leadCase++) {
+      const n = leadCase, style = STYLE_PRESETS[n % STYLE_PRESETS.length], plain = n % 6 === 5;
+      const track = { jobs: { lead: job }, voices: { ...style.voices, lead: LEAD_VOICES[n % LEAD_VOICES.length] }, ornaments: [0.5, 1, 0.75][n % 3] };
+      if (plain) track.length = 24;
+      add(`lead-${job}`, style, 1000 + n, { layers: WITH_LEAD, keys: [key], bars: colored(CHORD_COLORS[n % 4]), track, ...(plain ? {} : { form: autoForm(style) }) });
+    }
+  }
+}
+for (const [g, id] of Object.keys(GROOVES).entries()) {
+  const style = styles[g % styles.length], meter = GROOVES[id].meter.split('/').map(Number);
+  add(`riff-${id}`, style, 1100 + g, { meter, layers: WITH_LEAD, keys: KEYS_ALL, form: autoForm(style), track: { groove: id, jobs: { lead: 'riff' }, voices: { ...style.voices, lead: LEAD_VOICES[4] } } });
+  add(`lead-${id}`, style, 1150 + g, { meter, layers: WITH_LEAD, keys: KEYS_ALL, form: autoForm(style), track: { groove: id, jobs: { lead: LEAD_JOBS[g % 4] }, voices: { ...style.voices, lead: LEAD_VOICES[g % LEAD_VOICES.length] } } });
+}
+
 mkdirSync(out, { recursive: true });
 writeFileSync(join(out, 'cases.json'), JSON.stringify(cases));
 const total = cases.reduce((n, c) => n + c.events.length, 0);

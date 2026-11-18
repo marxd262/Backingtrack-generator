@@ -223,6 +223,60 @@ void keyRules(Env& env) {
     }
 }
 
+// Lead (saxophone, flute, guitar): at most one articulation per note, first of fall (end of a phrase, saxophone only),
+// bend (guitar only, long notes: the tone is pulled up from the scale step below), vibrato (long notes), scoop (start
+// of a phrase or an accented note; on the guitar a slide of 1 or 2 semitones), hammer and pull (guitar only: a tone 1
+// to 3 semitones next to the one before in the same bar, without a gap and without a stroke).
+// A phrase is notes without a gap of a beat.
+void leadRules(Env& env) {
+    const Track& track = env.track;
+    const std::vector<Event*> notes = env.notes("lead");
+    const double beat = 60 / track.bpm;
+    const Track::Voice& voice = track.voice("lead");
+    const bool sax = voice.variant == "sax", guitar = voice.id == "sample" && voice.variant == "guitar";
+    const std::vector<int> pcs = modePcs(track.keyRoot, track.keyMode);
+    const std::set<int> scale(pcs.begin(), pcs.end());
+    // The times of bend and vibrato come from the rhythm, never from a fixed number: a share of the note's length,
+    // rounded to whole grid steps, at least one, at most a beat. So the target arrives on a place of the grid.
+    const auto gridTime = [&](const Event& n, double share, double max) {
+        const Bar& b = env.bars[n.bar];
+        return r6(std::min(max, clamp(jsRound((share * n.dur) / b.stepSec), 1, b.sub) * b.stepSec));
+    };
+    for (size_t i = 0; i < notes.size(); ++i) {
+        Event& n = *notes[i];
+        const Context& c = env.ctx[n.bar];
+        const int s = env.stepOf(n);
+        Event* prev = i > 0 ? notes[i - 1] : nullptr;
+        const Event* next = i + 1 < notes.size() ? notes[i + 1] : nullptr;
+        const bool starts = !prev || n.t - (prev->t + prev->dur) >= beat, ends = !next || next->t - (n.t + n.dur) >= beat;
+        if (sax && ends && n.dur >= 0.3 && env.roll(c, "lead", "fall", s) < env.p(0.25)) {
+            n.art = "fall";
+            n.artSemi = -2 - std::floor(4 * env.roll(c, "lead", "fallSemi", s));
+            n.artTime = r6(clamp((0.15 + 0.15 * env.roll(c, "lead", "fallTime", s)) * env.tempo, 0.15, 0.3));
+        } else if (guitar && n.dur >= beat && env.roll(c, "lead", "bend", s) < env.p(0.3)) {
+            n.art = "bend";
+            n.artSemi = scale.count((n.midi - 2) % 12) ? -2 : -1;
+            n.artTime = gridTime(n, 0.15 + 0.15 * env.roll(c, "lead", "bendTime", s), 0.6); // 15 to 30 % of the note
+        } else if (n.dur >= beat && env.roll(c, "lead", "vibrato", s) < env.p(0.6)) {
+            n.art = "vibrato";
+            n.artSemi = r6(0.1 + 0.1 * env.roll(c, "lead", "vibratoDepth", s));
+            n.artTime = gridTime(n, 0.25 + 0.15 * env.roll(c, "lead", "vibratoStart", s), 0.8);
+            n.artRate = r6(clamp(4 + (track.bpm - 60) / 40, 4, 5.5)); // the vibrato follows the tempo
+        } else if ((starts || n.vel >= 0.85) && env.roll(c, "lead", "scoop", s) < env.p(0.3)) {
+            const double artTime = r6(clamp((0.05 + 0.05 * env.roll(c, "lead", "scoopTime", s)) * env.tempo, 0.05, 0.1));
+            const double x = env.roll(c, "lead", "scoopSemi", s);
+            n.art = guitar ? "slideIn" : "scoop";
+            n.artSemi = guitar ? (x < 0.5 ? -1 : -2) : r6(-0.5 - 0.5 * x);
+            n.artTime = artTime;
+        } else if (guitar && prev && prev->bar == n.bar && n.t - (prev->t + prev->dur) < env.bars[n.bar].stepSec && std::abs(n.midi - prev->midi) >= 1
+                   && std::abs(n.midi - prev->midi) <= 3 && env.roll(c, "lead", "hammer", s) < env.p(0.4)) {
+            n.art = n.midi > prev->midi ? "hammer" : "pull";
+            n.vel = roundVel(n.vel * 0.85);
+            prev->dur = r6(std::max(prev->dur, n.t - prev->t)); // tied: the tone before holds until here
+        }
+    }
+}
+
 // Keys, second group: rolled chords in the ballad, a crushed third in the blues, a barked stab in funk.
 void keyRulesB(Env& env) {
     if (!playsElectricPiano(env.track)) return;

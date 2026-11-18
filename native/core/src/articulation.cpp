@@ -396,6 +396,7 @@ std::vector<Event> articulate(const std::vector<Event>& events, const Track& tra
     if (track.layer("drums")) drumRules(env);
     if (track.layer("bass")) bassRules(env);
     if (track.layer("chords")) keyRules(env);
+    if (track.layer("lead")) leadRules(env);
     if (track.layer("pad")) padRules(env);
     if (track.layer("chords")) chordRules(env);
     if (track.layer("chords")) keyRulesB(env);

@@ -16,8 +16,12 @@
 
 namespace btg::detail {
 
-// Math.round: halves go up, also below zero (std::round goes away from zero).
-inline double jsRound(double x) { return std::floor(x + 0.5); }
+// Math.round: halves go up, also below zero (std::round goes away from zero). Not floor(x + 0.5): that sum rounds
+// the largest number below 0.5 up to 1.
+inline double jsRound(double x) {
+    const double f = std::floor(x);
+    return x - f >= 0.5 ? f + 1 : f;
+}
 inline double r6(double x) { return jsRound(x * 1e6) / 1e6; }
 inline double clamp(double x, double lo, double hi) { return std::min(hi, std::max(lo, x)); }
 inline double roundVel(double x) { return jsRound(clamp(x, 0.05, 1.0) * 1e3) / 1e3; }
@@ -139,6 +143,22 @@ double levelAt(const Resolved& r, int barInSection);
 std::string grooveIdFor(const Track& track);
 std::vector<std::pair<int, int>> phrasesOf(const Section& sec); // start, bars
 std::vector<int> chordTones(const Chord& chord, int octave);    // src/core/music.js: MIDI = 12 * (octave + 1) + pitch class + interval
+int noteToPc(const std::string& name);
+std::vector<int> modePcs(const std::string& keyRoot, const std::string& keyMode); // pitch classes of diatonicChords(key)
+
+// src/core/event-helpers.js
+double at(const Bar& b, int step, Rng& rng, double swing); // time of a grid step with swing and jitter; draws once
+double humanVel(double base, Rng& rng);                    // loudness spread by 6 %; draws once
+
+// src/core/lead.js
+struct LeadState { // what the jobs remember over a part
+    int start = 0, bars = 0;
+    std::optional<int> last;     // where the line was last
+    int callBar = -1;            // callResponse: the bar of the call (-1 = none) and its rhythm
+    std::vector<int> callRhythm;
+};
+// `arpStep` is the groove's (chords.arpStep). The job comes from track.jobs; `off` writes nothing and draws nothing.
+void playLead(std::vector<Event>& events, const Bar& b, LeadState& v, Rng& rng, const Params& params, bool fill, int arpStep, const Track& track);
 
 std::vector<Event> articulate(const std::vector<Event>& events, const Track& track, const std::vector<Bar>& bars,
                               const std::vector<Section>& sections, const Params& params, const Rng& rng);
