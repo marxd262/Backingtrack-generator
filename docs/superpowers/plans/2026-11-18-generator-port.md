@@ -437,11 +437,14 @@ In Arbeitstagen der KI, ohne Hör- und Testzeit des Nutzers; Grundlage sind die 
 | 6 App ohne Repository | 2 bis 3 |
 | **Summe** | **17 bis 24** |
 
+## Entschieden
+
+- **Saitenmodelle werden portiert** (Nutzer, 2026-11-18): Bass und E-Gitarre aus dem Saitenmodell gehören zum Port, auch wenn die Oberfläche sie nicht zur Wahl stellt (Task 24).
+
 ## Offene Entscheidungen des Nutzers
 
 Keine davon hält Phase 1 auf.
 
 1. **Zuschnitt:** Prüfung, Würfeln der Form, Klangmodell und Profile bleiben JavaScript; Regler werden keine JUCE-Parameter. Einverstanden? (Vor Phase 2.)
 2. **Kompressor:** Nachbau nach dem Chromium-Quelltext (BSD-3-Clause, Namensnennung in `LICENSES.md`)? Sonst nach der W3C-Beschreibung mit größerer Abweichung im Pegel. (Vor Task 17.)
-3. **Versteckte Stimmen:** Das Saitenmodell (Task 24) ist in der Oberfläche nicht wählbar. Portieren oder streichen? Vorschlag: zuletzt portieren, weil gespeicherte Profile es nennen können. (Vor Phase 5.)
-4. **Web-Version danach:** eingefroren als Demo auf GitHub Pages lassen oder abschalten? `src/audio` bleibt in jedem Fall als Referenz für den Klangabgleich, solange Stimmen portiert werden.
+3. **Web-Version danach:** eingefroren als Demo auf GitHub Pages lassen oder abschalten? `src/audio` bleibt in jedem Fall als Referenz für den Klangabgleich, solange Stimmen portiert werden.
