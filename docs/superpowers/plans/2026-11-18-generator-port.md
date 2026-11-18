@@ -359,7 +359,7 @@ Fertig, wenn ein ganzer Track mit Sample-Stimmen aus Web und Kern innerhalb der 
 - Modify: `native/core/src/engine.cpp`, `native/LICENSES.md`
 - Create: `native/tools/ab-mix.cmd`
 
-**Inhalt:** Nachbau des Kompressors des Browsers (Vorlauf 6 ms, Knie, anpassende Rückstellzeit, automatische Anhebung) zweimal hintereinander wie in `synth.js` (`applyBus`), mit den Feinwerten `mix/bus`. **Braucht vorher die Zustimmung des Nutzers** (offene Entscheidung 2): Der Nachbau folgt dem Chromium-Quelltext (BSD-3-Clause), das ist eine neue Quelle mit Namensnennung.
+**Inhalt:** Nachbau des Kompressors des Browsers (Vorlauf 6 ms, Knie, anpassende Rückstellzeit, automatische Anhebung) zweimal hintereinander wie in `synth.js` (`applyBus`), mit den Feinwerten `mix/bus`. Der Nachbau folgt dem Chromium-Quelltext (Zustimmung des Nutzers vom 2026-11-18). Vor dem ersten Commit: Lizenztext am Kopf der Quelldatei lesen, Datei und Stand in `native/LICENSES.md` von „geplant“ auf „geprüft“ setzen, Urhebervermerk in den Kopf von `compressor.cpp` und in `CREDITS.md`.
 
 **Prüfung:** `sound-compare.mjs` auf ganzen Tracks aller neun Stile mit Begrenzer: Pegel ±0,5 dB, Spitzen ±1 dB. Danach A/B-Satz für den Nutzer (`native\tools\ab-mix.cmd`).
 
@@ -440,11 +440,11 @@ In Arbeitstagen der KI, ohne Hör- und Testzeit des Nutzers; Grundlage sind die 
 ## Entschieden
 
 - **Saitenmodelle werden portiert** (Nutzer, 2026-11-18): Bass und E-Gitarre aus dem Saitenmodell gehören zum Port, auch wenn die Oberfläche sie nicht zur Wahl stellt (Task 24).
+- **Kompressor nach dem Chromium-Quelltext** (Nutzer, 2026-11-18): Bus-Kompressor und Begrenzer werden nach dem Kompressor des Browsers nachgebaut (BSD-3-Clause, Urhebervermerk in `native/LICENSES.md` und in den Credits der App; Task 17).
 
 ## Offene Entscheidungen des Nutzers
 
 Keine davon hält Phase 1 auf.
 
 1. **Zuschnitt:** Prüfung, Würfeln der Form, Klangmodell und Profile bleiben JavaScript; Regler werden keine JUCE-Parameter. Einverstanden? (Vor Phase 2.)
-2. **Kompressor:** Nachbau nach dem Chromium-Quelltext (BSD-3-Clause, Namensnennung in `LICENSES.md`)? Sonst nach der W3C-Beschreibung mit größerer Abweichung im Pegel. (Vor Task 17.)
-3. **Web-Version danach:** eingefroren als Demo auf GitHub Pages lassen oder abschalten? `src/audio` bleibt in jedem Fall als Referenz für den Klangabgleich, solange Stimmen portiert werden.
+2. **Web-Version danach:** eingefroren als Demo auf GitHub Pages lassen oder abschalten? `src/audio` bleibt in jedem Fall als Referenz für den Klangabgleich, solange Stimmen portiert werden.
