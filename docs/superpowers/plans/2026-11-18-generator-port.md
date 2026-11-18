@@ -414,6 +414,8 @@ Fertig, wenn ein ganzer Track mit Sample-Stimmen aus Web und Kern innerhalb der 
 
 Je Stimme eine Datei unter `native/core/src/voices/`, alle hinter derselben Schnittstelle wie die Sample-Stimmen (die Phase 2 festlegt). Reihenfolge nach Nutzen; nach jedem Task ein A/B-Satz.
 
+**Vor dem ersten Task dieser Phase zu entwerfen** (Befund der Schlussdurchsicht von Phase 1 und 2, 2026-11-18): Die Schnittstelle `Voice` aus Phase 2 trägt drei dieser Stimmen noch nicht. (1) Die Orgel hat eine eigene Kette hinter ihren Tönen (Schweller, Vorstufe, Leslie), deren Zustand weiterläuft und einen Stimmenwechsel überlebt: Klingende Orgeltöne behalten ihr Leslie, auch wenn die Schicht schon Gitarre spielt. Eine Kette je Schicht in der Engine wäre falsch; es braucht eine Kette je Stimme, auf dem Steuer-Thread gebaut, vom Setup gehalten, und die Engine behält abgelöste Ketten, bis sie verstummt sind. (2) Das Saitenmodell rechnet Töne vorab als Puffer: Eine Stimme muss einen Song auf dem Steuer-Thread vorbereiten können, `makeVoice` kennt heute nur Stimme, Pack und Feinwerte. (3) Töne mit anderem Zustand als ein Sample-Ton brauchen einen eigenen Platz im Vorrat (geplant: eine Variante im festen Feld).
+
 | Task | Stimmen | Vorlage | Besonderheit |
 |---|---|---|---|
 | 20 | Tonewheel-Orgel, vier Zugriegel-Presets, mit Leslie | `voices/organ.js`, `organ-leslie.js` | Felder `leslie`, `swell`, `art: swell`; Feinwerte der Oberfläche (Leslie, Zerre) über `setTuning` |

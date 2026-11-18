@@ -2,11 +2,11 @@ name: native
 
 on:
   push:
-    branches: [develop]
-    paths: ['native/**', 'src/core/**', '.github/workflows/native.yml']
+    branches: [develop, feat/port-samples] # the port's branch too: Linux and macOS are built nowhere else
+    paths: ['native/**', 'src/core/**', 'src/audio/**', '.github/workflows/native.yml']
   pull_request:
     branches: [develop]
-    paths: ['native/**', 'src/core/**', '.github/workflows/native.yml']
+    paths: ['native/**', 'src/core/**', 'src/audio/**', '.github/workflows/native.yml']
 
 jobs:
   build:
