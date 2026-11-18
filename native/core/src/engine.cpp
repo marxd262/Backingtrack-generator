@@ -40,10 +40,11 @@ struct PlaySong {
     double lengthBeats = 0.0, maxLeadBeats = 0.0;
 };
 
-// What the audio thread plays with: the voice of every layer (nullptr = silent) and its serial.
+// What the audio thread plays with: the voice of every layer (nullptr = silent), its serial and the layer's place by mix/pan.
 struct Setup {
     std::shared_ptr<const Voice> voice[Engine::layerCount];
     uint64_t serial[Engine::layerCount] = {};
+    float pan[Engine::layerCount] = {};
 };
 
 } // namespace
@@ -78,7 +79,7 @@ struct Engine::Impl {
     bool wasPlaying = false, reseek = true;
     unsigned starts = 0; // Transport::Block::starts of the last block
     double skipBefore = -INFINITY; // song beat of the last jump less a frame: events triggered before it do not play (but see render)
-    float gainNow[layerCount] = {}, masterNow = 1.0f, driveNow = 0.0f;
+    float gainNow[layerCount] = {}, panNow[layerCount] = {}, masterNow = 1.0f, driveNow = 0.0f;
     double limiterEnv = 0.0;
     float ahead[2][1024] = {}; // the limiter sees the signal 6 ms before it leaves, like the browser's compressor
     int aheadAt = 0, aheadFrames = 288;
@@ -87,7 +88,7 @@ struct Engine::Impl {
     Impl() {
         for (int l = 0; l < layerCount; ++l) {
             fader[l] = 1.0f;
-            pan[l] = 0.0f;
+            pan[l] = NAN;
             muted[l] = false;
             trim[l] = static_cast<float>(detail::soundData().trim.at(LAYER_NAMES[l]));
         }
@@ -107,8 +108,15 @@ struct Engine::Impl {
         for (int l = 0; l < layerCount; ++l) {
             made->voice[l] = chosen[l].voice;
             made->serial[l] = chosen[l].serial;
+            // shortcut: width 1 (synth.js mix.width = 2 * master.width, 1 at the default timbre); the timbre's width comes with Task 16.
+            made->pan[l] = static_cast<float>(detail::tunedValue("mix/pan", LAYER_NAMES[l], tuning));
         }
         publish<Setup>(std::move(made), pendingSetup, retiredSetup);
+    }
+    // Audio thread: where the layer goes, the mixer's pan or else the place mix/pan gives it.
+    float panTarget(int l) const {
+        const float p = pan[l];
+        return std::isnan(p) ? (setup ? setup->pan[l] : 0.0f) : p;
     }
 
     // Audio thread: layers whose voice changed (all: when playing starts) begin with the state of a voice just built.
@@ -242,7 +250,7 @@ double Engine::bpm() const { return impl_->bpm; }
 int Engine::beatsPerBar() const { return impl_->beatsPerBar; }
 void Engine::setLevel(Layer layer, float fader) { impl_->fader[layer] = std::clamp(fader, 0.0f, 1.0f); }
 void Engine::setMuted(Layer layer, bool muted) { impl_->muted[layer] = muted; }
-void Engine::setPan(Layer layer, float pan) { impl_->pan[layer] = std::clamp(pan, -1.0f, 1.0f); }
+void Engine::setPan(Layer layer, float pan) { impl_->pan[layer] = std::isnan(pan) ? pan : std::clamp(pan, -1.0f, 1.0f); }
 void Engine::setMaster(float fader) { impl_->master = std::clamp(fader, 0.0f, 1.0f); }
 void Engine::setBassDrive(float amount) { impl_->drive = std::clamp(amount, 0.0f, 1.0f); }
 void Engine::setLimiter(bool on) { impl_->limiterOn = on; }
@@ -253,7 +261,10 @@ void Engine::prepare(double sampleRate) {
     m.tones.sr = sampleRate;
     for (Tone& t : m.tones.all) t.active = false;
     m.restart(true);
-    for (int l = 0; l < layerCount; ++l) m.gainNow[l] = m.muted[l] ? 0.0f : m.fader[l] * m.fader[l];
+    for (int l = 0; l < layerCount; ++l) {
+        m.gainNow[l] = m.muted[l] ? 0.0f : m.fader[l] * m.fader[l];
+        m.panNow[l] = m.panTarget(l);
+    }
     m.masterNow = m.master * m.master;
     m.driveNow = m.drive;
     m.limiterEnv = 0.0;
@@ -276,9 +287,11 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
                 m.reseek = true;
             }
             if (m.pendingSetup) {
+                const bool first = !m.setup;
                 m.retiredSetup = std::move(m.setup);
                 m.setup = std::move(m.pendingSetup);
                 m.restart(false);
+                if (first) for (int l = 0; l < layerCount; ++l) m.panNow[l] = m.panTarget(l); // the places at once, not a sweep from the middle
             }
             m.hasPending = false;
         }
@@ -341,7 +354,7 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
                         voice->play(late, step > 0 ? static_cast<int>((ahead - late.leadBeats) / step) : 0, secondsPerBeat, m.states[e.layer], m.tones);
                         continue;
                     }
-                    const int delay = std::clamp(static_cast<int>((e.beat + lap - from) / step), 0, count - 1);
+                    const int delay = step > 0 ? std::clamp(static_cast<int>((e.beat + lap - from) / step), 0, count - 1) : 0;
                     if (voice) voice->play(e, delay, secondsPerBeat, m.states[e.layer], m.tones);
                 } else if (m.next >= events.size() && to >= length + lap) {
                     m.next = 0;
@@ -370,8 +383,9 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
             for (int l = 0; l < layerCount; ++l) {
                 const float target = m.muted[l] ? 0.0f : m.fader[l] * m.fader[l];
                 m.gainNow[l] += smoothLevel * (target - m.gainNow[l]);
-                const float p = m.pan[l], g = m.gainNow[l] * m.trim[l];
-                const float x = m.buffers[l][0][i] * g * (p > 0 ? 1 - p : 1), y = m.buffers[l][1][i] * g * (p < 0 ? 1 + p : 1);
+                m.panNow[l] += smoothLevel * (m.panTarget(l) - m.panNow[l]);
+                const float g = m.gainNow[l] * m.trim[l];
+                const float x = m.buffers[l][0][i] * g * (1 - m.panNow[l]), y = m.buffers[l][1][i] * g * (1 + m.panNow[l]); // synth.js balance
                 peak[l] = std::max(peak[l], std::max(std::fabs(x), std::fabs(y)));
                 sum[0] += x;
                 sum[1] += y;

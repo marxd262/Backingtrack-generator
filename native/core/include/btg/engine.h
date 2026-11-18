@@ -36,7 +36,7 @@ public:
     // Any thread; they take effect in the next block.
     void setLevel(Layer layer, float fader); // fader position 0..1, gain is the square (as in the web mixer)
     void setMuted(Layer layer, bool muted);
-    void setPan(Layer layer, float pan);     // -1 left .. 1 right
+    void setPan(Layer layer, float pan);     // -1 left .. 1 right; NaN: where the fine value mix/pan puts the layer (the default)
     void setMaster(float fader);
     void setBassDrive(float amount);         // 0 = off (signal unchanged) .. 1
     void setLimiter(bool on);                // default on; off (for measuring): no limiter, no delay, no make-up, no clamp, the sum only gets the master gain

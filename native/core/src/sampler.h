@@ -72,6 +72,7 @@ struct Note { // what playNote gets; the defaults are playNote's. Build it with 
     int delay = 0;
     Engine::Layer layer = Engine::drums;
     uint64_t voice = 0;             // serial of the voice that starts it
+    float panLeft = 1.0f, panRight = 1.0f; // kit pan: on the tone's left and right output
 };
 
 // One sounding sample. Points only into its pack, never into the voice that started it: it rings out after a voice change.
@@ -104,6 +105,7 @@ struct Tone {
     Biquad shelf[2];                         // bend: high shelf at 1800 Hz, after the lowpass
     int offBy = 0;
     double offTime = 0.0;
+    float panLeft = 1.0f, panRight = 1.0f;
 
     void start(const Note& n, double sampleRate, uint64_t number);
     void choke(long long inFrames, double timeConstant, double sampleRate); // inFrames count from the tone's own start, not from the chunk's

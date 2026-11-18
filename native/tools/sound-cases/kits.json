@@ -194,7 +194,7 @@
     "brightness": 0.5,
     "echo": 0.5,
     "reverb": 0.5,
-    "width": 0,
+    "width": 0.5,
     "roomSize": 0.5,
     "roomWet": 0.5
    }
@@ -397,7 +397,7 @@
     "brightness": 0.5,
     "echo": 0.5,
     "reverb": 0.5,
-    "width": 0,
+    "width": 0.5,
     "roomSize": 0.5,
     "roomWet": 0.5
    }
@@ -601,7 +601,7 @@
     "brightness": 0.5,
     "echo": 0.5,
     "reverb": 0.5,
-    "width": 0,
+    "width": 0.5,
     "roomSize": 0.5,
     "roomWet": 0.5
    }
@@ -802,7 +802,7 @@
     "brightness": 0.5,
     "echo": 0.5,
     "reverb": 0.5,
-    "width": 0,
+    "width": 0.5,
     "roomSize": 0.5,
     "roomWet": 0.5
    }
@@ -1008,7 +1008,7 @@
     "brightness": 0.5,
     "echo": 0.5,
     "reverb": 0.5,
-    "width": 0,
+    "width": 0.5,
     "roomSize": 0.5,
     "roomWet": 0.5
    }
@@ -1210,7 +1210,7 @@
     "brightness": 0.5,
     "echo": 0.5,
     "reverb": 0.5,
-    "width": 0,
+    "width": 0.5,
     "roomSize": 0.5,
     "roomWet": 0.5
    }
@@ -1415,7 +1415,7 @@
     "brightness": 0.5,
     "echo": 0.5,
     "reverb": 0.5,
-    "width": 0,
+    "width": 0.5,
     "roomSize": 0.5,
     "roomWet": 0.5
    }
@@ -1620,7 +1620,7 @@
     "brightness": 0.5,
     "echo": 0.5,
     "reverb": 0.5,
-    "width": 0,
+    "width": 0.5,
     "roomSize": 0.5,
     "roomWet": 0.5
    }
@@ -1822,7 +1822,7 @@
     "brightness": 0.5,
     "echo": 0.5,
     "reverb": 0.5,
-    "width": 0,
+    "width": 0.5,
     "roomSize": 0.5,
     "roomWet": 0.5
    }
@@ -2024,7 +2024,7 @@
     "brightness": 0.5,
     "echo": 0.5,
     "reverb": 0.5,
-    "width": 0,
+    "width": 0.5,
     "roomSize": 0.5,
     "roomWet": 0.5
    }
@@ -2226,7 +2226,7 @@
     "brightness": 0.5,
     "echo": 0.5,
     "reverb": 0.5,
-    "width": 0,
+    "width": 0.5,
     "roomSize": 0.5,
     "roomWet": 0.5
    }
@@ -2428,7 +2428,7 @@
     "brightness": 0.5,
     "echo": 0.5,
     "reverb": 0.5,
-    "width": 0,
+    "width": 0.5,
     "roomSize": 0.5,
     "roomWet": 0.5
    }

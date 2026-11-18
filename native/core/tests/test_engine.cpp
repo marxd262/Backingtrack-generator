@@ -112,7 +112,7 @@ static double gainDb(const btg::detail::Biquad& f, double hz, double sr) {
     return 20 * std::log10(std::abs((f.b0 + f.b1 * z + f.b2 * z * z) / (1.0 + f.a1 * z + f.a2 * z * z)));
 }
 
-struct Result { std::vector<float> left; double rms = 0.0, peak = 0.0; };
+struct Result { std::vector<float> left; double rms = 0.0, peak = 0.0, rmsRight = 0.0; };
 
 static Result render(btg::Engine& engine, btg::Transport& transport, double seconds, int blockSize) {
     Result r;
@@ -123,11 +123,13 @@ static Result render(btg::Engine& engine, btg::Transport& transport, double seco
         for (int i = 0; i < block.frames; ++i) {
             r.left.push_back(l[i]);
             r.rms += l[i] * l[i];
+            r.rmsRight += rr[i] * rr[i];
             r.peak = std::max(r.peak, static_cast<double>(std::fabs(l[i])));
         }
         done += block.frames;
     }
     r.rms = std::sqrt(r.rms / static_cast<double>(r.left.size()));
+    r.rmsRight = std::sqrt(r.rmsRight / static_cast<double>(r.left.size()));
     return r;
 }
 
@@ -495,25 +497,59 @@ int main(int argc, char** argv) {
         }
     }
 
-    // A hand-filled first block that stands still (beatsPerFrame 0) on the downbeat of a slide: the late event has no step to
-    // divide by, so it starts at the beginning of the chunk. No crash, finite samples.
+    // A hand-filled first block that stands still (beatsPerFrame 0) between a slide's trigger and its note. A still block plays only
+    // such a late event (on the regular path its events would lie before the place, which no first block has); with no step to divide
+    // by, it starts at frame 0. Unguarded, (ahead - lead) / 0 is +inf and its cast to int undefined: ARM64 saturates to INT_MAX (the tone
+    // never starts), x64 gives INT_MIN (it starts at once as well).
     {
-        double slide = -1.0;
+        double slide = -1.0, lead = 0.0;
         for (const btg::Event& e : btg::buildEvents(track))
-            if (e.type == btg::Event::Type::note && e.layer == "bass" && e.art == "slideIn" && e.t > 0.02) { slide = e.t * (100.0 / 60.0); break; }
-        CHECK(slide > 0.0);
+            if (e.type == btg::Event::Type::note && e.layer == "bass" && e.art == "slideIn" && e.t > 0.02) {
+                slide = e.t * (100.0 / 60.0);
+                lead = std::min(e.artTime ? *e.artTime : 0.08, e.t) * (100.0 / 60.0);
+                break;
+            }
+        CHECK(slide > 0.0 && lead > 0.0);
         btg::Engine engine;
         engine.setPackSource(source);
         engine.setTrack(track);
         engine.setMuted(btg::Engine::drums, true);
+        engine.setLimiter(false); // no look-ahead: frame 0 of the output is frame 0 of the tone
         engine.prepare(rate);
         std::vector<float> l(480), r(480);
-        const btg::Transport::Block still { true, slide, 0.0, 480, 1 };
+        const btg::Transport::Block still { true, slide - lead / 2, 0.0, 480, 1 };
         engine.render(l.data(), r.data(), still.frames, still);
-        bool finite = true;
-        for (int i = 0; i < 480; ++i) finite = finite && std::isfinite(l[i]) && std::isfinite(r[i]);
-        CHECK(finite);
+        double squares = 0.0;
+        for (int i = 0; i < 200; ++i) squares += static_cast<double>(l[i]) * l[i];
+        CHECK(std::sqrt(squares / 200) > 0.01); // the first 200 frames: silent when the tone starts anywhere after them
     }
+
+    // The balance of the web mixer: left 1 - p, right 1 + p. A pan of NaN puts the layer where mix/pan says.
+    const auto sides = [&](btg::Engine::Layer layer, const char* voices, float pan, const char* tuning) {
+        btg::Engine engine;
+        engine.setPackSource(source);
+        engine.setTrack(track);
+        engine.setVoices(voices);
+        engine.setTuning(tuning);
+        engine.setMuted(layer == btg::Engine::bass ? btg::Engine::drums : btg::Engine::bass, true);
+        engine.setLimiter(false);
+        engine.setPan(layer, pan);
+        engine.prepare(rate);
+        btg::Transport t;
+        t.play(64.0, engine.bpm());
+        const Result r = render(engine, t, 5.0, 480);
+        return r.rmsRight / r.rms;
+    };
+    const char* fingerBass = R"({"bass":{"id":"sample","variant":"finger"}})";
+    CHECK(std::fabs(sides(btg::Engine::bass, fingerBass, 0.5f, "{}") - 3.0) < 0.01);                                       // 1.5 / 0.5
+    CHECK(std::fabs(sides(btg::Engine::bass, fingerBass, NAN, "{}") - 1.0) < 0.01);                                        // mix/pan bass: 0
+    CHECK(std::fabs(sides(btg::Engine::bass, fingerBass, NAN, R"({"mix/pan":{"bass":-0.5}})") - 1.0 / 3.0) < 0.01);
+    // Kit pan: a format-1 kit spreads its hits by mix/pan "kit" (hi-hat right, crash and floor tom left); a format-2 kit (kitPan 0) does not.
+    const char* brushes = R"({"drums":{"id":"sample","variant":"brushes"}})";
+    const char* standard = R"({"drums":{"id":"sample","variant":"standard"}})";
+    CHECK(std::fabs(sides(btg::Engine::drums, brushes, 0.0f, R"({"mix/pan":{"kit":0}})") - 1.0) < 1e-6);
+    CHECK(sides(btg::Engine::drums, brushes, 0.0f, "{}") > 1.02);
+    CHECK(std::fabs(sides(btg::Engine::drums, standard, 0.0f, "{}") - sides(btg::Engine::drums, standard, 0.0f, R"({"mix/pan":{"kit":0}})")) < 1e-9);
 
     std::printf(failures ? "%d check(s) failed\n" : "all checks passed\n", failures);
     return failures ? 1 : 0;

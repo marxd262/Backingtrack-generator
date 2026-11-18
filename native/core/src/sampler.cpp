@@ -65,6 +65,8 @@ void Tone::start(const Note& n, double sampleRate, uint64_t number) {
     loop = zone.loop && !n.oneShot;
     loopStart = s.loopStart;
     loopEnd = s.loopEnd;
+    panLeft = n.panLeft;
+    panRight = n.panRight;
 
     art = n.art;
     double dur = n.dur, filter = n.filter, naturalDecay = n.naturalDecay, gain = n.gain;
@@ -220,8 +222,8 @@ void Tone::render(float* left, float* right, int count) {
             out[c] = x * fade;
         }
         if (sides == 1) out[1] = out[0];
-        left[i] += static_cast<float>(out[0]);
-        right[i] += static_cast<float>(out[1]);
+        left[i] += static_cast<float>(out[0] * panLeft);
+        right[i] += static_cast<float>(out[1] * panRight);
         pos += step;
     }
 }
@@ -328,12 +330,15 @@ public:
 class SampleHits final : public Voice {
 public:
     // closes: the name after the fallback is hat, or the event's own is hatPedal; opens: it is openHat (format 1: the closed hat chokes the open one)
-    struct Hit { int key = -1; bool halfChoke = false, closes = false, opens = false; };
+    struct Hit { int key = -1; bool halfChoke = false, closes = false, opens = false; float panLeft = 1.0f, panRight = 1.0f; };
     std::array<Hit, std::size(HIT_NAMES)> hits; // per HIT_NAMES index: the key that plays it, -1 = none
 
-    SampleHits(Engine::Layer voiceLayer, const std::string& key, const Pack& p) {
+    // kit: mix/pan "kit" when the voice places its hits in the kit (synth.js 198), else 0
+    SampleHits(Engine::Layer voiceLayer, const std::string& key, const Pack& p, double kit) {
         static const std::map<std::string, std::string> DRUM_FALLBACK { // src/core/event-helpers.js
             { "sideStick", "snare" }, { "rimshot", "snare" }, { "ride", "hat" }, { "rideBell", "hat" }, { "hatHalf", "openHat" }, { "hatPedal", "hat" } };
+        // src/audio/synth.js, KIT_PAN: the place of a hit relative to mix/pan "kit"; every other hit stays in the middle
+        static const std::map<std::string, double> KIT_PAN { { "hat", 1 }, { "openHat", 1 }, { "crash", -1.2 }, { "tomHigh", 0.8 }, { "tomLow", -1.2 } };
         const auto& hitKeys = soundData().hitKeys;
         const auto own = hitKeys.find(key);
         const auto& keyMap = own != hitKeys.end() ? own->second : hitKeys.at(LAYER_NAMES[voiceLayer]);
@@ -354,6 +359,12 @@ public:
             hits[i].key = found != keys.end() ? found->second : -1;
             hits[i].closes = n == "hat" || std::string(HIT_NAMES[i]) == "hatPedal";
             hits[i].opens = n == "openHat";
+            // the place goes by the event's name after the fallback (DRUM_FALLBACK[name] ?? name), whichever key plays it
+            const auto stand = DRUM_FALLBACK.find(HIT_NAMES[i]);
+            const auto place = KIT_PAN.find(stand != DRUM_FALLBACK.end() ? stand->second : HIT_NAMES[i]);
+            const double pan = clamp(kit * (place != KIT_PAN.end() ? place->second : 0.0), -1, 1);
+            hits[i].panLeft = static_cast<float>(1 - pan);
+            hits[i].panRight = static_cast<float>(1 + pan);
         }
     }
 
@@ -380,7 +391,7 @@ public:
             const Pack::Sample& s = pack->samples[sample];
             const double length = s.frames / s.rate / std::pow(2.0, ((hit.key - zone->rootKey) * 100 + zone->tuneCents) / 1200);
             return tones.start({ .pack = pack.get(), .zone = zone, .sample = sample, .key = hit.key, .dur = length, .vel = vel, .gain = g, .cents = cents,
-                                 .delay = delay, .layer = layer, .voice = state.serial });
+                                 .delay = delay, .layer = layer, .voice = state.serial, .panLeft = hit.panLeft, .panRight = hit.panRight });
         };
         Tone* started[2] = { start(zone->sample, gain), v2 && zone->room >= 0 ? start(zone->room, gain * (std::isfinite(tuned.roomMic) ? tuned.roomMic : 1.0)) : nullptr };
         if (!v2) { // 66 to 71: the kit's own choke rule
@@ -414,7 +425,9 @@ std::shared_ptr<const Voice> makeVoice(Engine::Layer layer, const std::string& k
                         v("lowDb"), v("midDb"), v("midHz"), v("highDb"), v("highHz"), v("layerSpread"), v("choke"), v("roomMic"), v("velCurve"), v("kitPan") };
     std::shared_ptr<Voice> voice;
     if (layer == Engine::drums || layer == Engine::percussion) {
-        voice = std::make_shared<SampleHits>(layer, key, *pack);
+        // synth.js 198: a drums voice places its hits unless its kitPan is 0 (NaN counts as not 0: every format-1 kit)
+        const double kit = layer == Engine::drums && !(tuned.kitPan == 0) ? tunedValue("mix/pan", "kit", tuning) : 0.0;
+        voice = std::make_shared<SampleHits>(layer, key, *pack, kit);
     } else {
         auto notes = std::make_shared<SampleNotes>();
         notes->eq = { tuned.lowDb, tuned.midDb, tuned.midHz, tuned.highDb, tuned.highHz };

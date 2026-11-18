@@ -14,12 +14,13 @@ const { resolveVoices } = await load('core/voices.js');
 const { progressionFor } = await load('core/progressions.js');
 const { DEFAULT_TIMBRE } = await load('core/timbre.js');
 const { tunedValue } = await load('audio/voices/tunables.js');
+const { rollForm } = await load('core/form-roll.js');
 
 const KEY = { root: 'A', mode: 'minor' };
 const NONE = { drums: false, bass: false, chords: false, pad: false, lead: false, percussion: false };
 // A verse, then a chorus: without drums the bass slides only into the downbeat of a chorus (articulation.js, band rule 6)
 const FORM = { sections: [{ type: 'verse', bars: 4 }, { type: 'chorus', bars: 4 }] };
-// width 0 puts every layer in the middle (the core's balance comes with Task 13)
+// width 0.5, the web app's default (mix.width 1): every layer where mix/pan puts it, the hits of a kit spread by mix/pan kit
 const neutral = (width) => ({ ...structuredClone(DEFAULT_TIMBRE), master: { ...DEFAULT_TIMBRE.master, width } });
 function track(styleId, { layers, voices = {}, seed = 2, lead = 'melody', extra = {} }) {
   const style = STYLE_PRESETS.find((s) => s.id === styleId);
@@ -48,7 +49,7 @@ const NOTES = [
 const samples = NOTES.flatMap(([layer, variant, style, twin = style]) => [[style, 0], ...(twin ? [[twin, 1]] : [])].map(([at, ornate]) => ({
   name: `${layer}-${variant}${ornate ? '-ornaments' : ''}${at !== style ? `-${at}` : ''}`,
   track: track(at, { layers: { [layer]: true }, voices: { [layer]: { id: 'sample', variant } }, lead: layer === 'lead' ? 'callResponse' : 'melody', extra: ornate ? { ornaments: 1 } : {} }),
-  sound: neutral(0),
+  sound: neutral(0.5),
   dry: true,
 })));
 write('samples.json', samples);
@@ -85,7 +86,7 @@ const KIT_FORM = { sections: [{ type: 'verse', bars: 4 }, { type: 'chorus', bars
 const SEEDS = {};
 const kits = KITS.map(([layer, variant, style, job]) => {
   const name = `${layer}-${variant}${job ? `-${job}` : ''}`;
-  return { name, track: track(style, { layers: { [layer]: true }, voices: { [layer]: { id: 'sample', variant } }, seed: SEEDS[name] ?? 1, extra: { form: KIT_FORM, ornaments: 1, ...(job && { jobs: { lead: 'melody', percussion: job } }) } }), sound: neutral(0), dry: true };
+  return { name, track: track(style, { layers: { [layer]: true }, voices: { [layer]: { id: 'sample', variant } }, seed: SEEDS[name] ?? 1, extra: { form: KIT_FORM, ornaments: 1, ...(job && { jobs: { lead: 'melody', percussion: job } }) } }), sound: neutral(0.5), dry: true };
 });
 const kitEvents = kits.map((c) => buildEvents(c.track));
 kits.forEach((c, i) => {
@@ -110,5 +111,17 @@ const PERCUSSION = ['shaker', 'tambourine', 'congaHigh', 'congaLow', 'bongoHigh'
 console.log(`kits.json: ${kits.length} cases. Hits per name over all cases, flam ${flams}, choke ${chokes}:`);
 for (const n of [...DRUM_ONLY, ...PERCUSSION]) console.log(`  ${n.padEnd(10)} ${hitCount[n] ?? 0}`);
 for (const n of PERCUSSION) if (!hitCount[n]) problems.push(`no ${n} in any kit case`);
+
+// Task 13: one track per style, all six layers with the style's voices, a rolled form, the layers where mix/pan puts them (width 0.5).
+// The same set is the A/B set for listening (native/tools/ab-samples.cmd).
+write('band.json', STYLE_PRESETS.map((style) => ({
+  name: `band-${style.id}`,
+  track: track(style.id, {
+    layers: { drums: true, bass: true, chords: true, pad: true, lead: true, percussion: true },
+    extra: { form: rollForm({ template: 'auto', style: style.id, targetBars: 24, seed: 1, tags: style.tags }) },
+  }),
+  sound: neutral(0.5),
+  dry: true,
+})));
 for (const p of problems) console.error(`ERROR ${p}`);
 process.exit(problems.length ? 1 : 0);

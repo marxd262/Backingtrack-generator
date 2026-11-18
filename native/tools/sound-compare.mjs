@@ -9,12 +9,15 @@
 //   kind   "sample" (default) or "synth": chooses the limits
 // Exit code 1 if a case fails (also one that cannot render, or whose renders differ in length by more than 50 ms).
 // balance = (right minus left level of the native render) minus (the same of the web render); limit as the level limit.
+// The listening files (<name>-web.wav, <name>-nativ.wav, 16 bit) of a pair above full scale are turned down by one common gain;
+// the measurement uses the unscaled floats. A run of cases ends with the A/B page index.html in the output folder (ab-page.mjs).
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderWeb, wavBytes } from './web-render.mjs';
+import { writeAbPage } from './ab-page.mjs';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const RATE = 48000;
@@ -173,6 +176,18 @@ async function renderCase(c) {
   }
 }
 
+// The listening files of a pair. When a render goes above full scale, both get one common gain that puts the larger peak at 0.98,
+// so that neither clips and the two stay comparable; a pair inside full scale is written unchanged. Returns the gain.
+function writePair(out, name, web, native) {
+  let peak = 0;
+  for (const x of [web, native]) for (const v of x) peak = Math.max(peak, Math.abs(v));
+  const gain = peak > 1 ? 0.98 / peak : 1;
+  writeFileSync(join(out, `${name}-web.wav`), wavBytes(web, RATE, gain));
+  writeFileSync(join(out, `${name}-nativ.wav`), wavBytes(native, RATE, gain));
+  return gain;
+}
+const turnedDown = (gain, dry) => `    listening files turned down by ${(-20 * Math.log10(gain)).toFixed(1)} dB (${dry ? 'dry sum' : 'render'} above full scale)`;
+
 // Renders, writes the WAVs, measures and prints one line per case; a case that fails to render prints RENDER FAILED and counts as failed.
 async function runCases(raw, baseDir, out) {
   const results = [];
@@ -181,10 +196,10 @@ async function runCases(raw, baseDir, out) {
     try {
       const c = prepareCase(entry, baseDir);
       const { web, native } = await renderCase(c);
-      writeFileSync(join(out, `${c.name}-web.wav`), wavBytes(web, RATE));
-      writeFileSync(join(out, `${c.name}-nativ.wav`), wavBytes(native, RATE));
+      const gain = writePair(out, c.name, web, native);
       const m = measure(web, native, c.kind);
       console.log(line(c.name, m));
+      if (gain < 1) console.log(turnedDown(gain, c.dry));
       results.push({ name, m });
     } catch (error) {
       const reason = String(error?.message ?? error).replace(/\s+/g, ' ').slice(0, 400);
@@ -215,8 +230,7 @@ function tilt(x, hz, gainDb) { // RBJ high shelf, slope 1
 async function selfCheck(out) {
   const c = prepareCase({ name: 'selfcheck-funk', track: join(repo, 'native/core/tests/track-funk.json'), dry: true }, repo);
   const { web, native } = await renderCase(c);
-  writeFileSync(join(out, `${c.name}-web.wav`), wavBytes(web, RATE));
-  writeFileSync(join(out, `${c.name}-nativ.wav`), wavBytes(native, RATE));
+  writePair(out, c.name, web, native);
   const checks = [
     ['as it is', native, 'must PASS', (m) => m.pass],
     ['native 2 dB quieter', native.map((v) => v * 10 ** (-2 / 20)), 'must FAIL on level', (m) => m.failed.level],
@@ -231,6 +245,23 @@ async function selfCheck(out) {
     console.log(line(`${c.name} (${what})`, m));
     console.log(`  ${good(m) ? 'ok' : 'WRONG'}: ${want}`);
     ok &&= good(m);
+  }
+  // listening files of a pair above full scale (the funk pair raised to a peak of 2, native 1 dB below web): one common gain,
+  // nothing clips, the level difference of the files is that of the floats
+  const loud = mkdtempSync(join(tmpdir(), 'btg-listen-'));
+  try {
+    const top = native.reduce((p, v) => Math.max(p, Math.abs(v)), 0);
+    const [w, n] = [web, native].map((x, i) => x.map((v) => v * (2 / top) * (i ? 10 ** (-1 / 20) : 1)));
+    const gain = writePair(loud, 'loud', w, n);
+    const [fw, fn] = ['web', 'nativ'].map((side) => readWav(join(loud, `loud-${side}.wav`)));
+    const inside = [fw, fn].every((x) => x.every((v) => Math.abs(v) < 32767 / 32768));
+    const gap = (db(meanSquare(fn)) - db(meanSquare(fw))) - (db(meanSquare(n)) - db(meanSquare(w)));
+    const listen = gain < 1 && inside && Math.abs(gap) <= 0.01;
+    console.log(`listening files of a pair above full scale\n${turnedDown(gain, true)}; level difference of the files minus that of the floats ${signed(gap)} dB, ${inside ? 'nothing clips' : 'CLIPS'}`);
+    console.log(`  ${listen ? 'ok' : 'WRONG'}: must turn both down by one gain, clip nothing and keep the level difference within 0.01 dB`);
+    ok &&= listen;
+  } finally {
+    rmSync(loud, { recursive: true, force: true });
   }
   // a case that cannot render (a file that is no track) must not take the next one with it
   console.log('two cases, the first cannot render:');
@@ -254,4 +285,5 @@ if (self) process.exit(await selfCheck(out) ? 0 : 1);
 
 const baseDir = dirname(resolve(casesFile));
 const results = await runCases(JSON.parse(readFileSync(resolve(casesFile), 'utf8')), baseDir, out);
+if (results.some((r) => r.m)) console.log(`A/B page: ${writeAbPage(out).page}`);
 process.exit(results.every((r) => r.m?.pass) ? 0 : 1);

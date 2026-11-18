@@ -2,6 +2,8 @@
 
 #include <juce_gui_extra/juce_gui_extra.h>
 
+#include <limits>
+
 #if JucePlugin_Build_Standalone
  #include <juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h> // the app's audio device, for the measurements
 #endif
@@ -14,7 +16,7 @@ const juce::File webRoot { BTG_WEB_ROOT };
 const juce::File shimRoot { BTG_WEB_SHIMS };
 
 // Files of the web app that the app replaces: the engine is the player, and it owns the samples.
-const juce::StringArray shims { "/audio/play.js", "/audio/load-voices.js" };
+const juce::StringArray shims { "/audio/play.js", "/audio/load-voices.js", "/audio/voices/sampler.js" };
 
 juce::String mimeType (const juce::File& file) {
     static const std::map<juce::String, juce::String> types {
@@ -42,9 +44,9 @@ const juce::StringArray layerNames { "drums", "bass", "chords", "pad", "lead", "
 
 // Messages that build the song (and read its packs) or start, stop or move the transport: they run on the processor's loader
 // thread in the order the page sent them, so a play waits for its track's packs and a stop sent meanwhile comes after it.
-const juce::StringArray queued { "track", "play", "stop", "tempo", "seek", "loop", "playFile", "fileRate" };
+const juce::StringArray queued { "track", "voices", "tuning", "pack", "play", "stop", "tempo", "seek", "loop", "playFile", "fileRate" };
 
-struct Done { juce::String failed, status; double ms = 0.0; }; // status: btg::Engine::voiceStatus after a track
+struct Done { juce::String failed, status; double ms = 0.0; }; // status: btg::Engine::voiceStatus after a track or voices
 
 // Loader thread: what a queued message does.
 Done control (BackingtrackProcessor& p, const juce::var& message) {
@@ -58,6 +60,12 @@ Done control (BackingtrackProcessor& p, const juce::var& message) {
             done.failed = e.what();
         }
         done.status = p.engine.voiceStatus();
+    } else if (type == "voices") {
+        p.engine.setVoices (message["json"].toString().toStdString());
+        done.status = p.engine.voiceStatus();
+    } else if (type == "tuning") p.engine.setTuning (message["json"].toString().toStdString());
+    else if (type == "pack") {
+        try { p.pack (message["id"].toString().toStdString()); } catch (const std::exception& e) { done.failed = e.what(); }
     } else if (type == "play") {
         p.playsFile = false;
         p.transport.setLoop (0.0, 0.0);
@@ -146,7 +154,7 @@ private:
             });
             return;
         }
-        const auto layer = message["layer"].toString() == "drums" ? btg::Engine::drums : message["layer"].toString() == "bass" ? btg::Engine::bass : btg::Engine::layerCount;
+        const int layer = layerNames.indexOf (message["layer"].toString());
         const auto value = juce::jlimit (-1.0f, 1.0f, (float) message["value"]);
         const auto setParameter = [this] (const char* id, float v) {
             if (auto* parameter = processor.parameters.getParameter (id)) parameter->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, v));
@@ -184,9 +192,10 @@ private:
             sentTrack = -1; // a page that just opened gets the analysis of the loaded track again
         } else if (type == "master") setParameter ("master", value);
         else if (type == "drive") setParameter ("bassDrive", value);
-        else if (type == "level" && layer != btg::Engine::layerCount) processor.engine.setLevel (layer, value);
-        else if (type == "mute" && layer != btg::Engine::layerCount) processor.engine.setMuted (layer, (bool) message["on"]);
-        else if (type == "pan" && layer != btg::Engine::layerCount) processor.engine.setPan (layer, value);
+        else if (type == "level" && layer >= 0) processor.engine.setLevel (static_cast<btg::Engine::Layer> (layer), value);
+        else if (type == "mute" && layer >= 0) processor.engine.setMuted (static_cast<btg::Engine::Layer> (layer), (bool) message["on"]);
+        else if (type == "pan" && layer >= 0) // null: the place mix/pan gives the layer
+            processor.engine.setPan (static_cast<btg::Engine::Layer> (layer), message["value"].isVoid() || message["value"].isUndefined() ? std::numeric_limits<float>::quiet_NaN() : value);
         else if (type == "buffer") { // measurement only: another buffer size of the audio device
             if (auto* devices = deviceManager()) {
                 auto setup = devices->getAudioDeviceSetup();
@@ -200,6 +209,13 @@ private:
     // Message thread: a queued message has run on the loader thread.
     void done (const juce::var& message, const Done& r) {
         const auto type = message["type"].toString();
+        if (type == "pack") { // for native/app/web/sampler.js: error "" = ready
+            auto* reply = new juce::DynamicObject();
+            reply->setProperty ("id", message["id"]);
+            reply->setProperty ("error", r.failed);
+            browser.emitEventIfBrowserIsVisible ("pack", juce::var (reply));
+            return;
+        }
         if (type == "play") run = (int) message["run"];
         if (type == "track") buildMs = r.ms;
         if (r.status.isEmpty()) return;
@@ -229,8 +245,7 @@ private:
         state->setProperty ("beats", processor.transport.beats());
         state->setProperty ("bpm", processor.transport.bpm());
         auto* peaks = new juce::DynamicObject();
-        peaks->setProperty ("drums", processor.engine.takePeak (btg::Engine::drums));
-        peaks->setProperty ("bass", processor.engine.takePeak (btg::Engine::bass));
+        for (int l = 0; l < layerNames.size(); ++l) peaks->setProperty (juce::Identifier (layerNames[l]), processor.engine.takePeak (l));
         peaks->setProperty ("master", processor.engine.takePeak (btg::Engine::layerCount));
         state->setProperty ("peaks", juce::var (peaks));
         state->setProperty ("error", error);

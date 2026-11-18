@@ -25,10 +25,6 @@ if (document.querySelector('[data-lang]')) {
 }
 const engineBeats = () => engine.beats + (engine.playing ? ((performance.now() - engine.at) / 1000) * (engine.bpm / 60) : 0);
 
-// The engine plays drums and bass so far. The other layers are switched off in the track, for the engine and
-// for the lights of the UI alike, so that the UI shows what sounds.
-const ENGINE_LAYERS = ['drums', 'bass'];
-const playable = (track) => ({ ...track, layers: Object.fromEntries(LAYER_IDS.map((id) => [id, ENGINE_LAYERS.includes(id) && track.layers?.[id] !== false])) });
 // The engine takes the track as normalizeTrack writes it, with the voices filled in.
 const sendTrack = (track) => send('track', { json: JSON.stringify({ ...normalizeTrack(track), voices: resolveVoices(track) }) });
 const sendTimbre = (timbre) => send('drive', { value: timbre?.bass?.overdrive ?? 0 }); // the one effect of the engine: drive on the bass
@@ -36,8 +32,8 @@ const sendTimbre = (timbre) => send('drive', { value: timbre?.bass?.overdrive ??
 let runs = 0;
 const TICK_MS = 10;
 
-export function play(ctx, trackInput, { loops = 1, startBar = 0, levels, master, pans, onEvent, onBar, onEnd, timing, ornaments } = {}) {
-  const given = playable(trackInput);
+export function play(ctx, trackInput, { loops = 1, startBar = 0, levels, master, pans, tuning, onEvent, onBar, onEnd, timing, ornaments } = {}) {
+  const given = trackInput;
   let events = buildEvents(given, { timing, ornaments }); // throws on an invalid track before anything starts
   if (!(loops === Infinity || (Number.isInteger(loops) && loops >= 1))) {
     throw new RangeError(`loops must be an integer >= 1 or Infinity, got ${loops}`);
@@ -57,12 +53,13 @@ export function play(ctx, trackInput, { loops = 1, startBar = 0, levels, master,
   }
 
   const run = ++runs;
+  send('tuning', { json: JSON.stringify(tuning ?? {}) }); // the voices that `track` builds read it
   sendTrack(given);
   sendTimbre(resolveTrackTimbre(track));
   send('master', { value: master ?? 1 });
-  for (const layer of ENGINE_LAYERS) {
+  for (const layer of LAYER_IDS) {
     send('level', { layer, value: levels?.[layer] ?? 1 });
-    send('pan', { layer, value: pans?.[layer] ?? 0 });
+    send('pan', { layer, value: pans?.[layer] ?? null }); // null: where mix/pan puts the layer
     send('mute', { layer, on: false });
   }
   send('play', { run, bpm, startBeats: (startSec * bpm) / 60 });
@@ -123,7 +120,6 @@ export function play(ctx, trackInput, { loops = 1, startBar = 0, levels, master,
     startPerf: performance.now(),
     stop,
     songTime,
-    // Layers the engine does not play yet take their controls and do nothing.
     setLayer(name, on) {
       checkLayer(name);
       send('mute', { layer: name, on: !on });
@@ -144,12 +140,12 @@ export function play(ctx, trackInput, { loops = 1, startBar = 0, levels, master,
     setTimbre(timbre) {
       if (!stopped) sendTimbre(timbre);
     },
-    setVoices() {}, // fixed packs so far
-    setTuning() {},
+    setVoices(voices) { if (!stopped) send('voices', { json: JSON.stringify(voices) }); },
+    setTuning(next) { if (!stopped) send('tuning', { json: JSON.stringify(next ?? {}) }); },
     level: (name) => (stopped ? 0 : engine.peaks?.[name] ?? 0),
     setTrack(newTrack) {
       if (stopped) return false;
-      const given2 = playable({ ...newTrack, bpm });
+      const given2 = { ...newTrack, bpm };
       const next2 = buildEvents(given2, { timing, ornaments });
       const t2 = normalizeTrack(given2);
       let sec = 0;
