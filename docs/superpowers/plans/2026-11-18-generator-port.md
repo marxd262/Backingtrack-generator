@@ -622,6 +622,8 @@ In Arbeitstagen der KI, ohne Hör- und Testzeit des Nutzers; Grundlage sind die 
 - **Die Hörprobe-Seite kommt in die App** (Nutzer, 2026-11-18): als dritte Seite auf der Engine, Task 35a in Phase 8.
 - **Die JavaScript-Schnittstelle `src/index.js` entfällt mit Phase 9** (Nutzer, 2026-11-18); Interactive Scales bindet den Generator später über die WebAssembly-Fassung ein.
 
+- **Vorerst bleibt alles in einem Zweig** (Nutzer, 2026-11-18): Plan, Phase 1 und die folgenden Phasen liegen auf `feat/port-samples`; nichts geht nach `develop`, und es gibt keinen neuen Zweig je Phase, bis der Nutzer es sagt. Das setzt die Regel „ein Zweig je Phase“ aus den Global Constraints bis dahin aus.
+
 ## Offene Entscheidungen des Nutzers
 
 Keine.
