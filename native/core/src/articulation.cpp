@@ -1,21 +1,12 @@
-// Port of src/core/articulation.js (tag port-base): the rule groups drums, bass, drumsB and bassB with the
-// band rules. The groups for chords, keys, pad and lead follow with their layers.
-#include "generator_internal.h"
+// Port of src/core/articulation.js: the step itself and the rule groups drums, bass, drumsB, bassB (with the
+// band rules) and pad. The groups of the chord layer are in articulation_harmony.cpp.
+#include "articulation_internal.h"
 
 #include <cstdlib>
-#include <deque>
 #include <limits>
 #include <set>
 
 namespace btg::detail {
-namespace {
-
-struct Context { // per bar, see barContexts in the JavaScript
-    std::string kind;
-    int phrase = 0, inPhrase = 0, rep = 0;
-    bool first = false, phraseStart = false, phraseEnd = false, verse = false, stop = false, fill = false, roll = false, change = false, nextChange = false;
-    double energy = 0.0;
-};
 
 std::vector<Context> barContexts(const std::vector<Bar>& bars, const std::vector<Section>& sections, const Params& params) {
     std::vector<Context> ctx(bars.size());
@@ -65,6 +56,8 @@ std::string profileOf(const Track& track) {
     return "rock";
 }
 
+namespace {
+
 // Values per style profile; 0 = the rule does not apply (in the JavaScript: the entry is missing).
 struct BassProfile { const char* hold; double dead, slideIn, approach; bool chromatic; };
 struct BassBProfile { double slideOff, palmMute, octavePop, hammer; };
@@ -94,39 +87,6 @@ DrumProfile drumProfile(const std::string& p) {
     if (p == "reggae" || p == "latin" || p == "country") return { "always", false, true };
     return { "", false, true }; // funk
 }
-
-// What the rules share (env in the JavaScript). The events live in `store`; `out` is the stream the rules
-// change, append to and delete from, as references like the JavaScript objects.
-struct Env {
-    const Track& track;
-    const std::vector<Bar>& bars;
-    const Params& params;
-    const Rng& rng;
-    std::vector<Context> ctx;
-    std::string profile;
-    double tempo, factor;
-    std::deque<Event> store;
-    std::vector<Event*> out;
-
-    // probability of a rule after knob and tempo; rules that make the style (from 0.8) are not scaled
-    double p(double base) const { return base >= 0.8 ? base : std::min(0.9, base * factor * tempo * 1.0); }
-    // planRoll: a number 0..1 fixed per kind of part, phrase and bar of the phrase; a repeat redraws with 0.3
-    double roll(const Context& c, const char* layer, const char* name, int slot = 0) const {
-        const std::string key = c.kind + ":" + std::to_string(c.phrase) + ":" + std::to_string(c.inPhrase) + ":" + layer + ":" + name + ":" + std::to_string(slot);
-        const bool again = c.rep > 0 && rng.fork(key + ":v" + std::to_string(c.rep)).next() < 0.3;
-        return rng.fork(again ? key + ":r" + std::to_string(c.rep) : key).next();
-    }
-    // time of a grid step with swing, without randomness
-    double slotTime(const Bar& b, int s) const { return r6(b.start + s * b.stepSec + (b.sub == 4 && s % 2 ? (params.swing * b.stepSec) / 3 : 0)); }
-    int stepOf(const Event& e) const { return static_cast<int>(jsRound(*e.beat * bars[e.bar].sub)); }
-    Event* add(const Event& e) { store.push_back(e); out.push_back(&store.back()); return out.back(); }
-    std::vector<Event*> notes(const char* layer) const {
-        std::vector<Event*> list;
-        for (Event* e : out) if (isNote(*e, layer)) list.push_back(e);
-        sortByTime(list);
-        return list;
-    }
-};
 
 Event hit(const Env& env, const Bar& b, int s, const char* name, double vel) {
     Event e;
@@ -436,6 +396,7 @@ std::vector<Event> articulate(const std::vector<Event>& events, const Track& tra
     if (track.layer("drums")) drumRules(env);
     if (track.layer("bass")) bassRules(env);
     if (track.layer("pad")) padRules(env);
+    if (track.layer("chords")) chordRules(env);
     if (track.layer("drums")) drumRulesB(env);
     if (track.layer("bass")) bassRulesB(env);
     sortByTime(env.out);

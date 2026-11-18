@@ -16,6 +16,7 @@ const { resolveVoices } = await load('core/voices.js');
 const { rollForm } = await load('core/form-roll.js');
 const { progressionFor } = await load('core/progressions.js');
 const { createRng } = await load('core/rng.js');
+const { colorProgression, CHORD_COLORS } = await load('core/harmony.js');
 
 if (process.argv.includes('--data')) {
   writeFileSync(join(repo, 'native/core/data/grooves.json'), `${JSON.stringify(GROOVES)}\n`);
@@ -40,6 +41,7 @@ function add(name, style, seed, extra = {}) {
     tags: style.tags, voices: style.voices, layers: extra.layers ?? ONLY, variety: true,
     ...extra.track,
   };
+  if (extra.bars) track.bars = extra.bars(track);
   if (extra.form) track.form = typeof extra.form === 'function' ? extra.form(track, pick) : extra.form;
   const events = buildEvents(track);
   // the core gets the track with defaults and voices filled in; it must mean the same track
@@ -105,6 +107,29 @@ for (const [s, style] of STYLE_PRESETS.entries()) {
     if (seed > 706) track.length = 24;
     add('pad', style, seed, { layers: { ...ONLY, pad: true }, keys: KEYS_ALL, track, ...(seed > 706 ? {} : { form: autoForm(style) }) });
   }
+}
+
+// chords with the guitar rules: every voice that is not a keyboard (those have rules of their own), every chord
+// colour, every amount of ornaments; per groove one track of arpeggios
+const WITH_CHORDS = { ...ONLY, chords: true, pad: true };
+const GUITAR_VOICES = [
+  ...['guitar', 'muted', 'jazz', 'funk', 'steel', 'nylon', 'twelve', 'freepats', 'freepatsjazz'].map((variant) => ({ id: 'sample', variant })),
+  { id: 'synth', variant: 'classic' }, { id: 'string', variant: 'electric' },
+];
+// the progression in a chord colour, as the UI does it
+const colored = (color) => (track) => colorProgression(track.bars, color, track.key);
+for (const [s, style] of STYLE_PRESETS.entries()) {
+  for (const [v, voice] of GUITAR_VOICES.entries()) {
+    const k = s + v;
+    const track = { voices: { ...style.voices, chords: voice }, ornaments: [0.5, 1, 0, 0.75][k % 4] };
+    if (k % 5 === 4) track.length = 24;
+    add('chords', style, 800 + v, { layers: WITH_CHORDS, keys: KEYS_ALL, bars: colored(CHORD_COLORS[k % 4]), track, ...(k % 5 === 4 ? {} : { form: autoForm(style) }) });
+  }
+}
+for (const [g, id] of Object.keys(GROOVES).entries()) {
+  const style = styles[g % styles.length];
+  const track = { groove: id, voices: { ...style.voices, chords: GUITAR_VOICES[g % GUITAR_VOICES.length] }, tags: { ...style.tags, synths: ['arpeggio'] } };
+  add(`arp-${id}`, style, 850 + g, { meter: GROOVES[id].meter.split('/').map(Number), layers: WITH_CHORDS, keys: KEYS_ALL, bars: colored(CHORD_COLORS[g % 4]), track, form: autoForm(style) });
 }
 
 mkdirSync(out, { recursive: true });

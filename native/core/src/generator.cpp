@@ -58,6 +58,9 @@ struct Groove {
     int openHatStep = -1;
     std::vector<Fill> fills, extraFills;
     std::vector<std::vector<BassPattern>> bassTiers, bassExtra;
+    std::vector<std::vector<int>> stabs, extraStabs, arps, extraArps; // chords
+    std::vector<int> offbeatStabs;
+    int arpStep = 0;
 };
 
 const std::map<std::string, Groove>& grooves() {
@@ -102,6 +105,13 @@ const std::map<std::string, Groove>& grooves() {
             g.bassThresholds = j.at("bass").at("thresholds").get<std::vector<double>>();
             g.bassTiers = patternsOf(j.at("bass").at("tiers"));
             g.bassExtra = patternsOf(j.at("bass").at("extra"));
+            const auto& c = j.at("chords");
+            g.stabs = c.at("stabs").get<std::vector<std::vector<int>>>();
+            g.extraStabs = c.at("extraStabs").get<std::vector<std::vector<int>>>();
+            g.arps = c.at("arps").get<std::vector<std::vector<int>>>();
+            g.extraArps = c.at("extraArps").get<std::vector<std::vector<int>>>();
+            g.offbeatStabs = c.at("offbeatStabs").get<std::vector<int>>();
+            g.arpStep = c.at("arpStep");
             out[id] = std::move(g);
         }
         return out;
@@ -469,6 +479,60 @@ void playBass(std::vector<Event>& events, const Bar& b, const BassPattern& patte
     }
 }
 
+struct ChordPattern { // one of the two is set
+    const std::vector<int>* arp = nullptr;
+    const std::vector<int>* stabs = nullptr;
+};
+
+ChordPattern chordsSection(const Params& params, Rng& rng, const Groove& g) {
+    ChordPattern v;
+    if (params.arp) v.arp = rng.pick(pool(g.arps, g.extraArps, params));
+    else v.stabs = rng.pick(pool(g.stabs, g.extraStabs, params));
+    return v;
+}
+
+void playChords(std::vector<Event>& events, const Bar& b, const ChordPattern& v, Rng& rng, const Params& params, const Groove& g) {
+    const std::vector<int> tones = chordTones(b.chord, 3);
+    const auto tone = [&](int step, double t, int midi, double vel, double dur) {
+        Event e;
+        e.t = t;
+        e.bar = b.index;
+        e.beat = static_cast<double>(step) / b.sub;
+        e.type = Event::Type::note;
+        e.layer = "chords";
+        e.midi = midi;
+        e.vel = vel;
+        e.dur = r6(std::min(dur, b.end - t));
+        return e;
+    };
+    if (v.arp) {
+        // arpPool: the chord tones in a cycle over the octaves, one octave up
+        const int n = static_cast<int>(tones.size());
+        int notes[4];
+        for (int i = 0; i < 4; ++i) notes[i] = tones[i % n] + 12 * (i / n) + 12;
+        for (int s = 0; s < b.steps; s += g.arpStep) {
+            const double t = at(b, s, rng, params.swing);
+            const double vel = humanVel(s % b.sub ? 0.7 : 0.85, rng);
+            events.push_back(tone(s, t, notes[(*v.arp)[(s / g.arpStep) % 8]], vel, g.arpStep * b.stepSec));
+        }
+        return;
+    }
+    const auto has = [](const std::vector<int>& list, int p) { return std::find(list.begin(), list.end(), p) != list.end(); };
+    const double len = (params.drive < 0.35 ? 4 : 1.5) * b.stepSec * (b.sub / 4.0);
+    for (int s = 0; s < b.steps; ++s) {
+        const int p = s % g.cycle;
+        if (!has(*v.stabs, p) && !(has(g.offbeatStabs, p) && rng.next() < 0.5 * params.syncopation)) continue;
+        const double t = at(b, s, rng, params.swing);
+        const double vel = humanVel(0.8, rng);
+        // strum: place and count of the tone in the stab, so that the voice can choose the direction of the stroke
+        for (size_t i = 0; i < tones.size(); ++i) {
+            Event e = tone(s, t, tones[i], vel, len);
+            e.strum = std::pair<int, int> { static_cast<int>(i), static_cast<int>(tones.size()) };
+            events.push_back(e);
+        }
+    }
+}
+
 void playPad(std::vector<Event>& events, const Bar& b, Rng& rng, const Params& params) {
     std::vector<int> midis = chordTones(b.chord, 3);
     if (params.padWidth > 0.6) // a wide pad doubles the voicing an octave up
@@ -660,7 +724,7 @@ Song buildSong(const std::string& trackJson) {
     using namespace detail;
     const Track track = parseTrack(trackJson);
     for (const auto& [id, on] : track.layers)
-        if (on && id != "drums" && id != "bass" && id != "pad") throw std::runtime_error("layer not ported yet: " + id);
+        if (on && (id == "lead" || id == "percussion")) throw std::runtime_error("layer not ported yet: " + id);
 
     const Rng master(track.seed);
     Rng tagRng = master.fork("tags");
@@ -748,6 +812,9 @@ Song buildSong(const std::string& trackJson) {
             return rng.pick(pool(g.bassTiers[step], g.bassExtra[step], p));
         },
         [&](const Bar& b, const BassPattern* v, Rng& rng, const Params& p, bool) { playBass(events, b, *v, rng, p, g); });
+    run("chords",
+        [&](const Params& p, Rng& rng, const Section&) { return chordsSection(p, rng, g); },
+        [&](const Bar& b, const ChordPattern& v, Rng& rng, const Params& p, bool) { playChords(events, b, v, rng, p, g); });
     run("pad",
         [](const Params&, Rng&, const Section&) { return 0; }, // the pad has no pattern to choose
         [&](const Bar& b, int, Rng& rng, const Params& p, bool) { playPad(events, b, rng, p); });

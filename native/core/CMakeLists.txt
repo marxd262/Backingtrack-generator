@@ -41,6 +41,7 @@ extern const unsigned int btg_grooves_json_size = sizeof(btg_grooves_json);
 add_library(btg_core STATIC
     src/generator.cpp
     src/articulation.cpp
+    src/articulation_harmony.cpp
     src/pack.cpp
     src/engine.cpp
     src/analysis.cpp
