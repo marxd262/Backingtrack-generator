@@ -2,15 +2,17 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Die Generator-Seite der nativen App spielt alles, was die Web-Version spielt: alle sechs Schichten, alle 41 Stimmen, alle Klangregler, Effekte und die Summe, und die App läuft ohne das Repository daneben.
+**Goal:** Die native App deckt alles ab, was die Web-Version kann: alle sechs Schichten, alle 41 Stimmen, alle Klangregler, Effekte und die Summe, dazu die gesamte Logik (Prüfung, Songform, Profile, Klangmodell) im Kern. Danach kann die Web-Version entfallen.
 
-**Architecture:** Die Oberfläche bleibt die Webseite aus `src/ui` in der WebView; sie rechnet weiter Zustand, Songform, Prüfung, Profile und das Klangmodell in JavaScript. Der Kern in C++ bekommt alles, was klingt: den Ereignisstrom aller Schichten (bitgleich zur Web-App), alle Stimmen, die Effektketten und die Summe. Zahlen, die der Nutzer nach Gehör einstellt (Feinwerte, abgeleitete Klangwerte), bleiben in JavaScript die einzige Quelle und kommen als Daten in den Kern.
+**Architecture:** Der Kern in C++ rechnet alles: den Ereignisstrom, den Klang und den Zustand der App (eine Sitzung, die Eingaben annimmt und meldet, was zu zeigen ist). Die Oberfläche bleibt als Seite in der WebView, aber nur als Anzeige: Sie zeichnet, was der Kern meldet, und schickt Eingaben. Die Web-Version bleibt bis zum Schluss unangetastet und ist die Referenz, gegen die jeder Teil des Kerns geprüft wird; erst wenn alles abgedeckt ist, werden die Referenzen eingefroren und sie wird entfernt.
 
 **Tech Stack:** C++20 ohne JUCE im Kern (`native/core`), JUCE 9.0.5 nur in `native/app`, WebView2, Node 22 und Playwright für Referenz und Prüfläufe, CMake und ctest über `native\build.ps1`.
 
-**Spec:** [native/PLAN_NATIV.md](../../../native/PLAN_NATIV.md) (Abschnitt 1 und Phasen C bis E), [native/MACHBARKEIT_JUCE.md](../../../native/MACHBARKEIT_JUCE.md) (Abschnitte 2 und 3), [docs/interface.md](../../interface.md) (Vertrag des Generators), [docs/PACK_FORMAT.md](../../PACK_FORMAT.md) und die Bestandsaufnahme unten. Dieser Plan ersetzt die Zeilen C, D und E der Phasentabelle in `PLAN_NATIV.md`.
+**Spec:** [native/PLAN_NATIV.md](../../../native/PLAN_NATIV.md) (Abschnitt 1 und Phasen C bis E), [native/MACHBARKEIT_JUCE.md](../../../native/MACHBARKEIT_JUCE.md) (Abschnitte 2 und 3), [docs/interface.md](../../interface.md) (Vertrag des Generators), [docs/PACK_FORMAT.md](../../PACK_FORMAT.md), die Bestandsaufnahme unten und die Entscheidungen des Nutzers vom 2026-11-18 (Abschnitt „Entschieden“). Dieser Plan ersetzt die Zeilen C, D und E der Phasentabelle in `PLAN_NATIV.md`.
 
-**Wie dieser Plan gelesen wird:** Er umfasst sieben Phasen. Jede endet mit etwas, das in der App läuft und sich prüfen lässt, und bekommt einen eigenen Zweig. Phase 1 ist bis auf einzelne Schritte ausgearbeitet, weil sie vollständig durch den vorhandenen JavaScript-Code und die Gleichheitsprüfung bestimmt ist. Die Phasen 2 bis 7 nennen je Task Dateien, Schnittstellen und die Prüfung, an der der Task fertig ist; ihre Einzelschritte werden beim Start der Phase ausgeschrieben, weil sie von Messwerten der Phase davor abhängen.
+**Wie dieser Plan gelesen wird:** Er umfasst neun Phasen. Jede endet mit etwas, das sich prüfen lässt, und bekommt einen eigenen Zweig. Phase 1 ist bis auf einzelne Schritte ausgearbeitet, weil sie vollständig durch den vorhandenen JavaScript-Code und die Gleichheitsprüfung bestimmt ist. Die Phasen 2 bis 9 nennen je Task Dateien, Schnittstellen und die Prüfung, an der der Task fertig ist; ihre Einzelschritte werden beim Start der Phase ausgeschrieben, weil sie von Messwerten der Phase davor abhängen.
+
+**Reihenfolge:** erst der Klang (Phasen 2 bis 5), dann Logik und Oberfläche (Phasen 6 und 7). Der Klangabgleich ist das größte Risiko und entscheidet, ob die Web-Version überhaupt entfallen kann; er soll früh sichtbar werden. Der Preis: Die Brücke zwischen Seite und Kern wird in Phase 2 um rund hundert Zeilen erweitert, die Phase 7 wieder ersetzt.
 
 ## Bestandsaufnahme (2026-11-18, `develop` bei `47da234`)
 
@@ -25,7 +27,7 @@ Heute gemessen: `npm test` 746 von 746 grün; `native\build.ps1 -NoApp` baut, al
 | Zu hören | Schlagzeug (immer Naked Drums) und Bass (immer Finger-Bass), egal welche Stimme gewählt ist. Akkorde, Pad, Lead und Percussion sind stumm, ihre Lichter bleiben aus |
 | Regler mit Wirkung | Start, Stopp, Tempo, Sprung, Pegel, Stumm und Pan für Schlagzeug und Bass, Gesamtpegel, Bass-Overdrive (vereinfacht) |
 | Regler ohne Wirkung | Stimmenwahl, Feinwerte (Orgel), alle übrigen 46 Klangregler |
-| Seite für eigene Tracks | fertig (Analyse, Griffbrett, Akkordrad, Spur, Schleife, Geschwindigkeit, Video); nicht Teil dieses Plans |
+| Seite für eigene Tracks | fertig (Analyse, Griffbrett, Akkordrad, Spur, Schleife, Geschwindigkeit, Video); ihre Logik ist nicht Teil dieses Plans |
 
 ### Generator (Ereignisstrom): Web gegen Kern
 
@@ -43,9 +45,21 @@ Heute gemessen: `npm test` 746 von 746 grün; `native\build.ps1 -NoApp` baut, al
 | Artikulation: Gruppen `chords`, `keys`, `keysB`, `pad`, `lead` | fehlt | `articulation.js` |
 | Orgel-Regeln (Leslie, Schweller) | fehlt | `organ.js` |
 | Felder am Ereignis | `art`, `artSemi`, `artTime` | `artRate`, `strum`, `strumUp`, `ring`, `leslie`, `swell` |
-| Prüfung des Tracks, Würfeln der Form, Klangmodell, Profile, Akkordfarbe | nicht im Kern | bleibt JavaScript (Abschnitt „Zuschnitt“) |
 
 Der Kern wirft heute bei jeder anderen eingeschalteten Schicht („layer not ported yet“); die Brücke schaltet sie deshalb vor dem Senden aus. Die Referenz der Gleichheitsprüfung ist noch der Tag `port-base`; `src/core` hat sich seitdem geändert (drei neue Modi in `music.js`, `progressions.js`, `lead.js`).
+
+### Logik und Zustand: Web gegen Kern
+
+Bis auf Bruchstücke, die der Generator braucht, ist nichts davon im Kern. Zusammen rund 2 700 Zeilen JavaScript mit eigenen Tests.
+
+| Baustein | Dateien |
+|---|---|
+| Track prüfen und auffüllen (15 Fehlercodes), Stimmen- und Aufgaben-Register | `src/core/track.js`, `form.js`, `voices.js`, `layers.js`, `music.js`, `chords.js` |
+| Akkordfolge, Akkordfarbe, Daten für Griffbrett und Akkordrad | `progressions.js`, `harmony.js`, `fretboard.js`, `timeline.js` |
+| Songform würfeln und bearbeiten | `form-roll.js`, `src/ui/form-ui.js` |
+| Klangmodell aus Schlagworten, Stile, Schlagwort-Wirkungen | `timbre.js`, `timbre-effects.js`, `tags.js`, `src/ui/tag-effects.js` |
+| Zustand der Oberfläche und seine Regeln (wann neu gewürfelt wird, Taktartwechsel, Stil anwenden) | `src/ui/state.js`, Teile von `app.js` |
+| Profile: zehn Teile, Baum, Dateiformate, Speicher, Werksprofile, Sitzung | `profile-parts.js`, `profile-tree.js`, `profile.js`, `src/ui/profile-store.js`, `profile-factory.js`, `profile-session.js`, `session-store.js`, `mix-state.js` |
 
 ### Klang: Web gegen Kern
 
@@ -69,32 +83,41 @@ Der Kern wirft heute bei jeder anderen eingeschalteten Schicht („layer not por
 | `btg_render`, `native/tools/render-ab.mjs`, `web-render.mjs` | derselbe Track aus Web und Kern als WAV, für A/B |
 | `native/tools/ui-check.mjs` | Oberfläche in der echten App: Fehler, Position, Pegel, Reaktionszeit (stumm) |
 | `btg_engine_tests` | Engine: Transport, Schleife, Pegel |
+| `tests/core` (746), `tests/e2e` (355) | Web-Version: Logik und Oberfläche; von den 32 Testdateien unter `tests/e2e` messen 9 Web Audio, 2 gehören zur Hörprobe- und Spektrogramm-Seite |
 
 ## Zuschnitt
 
-**In den Kern (C++):** Ereignisse aller Schichten, alle Stimmen, Effekte, Sendewege, Summe.
+**In den Kern (C++):** Ereignisse aller Schichten, alle Stimmen, Effekte, Sendewege, Summe, und die ganze Logik: Track prüfen und auffüllen, Akkordfolge und Akkordfarbe, Songform würfeln und bearbeiten, Klangmodell, Stile und Schlagworte, Profile, Sitzung, Zustand der App.
 
-**Bleibt JavaScript in der WebView:** Zustand der Oberfläche, `validateTrack`, `rollForm`, Akkordfolge und Akkordfarbe, Profile, Sitzung, Klangmodell aus Schlagworten (`resolveTrackTimbre`), die Umrechnung der Klangregler in Stimmenwerte (`voice-params.js`, `fx-params.js`, `modParams`) und die Feinwerte. Der Ereignisstrom wird weiter zweimal gebaut (JavaScript für die Anzeige, Kern für den Klang); die Gleichheitsprüfung hält beide zusammen.
+**Bleibt in der Seite (JavaScript):** nur Anzeige und Eingabe: DOM, Zeichnen (Spuren, Griffbrett, Akkordrad, Drehknöpfe) mit seiner Geometrie, Texte in beiden Sprachen, Ziehen und Ablegen, Tastaturbedienung, und der reine Anzeigezustand (Fokus oder Einstellen, Beschriftung, Bünde, Sprache). Die Seite rechnet keine Musik, keinen Klang und keinen gespeicherten Zustand mehr.
+
+**Lesart, vom Nutzer zu bestätigen:** „Weg von JavaScript“ ist hier als „Logik und Zustand in den Kern“ umgesetzt; die Oberfläche bleibt HTML in der WebView. Ein Neubau der Oberfläche mit JUCE-Bausteinen wäre ein eigenes Vorhaben von Wochen, würfe die Rack-Oberfläche weg und stünde dem späteren Hosten im Web entgegen (offene Entscheidung 1).
+
+**Später, nicht in diesem Plan:**
+
+- WebAssembly-Fassung fürs Hosten im Web (Entscheidung des Nutzers: späterer Schritt). Der Plan hält den Weg offen, siehe Global Constraints.
+- Logik der Seite für eigene Tracks in den Kern (Muster der Akkordfolgen, Korrekturen je Datei): folgt nach diesem Plan; die Seite zieht in Phase 7 nur an ihren neuen Ort um.
+- Alle Regler als JUCE-Parameter (`AudioProcessorValueTreeState`): nötig erst für die Automation in einer DAW. Die Sitzung im Kern ist die Stelle, an die sie dann gebunden werden.
+- Installer, Signierung, Updates (Phase G in `PLAN_NATIV.md`) und der pausierte Sample-Wechsel (`docs/sound-v2/UEBERGABE_SAMPLES.md`).
 
 **Gestrichen, mit Grund:**
 
-- `validateTrack`, `rollForm`, Klangmodell und Profile in C++ (standen in `MACHBARKEIT_JUCE.md`, Abschnitt 3): ohne Aufrufer, solange die Oberfläche die WebView ist. Kommt mit einem Plugin, das ohne offenes Fenster Tracks bauen muss.
-- Alle Regler als JUCE-Parameter (`AudioProcessorValueTreeState`): nötig erst für die Automation in einer DAW. Die App merkt sich alles wie die Web-Version (`localStorage` im WebView-Profil).
-- Eigenes Fenster für die Audio-Einstellungen: das Fenster der JUCE-Hülle reicht.
 - Regelgruppe `chordsB` (Slide-Akkord, Verzierung): im Standard aus (`ART_DEFAULTS.chordsB = 0`) und in der Oberfläche nicht einschaltbar.
 - Optionen `timing` und `ornaments` von `play`: nur die Hörprobe-Seite gibt sie mit, die Oberfläche nie.
-- Hörprobe- und Spektrogramm-Seite (`render-harness.html`, `spectrogram.html`): bleiben Web-Werkzeuge.
-- Installer, Signierung, Updates (Phase G in `PLAN_NATIV.md`) und der pausierte Sample-Wechsel (`docs/sound-v2/UEBERGABE_SAMPLES.md`): eigene Pläne.
+- Eigenes Fenster für die Audio-Einstellungen: das Fenster der JUCE-Hülle reicht.
+- Spektrogramm-Seite (`spectrogram.html`): Entwicklerwerkzeug der Web-Version, entfällt mit ihr. Zur Hörprobe-Seite siehe offene Entscheidung 2.
 
 ## Global Constraints
 
 - Der Kern bleibt C++20 ohne JUCE und baut unter Windows, Linux und macOS; `/fp:precise` und `-ffp-contract=off` bleiben.
-- Ereignisstrom: gegen die Web-App im Arbeitsstand bitgleich, also `with differences: 0` und `close: 0, different: 0`.
-- Der Code des Generators folgt dem JavaScript Zeile für Zeile; Namen der JavaScript-Funktionen bleiben (Regel aus `generator_internal.h`).
+- Der Kern bleibt nach WebAssembly übersetzbar: kein Plattform-Code, Dateien und dauerhafter Speicher nur über Schnittstellen, die die Hülle erfüllt; Packs, Tracks und Profile nimmt er auch aus dem Speicher an. WebAssembly selbst wird in diesem Plan nicht gebaut.
+- Ereignisstrom: gegen die Web-App im Arbeitsstand bitgleich, also `with differences: 0` und `close: 0, different: 0`. Dasselbe Maß gilt für die Logik (Phase 6): gleiche Eingabe, gleiches JSON.
+- Der Code des Generators und der Logik folgt dem JavaScript Zeile für Zeile; Namen der JavaScript-Funktionen bleiben (Regel aus `generator_internal.h`).
+- Die Web-Version bleibt bis Phase 9 lauffähig und unverändert im Verhalten; sie ist die Referenz. Vor und nach jeder Änderung an `src/`: `npm test` und `npm run test:ui`, beide grün.
 - Audio-Thread: keine Sperre, keine Speicheranforderung, kein Dateizugriff.
+- Was der Nutzer speichert (Profile, Sitzung), wird nie halb geschrieben: erst in eine Nebendatei, dann umbenennen; die vorige Fassung bleibt als Sicherung liegen.
 - Keine neue Abhängigkeit ohne Zustimmung des Nutzers, nichts unter GPL, AGPL oder NC; jede steht vor der Nutzung in `native/LICENSES.md`.
-- `src/` darf geändert werden, solange die Web-Version nicht kaputtgeht: vor und nach jeder Änderung an `src/` `npm test` und `npm run test:ui`, beide grün.
-- Bausteine, die Generator- und Backingtrack-Seite teilen, liegen in `src/`; die App ersetzt Dateien nur über die Liste `shims` in `native/app/PluginEditor.cpp`.
+- Bausteine, die Generator- und Backingtrack-Seite teilen, liegen an einer Stelle: bis Phase 7 in `src/ui`, danach in `native/app/ui`.
 - Ein Zweig je Phase von `develop`; Commits auf Englisch, ein Thema je Commit; nicht pushen; nach `develop` nur auf Ansage des Nutzers per Squash.
 - Prüfläufe der App laufen stumm (`BTG_MUTE=1`).
 - Klangabgleich, Startwerte der Grenzen (gemessen von `native/tools/sound-compare.mjs`, Task 9): Sample-Stimmen Pegel ±0,5 dB, je Oktavband ±1,5 dB, Hüllkurve gleich zu mindestens 0,98; Synth-Stimmen und Effekte ±1 dB, ±3 dB, 0,95. Verfehlt eine Stimme die Grenze, steht die Zahl im Bericht; das letzte Wort hat das Gehör des Nutzers.
@@ -107,7 +130,7 @@ Der Kern wirft heute bei jeder anderen eingeschalteten Schicht („layer not por
 
 1. **Pack fehlt oder ist beschädigt** (Datei gelöscht, JSON abgeschnitten): Die App läuft weiter, die Schicht bleibt stumm, die Leiste nennt Pack und Grund. Test in Task 10.
 2. **Stimmenwechsel mitten im Ton**, auch mehrmals je Sekunde: alte Töne klingen aus, kein Knacken über −40 dBFS, kein Absturz. Test in Task 10.
-3. **Tempo 20 und 400 bpm mit allen Schichten**: kein Aussetzer, kein NaN, kein Vollausschlag; das Echo bei 20 bpm (2,25 s) passt in seinen Speicher. Test in Task 15.
+3. **Fremde oder beschädigte Profil-Datei, und Abbruch beim Speichern:** Eine Datei, die kein Profil ist (kein JSON, falsches Format, neuere Version, über 5 MB, 1 000 Ebenen tief), ändert nichts und nennt den Grund; wird die App mitten im Schreiben beendet, sind die Profile danach vollständig da (alt oder neu). Test in Task 30.
 4. **Sprung und Schleife bei liegenden Tönen** (Pad, Orgel, ausklingende Gitarre): kein hängender Ton, nach dem Sprung klingt nur noch die Ausklingzeit. Test in Task 11.
 5. **Andere Abtastraten als 48 kHz** (44,1 und 96 kHz): gleiche Tonhöhe, gleiche Länge, Hall und Raum gleich lang. Test in Task 14.
 
@@ -271,16 +294,16 @@ Fertig, wenn in der App alle sechs Schichten mit ihren Sample-Stimmen spielen un
 **Interfaces:**
 - Produces, `btg::Engine`:
   - `enum Layer { drums, bass, chords, pad, lead, percussion, layerCount };`
-  - `void setPackFolder(const std::string& folder);` ersetzt `setPack`; `btg_render`, `test_engine.cpp` und `PluginProcessor.cpp` ziehen nach.
-  - `void setVoices(const std::string& voicesJson);` lädt fehlende Packs auf dem rufenden Thread (nie dem Audio-Thread) und tauscht sie wie den Song; `setTrack` ruft es mit `track.voices`.
+  - `void setPackSource(PackSource source);` mit `using PackSource = std::function<std::shared_ptr<const Pack>(const std::string& id)>;` ersetzt `setPack`. Die Hülle liefert die Quelle (in der App: `loadPackFiles` aus einem Ordner); so braucht der Kern keinen Dateizugriff. `btg_render`, `test_engine.cpp` und `PluginProcessor.cpp` ziehen nach.
+  - `void setVoices(const std::string& voicesJson);` holt fehlende Packs auf dem rufenden Thread (nie dem Audio-Thread) und tauscht sie wie den Song; `setTrack` ruft es mit `track.voices`.
   - `void setTuning(const std::string& tuningJson);` Überschreibungen der Feinwerte, Form wie `setTuning` der Web-App.
   - `std::string voiceStatus() const;` JSON `{ schicht: "ready" | "error: <grund>" | "silent" }`
-- Produces, `sound.json`: `tunables` (Standardwerte aus `TUNABLES` und `MIX_TUNABLES`), `packs` (Stimme zu Pack-ID nach `packIdFor`, samt der geteilten Packs), `hitKeys` (`HIT_KEYS`, Rimshot-Kit mit Taste 37 als Snare), `layerAudio` (`LAYER_AUDIO`), `kitPan` (`KIT_PAN`).
+- Produces, `sound.json`: `tunables` (Standardwerte aus `TUNABLES` und `MIX_TUNABLES`), `packs` (Stimme zu Pack-ID nach `packIdFor`, samt der geteilten Packs), `hitKeys` (`HIT_KEYS`, Rimshot-Kit mit Taste 37 als Snare), `layerAudio` (`LAYER_AUDIO`), `kitPan` (`KIT_PAN`). Bis Phase 9 wird die Datei aus dem JavaScript erzeugt, danach ist sie selbst die Quelle.
 - Die App lädt auf einem eigenen Thread (nicht dem der Oberfläche) und meldet der Seite das Ergebnis als Ereignis `voices`.
 
 **Entscheidung:** Solange ein Pack lädt, spielt die bisherige Stimme der Schicht weiter. Den Rückfall der Web-Version auf den Synth gibt es nicht, weil die Packs von der Platte in unter einer Sekunde da sind.
 
-**Prüfung:** Engine-Test: Stimmenwechsel in jedem Block über 10 s Spielzeit, Ausgabe endlich und ohne Sprung über −40 dBFS; ein Pack-Ordner ohne `pad-strings.json` ergibt `voiceStatus().pad` mit `error:` und die anderen Schichten spielen (Review Focus 1 und 2). Ein Test hält `sound.json` aktuell: Export in einen Zwischenordner, Vergleich mit der eingecheckten Datei.
+**Prüfung:** Engine-Test: Stimmenwechsel in jedem Block über 10 s Spielzeit, Ausgabe endlich und ohne Sprung über −40 dBFS; eine Pack-Quelle ohne `pad-strings` ergibt `voiceStatus().pad` mit `error:` und die anderen Schichten spielen (Review Focus 1 und 2). Ein Test hält `sound.json` aktuell: Export in einen Zwischenordner, Vergleich mit der eingecheckten Datei.
 
 ### Task 11: Ton-Stimmen aus Samples (Bass, Akkorde, Pad, Lead)
 
@@ -312,7 +335,7 @@ Fertig, wenn in der App alle sechs Schichten mit ihren Sample-Stimmen spielen un
 - Modify: `native/tools/ui-check.mjs`
 - Create: `native/tools/ab-samples.cmd` (ein Schritt: rendert den A/B-Satz und öffnet den Ordner)
 
-**Inhalt:** Die Balance rechnet wie die Web-Version (links `1 − p`, rechts `1 + p`; die heutige Formel im Kern weicht ab), die Lage ohne Angabe kommt aus `mix/pan`. Kit-Panorama je Schlag für Kits mit `kitPan` ungleich 0.
+**Inhalt:** Die Balance rechnet wie die Web-Version (links `1 − p`, rechts `1 + p`; die heutige Formel im Kern weicht ab), die Lage ohne Angabe kommt aus `mix/pan`. Kit-Panorama je Schlag für Kits mit `kitPan` ungleich 0. Die Änderungen an der Brücke (`play.js`, `load-voices.js`, `sampler.js`) sind eine Übergangslösung so klein wie möglich; Phase 7 ersetzt die Brücke.
 
 **Prüfung:** `ui-check.mjs`: nach „Los“ haben alle eingeschalteten Schichten einen Pegel über 0, ihre Lichter leuchten, ein Stimmenwechsel im Spiel ändert den Klang ohne Fehler, 0 Konsolenfehler, 0 Aussetzer, Last unter 25 %. Danach A/B-Satz für den Nutzer: je Stil ein Track, trocken, Web und nativ (`native\tools\ab-samples.cmd`).
 
@@ -336,21 +359,23 @@ Fertig, wenn ein ganzer Track mit Sample-Stimmen aus Web und Kern innerhalb der 
 
 **Inhalt:** punktierte Achtel für Akkorde, Pad und Lead, hinter dem `trim` abgegriffen; Rückkopplung, Tiefpass; folgt einem Tempowechsel mit 50 ms Zeitkonstante; Speicher 3 s.
 
-**Prüfung:** `sound-compare.mjs` mit Echo; `btg_render` bei 20 und 400 bpm mit allen Schichten: keine NaN, Spitze unter 1,0, Last unter der Grenze (Review Focus 3).
+**Prüfung:** `sound-compare.mjs` mit Echo; `btg_render` bei 20 und 400 bpm mit allen Schichten: keine NaN, Spitze unter 1,0, Last unter der Grenze; das Echo bei 20 bpm (2,25 s) passt in seinen Speicher.
 
-### Task 16: Klangmodell der Summe und der Sample-Stimmen
+### Task 16: Klangregler im Kern
 
 **Files:**
-- Modify: `native/core/include/btg/engine.h` (`void setSound(const std::string& soundJson);`), `engine.cpp`
-- Modify: `native/app/web/play.js` (`sendTimbre` schickt die abgeleiteten Werte), `native/app/PluginEditor.cpp`
-- Modify: `native/tools/export-events.mjs` (`sound.json` bekommt `neutral`: die abgeleiteten Werte bei `DEFAULT_TIMBRE`)
+- Create: `native/core/src/sound_model.h`, `sound_model.cpp` (nach `src/audio/voice-params.js`, `fx-params.js`, `modParams` aus `mod-fx.js`)
+- Modify: `native/core/include/btg/engine.h` (`void setSound(const std::string& timbreJson);`), `engine.cpp`
+- Modify: `native/app/web/play.js` (`sendTimbre` schickt das ganze Klangmodell statt eines Felds), `native/app/PluginEditor.cpp`
+- Create: `native/tools/export-logic.mjs` (erste Fallgruppe), `native/core/tests/test_logic.cpp`
 
 **Interfaces:**
-- `soundJson`: `{ master: masterParams(...), drums: drumParams(...), bass: bassParams(...), chords: chordParams(...), pad: padParams(...), raw: <Klangmodell 0 bis 1>, fx: { schicht: fxChainParams(...) }, mod: { schicht: modParams(...) } }`. Die Brücke rechnet es aus `resolveTrackTimbre(track)` und dem Tempo; der Kern rechnet nichts davon selbst.
+- `timbreJson` ist das aufgelöste Klangmodell, wie `resolveTrackTimbre(track)` es liefert (sechs Gruppen, 47 Felder von 0 bis 1). Die Umrechnung in Stimmen-, Effekt- und Summenwerte macht der Kern: `masterParams`, `drumParams`, `bassParams`, `chordParams`, `padParams`, `fxChainParams`, `modParams`, Namen wie im JavaScript.
+- Produces: `node native/tools/export-logic.mjs <outDir>` schreibt `<outDir>/logic.json`: je Funktion eine Liste `{ fn, in, out }` aus der Web-App. `btg_logic_tests <logic.json>` ruft dieselbe Funktion im Kern und vergleicht das JSON (Zahlen wie in der Gleichheitsprüfung). Phase 6 hängt hier weitere Funktionen an.
 
-**Inhalt:** Helligkeit (Hochregal), Hall- und Echo-Anteil, Breite, Raumgröße und Raumanteil, Raum-Sendeweg des Schlagzeugs; an den Sample-Stimmen Tiefpass (`bass.cutoff`, `chords.brightness`, `pad.cutoff`) und Hüllkurvenzeiten (`chords.length`, `pad.attack`). Der bisherige Parameter `bassDrive` und der einfache Verzerrer entfallen mit Task 18.
+**Inhalt:** Helligkeit (Hochregal), Hall- und Echo-Anteil, Breite, Raumgröße und Raumanteil, Raum-Sendeweg des Schlagzeugs; an den Sample-Stimmen Tiefpass (`bass.cutoff`, `chords.brightness`, `pad.cutoff`) und Hüllkurvenzeiten (`chords.length`, `pad.attack`). Das Auflösen der Schlagworte zum Klangmodell bleibt bis Task 28 in der Seite. Der bisherige Parameter `bassDrive` und der einfache Verzerrer entfallen mit Task 18.
 
-**Prüfung:** `sound-compare.mjs` mit drei Klangmodellen (neutral, Stil Psych, Stil Träumerisch) auf dem ganzen Track.
+**Prüfung:** `btg_logic_tests`: jede der sieben Umrechnungen für jedes Feld bei 0, 0,25, 0,5, 0,75 und 1, bitgleich. `sound-compare.mjs` mit drei Klangmodellen (neutral, Stil Psych, Stil Träumerisch) auf dem ganzen Track.
 
 ### Task 17: Bus-Kompressor und Begrenzer
 
@@ -371,7 +396,7 @@ Fertig, wenn ein ganzer Track mit Sample-Stimmen aus Web und Kern innerhalb der 
 
 **Files:** Create `native/core/src/guitar_fx.h`, `guitar_fx.cpp`; Modify `engine.cpp`, `native/app/PluginProcessor.cpp` (Parameter `bassDrive` entfällt).
 
-**Inhalt** (nach `guitar-fx.js`, Werte aus `soundJson.fx`): Overdrive, Distortion, Fuzz, Box je Schicht für Bass, Akkorde, Pad und Lead; Kennlinien und Überabtastung wie dort; alle Regler auf 0 lassen das Signal unverändert (bitgleich zum Eingang).
+**Inhalt** (nach `guitar-fx.js`, Werte aus `fxChainParams` des Kerns, Task 16): Overdrive, Distortion, Fuzz, Box je Schicht für Bass, Akkorde, Pad und Lead; Kennlinien und Überabtastung wie dort; alle Regler auf 0 lassen das Signal unverändert (bitgleich zum Eingang).
 
 **Prüfung:** Engine-Test „alle Regler 0: Ausgang gleich Eingang“; `sound-compare.mjs` je Stufe einzeln bei 0,3 und 1,0 auf der Sample-Gitarre und dem Bass (Grenzen der Synth-Stimmen).
 
@@ -379,7 +404,7 @@ Fertig, wenn ein ganzer Track mit Sample-Stimmen aus Web und Kern innerhalb der 
 
 **Files:** Create `native/core/src/mod_fx.h`, `mod_fx.cpp`; Modify `engine.cpp`.
 
-**Inhalt** (nach `mod-fx.js`, Werte aus `soundJson.mod`): Vibrato über eine bewegte Verzögerung, Tempo folgt dem Songtempo; Chorus mit zwei Kopien links und rechts; beide 0: unverändert.
+**Inhalt** (nach `mod-fx.js`, Werte aus `modParams` des Kerns): Vibrato über eine bewegte Verzögerung, Tempo folgt dem Songtempo; Chorus mit zwei Kopien links und rechts; beide 0: unverändert.
 
 **Prüfung:** wie Task 18; dazu der Stil Psych (Chorus auf der Sample-Gitarre aus den Schlagworten). A/B-Satz für den Nutzer.
 
@@ -393,33 +418,170 @@ Je Stimme eine Datei unter `native/core/src/voices/`, alle hinter derselben Schn
 |---|---|---|---|
 | 20 | Tonewheel-Orgel, vier Zugriegel-Presets, mit Leslie | `voices/organ.js`, `organ-leslie.js` | Felder `leslie`, `swell`, `art: swell`; Feinwerte der Oberfläche (Leslie, Zerre) über `setTuning` |
 | 21 | FM-E-Piano | `voices/epiano.js` | Tremolo aus `chords.tremolo` |
-| 22 | klassischer Synth: Bass, Akkorde, Pad, Lead | `voices/classic.js`, `voice-params.js` | bandbegrenzte Oszillatoren; der Akkord-Synth macht seinen Chorus selbst, die Kette lässt ihn dann aus |
+| 22 | klassischer Synth: Bass, Akkorde, Pad, Lead | `voices/classic.js` | bandbegrenzte Oszillatoren; der Akkord-Synth macht seinen Chorus selbst, die Kette lässt ihn dann aus |
 | 23 | Synth-Schlagzeug und Synth-Percussion | `voices/drums.js`, `percussion.js` | Rauschen aus dem Seed wie im Web (`noiseBuffer`) |
-| 24 | Saitenmodell: Bass und E-Gitarre (in der Oberfläche versteckt) | `string-model.js`, `voices/string.js` | reine Rechnung ohne Browser, Töne vorab als Puffer, nicht auf dem Audio-Thread |
+| 24 | Saitenmodell: Bass und E-Gitarre (in der Oberfläche versteckt; Entscheidung des Nutzers: wird portiert) | `string-model.js`, `voices/string.js` | reine Rechnung ohne Browser, Töne vorab als Puffer, nicht auf dem Audio-Thread |
 
 **Prüfung je Task:** `sound-compare.mjs` trocken, Solo-Fälle je Stimme mit den Grenzen der Synth-Stimmen; für Task 22 zusätzlich je Klangregler der Stimme die Werte 0, 0,5 und 1. Nach Task 23: die Taste „Alle Samples“ auf „alle Synth“ in `ui-check.mjs`, alle Schichten haben Pegel.
 
 ---
 
-## Phase 6: Die App ohne Repository (Zweig `feat/port-app`)
+## Phase 6: Logik und Zustand in den Kern (Zweig `feat/port-logic`)
 
-### Task 25: Dateien neben dem Programm
+Fertig, wenn der Kern aus denselben Eingaben denselben Track, dieselbe Form, dasselbe Klangmodell und dieselben Profile macht wie die Web-Version. Die App benutzt das noch nicht; das ist Phase 7.
+
+**Prüfweg für die ganze Phase:** `export-logic.mjs` und `btg_logic_tests` aus Task 16. Jeder Task hängt seine Funktionen und Fälle an und ist fertig bei `different: 0`.
+
+**Daten:** Tabellen, die Inhalte sind (Stile, Schlagworte und ihre Wirkungen, Stimmen-Register, Vorlagen der Akkordfolgen, Leitern, Werksprofile), kommen als erzeugte Datei `native/core/data/music.json` in den Kern (`export-events.mjs --data`, eingebettet wie `grooves.json`). Zahlen, die Teil einer Regel sind, stehen im Code.
+
+### Task 25: Track prüfen und auffüllen
+
+**Files:** Create `native/core/include/btg/track.h`, `native/core/src/track.cpp`; Modify `export-events.mjs` (`music.json`), `export-logic.mjs`, `CMakeLists.txt`.
+
+**Interfaces:**
+- `std::string normalizeTrack(const std::string& trackJson);` und `std::string validateTrack(const std::string& trackJson);` (JSON-Liste `[{ code, params }]`, leer heißt gültig; die 15 Codes aus `VALIDATION_CODES`). Beide werfen nie; Text, der kein JSON ist, zählt wie `null`.
+- Dazu nach `voices.js`, `layers.js`, `form.js`, `music.js`, `chords.js`: `completeVoices` (samt der entfernten Stimme `chords sample/organ`), `completeJobs`, `checkForm`, `normalizeForm`, `allowedChords`, `chordOptions`, `chordName`.
+
+**Prüfung:** Fälle: alle Tracks der Gleichheitsprüfung (gültig) und ein Mutations-Korpus aus drei davon: jedes Feld, auch die verschachtelten (`bars[0].chord.root`, `form.sections[0].type` …), ersetzt durch `null`, `0`, `-1`, `1e9`, `""`, `"x"`, `[]`, `{}`, `true`. Gleiche Codes und `params` in gleicher Reihenfolge.
+
+### Task 26: Harmonie und Anzeige-Daten
+
+**Files:** Create `native/core/src/harmony.cpp`; Header in `track.h` ergänzen.
+
+**Inhalt:** `progressionFor`, `colorChord`, `colorProgression`, `styleChordColor`, `chordTimeline`, und aus `src/core/fretboard.js` `fretboardNotes`, `nextDistinctChord`, `progressionRoles`, `romanDegree`, `beatsUntilChange`, `degreeLabel`.
+
+**Prüfung:** 12 Grundtöne mal 6 Modi mal Seeds 1 bis 50 mal 4 Akkordfarben; `fretboardNotes` für alle 17 Leitern mit jedem Akkord der Tonart als jetzigem und nächstem.
+
+### Task 27: Songform würfeln und bearbeiten
+
+**Files:** Create `native/core/src/form_roll.cpp`, `form_edit.cpp`.
+
+**Inhalt:** `rollForm` mit Vorlagen, Leitplanken, Bridge und Sperren (`form-roll.js`); die Bearbeitung aus `src/ui/form-ui.js` (`editPart`, `setLocked`, `addPart`, `copyPart`, `deletePart`, `movePart`, `limits`).
+
+**Prüfung:** fünf Vorlagen und `auto` mal neun Stile und ein unbekannter mal sieben Zielgrößen mal Struktur 0, 0,6 und 1 mal Seeds 1 bis 20; jeder Fall ein zweites Mal mit der ersten Form als `previous`, in der jeder dritte Teil gesperrt ist; dazu die Schlagworte der Entwicklung. Die Bearbeitung: jede Funktion auf jedem Teil von 30 gewürfelten Formen, auch an den Grenzen (64 Teile, 64 Takte, 512 Takte, letzter Teil).
+
+### Task 28: Klangmodell, Stile, Schlagworte
+
+**Files:** Create `native/core/src/timbre.cpp`.
+
+**Inhalt:** `resolveTimbre`, `resolveTrackTimbre` (mit der Drift bei `variety`), `completeTimbre`, `usesTimbreField`, `isSoundOnlyChange`, die Wirkung eines Schlagworts für die Anzeige (`src/ui/tag-effects.js`), `organTuning` (`src/ui/organ-tuning.js`).
+
+**Prüfung:** jedes Schlagwort allein, jeder Stil, 200 zufällige Schlagwort-Mengen aus einem festen Seed, Regler von Hand bei 0, 0,5 und 1, Seeds 1 bis 10 mit `variety`.
+
+### Task 29: Die Sitzung
+
+**Files:** Create `native/core/include/btg/session.h`, `native/core/src/session.cpp`, `native/PROTOKOLL.md`.
+
+**Interfaces:**
+
+```cpp
+// What the shell provides: lasting storage by name. The app writes files, a browser shell later its own store.
+struct Storage {
+    virtual ~Storage() = default;
+    virtual std::optional<std::string> read(const std::string& name) = 0;
+    virtual bool write(const std::string& name, const std::string& text) = 0; // all or nothing
+};
+
+class Session {
+public:
+    explicit Session(Storage& storage);            // the last session, else the start state of the web app
+    struct Change { bool events = false, sound = false, voices = false, tempo = false, mix = false, restart = false; };
+    Change apply(const std::string& actionJson);   // never throws; an action that is not valid changes nothing
+    std::string track() const;                     // for Engine::setTrack
+    std::string sound() const;                     // for Engine::setSound
+    std::string tuning() const;                    // for Engine::setTuning
+    std::string state() const;                     // everything the page shows
+};
+```
+
+**Inhalt:** Der Zustand aus `src/ui/state.js` (Track, Zielgröße, Würfelzähler, Regler der Form, Skala, Akkordfarbe und ob sie vom Stil kommt, Stil, Mischpult, Orgel, Tempo-Merker) und seine Regeln: `deriveBars`, `setChordColor`, `applyStyle`, `setMeter`, `rollNewForm`, `setFormTemplate`, `setFormTarget`, `setFormFeel`, dazu aus `app.js` Variante setzen, „Überrasch mich“, Schicht schalten und die Unterscheidung, ob eine Änderung live wirkt oder neu startet (`applyLive`, `restartIfPlaying`). Wann gewürfelt wird, steht in `docs/interface.md`, „Wann die eigene Oberfläche würfelt“. Zufall, den die Web-Version aus dem Browser nimmt (neue Variante, „Überrasch mich“), kommt als Wert in der Aktion.
+
+- [ ] **Erster Schritt:** `native/PROTOKOLL.md` schreiben: jede Aktion (Name, Felder) und jedes Feld von `state()`, abgeleitet aus den Bausteinen unter `src/ui`. Das ist die Vorlage für Task 31 und 32; die Namen dort gelten.
+
+**Prüfung:** `export-logic.mjs` spielt in Node 200 Folgen von je 30 Aktionen auf `src/ui/state.js` ab (fester Seed) und schreibt nach jeder Aktion den Track; die Sitzung im Kern liefert nach jeder Aktion denselben Track und dasselbe Klangmodell.
+
+### Task 30: Profile und Sitzung auf der Platte
+
+**Files:** Create `native/core/src/profiles.cpp`, `profile_tree.cpp`; Modify `session.cpp`.
+
+**Inhalt:** die zehn Teile eines Profils (`captureParts`, `sanitizeParts`, `applyParts`, `mergeParts`, Vorlagen), der Baum (anlegen, umbenennen, verschieben, löschen, Namen prüfen), die Dateiformate (`backingtrack-profile` Version 2, `backingtrack-folder` Version 1, Grenzen: Name 60 Zeichen, Tiefe 8, 1 000 Knoten, 5 MB), Werksprofile, die Übernahme alter Stände (flache Liste, entfernte Stimmen), die zuletzt gespielte Sitzung mit Takt. Gespeichert wird über `Storage` unter den Namen `profiles.json` und `session.json`.
+
+**Prüfung:** die Eingaben und Erwartungen aus `tests/core/profile.test.js`, `profile-parts.test.js`, `profile-tree.test.js`, `profile-store.test.js` als Fälle; `sanitizeParts` über das Mutations-Korpus aus Task 25. Zu Review Focus 3: kaputte Dateien (kein JSON, falsches Format, Version 99, 6 MB, Tiefe 9, 1 001 Knoten) ändern den Baum nicht und nennen den Grund; ein `Storage`, dessen `write` scheitert, lässt den Baum im Speicher und auf der Platte beim alten Stand.
+
+---
+
+## Phase 7: Die Oberfläche wird Anzeige (Zweig `feat/port-ui`)
+
+Fertig, wenn die Seiten der App keine Zeile aus `src/core` oder `src/audio` mehr laden und die Oberflächen-Tests der Web-Version gegen die App grün sind.
+
+### Task 31: Sitzung in der App
+
+**Files:** Create `native/app/Storage.cpp`, `Storage.h`; Modify `native/app/PluginProcessor.cpp`, `PluginProcessor.h`, `PluginEditor.cpp`.
+
+**Inhalt:** Der Processor besitzt die Sitzung. Nachricht `action` von der Seite: `Session::apply`, dann je nach `Change` `Engine::setTrack`, `setSound`, `setVoices`, `setTuning`, Tempo, Pegel; danach das Ereignis `state` an die Seite. Die Ereignisse für die Spuren gehen getrennt und nur bei Änderung (`events`, mit Zähler in `state`). Position und Pegel kommen weiter 30-mal je Sekunde. `Storage` schreibt unter `%APPDATA%\BackingtrackGenerator\` in eine Nebendatei und benennt um; die vorige Fassung bleibt als `.bak`. Bauen des Tracks und Laden der Packs laufen auf dem Thread aus Task 10, nicht auf dem der Oberfläche.
+
+**Prüfung:** Test der Hülle: eine Folge von Aktionen über die Nachricht `action` ergibt denselben `state` wie dieselbe Folge direkt an der Sitzung. Abbruch-Test zu Review Focus 3: der Prozess wird zwischen Schreiben und Umbenennen beendet, beim nächsten Start sind alle Profile da.
+
+### Task 32: Die Seiten zeichnen nur noch
+
+**Files:**
+- Create: `native/app/ui/` (Kopie von `src/ui` und `src/i18n`, dazu `native/app/web/track.html`, `track.js`, `track-text.js`)
+- Delete: `native/app/web/` (Brücke und Ersatzdateien), die Liste `shims` in `PluginEditor.cpp`
+- Modify: jeder Baustein unter `native/app/ui`
+
+**Inhalt:** Die Bausteine lesen `state` und schicken Aktionen nach `native/PROTOKOLL.md`; sie importieren nichts mehr aus `core/` oder `audio/`. In der Seite bleiben: DOM, Zeichnen und seine Geometrie (`lanes.js`, `fretboard.js`, `wheel.js`, `wheel-geometry.js`, `knob*.js`, `canvas.js`), Texte, Ziehen und Ablegen, der Anzeigezustand (`backingtrack.layout`, `backingtrack.lang`). `src/ui` selbst bleibt unverändert, damit die Web-Version weiterläuft. Einmalige Übernahme: Findet die Seite beim ersten Start `backingtrack.profiles`, `backingtrack.session` oder `backingtrack.mix` im Speicher der WebView, schickt sie sie als Aktion `importLegacy` an den Kern und vermerkt das.
+
+**Prüfung:** Ein Test durchsucht `native/app/ui` nach Importen außerhalb des Ordners: keiner. `ui-check.mjs`: 0 Fehler, alle Schichten mit Pegel.
+
+### Task 33: Die Oberflächen-Tests laufen gegen die App
+
+**Files:** Create `native/tests/ui/` (Playwright-Tests, Vorrichtung, die die App stumm startet und sich wie `ui-check.mjs` verbindet); Modify `playwright.config.js`.
+
+**Inhalt:** Die 21 Testdateien aus `tests/e2e`, die die Oberfläche prüfen, werden übernommen und angepasst (Start der Seite, Zugriff auf den Zustand). Nicht übernommen werden die 9 Dateien, die Web Audio messen (`levels`, `mix`, `play`, `sample-v2`, `sound`, `voices-*-sound`; ihren Zweck erfüllen `sound-compare.mjs` und die Engine-Tests), und `spectrogram`; `audition` hängt an der offenen Entscheidung 2.
+
+**Prüfung:** alle übernommenen Tests grün gegen die App; in `native/UEBERGABE.md` steht je nicht übernommenem Test, was ihn ersetzt.
+
+---
+
+## Phase 8: Die App ohne Repository (Zweig `feat/port-app`)
+
+### Task 34: Dateien neben dem Programm
 
 **Files:** Modify `native/app/CMakeLists.txt`, `PluginEditor.cpp`, `PluginProcessor.cpp`.
 
-**Inhalt:** Der Build kopiert `src/` (ohne `assets/samples`) nach `web/`, `native/app/web` nach `web-native/` und die Packs nach `samples/` neben das Programm. Die App sucht zuerst dort, dann im Repository (die beiden `shortcut:`-Stellen mit den Pfaden des Build-Rechners).
+**Inhalt:** Der Build kopiert `native/app/ui` nach `ui/` und die Packs nach `samples/` neben das Programm. Die App sucht zuerst dort, dann im Repository (die beiden `shortcut:`-Stellen mit den Pfaden des Build-Rechners).
 
 **Prüfung:** Den Ordner `Standalone` an einen Ort außerhalb des Repositorys kopieren, das Repository für den Lauf umbenennen, `ui-check.mjs` gegen die Kopie: 0 Fehler.
 
-### Task 26: Was die Oberfläche vom Browser erwartet
+### Task 35: Profile als Datei, Weitermachen, Credits
 
-**Inhalt:** In der App prüfen und, wo nötig, richten: Profile als Datei speichern und laden (`src/ui/profiles.js` nutzt einen Download-Link und ein Datei-Feld), „Weitermachen“ nach Neustart der App, die Seite „Credits“, ein Profil aus der Web-Version mit der entfernten Stimme `chords sample/organ`. Der unbenutzte `AudioContext` der Seite wird in der App nicht mehr angelegt.
+**Inhalt:** Profil und Ordner speichern, laden und sichern über den Dateidialog der App (Formate aus Task 30) statt über den Download-Link der Web-Version; „Weitermachen“ nach Neustart der App; die Seite „Credits“; ein Profil aus der Web-Version mit der entfernten Stimme `chords sample/organ` lässt sich laden.
 
-**Prüfung:** `ui-check.mjs` um diese vier Wege erweitert.
+**Prüfung:** die vier Wege als Tests in `native/tests/ui`.
 
-### Task 27: Abschluss
+---
 
-**Inhalt:** A/B-Gesamtsatz (neun Stile, Sample-Stimmen und Synth), Bericht mit allen Zahlen aus `sound-compare.mjs`, `native/UEBERGABE.md`, `PLAN_NATIV.md` und `MACHBARKEIT_JUCE.md` (Risiko 1) auf Stand, die `shortcut:`-Kommentare im Kern durchgehen und erledigte entfernen.
+## Phase 9: Die Web-Version ablösen (Zweig `feat/retire-web`)
+
+Beginnt erst, wenn die Phasen 1 bis 8 auf `develop` liegen und der Nutzer die A/B-Sätze gehört hat.
+
+### Task 36: Referenzen einfrieren
+
+**Files:** Create `native/core/tests/golden/` (Tracks der Gleichheitsprüfung, je Track Anzahl und Prüfsumme der Ereignisse; `logic.json`; je Klang-Fall Pegel und Oktavbänder des Kerns); Modify `test_parity.cpp`, `test_logic.cpp`, `sound-compare.mjs`, `CMakeLists.txt`.
+
+**Inhalt:** Ein letzter Lauf gegen die Web-Version muss vollständig bestehen; aus genau diesem Lauf entstehen die eingefrorenen Werte. Danach prüfen die Tests den Kern gegen diese Werte statt gegen JavaScript. `sound.json` und `music.json` sind ab hier Quelle statt Erzeugnis. Eine gewollte Änderung am Generator oder Klang ändert die Werte ab jetzt bewusst, mit einem eigenen Commit.
+
+**Prüfung:** alle Kerntests grün, ohne dass Node die Web-Version lädt (Ordner `src/` für den Lauf umbenannt).
+
+### Task 37: Entfernen
+
+**Nur auf Ansage des Nutzers.** Vorher der Tag `web-final` auf dem letzten Stand mit Web-Version.
+
+**Inhalt:** Es entfallen `src/audio`, `src/core`, `src/ui`, `src/i18n`, `src/index.js`, `src/index.html`, `tests/core`, `tests/e2e`, die Web-Skripte unter `scripts/` (`serve.js`, `render-*.mjs`, `ui-screens.mjs`, `spectrogram.mjs` und die übrigen Hörhilfen), `export-events.mjs`, `export-logic.mjs`, `web-render.mjs`, `render-ab.mjs` und `.github/workflows/pages.yml`. Es bleiben und ziehen um: die Packs (`src/assets/samples` nach `native/assets/samples`) und die Pack-Werkzeuge (`extract-samples.mjs`, `import-sfz.mjs`, `soundfont.mjs` mit ihrem Test). `README.md`, `docs/interface.md` und `native/UEBERGABE.md` beschreiben danach die native App; die `shortcut:`-Kommentare im Kern werden durchgegangen und erledigte entfernt.
+
+**Folge, die der Nutzer kennen muss:** Mit `src/index.js` entfällt die Schnittstelle, über die Interactive Scales den Generator als JavaScript einbinden sollte. Der Weg dorthin führt dann über die spätere WebAssembly-Fassung.
+
+**Prüfung:** `native\build.ps1` baut und testet aus einem frischen Klon ohne `src/`; `native\start.cmd` startet die App.
 
 ---
 
@@ -431,20 +593,27 @@ In Arbeitstagen der KI, ohne Hör- und Testzeit des Nutzers; Grundlage sind die 
 |---|---|
 | 1 Ereignisstrom | 2 bis 3 |
 | 2 Band mit Samples | 3 bis 4 |
-| 3 Sendewege und Summe | 3 bis 4 |
+| 3 Sendewege und Summe | 3 bis 5 |
 | 4 Effekte | 2 bis 3 |
 | 5 Synth-Stimmen | 5 bis 7 |
-| 6 App ohne Repository | 2 bis 3 |
-| **Summe** | **17 bis 24** |
+| 6 Logik und Zustand im Kern | 5 bis 7 |
+| 7 Oberfläche als Anzeige | 5 bis 8 |
+| 8 App ohne Repository | 2 bis 3 |
+| 9 Web-Version ablösen | 1 bis 2 |
+| **Summe** | **28 bis 42** |
 
 ## Entschieden
 
 - **Saitenmodelle werden portiert** (Nutzer, 2026-11-18): Bass und E-Gitarre aus dem Saitenmodell gehören zum Port, auch wenn die Oberfläche sie nicht zur Wahl stellt (Task 24).
 - **Kompressor nach dem Chromium-Quelltext** (Nutzer, 2026-11-18): Bus-Kompressor und Begrenzer werden nach dem Kompressor des Browsers nachgebaut (BSD-3-Clause, Urhebervermerk in `native/LICENSES.md` und in den Credits der App; Task 17).
+- **Weg von JavaScript** (Nutzer, 2026-11-18): Die ganze App wird für die native Fassung gebaut; die Logik zieht in den Kern (Phasen 6 und 7).
+- **Die Web-Version entfällt**, sobald die native App alles abdeckt (Nutzer, 2026-11-18; Phase 9).
+- **WebAssembly fürs Hosten im Web** ist ein späterer Schritt und nicht Teil dieses Plans (Nutzer, 2026-11-18).
 
 ## Offene Entscheidungen des Nutzers
 
-Keine davon hält Phase 1 auf.
+Keine davon hält die Phasen 1 bis 5 auf.
 
-1. **Zuschnitt:** Prüfung, Würfeln der Form, Klangmodell und Profile bleiben JavaScript; Regler werden keine JUCE-Parameter. Einverstanden? (Vor Phase 2.)
-2. **Web-Version danach:** eingefroren als Demo auf GitHub Pages lassen oder abschalten? `src/audio` bleibt in jedem Fall als Referenz für den Klangabgleich, solange Stimmen portiert werden.
+1. **Oberfläche:** Bleibt sie HTML in der WebView und wird reine Anzeige (so steht es im Plan), oder soll auch sie mit JUCE-Bausteinen neu gebaut werden? Das zweite wäre ein eigenes Vorhaben von Wochen und stünde dem späteren Hosten im Web entgegen. (Vor Phase 7.)
+2. **Hörprobe-Seite:** Mit der Web-Version entfällt die Seite, auf der die Feinwerte live verstellt und exportiert werden. Soll es sie in der App geben? Vorschlag: ja, als dritte Seite auf der Engine, eingeplant in Phase 8, sobald entschieden. (Vor Phase 8.)
+3. **Interactive Scales:** Einverstanden, dass die JavaScript-Schnittstelle `src/index.js` mit Phase 9 entfällt? (Vor Task 37.)

@@ -44,7 +44,7 @@ Reihenfolge nach dem Wunsch des Nutzers; Aufwand in Arbeitstagen der KI (aus dem
 | F Trennung | nur wenn Nutzen belegt und Lizenz geklärt | 3 bis 4 | Trefferquoten, Hörprobe |
 | G Auslieferung | Installer, Signierung, Updates, Nachladen von Packs | 2 bis 3 | Installation auf einem frischen Windows |
 
-Die Zeilen C, D und E sind seit dem 2026-11-18 ausgearbeitet in `docs/superpowers/plans/2026-11-18-generator-port.md` (Bestandsaufnahme, Zuschnitt, sieben Phasen); dort gilt der neuere Stand.
+Die Zeilen C, D und E sind seit dem 2026-11-18 ausgearbeitet in `docs/superpowers/plans/2026-11-18-generator-port.md` (Bestandsaufnahme, Zuschnitt, neun Phasen); dort gilt der neuere Stand. Seit dem 2026-11-18 gilt außerdem: die Logik zieht aus dem JavaScript in den Kern, die Web-Version entfällt, sobald die App alles abdeckt, und eine WebAssembly-Fassung fürs Hosten im Web ist ein späterer Schritt.
 
 ## 4. Arbeitspaket für 8 Stunden ohne Rückfrage (Entwurf zur Abstimmung)
 
