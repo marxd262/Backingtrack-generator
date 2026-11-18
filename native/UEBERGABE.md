@@ -157,3 +157,16 @@ Abgeschlossen, nicht gepusht. Schlussbericht über alle drei Phasen: `native/BER
 - **Stand der Zweige:** Der ganze Lauf samt nativer App liegt als Squash-Commit auf `develop`, darauf Vorschlag Nr. 9 als zweiter Commit. Die Zweige `exp/analysis-agent`, `exp/analysis-close-calls`, `exp/analysis-sus`, `feat/native-spike` (auch auf `origin`) und `feat/samples` sind am 2026-11-18 gelöscht; die Einzel-Commits gibt es nicht mehr.
 - **Label-Verdachtsfälle:** `native/LABEL-VERDACHT.md` (zehn Einträge, kein Label geändert).
 - **Offen:** die unangetasteten Tracks misst der Nutzer; Vorschläge Nr. 7 und 9 bis 12 in `VORSCHLAEGE.md`; `9pH42-82Mz0` hört er sich selbst an. Messausgaben und Hilfsskripte des Laufs liegen in `native/build/phase2/` (nicht in Git; was die Skripte tun, steht im Bericht).
+
+## Generator-Port, Phase 1: Ereignisstrom aller Schichten (2026-11-18, Branch `feat/port-events`)
+
+Plan: `docs/superpowers/plans/2026-11-18-generator-port.md` (neun Phasen; dies ist die erste). Abgeschlossen, nicht gepusht, nicht in `develop`.
+
+- **Stand:** Der Kern baut für jeden gültigen Track dieselben Ereignisse wie die Web-App, für alle sechs Schichten: Schlagzeug, Bass, Akkorde (Stabs, Arpeggios, Gitarren-Regeln), Tasten-Regeln des E-Pianos, Orgel (Leslie, Schweller), Pad, Lead (fünf Aufgaben mit ihren Artikulationen) und Percussion (sieben Aufgaben). Die Sperre „layer not ported yet“ ist weg.
+- **Gemessen:** `btg_parity_tests`: 1 006 Tracks, 1 076 487 Ereignisse, 100 % bitgleich (`close: 0, different: 0`); Export und Prüfung zusammen 9 s. Die 387 alten Fälle (nur Schlagzeug und Bass) sind unverändert enthalten. Die Fälle decken alle 17 Akkordarten, alle sechs Modi, alle neun Grooves, alle Aufgaben von Lead und Percussion und alle Stimmen ab, nach denen die Regeln fragen.
+- **Referenz:** nicht mehr der Tag `port-base`, sondern `src/` im Arbeitsstand (`native/tools/export-events.mjs`). Die Prüfung vergleicht jedes Feld, das die Web-App schreibt, in beide Richtungen: ein Feld, das nur eine Seite hat, ist ein Fehler.
+- **Dabei gefunden und behoben:** `jsRound` im Kern rundete 0,49999999999999994 auf 1 (JavaScript: 0); ein Lead-Fall in einem Aufbau-Teil hat es gezeigt. Im Mikrotiming bekam eine Schicht ohne Drift (das Pad) einen Nullwert, der nur zufällig richtig endete.
+- **Neue Dateien im Kern:** `articulation_internal.h` (was die Regelgruppen teilen), `articulation_harmony.cpp` (Gitarre, Tasten, Lead), `organ.cpp`, `lead.cpp`, `percussion.cpp`.
+- **Die App klingt unverändert:** Die Brücke (`native/app/web/play.js`) schaltet die neuen Schichten weiter aus, und die Engine spielt nur Schlagzeug und Bass. Das ändert Phase 2.
+- **`ui-check.mjs`:** stellt die Seite jetzt selbst auf Deutsch und wartet das erste Laden ab. Vorher hing sein Ergebnis davon ab, in welcher Sprache die App zuletzt stand, und ein Neuladen mitten im ersten Laden zählte als fehlgeschlagene Abrufe.
+- **Offen:** Die Änderung an `.github/workflows/native.yml` aus dem Plan (Schritt „Fetch the tag port-base“ streichen, `push` auf `develop`, `src/core/**` in `paths`) ist nicht gemacht; sie wartet auf das Ja des Nutzers. Der Workflow holt bis dahin einen Tag, den er nicht mehr braucht. Unter Linux und macOS ist der Stand nicht gebaut (das macht erst die CI nach einem Push).

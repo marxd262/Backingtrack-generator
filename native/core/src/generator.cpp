@@ -1,6 +1,7 @@
 // Port of the event generator of the web app (src/core): events.js, event-helpers.js,
 // timeline.js, tags.js, grooves.js, arrange.js, form-arrange.js, form-types.js, form.js (chordIndex),
-// form-post.js, microtiming.js. Layers so far: drums, bass and pad. See generator_internal.h for the rules of the port.
+// form-post.js, microtiming.js, music.js (chord tones, modes). All six layers; lead and percussion have their own
+// files (lead.cpp, percussion.cpp), the articulation step too. See generator_internal.h for the rules of the port.
 #include "generator_internal.h"
 
 #include <nlohmann/json.hpp>

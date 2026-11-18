@@ -17,6 +17,7 @@ const { rollForm } = await load('core/form-roll.js');
 const { progressionFor } = await load('core/progressions.js');
 const { createRng } = await load('core/rng.js');
 const { colorProgression, CHORD_COLORS } = await load('core/harmony.js');
+const { chordOptions } = await load('core/music.js');
 
 if (process.argv.includes('--data')) {
   writeFileSync(join(repo, 'native/core/data/grooves.json'), `${JSON.stringify(GROOVES)}\n`);
@@ -180,6 +181,36 @@ for (const [g, id] of Object.keys(GROOVES).entries()) {
     const track = { groove: id, jobs: { percussion: job }, complexity: [0.1, 0.5, 0.9][k % 3] };
     if (plain) track.length = 16;
     add(`percussion-${id}`, style, 1200 + j, { meter: GROOVES[id].meter.split('/').map(Number), layers: { ...ONLY, percussion: true }, keys: KEYS_ALL, track, ...(plain ? {} : { form: autoForm(style) }) });
+  }
+}
+
+// everything together: all six layers, the knobs of the rhythm module at their ends, every job in turn
+const ALL = { drums: true, bass: true, chords: true, pad: true, lead: true, percussion: true };
+const jobsOf = (n) => ({ lead: ['off', ...LEAD_JOBS][n % 6], percussion: PERCUSSION_JOBS[n % PERCUSSION_JOBS.length] });
+for (const [s, style] of STYLE_PRESETS.entries()) {
+  for (let seed = 1301; seed <= 1314; seed++) {
+    const n = s + seed, plain = seed > 1310;
+    const voices = { ...style.voices, lead: LEAD_VOICES[n % LEAD_VOICES.length], ...(n % 5 === 0 ? { chords: KEY_VOICES[n % KEY_VOICES.length] } : {}) };
+    const track = { jobs: jobsOf(n), voices, complexity: [0.5, 0.2, 0.8][n % 3], loose: [0.5, 0, 1][n % 3], ornaments: [0.5, 1, 0.75, 0][n % 4] };
+    if (plain) track.length = 24;
+    add('full', style, seed, { layers: ALL, keys: KEYS_ALL, bars: colored(CHORD_COLORS[n % 4]), track, ...(plain ? {} : { form: autoForm(style) }) });
+  }
+}
+// bars of other lengths than the meter, in every groove
+for (const [g, id] of Object.keys(GROOVES).entries()) {
+  for (const [k, oddBeats] of [[2, 6, 3, 5], [5, 1, 7, 4]].entries()) {
+    const n = g + k, style = styles[n % styles.length];
+    const track = { groove: id, length: 12, jobs: jobsOf(n + 1), voices: { ...style.voices, lead: LEAD_VOICES[n % LEAD_VOICES.length] } };
+    add(`full-odd-${id}`, style, 1350 + k, { meter: GROOVES[id].meter.split('/').map(Number), layers: ALL, keys: KEYS_ALL, oddBeats, track });
+  }
+}
+// every chord quality the register allows on a step of the key, eight bars at a time
+for (const [m, key] of MODE_KEYS.entries()) {
+  const chords = chordOptions(key).flatMap(({ root, qualities }) => qualities.map((quality) => ({ root, quality })));
+  for (let from = 0, part = 0; from < chords.length; from += 8, part++) {
+    const n = m + part, style = styles[n % styles.length];
+    const bars = (track) => chords.slice(from, from + 8).map((chord) => ({ chord, beats: track.bars[0].beats }));
+    add(`chords-all-${key.mode}`, style, 1400 + part, { layers: ALL, keys: [key], bars, form: autoForm(style), track: { jobs: jobsOf(n + 2), voices: { ...style.voices, lead: LEAD_VOICES[n % LEAD_VOICES.length] } } });
   }
 }
 

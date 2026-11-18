@@ -14,7 +14,7 @@ struct Event {
     double t = 0.0;             // seconds from the start
     int bar = 0;
     std::optional<double> beat; // position in the bar in beats (the fill marker has none)
-    std::string layer;          // note, hit: "drums", "bass"
+    std::string layer;          // note, hit: "drums", "bass", "chords", "pad", "lead", "percussion"
     std::string name;           // hit: drum name; marker: "fill" or "section"
     int midi = 0;               // note
     double vel = 0.0;           // note, hit
@@ -29,9 +29,9 @@ struct Event {
     bool ring = false;          // chords: the stab rings out
 };
 
-// Port of buildEvents() of the web app (src/core/events.js), so far for the layers
-// drums, bass and pad. `trackJson` is a track as normalizeTrack() writes it, with `voices` filled in; it is not
-// validated here. Throws std::runtime_error for a track this port cannot play (another layer switched on).
+// Port of buildEvents() of the web app (src/core/events.js), all six layers: for the same track the same events,
+// bit for bit (native/core/tests/test_parity.cpp). `trackJson` is a track as normalizeTrack() writes it, with
+// `voices` filled in; it is not validated here. Throws (std::exception) when the JSON is not such a track.
 std::vector<Event> buildEvents(const std::string& trackJson);
 
 // The events with what a player needs around them. Event times are seconds at `bpm`.

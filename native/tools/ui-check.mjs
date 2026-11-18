@@ -43,6 +43,8 @@ try {
   page.on('response', (r) => { if (r.status() >= 400) problems.push(`${r.status()}: ${r.url()}`); });
   let requests = 0;
   page.on('request', () => requests++);
+  await page.waitForLoadState('load'); // a first load still running would be cut off by the reload and count as failed requests
+  await page.evaluate(() => localStorage.setItem('backingtrack.lang', 'de')); // the checks below read German labels, whatever language the app was left in
   await page.reload(); // listeners attached first, so load errors are seen
   await page.locator('#go').waitFor({ state: 'visible', timeout: 15000 });
   await sleep(500);
