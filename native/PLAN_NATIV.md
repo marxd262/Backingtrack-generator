@@ -44,6 +44,8 @@ Reihenfolge nach dem Wunsch des Nutzers; Aufwand in Arbeitstagen der KI (aus dem
 | F Trennung | nur wenn Nutzen belegt und Lizenz geklärt | 3 bis 4 | Trefferquoten, Hörprobe |
 | G Auslieferung | Installer, Signierung, Updates, Nachladen von Packs | 2 bis 3 | Installation auf einem frischen Windows |
 
+Die Zeilen C, D und E sind seit dem 2026-11-18 ausgearbeitet in `docs/superpowers/plans/2026-11-18-generator-port.md` (Bestandsaufnahme, Zuschnitt, sieben Phasen); dort gilt der neuere Stand.
+
 ## 4. Arbeitspaket für 8 Stunden ohne Rückfrage (Entwurf zur Abstimmung)
 
 **Ziel:** Die Backingtrack-Seite so, wie in Abschnitt 1 beschrieben, auf einer deutlich besseren Analyse. Das ist Phase A und der Kern von Phase B.
