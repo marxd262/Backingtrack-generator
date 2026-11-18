@@ -14,6 +14,7 @@ struct SoundData {
     std::map<std::string, std::string> packs;                     // every sample voice "layer/sample/variant" -> pack id
     std::map<std::string, std::map<std::string, int>> hitKeys;    // "drums", "percussion", "drums/sample/rimshot" -> hit name -> key
     std::map<std::string, double> trim;                           // layerAudio: layer -> trim
+    std::map<std::string, double> kitPan;                         // synth.js KIT_PAN: hit name -> place in the kit (a hit not named stays in the middle)
 };
 const SoundData& soundData(); // parsed on first use
 using Tuning = std::map<std::string, std::map<std::string, double>>;

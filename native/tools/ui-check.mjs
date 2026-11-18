@@ -8,6 +8,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
+import { buildEvents } from '../../src/index.js';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const exe = process.argv[2] ?? join(repo, 'native/build/app/BackingtrackApp_artefacts/Release/Standalone/Backingtrack Generator.exe');
@@ -93,6 +94,11 @@ try {
   }, [id, String(value)]);
   const result = { requests, idle: await engine(1000) };
 
+  await page.evaluate(() => { // the lead's default job plays nothing: give it a melody, as the user does with the job menu
+    const job = document.getElementById('job-lead');
+    job.value = 'melody';
+    job.dispatchEvent(new Event('change', { bubbles: true }));
+  });
   await page.locator('#go').click();
   await sleep(1500);
   result.voices = await page.evaluate(() => window.voiceLog.at(-1) ?? null);
@@ -115,6 +121,23 @@ try {
   });
   for (const [layer, { lit, peak }] of Object.entries(result.layers)) if (lit && !(peak > 0)) problems.push(`${layer}: its light goes on, but it is silent`);
   for (const layer of ['drums', 'bass']) if (!(result.layers[layer]?.peak > 0)) problems.push(`${layer}: silent after the start`);
+  // All six layers: switch each on with its mute key, seek to its first note or hit in the track the page sent, and read its level.
+  // Every switched-on layer must show a level above 0; a layer without any event in the track cannot show that and fails too.
+  await page.evaluate(() => { for (const key of document.querySelectorAll('button[data-mute]')) if (key.getAttribute('aria-pressed') === 'true') key.click(); });
+  const sentTrack = JSON.parse(await page.evaluate(() => window.sent.findLast((s) => s.type === 'track').json));
+  const events = buildEvents({ ...sentTrack, layers: Object.fromEntries(Object.keys(sentTrack.layers).map((id) => [id, true])) }); // where the layers play, whatever the page sent
+  result.everyLayer = {};
+  for (const layer of ['drums', 'bass', 'chords', 'pad', 'lead', 'percussion']) {
+    const first = events.find((e) => e.layer === layer && (e.type === 'note' || e.type === 'hit'));
+    if (!first) { result.everyLayer[layer] = 'no event in the track'; problems.push(`${layer}: the track has no note or hit for it`); continue; }
+    const beat = (first.t * sentTrack.bpm) / 60;
+    await page.evaluate((b) => { window.bridge('seek', { beats: b }); window.engineLog.length = 0; }, Math.max(0, beat - 0.5));
+    await sleep(2500);
+    const state = await page.evaluate((l) => ({ muted: document.querySelector(`#lane-buttons [data-layer="${l}"]`).dataset.muted, peak: +Math.max(0, ...window.engineLog.map((m) => m.peaks?.[l] ?? 0)).toFixed(3) }), layer);
+    result.everyLayer[layer] = { firstBeat: +beat.toFixed(2), ...state };
+    if (state.muted !== 'false') problems.push(`${layer}: could not be switched on`);
+    else if (!(state.peak > 0)) problems.push(`${layer}: switched on, but its level stays 0`);
+  }
   // a voice change while playing: the chords switch to another sample guitar, the engine reports it ready, no error
   result.voiceChange = await page.evaluate(async () => {
     const select = document.getElementById('voice-chords');

@@ -23,6 +23,7 @@ const SoundData& soundData() {
         out.packs = j.at("packs").get<std::map<std::string, std::string>>();
         out.hitKeys = j.at("hitKeys").get<std::map<std::string, std::map<std::string, int>>>();
         for (const auto& [layer, audio] : j.at("layerAudio").items()) out.trim[layer] = audio.at("trim").get<double>();
+        out.kitPan = j.at("kitPan").get<std::map<std::string, double>>();
         return out;
     }();
     return data;

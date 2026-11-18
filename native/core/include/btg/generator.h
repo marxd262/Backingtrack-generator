@@ -31,7 +31,9 @@ struct Event {
 
 // Port of buildEvents() of the web app (src/core/events.js), all six layers: for the same track the same events,
 // bit for bit (native/core/tests/test_parity.cpp). `trackJson` is a track as normalizeTrack() writes it, with
-// `voices` filled in; it is not validated here. Throws (std::exception) when the JSON is not such a track.
+// `voices` filled in; it is not validated here: the track must be one that the web app's normalizeTrack wrote and validateTrack
+// accepted (a later task validates here). Throws (std::exception) when the JSON is not a track at all; an inconsistent one
+// (`bars: []`, form parts summing to 0, a form longer than `length`) is undefined behaviour: a division by zero or an index outside `bars`.
 std::vector<Event> buildEvents(const std::string& trackJson);
 
 // The events with what a player needs around them. Event times are seconds at `bpm`.

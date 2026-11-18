@@ -3,6 +3,8 @@
 #include <dr_flac.h>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <iterator>
 #include <stdexcept>
@@ -37,12 +39,18 @@ Pack loadPack(const std::string& text, const unsigned char* audio, size_t size) 
 
     for (const auto& s : j.at("samples")) {
         Pack::Sample sample;
-        sample.offset = s.at("offset").get<int>() / (pack.version == 1 ? 2 : 1); // format 1 counts bytes
-        sample.frames = s.at("frames");
+        // long long: a value that does not fit an int must not wrap around before it is checked
+        const long long offset = s.at("offset").get<long long>() / (pack.version == 1 ? 2 : 1); // format 1 counts bytes
+        const long long frames = s.at("frames").get<long long>();
+        if (offset < 0 || frames < 0 || offset > decodedFrames || frames > decodedFrames - offset) throw std::runtime_error("pack: a sample lies outside the audio file");
+        sample.offset = static_cast<int>(offset);
+        sample.frames = static_cast<int>(frames);
         sample.rate = s.value("rate", 44100.0);
-        sample.loopStart = s.value("loopStart", 0);
-        sample.loopEnd = s.value("loopEnd", 0);
-        if (sample.offset < 0 || sample.frames < 0 || sample.offset + sample.frames > decodedFrames) throw std::runtime_error("pack: a sample lies outside the audio file");
+        if (!(sample.rate >= 1000.0 && sample.rate <= 1e6)) throw std::runtime_error("pack: a sample rate is not between 1000 and 1000000 Hz");
+        const long long loopStart = s.value("loopStart", 0LL), loopEnd = s.value("loopEnd", 0LL);
+        if (loopStart < 0 || loopStart > frames || loopEnd < 0 || loopEnd > frames) throw std::runtime_error("pack: loop points lie outside their sample");
+        sample.loopStart = static_cast<int>(loopStart);
+        sample.loopEnd = static_cast<int>(loopEnd);
         pack.samples.push_back(sample);
     }
     const int count = static_cast<int>(pack.samples.size());
@@ -86,6 +94,10 @@ std::shared_ptr<const Pack> loadPackFiles(const std::string& folder, const std::
         if (!file) throw std::runtime_error("pack: cannot open " + path);
         return std::string(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
     };
+    // The id comes from a page: only a plain name may reach the file system.
+    const bool plain = !id.empty() && id.find("..") == std::string::npos
+        && std::all_of(id.begin(), id.end(), [](unsigned char c) { return std::isalnum(c) || c == '-' || c == '_' || c == '.'; });
+    if (!plain) throw std::runtime_error("pack: the id is not a plain name");
     const std::string text = read(folder + "/" + id + ".json");
     const std::string name = nlohmann::json::parse(text).value("file", id + ".pcm");
     if (name.find_first_of("/\\") != std::string::npos) throw std::runtime_error("pack: the audio file must lie next to the JSON");

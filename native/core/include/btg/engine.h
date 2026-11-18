@@ -25,7 +25,9 @@ public:
 
     // Control thread, one thread at a time (the app: its loader thread).
     void setPackSource(PackSource source);         // before the first setTrack or setVoices
-    void setTrack(const std::string& trackJson);   // plays from the next block on. Throws like buildSong (then nothing changes); then setVoices with the track's "voices"
+    // plays from the next block on. The track must be one that the web app's normalizeTrack wrote and validateTrack accepted (a later task
+    // validates here). Throws like buildSong when the JSON is not a track at all (then nothing changes); an inconsistent track is not checked. Then setVoices with the track's "voices"
+    void setTrack(const std::string& trackJson);
     void setVoices(const std::string& voicesJson); // {"bass":{"id":"sample","variant":"pick"},...}; a layer not named keeps its voice. Reads the packs it does not have yet, here; until then the old voice plays. Never throws
     void setTuning(const std::string& tuningJson); // overrides of the fine values as setTuning of the web app ({"bass/sample/finger":{"level":3}}); replaces the earlier ones. Never throws
     std::string voiceStatus() const;               // {"drums":"ready","bass":"error: bass-pick: <reason>","chords":"silent",...}, layers in enum order

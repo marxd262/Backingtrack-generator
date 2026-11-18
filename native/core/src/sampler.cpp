@@ -337,8 +337,7 @@ public:
     SampleHits(Engine::Layer voiceLayer, const std::string& key, const Pack& p, double kit) {
         static const std::map<std::string, std::string> DRUM_FALLBACK { // src/core/event-helpers.js
             { "sideStick", "snare" }, { "rimshot", "snare" }, { "ride", "hat" }, { "rideBell", "hat" }, { "hatHalf", "openHat" }, { "hatPedal", "hat" } };
-        // src/audio/synth.js, KIT_PAN: the place of a hit relative to mix/pan "kit"; every other hit stays in the middle
-        static const std::map<std::string, double> KIT_PAN { { "hat", 1 }, { "openHat", 1 }, { "crash", -1.2 }, { "tomHigh", 0.8 }, { "tomLow", -1.2 } };
+        const auto& kitPan = soundData().kitPan; // KIT_PAN of synth.js: the place of a hit relative to mix/pan "kit"; every other hit stays in the middle
         const auto& hitKeys = soundData().hitKeys;
         const auto own = hitKeys.find(key);
         const auto& keyMap = own != hitKeys.end() ? own->second : hitKeys.at(LAYER_NAMES[voiceLayer]);
@@ -361,8 +360,9 @@ public:
             hits[i].opens = n == "openHat";
             // the place goes by the event's name after the fallback (DRUM_FALLBACK[name] ?? name), whichever key plays it
             const auto stand = DRUM_FALLBACK.find(HIT_NAMES[i]);
-            const auto place = KIT_PAN.find(stand != DRUM_FALLBACK.end() ? stand->second : HIT_NAMES[i]);
-            const double pan = clamp(kit * (place != KIT_PAN.end() ? place->second : 0.0), -1, 1);
+            const auto place = kitPan.find(stand != DRUM_FALLBACK.end() ? stand->second : HIT_NAMES[i]);
+            // shortcut: width 1 (synth.js mix.width = 2 * master.width, 1 at the default timbre); the timbre's width comes with Task 16.
+            const double pan = clamp(kit * (place != kitPan.end() ? place->second : 0.0), -1, 1);
             hits[i].panLeft = static_cast<float>(1 - pan);
             hits[i].panRight = static_cast<float>(1 + pan);
         }

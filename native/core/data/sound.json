@@ -2411,5 +2411,12 @@
       "trim": 0.33,
       "room": true
     }
+  },
+  "kitPan": {
+    "hat": 1,
+    "openHat": 1,
+    "crash": -1.2,
+    "tomHigh": 0.8,
+    "tomLow": -1.2
   }
 }

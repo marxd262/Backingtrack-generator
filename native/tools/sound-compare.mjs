@@ -4,14 +4,14 @@
 // cases.json: array of { name, track, sound?, tuning?, dry?, kind? }
 //   track  path to a track JSON (relative to cases.json) or the track object
 //   sound  timbre overrides like track.timbre ({ master: { brightness: 0.3 } }), laid over the track's own
-//   tuning fine values of the web voices ({ 'mix/room': { wet: 0 } }); the native core does not read them yet
+//   tuning fine values as setTuning takes them ({ 'mix/room': { wet: 0 } }), given to both renders (btg_render --tuning)
 //   dry    no limiter, master.reverb 0, master.echo 0, mix/room wet 0, on both sides
 //   kind   "sample" (default) or "synth": chooses the limits
 // Exit code 1 if a case fails (also one that cannot render, or whose renders differ in length by more than 50 ms).
 // balance = (right minus left level of the native render) minus (the same of the web render); limit as the level limit.
 // The listening files (<name>-web.wav, <name>-nativ.wav, 16 bit) of a pair above full scale are turned down by one common gain;
 // the measurement uses the unscaled floats. A run of cases ends with the A/B page index.html in the output folder (ab-page.mjs).
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -165,8 +165,10 @@ async function renderCase(c) {
   try {
     const trackFile = join(temp, `${c.name}.json`), wavFile = join(temp, `${c.name}.wav`);
     writeFileSync(trackFile, JSON.stringify(c.track));
+    const tuningFile = join(temp, `${c.name}-tuning.json`);
+    if (c.options.tuning) writeFileSync(tuningFile, JSON.stringify(c.options.tuning));
     try {
-      execFileSync(render, [trackFile, join(repo, 'src/assets/samples'), wavFile, String(RATE), ...(c.dry ? ['--dry'] : [])], { encoding: 'utf8', stdio: 'pipe' });
+      execFileSync(render, [trackFile, join(repo, 'src/assets/samples'), wavFile, String(RATE), ...(c.dry ? ['--dry'] : []), ...(c.options.tuning ? ['--tuning', tuningFile] : [])], { encoding: 'utf8', stdio: 'pipe' });
     } catch (error) { // btg_render says why on stdout (also on its legitimate exit 1 for a silent render)
       throw new Error(`btg_render: ${[error.stdout, error.stderr].filter(Boolean).join(' ').trim() || error.message}`);
     }
@@ -270,7 +272,28 @@ async function selfCheck(out) {
   const results = await runCases([{ name: 'selfcheck-broken', track: broken }, { name: c.name, track: join(repo, 'native/core/tests/track-funk.json'), dry: true }], repo, out);
   const good = results[0].error && results[1].m?.pass && results.filter((r) => !r.m?.pass).length === 1;
   console.log(`  ${good ? 'ok' : 'WRONG'}: must print RENDER FAILED for the first, measure the second, one failed case`);
-  return ok && !!good;
+  // a case's tuning reaches both renders: the bass alone, its voice's level 4 -> 2 is -6.02 dB on both sides, so the case still passes
+  // and the native render is 6.02 dB (within 0.1) quieter than the same case without the tuning
+  const bassTrack = JSON.parse(readFileSync(join(repo, 'native/core/tests/track-funk.json'), 'utf8'));
+  bassTrack.layers.drums = false;
+  const bass = (name, tuning) => prepareCase({ name, track: bassTrack, dry: true, tuning }, repo);
+  const plain = await renderCase(bass('selfcheck-bass', undefined));
+  const tuned = bass('selfcheck-bass-tuned', { 'bass/sample/finger': { level: 2 } });
+  const quieter = await renderCase(tuned);
+  const m = measure(quieter.web, quieter.native, tuned.kind);
+  const drop = db(meanSquare(quieter.native)) - db(meanSquare(plain.native));
+  const reaches = m.pass && Math.abs(drop + 6.02) <= 0.1;
+  console.log(line(tuned.name, m));
+  console.log(`  native level with the tuning minus without: ${signed(drop)} dB (expected -6.02)
+  ${reaches ? 'ok' : 'WRONG'}: tuning must reach both renders: the case passes, the native render is 6.02 dB quieter`);
+  // an empty set of cases is no pass: the run exits 1 and says so
+  const empty = join(out, 'selfcheck-empty.json');
+  writeFileSync(empty, '[]');
+  const run = spawnSync(process.execPath, [fileURLToPath(import.meta.url), empty, out], { encoding: 'utf8' });
+  const none = run.status === 1 && /no cases/.test(run.stdout);
+  console.log(`an empty set of cases: exit ${run.status}, "${run.stdout.trim()}"
+  ${none ? 'ok' : 'WRONG'}: must exit 1 and say there were no cases`);
+  return ok && !!good && reaches && none;
 }
 
 // --- main ---
@@ -284,6 +307,8 @@ mkdirSync(out, { recursive: true });
 if (self) process.exit(await selfCheck(out) ? 0 : 1);
 
 const baseDir = dirname(resolve(casesFile));
-const results = await runCases(JSON.parse(readFileSync(resolve(casesFile), 'utf8')), baseDir, out);
+const cases = JSON.parse(readFileSync(resolve(casesFile), 'utf8'));
+if (!Array.isArray(cases) || cases.length === 0) { console.log(`${casesFile}: no cases, nothing was checked  FAIL`); process.exit(1); } // a gate must not pass on nothing
+const results = await runCases(cases, baseDir, out);
 if (results.some((r) => r.m)) console.log(`A/B page: ${writeAbPage(out).page}`);
 process.exit(results.every((r) => r.m?.pass) ? 0 : 1);

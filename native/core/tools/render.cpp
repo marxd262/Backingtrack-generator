@@ -1,6 +1,7 @@
 // Offline render of a track with the engine of the core, no JUCE:
-//   btg_render <track.json> <folder with the sample packs> <out.wav> [sample rate, default 48000] [--dry]
+//   btg_render <track.json> <folder with the sample packs> <out.wav> [sample rate, default 48000] [--dry] [--tuning <file.json>]
 // The track is JSON as normalizeTrack() of the web app writes it (see native/tools). Plays the song once, then 0.2 s in which the tones ring out.
+// --tuning: fine values as the web app's setTuning takes them ({"bass/sample/finger":{"level":2}}), set before the track is built.
 // --dry: no limiter (the sum only gets the master gain), written as 32-bit float WAV so that nothing clips; for native/tools/sound-compare.mjs.
 #include "btg/engine.h"
 #include "btg/pack.h"
@@ -18,14 +19,16 @@
 
 int main(int argc, char** argv) {
     bool dry = false;
+    std::string tuningFile;
     std::vector<char*> args;
     for (int i = 0; i < argc; ++i) {
         if (std::string(argv[i]) == "--dry") dry = true;
+        else if (std::string(argv[i]) == "--tuning" && i + 1 < argc) tuningFile = argv[++i];
         else args.push_back(argv[i]);
     }
     argc = static_cast<int>(args.size());
     argv = args.data();
-    if (argc < 4) { std::printf("usage: btg_render <track.json> <packs folder> <out.wav> [sample rate] [--dry]\n"); return 2; }
+    if (argc < 4) { std::printf("usage: btg_render <track.json> <packs folder> <out.wav> [sample rate] [--dry] [--tuning <file.json>]\n"); return 2; }
     const double rate = argc > 4 ? std::atof(argv[4]) : 48000.0;
     try {
         std::ifstream file(argv[1], std::ios::binary);
@@ -35,6 +38,11 @@ int main(int argc, char** argv) {
         btg::Engine engine;
         const std::string folder = argv[2];
         engine.setPackSource([folder](const std::string& id) { return btg::loadPackFiles(folder, id); });
+        if (!tuningFile.empty()) {
+            std::ifstream tuning(tuningFile, std::ios::binary);
+            if (!tuning) throw std::runtime_error("cannot open " + tuningFile);
+            engine.setTuning(std::string((std::istreambuf_iterator<char>(tuning)), std::istreambuf_iterator<char>()));
+        }
         engine.setTrack(track);
         std::printf("voices: %s\n", engine.voiceStatus().c_str());
         engine.setLimiter(!dry);

@@ -305,6 +305,54 @@ int main(int argc, char** argv) {
         CHECK(std::isfinite(r.rms) && r.rms > 0.01);
     }
 
+    // A damaged pack (a sample rate that is zero, negative or infinite; loop points outside the sample; an offset that does not fit an int
+    // or whose sum with the frames overflows) is an error of its layer: the status names the pack, the other layers play with finite samples.
+    {
+        const char* damaged[] = {
+            R"({"offset":0,"frames":8,"rate":0})",
+            R"({"offset":0,"frames":8,"rate":-44100})",
+            R"({"offset":0,"frames":8,"rate":1e999})",
+            R"({"offset":0,"frames":8,"loopStart":-1,"loopEnd":4})",
+            R"({"offset":0,"frames":8,"loopStart":2,"loopEnd":9})",
+            R"({"offset":0,"frames":8,"loopStart":9,"loopEnd":0})",
+            R"({"offset":0,"frames":8,"loopStart":0,"loopEnd":-3})",
+            R"({"offset":2000000000,"frames":2000000000})",  // 1e9 + 2e9 frames overflows an int
+            R"({"offset":4294967296,"frames":8})",           // 2^32 bytes: truncated to 0 by a cast to int
+            R"({"offset":9223372036854775807,"frames":9223372036854775807})", // offset/2 + frames overflows even a long long
+            R"({"offset":0,"frames":8,"rate":1e-300})",      // a rate outside 1000 .. 1000000 Hz makes frames / rate huge
+            R"({"offset":0,"frames":8,"rate":5e6})",
+        };
+        static const unsigned char audio[16] = {};
+        for (const char* sample : damaged) {
+            const std::string text = std::string(R"({"version":1,"samples":[)") + sample + R"(],"zones":[{"sample":0}]})";
+            bool threw = false;
+            try { btg::loadPack(text, audio, sizeof audio); } catch (const std::exception&) { threw = true; }
+            CHECK(threw);
+            if (!threw) std::printf("  not rejected: %s\n", sample);
+            btg::Engine engine;
+            engine.setPackSource([&](const std::string& id) -> std::shared_ptr<const btg::Pack> {
+                if (id == "pad-strings") return std::make_shared<const btg::Pack>(btg::loadPack(text, audio, sizeof audio));
+                return source(id);
+            });
+            engine.setTrack(track);
+            CHECK(engine.voiceStatus().find(R"("pad":"error: pad-strings: )") != std::string::npos);
+            engine.prepare(rate);
+            btg::Transport t;
+            t.play(64.0, engine.bpm());
+            const Result r = render(engine, t, 2.0, 480);
+            CHECK(std::isfinite(r.rms) && r.rms > 0.01);
+        }
+        // an id that is not a plain name never reaches the file system: the folder does not exist, yet the reason is the id
+        for (const char* id : { "", "..", "../x", "a/b", "a\\b", "C:x", "a..b", "a b", "x.json/../y" }) {
+            std::string reason;
+            try { btg::loadPackFiles("no-such-folder", id); } catch (const std::exception& error) { reason = error.what(); }
+            CHECK(reason.find("not a plain name") != std::string::npos);
+        }
+        // a good pack is still taken: loop points at the edges of the sample
+        const char* fine = R"({"version":1,"samples":[{"offset":0,"frames":8,"rate":44100,"loopStart":0,"loopEnd":8}],"zones":[{"sample":0,"loop":true}]})";
+        CHECK(btg::loadPack(fine, audio, sizeof audio).samples.size() == 1);
+    }
+
     // Review Focus 2: the bass changes its voice in every block for 10 s. Old tones ring out and nothing clicks: the second
     // difference of these sines stays below 0.01; a cut tone jumps by its amplitude (0.1 and more). The voice does change:
     // the pick's test pack has half the amplitude, so the run is clearly quieter than with the finger voice alone.

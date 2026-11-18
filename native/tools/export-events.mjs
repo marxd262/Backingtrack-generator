@@ -3,7 +3,7 @@
 //   node native/tools/export-events.mjs <outDir> --data    -> also rewrites native/core/data/grooves.json and sound.json
 //   node native/tools/export-events.mjs --data-only <dir>  -> writes only grooves.json and sound.json, into <dir>
 // The first groups switch on drums and bass only; the groups of the other layers follow them.
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -20,6 +20,19 @@ const { createRng } = await load('core/rng.js');
 const { colorProgression, CHORD_COLORS } = await load('core/harmony.js');
 const { chordOptions } = await load('core/music.js');
 
+// The kit's panorama is a constant that synth.js does not export and src/ stays as it is: read its literal out of the text and fail
+// loudly when it is not found or not what is expected (hit name -> finite number).
+function readKitPan() {
+  const file = join(repo, 'src/audio/synth.js');
+  const found = /const KIT_PAN = Object\.freeze\((\{[^}]*\})\)/.exec(readFileSync(file, 'utf8'));
+  if (!found) throw new Error(`KIT_PAN: no literal "const KIT_PAN = Object.freeze({ ... })" found in ${file}`);
+  let table;
+  try { table = JSON.parse(found[1].replace(/([A-Za-z_]\w*)\s*:/g, '"$1":')); } catch (error) { throw new Error(`KIT_PAN: cannot parse ${found[1]}: ${error.message}`); }
+  const entries = Object.entries(table);
+  if (!entries.length || !entries.every(([, v]) => typeof v === 'number' && Number.isFinite(v))) throw new Error(`KIT_PAN: not a table of numbers: ${found[1]}`);
+  return table;
+}
+
 // The data the core embeds (native/core/data): --data writes it there, --data-only <dir> writes it into <dir> and stops
 // (the check in native/core/CMakeLists.txt compares that copy with the checked-in files).
 const dataOnly = process.argv.indexOf('--data-only');
@@ -34,6 +47,7 @@ if (process.argv.includes('--data') || dataOnly >= 0) {
     packs: Object.fromEntries(VOICE_LAYERS.flatMap((layer) => (VOICES[layer].sample?.variants ?? []).map((variant) => [`${layer}/sample/${variant}`, packIdFor(layer, variant)]))),
     hitKeys: { ...HIT_KEYS, 'drums/sample/rimshot': hitKeysFor('drums', 'rimshot') },
     layerAudio: LAYER_AUDIO,
+    kitPan: readKitPan(),
   };
   const dir = dataOnly >= 0 ? resolve(process.argv[dataOnly + 1]) : join(repo, 'native/core/data');
   mkdirSync(dir, { recursive: true });
@@ -232,6 +246,25 @@ for (const [m, key] of MODE_KEYS.entries()) {
     add(`chords-all-${key.mode}`, style, 1400 + part, { layers: ALL, keys: [key], bars, form: autoForm(style), track: { jobs: jobsOf(n + 2), voices: { ...style.voices, lead: LEAD_VOICES[n % LEAD_VOICES.length] } } });
   }
 }
+
+// the edges of what the UI allows, all six layers: 20 and 400 bpm, bars of 1 and 16 beats, 1, 2, 3 and 512 bars (with and without a
+// form), every meter at 400 bpm. Appended last: the cases above stay as they were.
+const edge = (style, name, seed, track = {}, extra = {}) =>
+  add(`edge-${name}`, style, seed, { layers: ALL, keys: [{ root: 'A', mode: 'minor' }], ...extra, track: { length: 8, jobs: { lead: LEAD_JOBS[seed % 5], percussion: 'mixed' }, ...track } });
+const barsOf = (beats) => (track) => track.bars.map((bar) => ({ ...bar, beats }));
+for (const [s, style] of STYLE_PRESETS.entries()) {
+  for (const bpm of [20, 21.7, 399.3, 400]) edge(style, `bpm${bpm}`, 10 + s, { bpm });
+  edge(style, 'bars1', 20 + s, { length: 1 });
+  edge(style, 'bars2', 30 + s, { length: 2 });
+  edge(style, 'bars3form', 40 + s, { length: 3, form: { sections: [{ type: 'intro', bars: 1 }, { type: 'chorus', bars: 1, transition: 'roll' }, { type: 'outro', bars: 1, transition: 'stop' }] } });
+  edge(style, 'beats1', 50 + s, {}, { bars: barsOf(1) });
+  edge(style, 'beats16', 60 + s, {}, { bars: barsOf(16) });
+  edge(style, 'beats16-bpm400', 70 + s, { bpm: 400 }, { bars: barsOf(16) });
+  edge(style, 'beats1-bpm20', 80 + s, { bpm: 20 }, { bars: barsOf(1) });
+  for (const meter of [[3, 4], [6, 8], [12, 8], [5, 4]]) edge(style, `meter${meter.join('-')}-bpm400`, 90 + s, { bpm: 400 }, { meter });
+}
+edge(STYLE_PRESETS[0], 'bars512', 99, { length: 512 });
+edge(STYLE_PRESETS[0], 'bars512form', 98, { length: 512, form: rollForm({ template: 'auto', style: STYLE_PRESETS[0].id, targetBars: 512, seed: 98, tags: STYLE_PRESETS[0].tags }) });
 
 mkdirSync(out, { recursive: true });
 writeFileSync(join(out, 'cases.json'), JSON.stringify(cases));
