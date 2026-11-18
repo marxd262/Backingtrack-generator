@@ -1,11 +1,14 @@
-// Compares the C++ generator event by event with the web app at the tag port-base.
+// Compares the C++ generator event by event with the web app in the working tree.
 // Usage: btg_parity_tests <cases.json>   (written by native/tools/export-events.mjs)
+// Every event of the core is written the way the web app writes it (only the fields that are set) and compared
+// key by key, both ways: a field that only one side has is a difference.
 // "identical": every field equal, numbers bit for bit. "close": numbers within 1.5e-6 (one step of the
 // rounding to six places). Anything else is a difference and fails the test.
 #include "btg/generator.h"
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
@@ -19,59 +22,58 @@ namespace {
 const double TOLERANCE = 1.5e-6;
 enum class Match { identical, close, different };
 
+// The event as the web app writes it.
+json written(const btg::Event& e) {
+    static const char* const TYPES[] = { "chord", "marker", "note", "hit" };
+    using Type = btg::Event::Type;
+    json j = { { "t", e.t }, { "bar", e.bar }, { "type", TYPES[static_cast<int>(e.type)] } };
+    if (e.beat) j["beat"] = *e.beat;
+    if (e.type == Type::chord) j["chord"] = { { "root", e.chordRoot }, { "quality", e.chordQuality } };
+    if (e.type == Type::marker) {
+        j["name"] = e.name;
+        if (e.name == "section") { j["kind"] = e.kind; j["index"] = e.index; }
+    }
+    if (e.type == Type::note) { j["layer"] = e.layer; j["midi"] = e.midi; j["vel"] = e.vel; j["dur"] = e.dur; }
+    if (e.type == Type::hit) { j["layer"] = e.layer; j["name"] = e.name; j["vel"] = e.vel; }
+    if (!e.art.empty()) j["art"] = e.art;
+    if (e.artSemi) j["artSemi"] = *e.artSemi;
+    if (e.artTime) j["artTime"] = *e.artTime;
+    if (e.artRate) j["artRate"] = *e.artRate;
+    if (e.strum) j["strum"] = json::array({ e.strum->first, e.strum->second });
+    if (e.strumUp) j["strumUp"] = *e.strumUp;
+    if (e.leslie) j["leslie"] = *e.leslie;
+    if (e.swell) j["swell"] = *e.swell;
+    if (e.ring) j["ring"] = true;
+    return j;
+}
+
 struct Compare {
     Match result = Match::identical;
-    std::string field; // first field that is not identical
+    std::string field; // the field that differs, else the first one that is only close
     double delta = 0.0;
 
-    void text(const char* name, const json& expected, const std::string& actual) {
-        const std::string want = expected.contains(name) && expected[name].is_string() ? expected[name].get<std::string>() : std::string();
-        if (want != actual) fail(name);
-    }
-    void whole(const char* name, const json& expected, int actual, bool present = true) {
-        if (expected.contains(name) != present || (present && expected[name] != actual)) fail(name);
-    }
-    void number(const char* name, const json& expected, bool present, double actual) {
-        const bool wanted = expected.contains(name) && expected[name].is_number();
-        if (wanted != present) return fail(name);
-        if (!present) return;
-        const double diff = std::fabs(expected[name].get<double>() - actual);
-        if (diff == 0.0) return;
-        if (result == Match::identical) field = name;
-        delta = std::max(delta, diff);
-        if (diff > TOLERANCE) result = Match::different;
-        else if (result == Match::identical) result = Match::close;
-    }
-    void fail(const char* name) {
+    void fail(const std::string& name) {
         if (result != Match::different) field = name;
         result = Match::different;
     }
+    void value(const std::string& name, const json& want, const json& got) {
+        if (want.is_number() && got.is_number()) {
+            const double diff = std::fabs(want.get<double>() - got.get<double>());
+            if (diff == 0.0) return;
+            if (!(diff <= TOLERANCE)) return fail(name); // also a NaN
+            if (result == Match::identical) { field = name; result = Match::close; }
+            delta = std::max(delta, diff);
+        } else if (want.is_object() && got.is_object()) {
+            for (auto it = want.begin(); it != want.end(); ++it) {
+                if (got.contains(it.key())) value(it.key(), it.value(), got[it.key()]);
+                else fail(it.key());
+            }
+            for (auto it = got.begin(); it != got.end(); ++it) if (!want.contains(it.key())) fail(it.key());
+        } else if (want.is_array() && got.is_array() && want.size() == got.size()) {
+            for (size_t i = 0; i < want.size(); ++i) value(name, want[i], got[i]);
+        } else if (want != got) fail(name);
+    }
 };
-
-Compare compare(const json& x, const btg::Event& e) {
-    static const char* const TYPES[] = { "chord", "marker", "note", "hit" };
-    const bool chord = e.type == btg::Event::Type::chord, marker = e.type == btg::Event::Type::marker, note = e.type == btg::Event::Type::note;
-    const bool sound = !chord && !marker;
-    Compare c;
-    c.text("type", x, TYPES[static_cast<int>(e.type)]);
-    c.text("layer", x, e.layer);
-    c.text("name", x, e.name);
-    c.text("art", x, e.art);
-    c.text("kind", x, e.kind);
-    c.whole("bar", x, e.bar);
-    c.whole("midi", x, e.midi, note);
-    c.whole("index", x, e.index, marker && e.name == "section");
-    if (chord) {
-        if (!x.contains("chord") || x["chord"].value("root", "") != e.chordRoot || x["chord"].value("quality", "") != e.chordQuality) c.fail("chord");
-    } else if (x.contains("chord")) c.fail("chord");
-    c.number("t", x, true, e.t);
-    c.number("beat", x, e.beat.has_value(), e.beat.value_or(0));
-    c.number("vel", x, sound, e.vel);
-    c.number("dur", x, note, e.dur);
-    c.number("artSemi", x, e.artSemi.has_value(), e.artSemi.value_or(0));
-    c.number("artTime", x, e.artTime.has_value(), e.artTime.value_or(0));
-    return c;
-}
 
 } // namespace
 
@@ -101,7 +103,9 @@ int main(int argc, char** argv) {
         long long trackIdentical = 0, trackDifferent = 0;
         const size_t count = std::min(expected.size(), actual.size());
         for (size_t i = 0; i < count; ++i) {
-            const Compare c = compare(expected[i], actual[i]);
+            const json got = written(actual[i]);
+            Compare c;
+            c.value("event", expected[i], got);
             if (c.result == Match::identical) { ++trackIdentical; continue; }
             if (c.result == Match::close) { ++close; ++closeFields[c.field]; worst = std::max(worst, c.delta); continue; }
             ++trackDifferent;
@@ -109,7 +113,7 @@ int main(int argc, char** argv) {
             if (shown < 12) {
                 ++shown;
                 std::printf("DIFF %s #%zu field %s: expected %s\n", name.c_str(), i, c.field.c_str(), expected[i].dump().c_str());
-                std::printf("     got t=%.6f bar=%d name=%s midi=%d vel=%.3f dur=%.6f art=%s\n", actual[i].t, actual[i].bar, actual[i].name.c_str(), actual[i].midi, actual[i].vel, actual[i].dur, actual[i].art.c_str());
+                std::printf("     got %s\n", got.dump().c_str());
             }
         }
         const long long extra = static_cast<long long>(std::max(expected.size(), actual.size()) - count);

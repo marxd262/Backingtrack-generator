@@ -37,7 +37,7 @@ function add(name, style, seed, extra = {}) {
   const track = {
     key, bpm: style.bpm, seed, meter,
     bars: progressionFor(key, seed).map((chord, i) => ({ chord, beats: extra.oddBeats?.[i] ?? beats })),
-    tags: style.tags, voices: style.voices, layers: ONLY, variety: true,
+    tags: style.tags, voices: style.voices, layers: extra.layers ?? ONLY, variety: true,
     ...extra.track,
   };
   if (extra.form) track.form = typeof extra.form === 'function' ? extra.form(track, pick) : extra.form;

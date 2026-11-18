@@ -2,6 +2,7 @@
 
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace btg {
@@ -22,7 +23,10 @@ struct Event {
     std::string kind;           // section marker: type of the part
     int index = 0;              // section marker: place in the form
     std::string art;            // articulation, empty = none
-    std::optional<double> artSemi, artTime;
+    std::optional<double> artSemi, artTime, artRate;
+    std::optional<std::pair<int, int>> strum; // chords: place of the tone in its stab and how many tones the stab has
+    std::optional<double> strumUp, leslie, swell;
+    bool ring = false;          // chords: the stab rings out
 };
 
 // Port of buildEvents() of the web app (src/core/events.js at the tag port-base), so far for the layers
