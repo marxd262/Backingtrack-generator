@@ -1,0 +1,2415 @@
+{
+  "tunables": {
+    "drums/synth/classic": {
+      "sideStick": {
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "value": 0.45
+      },
+      "hatPedal": {
+        "min": 0,
+        "max": 1,
+        "step": 1,
+        "value": 0
+      }
+    },
+    "bass/string/finger": {
+      "pluckPos": {
+        "min": 0,
+        "max": 0.5,
+        "step": 0.01,
+        "value": 0.28
+      },
+      "brightness": {
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "value": 0.45
+      },
+      "decay": {
+        "min": 0.2,
+        "max": 6,
+        "step": 0.05,
+        "value": 1.2
+      },
+      "excite": {
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "value": 0.25
+      },
+      "stiffness": {
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "value": 0.05
+      },
+      "pickupPos": {
+        "min": 0,
+        "max": 0.5,
+        "step": 0.01,
+        "value": 0.12
+      },
+      "pickupLp": {
+        "min": 500,
+        "max": 12000,
+        "step": 100,
+        "value": 2500
+      },
+      "body": {
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "value": 0.25
+      },
+      "level": {
+        "min": 0.5,
+        "max": 24,
+        "step": 0.1,
+        "value": 4.5
+      }
+    },
+    "chords/string/electric": {
+      "pluckPos": {
+        "min": 0,
+        "max": 0.5,
+        "step": 0.01,
+        "value": 0.15
+      },
+      "brightness": {
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "value": 0.6
+      },
+      "decay": {
+        "min": 0.2,
+        "max": 6,
+        "step": 0.05,
+        "value": 1.5
+      },
+      "excite": {
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "value": 0.7
+      },
+      "stiffness": {
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "value": 0.1
+      },
+      "pickupPos": {
+        "min": 0,
+        "max": 0.5,
+        "step": 0.01,
+        "value": 0.2
+      },
+      "pickupLp": {
+        "min": 500,
+        "max": 12000,
+        "step": 100,
+        "value": 4500
+      },
+      "body": {
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "value": 0.1
+      },
+      "level": {
+        "min": 0.2,
+        "max": 10,
+        "step": 0.05,
+        "value": 0.85
+      },
+      "strum": {
+        "min": 0,
+        "max": 0.05,
+        "step": 0.002,
+        "value": 0.012
+      }
+    },
+    "bass/sample/finger": {
+      "level": {
+        "min": 0.05,
+        "max": 8,
+        "step": 0.05,
+        "value": 4
+      },
+      "decay": {
+        "min": 0.2,
+        "max": 10,
+        "step": 0.1,
+        "value": 2.5
+      },
+      "velExp": {
+        "min": 0.5,
+        "max": 3,
+        "step": 0.05,
+        "value": 1.3
+      },
+      "softHz": {
+        "min": 800,
+        "max": 20000,
+        "step": 100,
+        "value": 2500
+      },
+      "oneShot": {
+        "min": 0,
+        "max": 1,
+        "step": 1,
+        "value": 0
+      },
+      "humanCents": {
+        "min": 0,
+        "max": 10,
+        "step": 0.5,
+        "value": 1.5
+      },
+      "humanDb": {
+        "min": 0,
+        "max": 3,
+        "step": 0.1,
+        "value": 0.6
+      }
+    },
+    "bass/sample/pick": {
+      "level": {
+        "min": 0.05,
+        "max": 8,
+        "step": 0.05,
+        "value": 4.65
+      },
+      "decay": {
+        "min": 0.2,
+        "max": 10,
+        "step": 0.1,
+        "value": 2
+      },
+      "velExp": {
+        "min": 0.5,
+        "max": 3,
+        "step": 0.05,
+        "value": 1.3
+      },
+      "softHz": {
+        "min": 800,
+        "max": 20000,
+        "step": 100,
+        "value": 2500
+      },
+      "oneShot": {
+        "min": 0,
+        "max": 1,
+        "step": 1,
+        "value": 0
+      },
+      "humanCents": {
+        "min": 0,
+        "max": 10,
+        "step": 0.5,
+        "value": 1.5
+      },
+      "humanDb": {
+        "min": 0,
+        "max": 3,
+        "step": 0.1,
+        "value": 0.6
+      }
+    },
+    "chords/sample/guitar": {
+      "level": {
+        "min": 0.05,
+        "max": 8,
+        "step": 0.05,
+        "value": 1.5
+      },
+      "decay": {
+        "min": 0.2,
+        "max": 10,
+        "step": 0.1,
+        "value": 3
+      },
+      "strum": {
+        "min": 0,
+        "max": 0.05,
+        "step": 0.002,
+        "value": 0.012
+      },
+      "strumUp": {
+        "min": 0,
+        "max": 2,
+        "step": 1,
+        "value": 2
+      },
+      "strumTilt": {
+        "min": 0,
+        "max": 0.6,
+        "step": 0.05,
+        "value": 0.25
+      },
+      "lowDb": {
+        "min": -12,
+        "max": 12,
+        "step": 0.5,
+        "value": 5
+      },
+      "midDb": {
+        "min": -12,
+        "max": 6,
+        "step": 0.5,
+        "value": -6
+      },
+      "midHz": {
+        "min": 500,
+        "max": 5000,
+        "step": 50,
+        "value": 2400
+      },
+      "highDb": {
+        "min": -12,
+        "max": 6,
+        "step": 0.5,
+        "value": -4
+      },
+      "highHz": {
+        "min": 1500,
+        "max": 8000,
+        "step": 100,
+        "value": 2600
+      },
+      "velExp": {
+        "min": 0.5,
+        "max": 3,
+        "step": 0.05,
+        "value": 1.6
+      },
+      "softHz": {
+        "min": 800,
+        "max": 20000,
+        "step": 100,
+        "value": 3500
+      },
+      "oneShot": {
+        "min": 0,
+        "max": 1,
+        "step": 1,
+        "value": 1
+      },
+      "humanCents": {
+        "min": 0,
+        "max": 10,
+        "step": 0.5,
+        "value": 2.5
+      },
+      "humanDb": {
+        "min": 0,
+        "max": 3,
+        "step": 0.1,
+        "value": 0.8
+      }
+    },
+    "chords/sample/epiano": {
+      "level": {
+        "min": 0.05,
+        "max": 8,
+        "step": 0.05,
+        "value": 2.25
+      },
+      "decay": {
+        "min": 0.2,
+        "max": 10,
+        "step": 0.1,
+        "value": 3
+      },
+      "velExp": {
+        "min": 0.5,
+        "max": 3,
+        "step": 0.05,
+        "value": 1
+      },
+      "softHz": {
+        "min": 800,
+        "max": 20000,
+        "step": 100,
+        "value": 20000
+      },
+      "oneShot": {
+        "min": 0,
+        "max": 1,
+        "step": 1,
+        "value": 0
+      },
+      "humanCents": {
+        "min": 0,
+        "max": 10,
+        "step": 0.5,
+        "value": 0
+      },
+      "humanDb": {
+        "min": 0,
+        "max": 3,
+        "step": 0.1,
+        "value": 0
+      }
+    },
+    "pad/sample/strings": {
+      "level": {
+        "min": 0.05,
+        "max": 8,
+        "step": 0.05,
+        "value": 1.95
+      }
+    },
+    "pad/sample/warm": {
+      "level": {
+        "min": 0.05,
+        "max": 8,
+        "step": 0.05,
+        "value": 1.15
+      }
+    },
+    "bass/sample/upright": {
+      "level": {
+        "min": 0.05,
+        "max": 8,
+        "step": 0.05,
+        "value": 3
+      },
+      "decay": {
+        "min": 0.2,
+        "max": 10,
+        "step": 0.1,
+        "value": 2.5
+      },
+      "velExp": {
+        "min": 0.5,
+        "max": 3,
+        "step": 0.05,
+        "value": 1.3
+      },
+      "softHz": {
+        "min": 800,
+        "max": 20000,
+        "step": 100,
+        "value": 2500
+      },
+      "oneShot": {
+        "min": 0,
+        "max": 1,
+        "step": 1,
+        "value": 0
+      },
+      "humanCents": {
+        "min": 0,
+        "max": 10,
+        "step": 0.5,
+        "value": 1.5
+      },
+      "humanDb": {
+        "min": 0,
+        "max": 3,
+        "step": 0.1,
+        "value": 0.6
+      }
+    },
+    "chords/sample/muted": {
+      "level": {
+        "min": 0.05,
+        "max": 8,
+        "step": 0.05,
+        "value": 1.35
+      },
+      "decay": {
+        "min": 0.2,
+        "max": 10,
+        "step": 0.1,
+        "value": 1.5
+      },
+      "velExp": {
+        "min": 0.5,
+        "max": 3,
+        "step": 0.05,
+        "value": 1.6
+      },
+      "softHz": {
+        "min": 800,
+        "max": 20000,
+        "step": 100,
+        "value": 3500
+      },
+      "oneShot": {
+        "min": 0,
+        "max": 1,
+        "step": 1,
+        "value": 1
+      },
+      "humanCents": {
+        "min": 0,
+        "max": 10,
+        "step": 0.5,
+        "value": 2.5
+      },
+      "humanDb": {
+        "min": 0,
+        "max": 3,
+        "step": 0.1,
+        "value": 0.8
+      }
+    },
+    "chords/sample/jazz": {
+      "level": {
+        "min": 0.05,
+        "max": 8,
+        "step": 0.05,
+        "value": 4.9
+      },
+      "decay": {
+        "min": 0.2,
+        "max": 10,
+        "step": 0.1,
+        "value": 3
+      },
+      "strum": {
+        "min": 0,
+        "max": 0.05,
+        "step": 0.002,
+        "value": 0.012
+      },
+      "strumUp": {
+        "min": 0,
+        "max": 2,
+        "step": 1,
+        "value": 2
+      },
+      "strumTilt": {
+        "min": 0,
+        "max": 0.6,
+        "step": 0.05,
+        "value": 0.25
+      },
+      "velExp": {
+        "min": 0.5,
+        "max": 3,
+        "step": 0.05,
+        "value": 1.6
+      },
+      "softHz": {
+        "min": 800,
+        "max": 20000,
+        "step": 100,
+        "value": 3500
+      },
+      "oneShot": {
+        "min": 0,
+        "max": 1,
+        "step": 1,
+        "value": 1
+      },
+      "humanCents": {
+        "min": 0,
+        "max": 10,
+        "step": 0.5,
+        "value": 2.5
+      },
+      "humanDb": {
+        "min": 0,
+        "max": 3,
+        "step": 0.1,
+        "value": 0.8
+      }
+    },
+    "chords/sample/steel": {
+      "level": {
+        "min": 0.05,
+        "max": 8,
+        "step": 0.05,
+        "value": 5.6
+      },
+      "decay": {
+        "min": 0.2,
+        "max": 10,
+        "step": 0.1,
+        "value": 3
+      },
+      "strum": {
+        "min": 0,
+        "max": 0.05,
+        "step": 0.002,
+        "value": 0.012
+      },
+      "strumUp": {
+        "min": 0,
+        "max": 2,
+        "step": 1,
+        "value": 2
+      },
+      "strumTilt": {
+        "min": 0,
+        "max": 0.6,
+        "step": 0.05,
+        "value": 0.25
+      },
+      "velExp": {
+        "min": 0.5,
+        "max": 3,
+        "step": 0.05,
+        "value": 1.6
+      },
+      "softHz": {
+        "min": 800,
+        "max": 20000,
+        "step": 100,
+        "value": 3500
+      },
+      "oneShot": {
+        "min": 0,
+        "max": 1,
+        "step": 1,
+        "value": 1
+      },
+      "humanCents": {
+        "min": 0,
+        "max": 10,
+        "step": 0.5,
+        "value": 2.5
+      },
+      "humanDb": {
+        "min": 0,
+        "max": 3,
+        "step": 0.1,
+        "value": 0.8
+      }
+    },
+    "chords/sample/nylon": {
+      "level": {
+        "min": 0.05,
+        "max": 8,
+        "step": 0.05,
+        "value": 2.1
+      },
+      "decay": {
+        "min": 0.2,
+        "max": 10,
+        "step": 0.1,
+        "value": 3
+      },
+      "strum": {
+        "min": 0,
+        "max": 0.05,
+        "step": 0.002,
+        "value": 0.012
+      },
+      "strumUp": {
+        "min": 0,
+        "max": 2,
+        "step": 1,
+        "value": 2
+      },
+      "strumTilt": {
+        "min": 0,
+        "max": 0.6,
+        "step": 0.05,
+        "value": 0.25
+      },
+      "velExp": {
+        "min": 0.5,
+        "max": 3,
+        "step": 0.05,
+        "value": 1.6
+      },
+      "softHz": {
+        "min": 800,
+        "max": 20000,
+        "step": 100,
+        "value": 3500
+      },
+      "oneShot": {
+        "min": 0,
+        "max": 1,
+        "step": 1,
+        "value": 1
+      },
+      "humanCents": {
+        "min": 0,
+        "max": 10,
+        "step": 0.5,
+        "value": 2.5
+      },
+      "humanDb": {
+        "min": 0,
+        "max": 3,
+        "step": 0.1,
+        "value": 0.8
+      }
+    },
+    "chords/sample/twelve": {
+      "level": {
+        "min": 0.05,
+        "max": 8,
+        "step": 0.05,
+        "value": 7.35
+      },
+      "decay": {
+        "min": 0.2,
+        "max": 10,
+        "step": 0.1,
+        "value": 3
+      },
+      "strum": {
+        "min": 0,
+        "max": 0.05,
+        "step": 0.002,
+        "value": 0.012
+      },
+      "strumUp": {
+        "min": 0,
+        "max": 2,
+        "step": 1,
+        "value": 2
+      },
+      "strumTilt": {
+        "min": 0,
+        "max": 0.6,
+        "step": 0.05,
+        "value": 0.25
+      },
+      "velExp": {
+        "min": 0.5,
+        "max": 3,
+        "step": 0.05,
+        "value": 1.6
+      },
+      "softHz": {
+        "min": 800,
+        "max": 20000,
+        "step": 100,
+        "value": 3500
+      },
+      "oneShot": {
+        "min": 0,
+        "max": 1,
+        "step": 1,
+        "value": 1
+      },
+      "humanCents": {
+        "min": 0,
+        "max": 10,
+        "step": 0.5,
+        "value": 2.5
+      },
+      "humanDb": {
+        "min": 0,
+        "max": 3,
+        "step": 0.1,
+        "value": 0.8
+      }
+    },
+    "chords/sample/funk": {
+      "level": {
+        "min": 0.05,
+        "max": 8,
+        "step": 0.05,
+        "value": 1
+      },
+      "decay": {
+        "min": 0.2,
+        "max": 10,
+        "step": 0.1,
+        "value": 3
+      },
+      "strum": {
+        "min": 0,
+        "max": 0.05,
+        "step": 0.002,
+        "value": 0.012
+      },
+      "strumUp": {
+        "min": 0,
+        "max": 2,
+        "step": 1,
+        "value": 2
+      },
+      "strumTilt": {
+        "min": 0,
+        "max": 0.6,
+        "step": 0.05,
+        "value": 0.25
+      },
+      "velExp": {
+        "min": 0.5,
+        "max": 3,
+        "step": 0.05,
+        "value": 1.6
+      },
+      "softHz": {
+        "min": 800,
+        "max": 20000,
+        "step": 100,
+        "value": 3500
+      },
+      "oneShot": {
+        "min": 0,
+        "max": 1,
+        "step": 1,
+        "value": 1
+      },
+      "humanCents": {
+        "min": 0,
+        "max": 10,
+        "step": 0.5,
+        "value": 2.5
+      },
+      "humanDb": {
+        "min": 0,
+        "max": 3,
+        "step": 0.1,
+        "value": 0.8
+      }
+    },
+    "chords/sample/freepats": {
+      "level": {
+        "min": 0.05,
+        "max": 8,
+        "step": 0.05,
+        "value": 0.75
+      },
+      "decay": {
+        "min": 0.2,
+        "max": 10,
+        "step": 0.1,
+        "value": 3
+      },
+      "strum": {
+        "min": 0,
+        "max": 0.05,
+        "step": 0.002,
+        "value": 0.012
+      },
+      "strumUp": {
+        "min": 0,
+        "max": 2,
+        "step": 1,
+        "value": 2
+      },
+      "strumTilt": {
+        "min": 0,
+        "max": 0.6,
+        "step": 0.05,
+        "value": 0.25
+      },
+      "velExp": {
+        "min": 0.5,
+        "max": 3,
+        "step": 0.05,
+        "value": 1.6
+      },
+      "softHz": {
+        "min": 800,
+        "max": 20000,
+        "step": 100,
+        "value": 3500
+      },
+      "oneShot": {
+        "min": 0,
+        "max": 1,
+        "step": 1,
+        "value": 1
+      },
+      "humanCents": {
+        "min": 0,
+        "max": 10,
+        "step": 0.5,
+        "value": 2.5
+      },
+      "humanDb": {
+        "min": 0,
+        "max": 3,
+        "step": 0.1,
+        "value": 0.8
+      }
+    },
+    "chords/sample/freepatsjazz": {
+      "level": {
+        "min": 0.05,
+        "max": 8,
+        "step": 0.05,
+        "value": 0.6
+      },
+      "decay": {
+        "min": 0.2,
+        "max": 10,
+        "step": 0.1,
+        "value": 3
+      },
+      "strum": {
+        "min": 0,
+        "max": 0.05,
+        "step": 0.002,
+        "value": 0.012
+      },
+      "strumUp": {
+        "min": 0,
+        "max": 2,
+        "step": 1,
+        "value": 2
+      },
+      "strumTilt": {
+        "min": 0,
+        "max": 0.6,
+        "step": 0.05,
+        "value": 0.25
+      },
+      "velExp": {
+        "min": 0.5,
+        "max": 3,
+        "step": 0.05,
+        "value": 1.6
+      },
+      "softHz": {
+        "min": 800,
+        "max": 20000,
+        "step": 100,
+        "value": 3500
+      },
+      "oneShot": {
+        "min": 0,
+        "max": 1,
+        "step": 1,
+        "value": 1
+      },
+      "humanCents": {
+        "min": 0,
+        "max": 10,
+        "step": 0.5,
+        "value": 2.5
+      },
+      "humanDb": {
+        "min": 0,
+        "max": 3,
+        "step": 0.1,
+        "value": 0.8
+      }
+    },
+    "lead/sample/flute": {
+      "level": {
+        "min": 0.05,
+        "max": 8,
+        "step": 0.05,
+        "value": 2.4
+      }
+    },
+    "lead/sample/sax": {
+      "level": {
+        "min": 0.05,
+        "max": 8,
+        "step": 0.05,
+        "value": 1.3
+      }
+    },
+    "lead/sample/synth": {
+      "level": {
+        "min": 0.05,
+        "max": 8,
+        "step": 0.05,
+        "value": 4.3
+      }
+    },
+    "lead/sample/guitar": {
+      "level": {
+        "min": 0.05,
+        "max": 8,
+        "step": 0.05,
+        "value": 2.15
+      },
+      "decay": {
+        "min": 0.2,
+        "max": 10,
+        "step": 0.1,
+        "value": 10
+      },
+      "velExp": {
+        "min": 0.5,
+        "max": 3,
+        "step": 0.05,
+        "value": 1.6
+      },
+      "softHz": {
+        "min": 800,
+        "max": 20000,
+        "step": 100,
+        "value": 3500
+      },
+      "oneShot": {
+        "min": 0,
+        "max": 1,
+        "step": 1,
+        "value": 1
+      },
+      "humanCents": {
+        "min": 0,
+        "max": 10,
+        "step": 0.5,
+        "value": 2.5
+      },
+      "humanDb": {
+        "min": 0,
+        "max": 3,
+        "step": 0.1,
+        "value": 0.8
+      }
+    },
+    "drums/sample/standard": {
+      "level": {
+        "min": 0.05,
+        "max": 8,
+        "step": 0.05,
+        "value": 2.5
+      },
+      "humanCents": {
+        "min": 0,
+        "max": 30,
+        "step": 1,
+        "value": 6
+      },
+      "humanDb": {
+        "min": 0,
+        "max": 3,
+        "step": 0.1,
+        "value": 0.7
+      },
+      "roomMic": {
+        "min": 0,
+        "max": 2,
+        "step": 0.05,
+        "value": 1
+      },
+      "velCurve": {
+        "min": 0.3,
+        "max": 1.5,
+        "step": 0.05,
+        "value": 0.5
+      },
+      "kitPan": {
+        "min": 0,
+        "max": 1,
+        "step": 1,
+        "value": 0
+      }
+    },
+    "drums/sample/brushes": {
+      "level": {
+        "min": 0.05,
+        "max": 8,
+        "step": 0.05,
+        "value": 1.2
+      },
+      "humanCents": {
+        "min": 0,
+        "max": 30,
+        "step": 1,
+        "value": 6
+      },
+      "humanDb": {
+        "min": 0,
+        "max": 3,
+        "step": 0.1,
+        "value": 0.7
+      },
+      "layerSpread": {
+        "min": 0,
+        "max": 0.3,
+        "step": 0.01,
+        "value": 0.08
+      },
+      "choke": {
+        "min": 0,
+        "max": 1,
+        "step": 1,
+        "value": 1
+      }
+    },
+    "drums/sample/rimshot": {
+      "level": {
+        "min": 0.05,
+        "max": 8,
+        "step": 0.05,
+        "value": 2.5
+      },
+      "humanCents": {
+        "min": 0,
+        "max": 30,
+        "step": 1,
+        "value": 6
+      },
+      "humanDb": {
+        "min": 0,
+        "max": 3,
+        "step": 0.1,
+        "value": 0.7
+      },
+      "roomMic": {
+        "min": 0,
+        "max": 2,
+        "step": 0.05,
+        "value": 1
+      },
+      "velCurve": {
+        "min": 0.3,
+        "max": 1.5,
+        "step": 0.05,
+        "value": 0.5
+      },
+      "kitPan": {
+        "min": 0,
+        "max": 1,
+        "step": 1,
+        "value": 0
+      }
+    },
+    "drums/sample/jazz": {
+      "level": {
+        "min": 0.05,
+        "max": 8,
+        "step": 0.05,
+        "value": 1.15
+      },
+      "humanCents": {
+        "min": 0,
+        "max": 30,
+        "step": 1,
+        "value": 6
+      },
+      "humanDb": {
+        "min": 0,
+        "max": 3,
+        "step": 0.1,
+        "value": 0.7
+      },
+      "layerSpread": {
+        "min": 0,
+        "max": 0.3,
+        "step": 0.01,
+        "value": 0.08
+      },
+      "choke": {
+        "min": 0,
+        "max": 1,
+        "step": 1,
+        "value": 1
+      }
+    },
+    "drums/sample/electronic": {
+      "level": {
+        "min": 0.05,
+        "max": 8,
+        "step": 0.05,
+        "value": 1.05
+      },
+      "humanCents": {
+        "min": 0,
+        "max": 30,
+        "step": 1,
+        "value": 6
+      },
+      "humanDb": {
+        "min": 0,
+        "max": 3,
+        "step": 0.1,
+        "value": 0.7
+      },
+      "layerSpread": {
+        "min": 0,
+        "max": 0.3,
+        "step": 0.01,
+        "value": 0.08
+      },
+      "choke": {
+        "min": 0,
+        "max": 1,
+        "step": 1,
+        "value": 1
+      }
+    },
+    "drums/sample/808": {
+      "level": {
+        "min": 0.05,
+        "max": 8,
+        "step": 0.05,
+        "value": 0.7
+      },
+      "humanCents": {
+        "min": 0,
+        "max": 30,
+        "step": 1,
+        "value": 6
+      },
+      "humanDb": {
+        "min": 0,
+        "max": 3,
+        "step": 0.1,
+        "value": 0.7
+      },
+      "layerSpread": {
+        "min": 0,
+        "max": 0.3,
+        "step": 0.01,
+        "value": 0.08
+      },
+      "choke": {
+        "min": 0,
+        "max": 1,
+        "step": 1,
+        "value": 1
+      }
+    },
+    "drums/sample/muldjord": {
+      "level": {
+        "min": 0.05,
+        "max": 8,
+        "step": 0.05,
+        "value": 1.9
+      },
+      "humanCents": {
+        "min": 0,
+        "max": 30,
+        "step": 1,
+        "value": 6
+      },
+      "humanDb": {
+        "min": 0,
+        "max": 3,
+        "step": 0.1,
+        "value": 0.7
+      },
+      "roomMic": {
+        "min": 0,
+        "max": 2,
+        "step": 0.05,
+        "value": 1
+      },
+      "velCurve": {
+        "min": 0.3,
+        "max": 1.5,
+        "step": 0.05,
+        "value": 0.8
+      },
+      "kitPan": {
+        "min": 0,
+        "max": 1,
+        "step": 1,
+        "value": 0
+      }
+    },
+    "drums/sample/legacy": {
+      "level": {
+        "min": 0.05,
+        "max": 8,
+        "step": 0.05,
+        "value": 1.2
+      },
+      "humanCents": {
+        "min": 0,
+        "max": 30,
+        "step": 1,
+        "value": 6
+      },
+      "humanDb": {
+        "min": 0,
+        "max": 3,
+        "step": 0.1,
+        "value": 0.7
+      },
+      "layerSpread": {
+        "min": 0,
+        "max": 0.3,
+        "step": 0.01,
+        "value": 0.08
+      },
+      "choke": {
+        "min": 0,
+        "max": 1,
+        "step": 1,
+        "value": 1
+      }
+    },
+    "percussion/sample/studio": {
+      "level": {
+        "min": 0.05,
+        "max": 8,
+        "step": 0.05,
+        "value": 1.95
+      },
+      "humanCents": {
+        "min": 0,
+        "max": 30,
+        "step": 1,
+        "value": 6
+      },
+      "humanDb": {
+        "min": 0,
+        "max": 3,
+        "step": 0.1,
+        "value": 0.7
+      },
+      "layerSpread": {
+        "min": 0,
+        "max": 0.3,
+        "step": 0.01,
+        "value": 0.08
+      }
+    },
+    "chords/epiano/rhodes": {
+      "ratio": {
+        "min": 0.5,
+        "max": 4,
+        "step": 0.01,
+        "value": 1
+      },
+      "index": {
+        "min": 0,
+        "max": 8,
+        "step": 0.05,
+        "value": 2.2
+      },
+      "indexDecay": {
+        "min": 0.05,
+        "max": 2,
+        "step": 0.01,
+        "value": 0.35
+      },
+      "bell": {
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "value": 0.2
+      },
+      "bellRatio": {
+        "min": 4,
+        "max": 20,
+        "step": 0.5,
+        "value": 14
+      },
+      "decay": {
+        "min": 0.2,
+        "max": 8,
+        "step": 0.1,
+        "value": 2.5
+      },
+      "level": {
+        "min": 0.1,
+        "max": 6,
+        "step": 0.05,
+        "value": 1.1
+      }
+    },
+    "chords/organ/jazz": {
+      "level": {
+        "min": 0.05,
+        "max": 8,
+        "step": 0.05,
+        "value": 0.95
+      },
+      "d16": {
+        "min": 0,
+        "max": 8,
+        "step": 1,
+        "value": 8
+      },
+      "d513": {
+        "min": 0,
+        "max": 8,
+        "step": 1,
+        "value": 8
+      },
+      "d8": {
+        "min": 0,
+        "max": 8,
+        "step": 1,
+        "value": 8
+      },
+      "d4": {
+        "min": 0,
+        "max": 8,
+        "step": 1,
+        "value": 0
+      },
+      "d223": {
+        "min": 0,
+        "max": 8,
+        "step": 1,
+        "value": 0
+      },
+      "d2": {
+        "min": 0,
+        "max": 8,
+        "step": 1,
+        "value": 0
+      },
+      "d135": {
+        "min": 0,
+        "max": 8,
+        "step": 1,
+        "value": 0
+      },
+      "d113": {
+        "min": 0,
+        "max": 8,
+        "step": 1,
+        "value": 0
+      },
+      "d1": {
+        "min": 0,
+        "max": 8,
+        "step": 1,
+        "value": 0
+      },
+      "click": {
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "value": 0.1
+      },
+      "clickOff": {
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "value": 0.5
+      },
+      "perc": {
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "value": 0.5
+      },
+      "percHarm": {
+        "min": 2,
+        "max": 3,
+        "step": 1,
+        "value": 3
+      },
+      "percDecay": {
+        "min": 0.05,
+        "max": 2,
+        "step": 0.05,
+        "value": 0.2
+      },
+      "leslie": {
+        "min": 0,
+        "max": 3,
+        "step": 1,
+        "value": 1
+      },
+      "hornSlow": {
+        "min": 0.1,
+        "max": 2,
+        "step": 0.05,
+        "value": 0.8
+      },
+      "hornFast": {
+        "min": 3,
+        "max": 10,
+        "step": 0.1,
+        "value": 6.7
+      },
+      "drumSlow": {
+        "min": 0.1,
+        "max": 2,
+        "step": 0.05,
+        "value": 0.7
+      },
+      "drumFast": {
+        "min": 3,
+        "max": 10,
+        "step": 0.1,
+        "value": 5.7
+      },
+      "hornUp": {
+        "min": 0.1,
+        "max": 6,
+        "step": 0.1,
+        "value": 1
+      },
+      "hornDown": {
+        "min": 0.1,
+        "max": 8,
+        "step": 0.1,
+        "value": 1.5
+      },
+      "drumUp": {
+        "min": 0.5,
+        "max": 10,
+        "step": 0.1,
+        "value": 3.5
+      },
+      "drumDown": {
+        "min": 0.5,
+        "max": 12,
+        "step": 0.1,
+        "value": 5
+      },
+      "hornAm": {
+        "min": 0,
+        "max": 0.9,
+        "step": 0.05,
+        "value": 0.5
+      },
+      "drumAm": {
+        "min": 0,
+        "max": 0.9,
+        "step": 0.05,
+        "value": 0.25
+      },
+      "hornDoppler": {
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "value": 0.4
+      },
+      "drumDoppler": {
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "value": 0.15
+      },
+      "crossover": {
+        "min": 200,
+        "max": 2000,
+        "step": 50,
+        "value": 800
+      },
+      "micAngle": {
+        "min": 0,
+        "max": 180,
+        "step": 5,
+        "value": 90
+      },
+      "drive": {
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "value": 0.25
+      },
+      "swell": {
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "value": 1
+      }
+    },
+    "chords/organ/rock": {
+      "level": {
+        "min": 0.05,
+        "max": 8,
+        "step": 0.05,
+        "value": 0.8
+      },
+      "d16": {
+        "min": 0,
+        "max": 8,
+        "step": 1,
+        "value": 8
+      },
+      "d513": {
+        "min": 0,
+        "max": 8,
+        "step": 1,
+        "value": 8
+      },
+      "d8": {
+        "min": 0,
+        "max": 8,
+        "step": 1,
+        "value": 8
+      },
+      "d4": {
+        "min": 0,
+        "max": 8,
+        "step": 1,
+        "value": 8
+      },
+      "d223": {
+        "min": 0,
+        "max": 8,
+        "step": 1,
+        "value": 0
+      },
+      "d2": {
+        "min": 0,
+        "max": 8,
+        "step": 1,
+        "value": 0
+      },
+      "d135": {
+        "min": 0,
+        "max": 8,
+        "step": 1,
+        "value": 0
+      },
+      "d113": {
+        "min": 0,
+        "max": 8,
+        "step": 1,
+        "value": 0
+      },
+      "d1": {
+        "min": 0,
+        "max": 8,
+        "step": 1,
+        "value": 0
+      },
+      "click": {
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "value": 0.03
+      },
+      "clickOff": {
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "value": 0.5
+      },
+      "perc": {
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "value": 0
+      },
+      "percHarm": {
+        "min": 2,
+        "max": 3,
+        "step": 1,
+        "value": 3
+      },
+      "percDecay": {
+        "min": 0.05,
+        "max": 2,
+        "step": 0.05,
+        "value": 0.2
+      },
+      "leslie": {
+        "min": 0,
+        "max": 3,
+        "step": 1,
+        "value": 1
+      },
+      "hornSlow": {
+        "min": 0.1,
+        "max": 2,
+        "step": 0.05,
+        "value": 0.8
+      },
+      "hornFast": {
+        "min": 3,
+        "max": 10,
+        "step": 0.1,
+        "value": 6.7
+      },
+      "drumSlow": {
+        "min": 0.1,
+        "max": 2,
+        "step": 0.05,
+        "value": 0.7
+      },
+      "drumFast": {
+        "min": 3,
+        "max": 10,
+        "step": 0.1,
+        "value": 5.7
+      },
+      "hornUp": {
+        "min": 0.1,
+        "max": 6,
+        "step": 0.1,
+        "value": 1
+      },
+      "hornDown": {
+        "min": 0.1,
+        "max": 8,
+        "step": 0.1,
+        "value": 1.5
+      },
+      "drumUp": {
+        "min": 0.5,
+        "max": 10,
+        "step": 0.1,
+        "value": 3.5
+      },
+      "drumDown": {
+        "min": 0.5,
+        "max": 12,
+        "step": 0.1,
+        "value": 5
+      },
+      "hornAm": {
+        "min": 0,
+        "max": 0.9,
+        "step": 0.05,
+        "value": 0.5
+      },
+      "drumAm": {
+        "min": 0,
+        "max": 0.9,
+        "step": 0.05,
+        "value": 0.25
+      },
+      "hornDoppler": {
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "value": 0.4
+      },
+      "drumDoppler": {
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "value": 0.15
+      },
+      "crossover": {
+        "min": 200,
+        "max": 2000,
+        "step": 50,
+        "value": 800
+      },
+      "micAngle": {
+        "min": 0,
+        "max": 180,
+        "step": 5,
+        "value": 90
+      },
+      "drive": {
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "value": 0.5
+      },
+      "swell": {
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "value": 1
+      }
+    },
+    "chords/organ/gospel": {
+      "level": {
+        "min": 0.05,
+        "max": 8,
+        "step": 0.05,
+        "value": 0.65
+      },
+      "d16": {
+        "min": 0,
+        "max": 8,
+        "step": 1,
+        "value": 8
+      },
+      "d513": {
+        "min": 0,
+        "max": 8,
+        "step": 1,
+        "value": 8
+      },
+      "d8": {
+        "min": 0,
+        "max": 8,
+        "step": 1,
+        "value": 8
+      },
+      "d4": {
+        "min": 0,
+        "max": 8,
+        "step": 1,
+        "value": 8
+      },
+      "d223": {
+        "min": 0,
+        "max": 8,
+        "step": 1,
+        "value": 8
+      },
+      "d2": {
+        "min": 0,
+        "max": 8,
+        "step": 1,
+        "value": 8
+      },
+      "d135": {
+        "min": 0,
+        "max": 8,
+        "step": 1,
+        "value": 8
+      },
+      "d113": {
+        "min": 0,
+        "max": 8,
+        "step": 1,
+        "value": 8
+      },
+      "d1": {
+        "min": 0,
+        "max": 8,
+        "step": 1,
+        "value": 8
+      },
+      "click": {
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "value": 0.1
+      },
+      "clickOff": {
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "value": 0.5
+      },
+      "perc": {
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "value": 0
+      },
+      "percHarm": {
+        "min": 2,
+        "max": 3,
+        "step": 1,
+        "value": 3
+      },
+      "percDecay": {
+        "min": 0.05,
+        "max": 2,
+        "step": 0.05,
+        "value": 0.2
+      },
+      "leslie": {
+        "min": 0,
+        "max": 3,
+        "step": 1,
+        "value": 1
+      },
+      "hornSlow": {
+        "min": 0.1,
+        "max": 2,
+        "step": 0.05,
+        "value": 0.8
+      },
+      "hornFast": {
+        "min": 3,
+        "max": 10,
+        "step": 0.1,
+        "value": 6.7
+      },
+      "drumSlow": {
+        "min": 0.1,
+        "max": 2,
+        "step": 0.05,
+        "value": 0.7
+      },
+      "drumFast": {
+        "min": 3,
+        "max": 10,
+        "step": 0.1,
+        "value": 5.7
+      },
+      "hornUp": {
+        "min": 0.1,
+        "max": 6,
+        "step": 0.1,
+        "value": 1
+      },
+      "hornDown": {
+        "min": 0.1,
+        "max": 8,
+        "step": 0.1,
+        "value": 1.5
+      },
+      "drumUp": {
+        "min": 0.5,
+        "max": 10,
+        "step": 0.1,
+        "value": 3.5
+      },
+      "drumDown": {
+        "min": 0.5,
+        "max": 12,
+        "step": 0.1,
+        "value": 5
+      },
+      "hornAm": {
+        "min": 0,
+        "max": 0.9,
+        "step": 0.05,
+        "value": 0.5
+      },
+      "drumAm": {
+        "min": 0,
+        "max": 0.9,
+        "step": 0.05,
+        "value": 0.25
+      },
+      "hornDoppler": {
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "value": 0.4
+      },
+      "drumDoppler": {
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "value": 0.15
+      },
+      "crossover": {
+        "min": 200,
+        "max": 2000,
+        "step": 50,
+        "value": 800
+      },
+      "micAngle": {
+        "min": 0,
+        "max": 180,
+        "step": 5,
+        "value": 90
+      },
+      "drive": {
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "value": 0.25
+      },
+      "swell": {
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "value": 1
+      }
+    },
+    "chords/organ/ballad": {
+      "level": {
+        "min": 0.05,
+        "max": 8,
+        "step": 0.05,
+        "value": 0.85
+      },
+      "d16": {
+        "min": 0,
+        "max": 8,
+        "step": 1,
+        "value": 8
+      },
+      "d513": {
+        "min": 0,
+        "max": 8,
+        "step": 1,
+        "value": 3
+      },
+      "d8": {
+        "min": 0,
+        "max": 8,
+        "step": 1,
+        "value": 8
+      },
+      "d4": {
+        "min": 0,
+        "max": 8,
+        "step": 1,
+        "value": 0
+      },
+      "d223": {
+        "min": 0,
+        "max": 8,
+        "step": 1,
+        "value": 0
+      },
+      "d2": {
+        "min": 0,
+        "max": 8,
+        "step": 1,
+        "value": 0
+      },
+      "d135": {
+        "min": 0,
+        "max": 8,
+        "step": 1,
+        "value": 0
+      },
+      "d113": {
+        "min": 0,
+        "max": 8,
+        "step": 1,
+        "value": 0
+      },
+      "d1": {
+        "min": 0,
+        "max": 8,
+        "step": 1,
+        "value": 0
+      },
+      "click": {
+        "min": 0,
+        "max": 1,
+        "step": 0.01,
+        "value": 0.1
+      },
+      "clickOff": {
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "value": 0.5
+      },
+      "perc": {
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "value": 0
+      },
+      "percHarm": {
+        "min": 2,
+        "max": 3,
+        "step": 1,
+        "value": 3
+      },
+      "percDecay": {
+        "min": 0.05,
+        "max": 2,
+        "step": 0.05,
+        "value": 0.2
+      },
+      "leslie": {
+        "min": 0,
+        "max": 3,
+        "step": 1,
+        "value": 1
+      },
+      "hornSlow": {
+        "min": 0.1,
+        "max": 2,
+        "step": 0.05,
+        "value": 0.8
+      },
+      "hornFast": {
+        "min": 3,
+        "max": 10,
+        "step": 0.1,
+        "value": 6.7
+      },
+      "drumSlow": {
+        "min": 0.1,
+        "max": 2,
+        "step": 0.05,
+        "value": 0.7
+      },
+      "drumFast": {
+        "min": 3,
+        "max": 10,
+        "step": 0.1,
+        "value": 5.7
+      },
+      "hornUp": {
+        "min": 0.1,
+        "max": 6,
+        "step": 0.1,
+        "value": 1
+      },
+      "hornDown": {
+        "min": 0.1,
+        "max": 8,
+        "step": 0.1,
+        "value": 1.5
+      },
+      "drumUp": {
+        "min": 0.5,
+        "max": 10,
+        "step": 0.1,
+        "value": 3.5
+      },
+      "drumDown": {
+        "min": 0.5,
+        "max": 12,
+        "step": 0.1,
+        "value": 5
+      },
+      "hornAm": {
+        "min": 0,
+        "max": 0.9,
+        "step": 0.05,
+        "value": 0.5
+      },
+      "drumAm": {
+        "min": 0,
+        "max": 0.9,
+        "step": 0.05,
+        "value": 0.25
+      },
+      "hornDoppler": {
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "value": 0.4
+      },
+      "drumDoppler": {
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "value": 0.15
+      },
+      "crossover": {
+        "min": 200,
+        "max": 2000,
+        "step": 50,
+        "value": 800
+      },
+      "micAngle": {
+        "min": 0,
+        "max": 180,
+        "step": 5,
+        "value": 90
+      },
+      "drive": {
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "value": 0.25
+      },
+      "swell": {
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "value": 1
+      }
+    },
+    "mix/bus": {
+      "on": {
+        "min": 0,
+        "max": 1,
+        "step": 1,
+        "value": 0
+      },
+      "glueDb": {
+        "min": -40,
+        "max": 0,
+        "step": 0.5,
+        "value": -14
+      },
+      "glueRatio": {
+        "min": 1,
+        "max": 6,
+        "step": 0.1,
+        "value": 2
+      },
+      "glueAttack": {
+        "min": 0.001,
+        "max": 0.2,
+        "step": 0.001,
+        "value": 0.03
+      },
+      "glueRelease": {
+        "min": 0.05,
+        "max": 1,
+        "step": 0.01,
+        "value": 0.25
+      },
+      "gainDb": {
+        "min": -6,
+        "max": 12,
+        "step": 0.5,
+        "value": 3
+      },
+      "ceilingDb": {
+        "min": -12,
+        "max": -0.5,
+        "step": 0.5,
+        "value": -2
+      }
+    },
+    "mix/pan": {
+      "drums": {
+        "min": -1,
+        "max": 1,
+        "step": 0.05,
+        "value": 0
+      },
+      "bass": {
+        "min": -1,
+        "max": 1,
+        "step": 0.05,
+        "value": 0
+      },
+      "chords": {
+        "min": -1,
+        "max": 1,
+        "step": 0.05,
+        "value": 0.3
+      },
+      "pad": {
+        "min": -1,
+        "max": 1,
+        "step": 0.05,
+        "value": -0.2
+      },
+      "lead": {
+        "min": -1,
+        "max": 1,
+        "step": 0.05,
+        "value": 0
+      },
+      "percussion": {
+        "min": -1,
+        "max": 1,
+        "step": 0.05,
+        "value": -0.4
+      },
+      "kit": {
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "value": 0.25
+      }
+    },
+    "mix/timing": {
+      "amount": {
+        "min": 0,
+        "max": 5,
+        "step": 0.05,
+        "value": 1.5
+      },
+      "tight": {
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "value": 0.3
+      },
+      "layback": {
+        "min": 0,
+        "max": 2,
+        "step": 0.05,
+        "value": 1
+      },
+      "drift": {
+        "min": 0,
+        "max": 2,
+        "step": 0.05,
+        "value": 1
+      }
+    },
+    "mix/art": {
+      "on": {
+        "min": 0,
+        "max": 1,
+        "step": 1,
+        "value": 1
+      },
+      "bass": {
+        "min": 0,
+        "max": 2,
+        "step": 0.05,
+        "value": 1
+      },
+      "chords": {
+        "min": 0,
+        "max": 2,
+        "step": 0.05,
+        "value": 1
+      },
+      "drums": {
+        "min": 0,
+        "max": 2,
+        "step": 0.05,
+        "value": 1
+      },
+      "keys": {
+        "min": 0,
+        "max": 2,
+        "step": 0.05,
+        "value": 1
+      },
+      "pad": {
+        "min": 0,
+        "max": 2,
+        "step": 0.05,
+        "value": 1
+      },
+      "lead": {
+        "min": 0,
+        "max": 2,
+        "step": 0.05,
+        "value": 1
+      },
+      "band": {
+        "min": 0,
+        "max": 2,
+        "step": 0.05,
+        "value": 1
+      },
+      "bassB": {
+        "min": 0,
+        "max": 2,
+        "step": 0.05,
+        "value": 1
+      },
+      "chordsB": {
+        "min": 0,
+        "max": 2,
+        "step": 0.05,
+        "value": 0
+      },
+      "keysB": {
+        "min": 0,
+        "max": 2,
+        "step": 0.05,
+        "value": 1
+      },
+      "drumsB": {
+        "min": 0,
+        "max": 2,
+        "step": 0.05,
+        "value": 1
+      }
+    },
+    "mix/room": {
+      "wet": {
+        "min": 0,
+        "max": 4,
+        "step": 0.05,
+        "value": 1
+      },
+      "tone": {
+        "min": 1000,
+        "max": 16000,
+        "step": 100,
+        "value": 7000
+      },
+      "drums": {
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "value": 1
+      },
+      "bass": {
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "value": 0.15
+      },
+      "chords": {
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "value": 0.7
+      },
+      "pad": {
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "value": 0.4
+      },
+      "lead": {
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "value": 0.6
+      },
+      "percussion": {
+        "min": 0,
+        "max": 1,
+        "step": 0.05,
+        "value": 1
+      }
+    }
+  },
+  "packs": {
+    "drums/sample/standard": "drums-naked",
+    "drums/sample/brushes": "drums-brushes",
+    "drums/sample/rimshot": "drums-naked",
+    "drums/sample/jazz": "drums-jazz",
+    "drums/sample/electronic": "drums-electronic",
+    "drums/sample/808": "drums-808",
+    "drums/sample/muldjord": "drums-muldjord",
+    "drums/sample/legacy": "drums-standard",
+    "bass/sample/finger": "bass-finger",
+    "bass/sample/pick": "bass-pick",
+    "bass/sample/upright": "bass-upright",
+    "chords/sample/guitar": "chords-guitar",
+    "chords/sample/epiano": "chords-epiano",
+    "chords/sample/muted": "chords-muted",
+    "chords/sample/jazz": "chords-jazz",
+    "chords/sample/funk": "chords-funk",
+    "chords/sample/steel": "chords-steel",
+    "chords/sample/nylon": "chords-nylon",
+    "chords/sample/twelve": "chords-twelve",
+    "chords/sample/freepats": "chords-freepats",
+    "chords/sample/freepatsjazz": "chords-freepatsjazz",
+    "pad/sample/strings": "pad-strings",
+    "pad/sample/warm": "pad-warm",
+    "lead/sample/flute": "lead-flute",
+    "lead/sample/sax": "lead-sax",
+    "lead/sample/synth": "lead-synth",
+    "lead/sample/guitar": "chords-freepats",
+    "percussion/sample/studio": "percussion-studio"
+  },
+  "hitKeys": {
+    "drums": {
+      "kick": 36,
+      "snare": 38,
+      "hat": 42,
+      "openHat": 46,
+      "tomHigh": 50,
+      "tomMid": 47,
+      "tomLow": 43,
+      "crash": 49,
+      "sideStick": 37,
+      "hatPedal": 44
+    },
+    "percussion": {
+      "shaker": 82,
+      "tambourine": 54,
+      "congaHigh": 63,
+      "congaLow": 64,
+      "bongoHigh": 60,
+      "bongoLow": 61,
+      "claves": 75,
+      "cowbell": 56
+    },
+    "drums/sample/rimshot": {
+      "kick": 36,
+      "snare": 37,
+      "hat": 42,
+      "openHat": 46,
+      "tomHigh": 50,
+      "tomMid": 47,
+      "tomLow": 43,
+      "crash": 49,
+      "sideStick": 37,
+      "hatPedal": 44
+    }
+  },
+  "layerAudio": {
+    "drums": {
+      "trim": 0.65,
+      "room": true
+    },
+    "bass": {
+      "trim": 0.24
+    },
+    "chords": {
+      "trim": 1,
+      "echo": true
+    },
+    "pad": {
+      "trim": 0.8,
+      "echo": true
+    },
+    "lead": {
+      "trim": 0.5,
+      "echo": true
+    },
+    "percussion": {
+      "trim": 0.33,
+      "room": true
+    }
+  }
+}

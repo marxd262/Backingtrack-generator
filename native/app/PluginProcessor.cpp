@@ -28,15 +28,14 @@ BackingtrackProcessor::BackingtrackProcessor()
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       juce::Thread ("track loader"),
       parameters (*this, nullptr, "state", createParameters()) {
-    // shortcut: fixed packs read from the repository of the build machine (BTG_WEB_ROOT); a release installs the
-    // packs and picks them by the voices of the track.
-    try {
-        const std::string folder = BTG_WEB_ROOT "/assets/samples";
-        engine.setPack (btg::Engine::drums, btg::loadPackFiles (folder, "drums-naked"));
-        engine.setPack (btg::Engine::bass, btg::loadPackFiles (folder, "bass-finger"));
-    } catch (const std::exception& error) {
-        packError = error.what();
-    }
+    engine.setPackSource ([this] (const std::string& id) { return pack (id); });
+}
+
+std::shared_ptr<const btg::Pack> BackingtrackProcessor::pack (const std::string& id) {
+    auto& held = packs[id];
+    // shortcut: packs read from the repository of the build machine (BTG_WEB_ROOT); a release installs them next to the program (Task 34).
+    if (held == nullptr) held = btg::loadPackFiles (BTG_WEB_ROOT "/assets/samples", id);
+    return held;
 }
 
 bool BackingtrackProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const {
@@ -86,7 +85,7 @@ static juce::String peaksOf (const std::vector<float>& mono, double rate) {
 
 void BackingtrackProcessor::loadTrack (const juce::File& file) {
     stopThread (10000); // a load still running is given up
-    transport.stop();
+    loader.addJob ([this] { transport.stop(); }); // in order with the queued transport messages (PluginEditor.cpp, `queued`)
     trackFile = file;
     trackProgress = 0.0f;
     trackLoading = true;

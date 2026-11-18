@@ -1,6 +1,7 @@
 // Writes the reference for the C++ generator from the web app in the working tree (src/, read only).
 //   node native/tools/export-events.mjs <outDir>           -> <outDir>/cases.json (tracks and their events)
-//   node native/tools/export-events.mjs <outDir> --data    -> also rewrites native/core/data/grooves.json
+//   node native/tools/export-events.mjs <outDir> --data    -> also rewrites native/core/data/grooves.json and sound.json
+//   node native/tools/export-events.mjs --data-only <dir>  -> writes only grooves.json and sound.json, into <dir>
 // The first groups switch on drums and bass only; the groups of the other layers follow them.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -19,8 +20,26 @@ const { createRng } = await load('core/rng.js');
 const { colorProgression, CHORD_COLORS } = await load('core/harmony.js');
 const { chordOptions } = await load('core/music.js');
 
-if (process.argv.includes('--data')) {
-  writeFileSync(join(repo, 'native/core/data/grooves.json'), `${JSON.stringify(GROOVES)}\n`);
+// The data the core embeds (native/core/data): --data writes it there, --data-only <dir> writes it into <dir> and stops
+// (the check in native/core/CMakeLists.txt compares that copy with the checked-in files).
+const dataOnly = process.argv.indexOf('--data-only');
+if (process.argv.includes('--data') || dataOnly >= 0) {
+  const { TUNABLES, MIX_TUNABLES } = await load('audio/voices/tunables.js');
+  const { packIdFor, hitKeysFor } = await load('audio/voices/index.js');
+  const { HIT_KEYS } = await load('audio/voices/sample-hits.js');
+  const { LAYER_AUDIO } = await load('audio/synth.js');
+  const { VOICES, VOICE_LAYERS } = await load('core/voices.js');
+  const sound = {
+    tunables: { ...TUNABLES, ...MIX_TUNABLES },
+    packs: Object.fromEntries(VOICE_LAYERS.flatMap((layer) => (VOICES[layer].sample?.variants ?? []).map((variant) => [`${layer}/sample/${variant}`, packIdFor(layer, variant)]))),
+    hitKeys: { ...HIT_KEYS, 'drums/sample/rimshot': hitKeysFor('drums', 'rimshot') },
+    layerAudio: LAYER_AUDIO,
+  };
+  const dir = dataOnly >= 0 ? resolve(process.argv[dataOnly + 1]) : join(repo, 'native/core/data');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'grooves.json'), `${JSON.stringify(GROOVES)}\n`);
+  writeFileSync(join(dir, 'sound.json'), `${JSON.stringify(sound, null, 2)}\n`);
+  if (dataOnly >= 0) process.exit(0);
 }
 
 const KEYS = [

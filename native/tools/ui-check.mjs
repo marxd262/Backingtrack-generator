@@ -58,6 +58,8 @@ try {
     window.pongs = new Map();
     backend.addEventListener('engine', (m) => window.engineLog.push({ ...m, at: performance.now() }));
     backend.addEventListener('pong', (m) => window.pongs.get(m.id)?.(performance.now()));
+    window.voiceLog = [];
+    backend.addEventListener('voices', (m) => window.voiceLog.push(m));
     const emit = backend.emitEvent.bind(backend);
     backend.emitEvent = (name, data) => { window.sent.push({ ...data, at: performance.now() }); emit(name, data); };
     window.bridge = (type, data = {}) => emit('btg', { type, ...data });
@@ -92,6 +94,8 @@ try {
 
   await page.locator('#go').click();
   await sleep(1500);
+  result.voices = await page.evaluate(() => window.voiceLog.at(-1) ?? null);
+  if (result.voices?.drums !== 'ready' || result.voices?.bass !== 'ready') problems.push(`voices after the start: ${JSON.stringify(result.voices)}`);
   await page.evaluate(() => window.bridge('seek', { beats: 24 })); // past the intro of a rolled form: drums and bass play
   await sleep(600);
   result.playing = await engine(4000);

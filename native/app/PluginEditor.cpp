@@ -38,6 +38,46 @@ std::optional<juce::WebBrowserComponent::Resource> resource (const juce::String&
     return juce::WebBrowserComponent::Resource { { begin, begin + bytes.getSize() }, mimeType (file) };
 }
 
+const juce::StringArray layerNames { "drums", "bass", "chords", "pad", "lead", "percussion" }; // order of btg::Engine::Layer
+
+// Messages that build the song (and read its packs) or start, stop or move the transport: they run on the processor's loader
+// thread in the order the page sent them, so a play waits for its track's packs and a stop sent meanwhile comes after it.
+const juce::StringArray queued { "track", "play", "stop", "tempo", "seek", "loop", "playFile", "fileRate" };
+
+struct Done { juce::String failed, status; double ms = 0.0; }; // status: btg::Engine::voiceStatus after a track
+
+// Loader thread: what a queued message does.
+Done control (BackingtrackProcessor& p, const juce::var& message) {
+    Done done;
+    const auto started = juce::Time::getMillisecondCounterHiRes();
+    const auto type = message["type"].toString();
+    if (type == "track") {
+        try {
+            p.engine.setTrack (message["json"].toString().toStdString());
+        } catch (const std::exception& e) {
+            done.failed = e.what();
+        }
+        done.status = p.engine.voiceStatus();
+    } else if (type == "play") {
+        p.playsFile = false;
+        p.transport.setLoop (0.0, 0.0);
+        p.transport.play ((double) message["startBeats"], (double) message["bpm"]);
+    } else if (type == "stop") p.transport.stop();
+    else if (type == "tempo") p.transport.setTempo ((double) message["bpm"]);
+    else if (type == "seek") p.transport.seek ((double) message["beats"]);
+    else if (type == "loop") p.transport.setLoop ((double) message["start"], (double) message["end"]);
+    else if (type == "playFile") {
+        p.playsFile = true; // the page sets and clears the loop itself
+        if (message.hasProperty ("rate")) p.fileRate = juce::jlimit (0.25, 2.0, (double) message["rate"]);
+        p.transport.play ((double) message["from"], 60.0 * p.fileRate); // one beat = one second of the track
+    } else if (type == "fileRate") { // speed of the loaded track, 1 = as recorded
+        p.fileRate = juce::jlimit (0.25, 2.0, (double) message["rate"]);
+        if (p.playsFile) p.transport.setTempo (60.0 * p.fileRate);
+    }
+    done.ms = juce::Time::getMillisecondCounterHiRes() - started;
+    return done;
+}
+
 juce::AudioDeviceManager* deviceManager() {
    #if JucePlugin_Build_Standalone
     if (auto* holder = juce::StandalonePluginHolder::getInstance()) return &holder->deviceManager;
@@ -51,7 +91,7 @@ public:
         // The strip: what holds for every page (which page, the language) and the measurements.
         addAndMakeVisible (page);
         page.onClick = [this] {
-            processor.transport.stop();
+            processor.loader.addJob ([&p = processor] { p.transport.stop(); }); // in order with the queued transport messages
             shows (! ownTrack);
             browser.goToURL (juce::WebBrowserComponent::getResourceProviderRoot() + (ownTrack ? "native/track.html" : "ui/index.html"));
         };
@@ -97,6 +137,15 @@ private:
     // UI -> engine. Messages come from native/app/web/play.js.
     void handle (const juce::var& message) {
         const auto type = message["type"].toString();
+        if (queued.contains (type)) {
+            auto& p = processor;
+            p.loader.addJob ([&p, message, editor = juce::Component::SafePointer<Editor> (this)] {
+                const Done result = control (p, message);
+                p.controlArrived();
+                juce::MessageManager::callAsync ([editor, message, result] { if (editor != nullptr) editor->done (message, result); });
+            });
+            return;
+        }
         const auto layer = message["layer"].toString() == "drums" ? btg::Engine::drums : message["layer"].toString() == "bass" ? btg::Engine::bass : btg::Engine::layerCount;
         const auto value = juce::jlimit (-1.0f, 1.0f, (float) message["value"]);
         const auto setParameter = [this] (const char* id, float v) {
@@ -117,16 +166,7 @@ private:
             if (positionLog.isNotEmpty()) juce::File (positionLog).appendText (message["line"].toString() + "\n");
             return;
         }
-        if (type == "track") {
-            const auto started = juce::Time::getMillisecondCounterHiRes();
-            try {
-                processor.engine.setTrack (message["json"].toString().toStdString());
-                error = processor.packError;
-            } catch (const std::exception& e) {
-                error = e.what();
-            }
-            buildMs = juce::Time::getMillisecondCounterHiRes() - started;
-        } else if (type == "openFile") {
+        if (type == "openFile") {
             chooser = std::make_unique<juce::FileChooser> (text ("Track laden", "Load track"), juce::File(), "*.wav;*.flac;*.mp3;*.m4a;*.aac;*.ogg;*.aiff;*.aif;*.wma;*.mp4;*.m4v;*.mov;*.mkv;*.webm");
             chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [this] (const juce::FileChooser& c) {
                 if (c.getResult().existsAsFile()) processor.loadTrack (c.getResult());
@@ -142,23 +182,7 @@ private:
         } else if (type == "hello") {
             shows (true);
             sentTrack = -1; // a page that just opened gets the analysis of the loaded track again
-        } else if (type == "playFile") {
-            processor.playsFile = true; // the page sets and clears the loop itself
-            if (message.hasProperty ("rate")) fileRate = juce::jlimit (0.25, 2.0, (double) message["rate"]);
-            processor.transport.play ((double) message["from"], 60.0 * fileRate); // one beat = one second of the track
-        } else if (type == "fileRate") { // speed of the loaded track, 1 = as recorded
-            fileRate = juce::jlimit (0.25, 2.0, (double) message["rate"]);
-            if (processor.playsFile) processor.transport.setTempo (60.0 * fileRate);
-        } else if (type == "play") {
-            processor.playsFile = false;
-            run = (int) message["run"];
-            processor.transport.setLoop (0.0, 0.0);
-            processor.transport.play ((double) message["startBeats"], (double) message["bpm"]);
-        } else if (type == "stop") processor.transport.stop();
-        else if (type == "tempo") processor.transport.setTempo ((double) message["bpm"]);
-        else if (type == "seek") processor.transport.seek ((double) message["beats"]);
-        else if (type == "loop") processor.transport.setLoop ((double) message["start"], (double) message["end"]);
-        else if (type == "master") setParameter ("master", value);
+        } else if (type == "master") setParameter ("master", value);
         else if (type == "drive") setParameter ("bassDrive", value);
         else if (type == "level" && layer != btg::Engine::layerCount) processor.engine.setLevel (layer, value);
         else if (type == "mute" && layer != btg::Engine::layerCount) processor.engine.setMuted (layer, (bool) message["on"]);
@@ -171,6 +195,21 @@ private:
             }
         }
         processor.controlArrived();
+    }
+
+    // Message thread: a queued message has run on the loader thread.
+    void done (const juce::var& message, const Done& r) {
+        const auto type = message["type"].toString();
+        if (type == "play") run = (int) message["run"];
+        if (type == "track") buildMs = r.ms;
+        if (r.status.isEmpty()) return;
+        const auto voices = juce::JSON::parse (r.status);
+        browser.emitEventIfBrowserIsVisible ("voices", voices);
+        error = r.failed;
+        for (const auto& layer : layerNames) {
+            const auto state = voices[juce::Identifier (layer)].toString();
+            if (error.isEmpty() && state.startsWith ("error: ")) error = layer + ": " + state.fromFirstOccurrenceOf ("error: ", false, false);
+        }
     }
 
     // Engine -> UI: position, levels and measurements, 30 times a second; the UI interpolates the position in between.
@@ -269,9 +308,8 @@ private:
     int run = 0; // which play() the position belongs to
     int ticks = 0;
     double buildMs = 0.0; // time the last track took to become events
-    juce::String error { processor.packError };
+    juce::String error;
     bool hasWindowButtons = false;
-    double fileRate = 1.0; // speed of the loaded track
     // Diagnosis: BTG_POSITION_LOG=<file> in the environment makes the track page compare the position it shows
     // with the engine's twice a second and write the result there.
     const juce::String positionLog = juce::SystemStats::getEnvironmentVariable ("BTG_POSITION_LOG", {});

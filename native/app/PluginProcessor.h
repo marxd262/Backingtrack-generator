@@ -6,10 +6,12 @@
 #include <btg/file_player.h>
 #include <btg/transport.h>
 
+#include <map>
+
 class BackingtrackProcessor final : public juce::AudioProcessor, private juce::Thread {
 public:
     BackingtrackProcessor();
-    ~BackingtrackProcessor() override { stopThread (10000); }
+    ~BackingtrackProcessor() override { loader.removeAllJobs (true, 10000); stopThread (10000); }
 
     void prepareToPlay (double sampleRate, int) override { engine.prepare (sampleRate); filePlayer.prepare (sampleRate); }
     void releaseResources() override {}
@@ -37,7 +39,14 @@ public:
     btg::Transport transport;
     btg::Engine engine;
     juce::AudioProcessorValueTreeState parameters;
-    juce::String packError; // why the sample packs did not load, empty = loaded
+    // Sample packs by id, read once and kept for the app's life (the engine's tones point into them). Loader thread only;
+    // throws like btg::loadPackFiles.
+    std::shared_ptr<const btg::Pack> pack (const std::string& id);
+    // Work that reads packs or builds the song, and the transport with it, in the order the page sent it (PluginEditor.cpp, `queued`).
+    juce::ThreadPool loader { juce::ThreadPoolOptions{}.withThreadName ("loader").withNumberOfThreads (1) };
+    // Speed of the loaded track (1 = as recorded). Here, not in the editor: the queued messages playFile and fileRate set and
+    // read it, so it is touched on the loader thread only.
+    double fileRate = 1.0;
 
     // A track of the user's: decoded and analysed on a background thread, then played by filePlayer.
     // While playsFile is set, one beat of the transport is one second of the track.
@@ -69,4 +78,5 @@ private:
     juce::CriticalSection trackLock;
     TrackState track;
     juce::File trackFile;
+    std::map<std::string, std::shared_ptr<const btg::Pack>> packs;
 };

@@ -33,9 +33,10 @@ int main(int argc, char** argv) {
         const std::string track((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 
         btg::Engine engine;
-        engine.setPack(btg::Engine::drums, btg::loadPackFiles(argv[2], "drums-naked"));
-        engine.setPack(btg::Engine::bass, btg::loadPackFiles(argv[2], "bass-finger"));
+        const std::string folder = argv[2];
+        engine.setPackSource([folder](const std::string& id) { return btg::loadPackFiles(folder, id); });
         engine.setTrack(track);
+        std::printf("voices: %s\n", engine.voiceStatus().c_str());
         engine.setLimiter(!dry);
         engine.prepare(rate);
         btg::Transport transport;

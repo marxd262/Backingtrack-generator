@@ -27,16 +27,18 @@ file(DOWNLOAD ${dr_libs_url}/dr_flac.h ${dr_libs_dir}/dr_flac.h EXPECTED_HASH SH
 file(DOWNLOAD ${dr_libs_url}/dr_mp3.h ${dr_libs_dir}/dr_mp3.h EXPECTED_HASH SHA256=0bf9ae11a1cae49283ad80143de77358aff4f74cdf42d49effc5ae115f5f11cf)
 file(DOWNLOAD ${dr_libs_url}/dr_wav.h ${dr_libs_dir}/dr_wav.h EXPECTED_HASH SHA256=7c9660d75361ad6175e6217c63a1075c9512445c06bc951197fc479179f76b39)
 
-# The groove patterns of the web app (native/tools/export-events.mjs --data) as bytes in the library.
+# The data of the web app (native/tools/export-events.mjs --data) as bytes in the library.
 # A byte array, not a string literal: MSVC caps string literals at 16 KB.
-set(grooves_json ${CMAKE_CURRENT_SOURCE_DIR}/data/grooves.json)
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${grooves_json})
-file(READ ${grooves_json} grooves_hex HEX)
-string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," grooves_bytes "${grooves_hex}")
-file(CONFIGURE OUTPUT grooves_data.cpp CONTENT
-"extern const unsigned char btg_grooves_json[] = {${grooves_bytes}};
-extern const unsigned int btg_grooves_json_size = sizeof(btg_grooves_json);
+foreach(data grooves sound)
+    set(data_file ${CMAKE_CURRENT_SOURCE_DIR}/data/${data}.json)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${data_file})
+    file(READ ${data_file} data_hex HEX)
+    string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," data_bytes "${data_hex}")
+    file(CONFIGURE OUTPUT ${data}_bytes.cpp CONTENT
+"extern const unsigned char btg_${data}_json[] = {${data_bytes}};
+extern const unsigned int btg_${data}_json_size = sizeof(btg_${data}_json);
 " @ONLY)
+endforeach()
 
 add_library(btg_core STATIC
     src/generator.cpp
@@ -51,7 +53,9 @@ add_library(btg_core STATIC
     src/file_player.cpp
     src/decode.cpp
     src/dr_flac_impl.cpp
-    ${CMAKE_CURRENT_BINARY_DIR}/grooves_data.cpp)
+    src/sound_data.cpp
+    ${CMAKE_CURRENT_BINARY_DIR}/grooves_bytes.cpp
+    ${CMAKE_CURRENT_BINARY_DIR}/sound_bytes.cpp)
 target_include_directories(btg_core PUBLIC include PRIVATE ${dr_libs_dir})
 target_link_libraries(btg_core PRIVATE nlohmann_json::nlohmann_json signalsmith-stretch)
 # For measuring only: the numbers of the analysis can then be set through the environment (native/tools/analysis-sweep.ps1).
@@ -157,6 +161,11 @@ if(NODE)
     add_test(NAME parity COMMAND btg_parity_tests ${PROJECT_BINARY_DIR}/parity/cases.json)
     set_tests_properties(parity_export PROPERTIES FIXTURES_SETUP parity_reference)
     set_tests_properties(parity PROPERTIES FIXTURES_REQUIRED parity_reference)
+    # sound.json must be what the web app in the working tree exports (native/tools/export-events.mjs --data rewrites it)
+    add_test(NAME sound_data_export COMMAND ${NODE} ${PROJECT_SOURCE_DIR}/tools/export-events.mjs --data-only ${PROJECT_BINARY_DIR}/data-check)
+    add_test(NAME sound_data COMMAND ${CMAKE_COMMAND} -E compare_files --ignore-eol ${PROJECT_BINARY_DIR}/data-check/sound.json ${CMAKE_CURRENT_SOURCE_DIR}/data/sound.json)
+    set_tests_properties(sound_data_export PROPERTIES FIXTURES_SETUP sound_reference)
+    set_tests_properties(sound_data PROPERTIES FIXTURES_REQUIRED sound_reference)
 else()
     message(WARNING "node not found: the parity test against the web app is not registered")
 endif()

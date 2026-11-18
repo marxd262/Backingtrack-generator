@@ -2,6 +2,7 @@
 
 #include "btg/transport.h"
 
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -9,19 +10,25 @@ namespace btg {
 
 struct Pack;
 
-// Plays the generator's events with sample packs: drums and bass, a drive effect on the bass, a mixer and a
-// limiter on the sum. The position comes in from outside (Transport::Block), so the same engine runs under
-// the app's own transport, in an offline render and later under a host's play head.
+// Plays the generator's events of all six layers with the voices chosen for them (sample voices; synth voices stay silent
+// until they are ported), a drive effect on the bass, a mixer and a limiter on the sum. The position comes in from outside
+// (Transport::Block), so the same engine runs under the app's own transport, in an offline render and later under a host's play head.
 class Engine {
 public:
-    enum Layer { drums, bass, layerCount };
+    enum Layer { drums, bass, chords, pad, lead, percussion, layerCount };
+    // Delivers the sample pack with this id ("bass-finger"); throws std::exception with the reason when it cannot. The shell
+    // fills it (the app: files of the repository), so the core reads no files. Called on the control thread only.
+    using PackSource = std::function<std::shared_ptr<const Pack>(const std::string& id)>;
 
     Engine();
     ~Engine();
 
-    // Control thread.
-    void setPack(Layer layer, std::shared_ptr<const Pack> pack); // before the audio runs and before setTrack
-    void setTrack(const std::string& trackJson);                 // any time; plays from the next block on. Throws like buildSong
+    // Control thread, one thread at a time (the app: its loader thread).
+    void setPackSource(PackSource source);         // before the first setTrack or setVoices
+    void setTrack(const std::string& trackJson);   // plays from the next block on. Throws like buildSong (then nothing changes); then setVoices with the track's "voices"
+    void setVoices(const std::string& voicesJson); // {"bass":{"id":"sample","variant":"pick"},...}; a layer not named keeps its voice. Reads the packs it does not have yet, here; until then the old voice plays. Never throws
+    void setTuning(const std::string& tuningJson); // overrides of the fine values as setTuning of the web app ({"bass/sample/finger":{"level":3}}); replaces the earlier ones. Never throws
+    std::string voiceStatus() const;               // {"drums":"ready","bass":"error: bass-pick: <reason>","chords":"silent",...}, layers in enum order
     double lengthBeats() const;
     double bpm() const;      // of the track last set
     int beatsPerBar() const; // of its first bar
