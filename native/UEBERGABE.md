@@ -169,4 +169,5 @@ Plan: `docs/superpowers/plans/2026-11-18-generator-port.md` (neun Phasen; dies i
 - **Neue Dateien im Kern:** `articulation_internal.h` (was die Regelgruppen teilen), `articulation_harmony.cpp` (Gitarre, Tasten, Lead), `organ.cpp`, `lead.cpp`, `percussion.cpp`.
 - **Die App klingt unverändert:** Die Brücke (`native/app/web/play.js`) schaltet die neuen Schichten weiter aus, und die Engine spielt nur Schlagzeug und Bass. Das ändert Phase 2.
 - **`ui-check.mjs`:** stellt die Seite jetzt selbst auf Deutsch und wartet das erste Laden ab. Vorher hing sein Ergebnis davon ab, in welcher Sprache die App zuletzt stand, und ein Neuladen mitten im ersten Laden zählte als fehlgeschlagene Abrufe.
-- **Offen:** Die Änderung an `.github/workflows/native.yml` aus dem Plan (Schritt „Fetch the tag port-base“ streichen, `push` auf `develop`, `src/core/**` in `paths`) ist nicht gemacht; sie wartet auf das Ja des Nutzers. Der Workflow holt bis dahin einen Tag, den er nicht mehr braucht. Unter Linux und macOS ist der Stand nicht gebaut (das macht erst die CI nach einem Push).
+- **CI:** `.github/workflows/native.yml` holt den Tag `port-base` nicht mehr, baut bei Pushes auf `develop` und auch bei Änderungen unter `src/core/**` (die Referenz der Gleichheitsprüfung liegt dort).
+- **Offen:** Unter Linux und macOS ist der Stand nicht gebaut (das macht erst die CI nach einem Push).

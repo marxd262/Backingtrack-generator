@@ -2,11 +2,11 @@ name: native
 
 on:
   push:
-    branches: [feat/native-spike]
-    paths: ['native/**', '.github/workflows/native.yml']
+    branches: [develop]
+    paths: ['native/**', 'src/core/**', '.github/workflows/native.yml']
   pull_request:
     branches: [develop]
-    paths: ['native/**', '.github/workflows/native.yml']
+    paths: ['native/**', 'src/core/**', '.github/workflows/native.yml']
 
 jobs:
   build:
@@ -23,10 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # the parity test reads the web app at this tag
-      - name: Fetch the tag port-base
-        run: git fetch --depth=1 origin tag port-base
-
+      # the parity test reads the web app from src/ of the checkout (native/tools/export-events.mjs)
       - uses: actions/setup-node@v4
         with:
           node-version: 22
