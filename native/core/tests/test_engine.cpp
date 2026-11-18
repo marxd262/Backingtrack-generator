@@ -46,6 +46,43 @@ static std::shared_ptr<const btg::Pack> kit() {
     }
     return pack;
 }
+// A format-1 kit (no key table of its own): every GM key of HIT_KEYS.drums has a zone with decaying noise, mono.
+static std::shared_ptr<const btg::Pack> gmKit() {
+    auto pack = std::make_shared<btg::Pack>();
+    const int keys[] = { 36, 38, 42, 46, 50, 47, 43, 49, 37, 44 };
+    unsigned int noise = 7;
+    for (int k = 0; k < 10; ++k) {
+        pack->samples.push_back({ k * 8000, 8000, 22050.0, 0, 0 });
+        for (int i = 0; i < 8000; ++i) {
+            noise = noise * 1664525u + 1013904223u;
+            pack->audio.push_back((static_cast<float>(noise >> 8) / 8388608.0f - 1.0f) * std::exp(-i / 1500.0f));
+        }
+        btg::Pack::Zone zone;
+        zone.keyLo = zone.keyHi = zone.rootKey = keys[k];
+        zone.sample = k;
+        zone.release = 0.04;
+        pack->zones.push_back(zone);
+    }
+    return pack;
+}
+// The kit of the choke tests: every GM key plays a constant (DC) sample of 40000 frames, so a choke shows as the frame where the level falls.
+// Format 2 brings its key table; format 1 gets it from sound.json.
+static std::shared_ptr<const btg::Pack> dcKit(bool v2) {
+    auto pack = std::make_shared<btg::Pack>();
+    pack->version = v2 ? 2 : 1;
+    const char* names[] = { "kick", "snare", "hat", "openHat", "tomHigh", "tomMid", "tomLow", "crash", "sideStick", "hatPedal" };
+    const int keys[] = { 36, 38, 42, 46, 50, 47, 43, 49, 37, 44 };
+    for (int k = 0; k < 10; ++k) {
+        pack->keys[names[k]] = keys[k];
+        pack->samples.push_back({ k * 40000, 40000, 48000.0, 0, 0 });
+        pack->audio.insert(pack->audio.end(), 40000, 1.0f);
+        btg::Pack::Zone zone;
+        zone.keyLo = zone.keyHi = zone.rootKey = keys[k];
+        zone.sample = k;
+        pack->zones.push_back(zone);
+    }
+    return pack;
+}
 // A looped sine of 200 frames per period; the loop holds exactly 100 periods, so the seam does not click.
 static std::shared_ptr<const btg::Pack> tonePack(int rootKey, float amplitude, double release) {
     auto pack = std::make_shared<btg::Pack>();
@@ -62,6 +99,7 @@ static std::shared_ptr<const btg::Pack> tonePack(int rootKey, float amplitude, d
 // The packs of the tests by id; any other id is missing, as the shell's source would say.
 static std::shared_ptr<const btg::Pack> source(const std::string& id) {
     if (id == "drums-naked") return kit();
+    if (id == "drums-brushes") return gmKit();
     if (id == "bass-finger" || id == "bass-upright") return tonePack(45, 0.5f, 0.2);
     if (id == "bass-pick") return tonePack(45, 0.25f, 0.2);
     if (id == "pad-strings") return tonePack(57, 0.5f, 4.0); // the engine caps the release at 2 s
@@ -390,6 +428,91 @@ int main(int argc, char** argv) {
             for (int i = rate / 50; i < rate * 12 / 100; ++i) squares += static_cast<double>(after.left[i]) * after.left[i];
             CHECK(std::sqrt(squares / (rate / 10)) > 0.01);
         }
+    }
+
+    // A format-1 kit plays through the key table of sound.json (hitKeys "drums").
+    {
+        btg::Engine engine;
+        engine.setPackSource(source);
+        engine.setTrack(track);
+        engine.setVoices(R"({"drums":{"id":"sample","variant":"brushes"}})");
+        engine.setMuted(btg::Engine::bass, true);
+        engine.prepare(rate);
+        btg::Transport t;
+        t.play(64.0, engine.bpm());
+        CHECK(engine.voiceStatus().find(R"({"drums":"ready",)") == 0);
+        CHECK(render(engine, t, 5.0, 480).rms > 0.01);
+    }
+
+    // Chokes land on the web's time: a self-choke 0.1 s after the hit's own start, a closed hat at its own time on an open hat that began
+    // earlier in the same chunk (the tone's frame count starts at its own start, not at the chunk's). Both formats; a constant sample,
+    // so the choke is the frame where the level has fallen by 1 %. At 12 ms time constant that is 6 frames after the choke begins.
+    for (const bool v2 : { true, false }) {
+        using namespace btg::detail;
+        const std::string key = v2 ? "drums/sample/standard" : "drums/sample/brushes";
+        const auto voice = makeVoice(btg::Engine::drums, key, dcKit(v2), {});
+        CHECK(voice != nullptr);
+        if (!voice) continue;
+        const auto nameIndex = [](const char* name) { return static_cast<int>(std::find_if(std::begin(HIT_NAMES), std::end(HIT_NAMES), [&](const char* n) { return std::string(n) == name; }) - std::begin(HIT_NAMES)); };
+        const auto fallsAt = [&](Tone& tone) { // frame of the first fall below 99 % of the plateau
+            std::vector<float> l(20000), r(20000);
+            tone.render(l.data(), r.data(), 20000);
+            size_t top = 0;
+            for (size_t i = 0; i < l.size(); ++i) if (l[i] > l[top]) top = i;
+            for (size_t i = top; i < l.size(); ++i) if (l[i] < 0.99f * l[top]) return static_cast<int>(i);
+            return -1;
+        };
+        {   // a crash with art choke 0.1 s that starts at frame 200 of its chunk
+            auto tones = std::make_unique<Tones>();
+            tones->sr = rate;
+            VoiceState state;
+            state.rng = voice->startRng;
+            PlayEvent e;
+            e.hit = true;
+            e.name = nameIndex("crash");
+            e.vel = 1.0;
+            e.art = Art::choke;
+            e.artTime = 0.1;
+            voice->play(e, 200, 0.5, state, *tones);
+            const int at = fallsAt(tones->all[0]);
+            CHECK(std::abs(at - (200 + 4800)) < 48); // 0.1 s after its own start, within 1 ms
+        }
+        if (v2) continue; // the closing hat's rule is format 1's
+        {   // an open hat at frame 100, a closed hat at frame 250 of the same chunk
+            auto tones = std::make_unique<Tones>();
+            tones->sr = rate;
+            VoiceState state;
+            state.rng = voice->startRng;
+            PlayEvent e;
+            e.hit = true;
+            e.vel = 1.0;
+            e.name = nameIndex("openHat");
+            voice->play(e, 100, 0.5, state, *tones);
+            e.name = nameIndex("hat");
+            voice->play(e, 250, 0.5, state, *tones);
+            const int at = fallsAt(tones->all[0]);
+            CHECK(std::abs(at - 250) < 48); // at the closed hat's time, within 1 ms
+        }
+    }
+
+    // A hand-filled first block that stands still (beatsPerFrame 0) on the downbeat of a slide: the late event has no step to
+    // divide by, so it starts at the beginning of the chunk. No crash, finite samples.
+    {
+        double slide = -1.0;
+        for (const btg::Event& e : btg::buildEvents(track))
+            if (e.type == btg::Event::Type::note && e.layer == "bass" && e.art == "slideIn" && e.t > 0.02) { slide = e.t * (100.0 / 60.0); break; }
+        CHECK(slide > 0.0);
+        btg::Engine engine;
+        engine.setPackSource(source);
+        engine.setTrack(track);
+        engine.setMuted(btg::Engine::drums, true);
+        engine.prepare(rate);
+        std::vector<float> l(480), r(480);
+        const btg::Transport::Block still { true, slide, 0.0, 480, 1 };
+        engine.render(l.data(), r.data(), still.frames, still);
+        bool finite = true;
+        for (int i = 0; i < 480; ++i) finite = finite && std::isfinite(l[i]) && std::isfinite(r[i]);
+        CHECK(finite);
     }
 
     std::printf(failures ? "%d check(s) failed\n" : "all checks passed\n", failures);

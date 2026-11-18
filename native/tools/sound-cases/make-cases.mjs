@@ -72,5 +72,43 @@ console.log(`samples.json: ${samples.length} cases. Articulations the sampler co
 for (const a of COMPUTED) console.log(`  ${a.padEnd(9)} ${count[a]}`);
 const missing = COMPUTED.filter((a) => count[a] === 0);
 if (missing.length) problems.push(`never occurs: ${missing.join(', ')}`);
+
+// Task 12: every kit alone, and the percussion: a fill into a crashed chorus, then a stop (the crash before it chokes itself);
+// ornaments 1 for flams. SEEDS: a case whose seed 1 lacks a fill, a crash, a flam or a choke (see the checks below).
+const KITS = [
+  ['drums', 'standard', 'funk'], ['drums', 'brushes', 'country'], ['drums', 'rimshot', 'reggae'], ['drums', 'jazz', 'blues'],
+  ['drums', 'electronic', 'psych'], ['drums', '808', 'funk'], ['drums', 'muldjord', 'rock'], ['drums', 'legacy', 'rock'], ['percussion', 'studio', 'funk'],
+  // the jobs that play only the instruments 'mixed' never picks: bongos, claves, cowbell (same layer set-up as the case above)
+  ['percussion', 'studio', 'funk', 'bongos'], ['percussion', 'studio', 'funk', 'claves'], ['percussion', 'studio', 'funk', 'cowbell'],
+];
+const KIT_FORM = { sections: [{ type: 'verse', bars: 4 }, { type: 'chorus', bars: 4, transition: 'fill', crash: true }, { type: 'verse', bars: 2, transition: 'stop' }] };
+const SEEDS = {};
+const kits = KITS.map(([layer, variant, style, job]) => {
+  const name = `${layer}-${variant}${job ? `-${job}` : ''}`;
+  return { name, track: track(style, { layers: { [layer]: true }, voices: { [layer]: { id: 'sample', variant } }, seed: SEEDS[name] ?? 1, extra: { form: KIT_FORM, ornaments: 1, ...(job && { jobs: { lead: 'melody', percussion: job } }) } }), sound: neutral(0), dry: true };
+});
+const kitEvents = kits.map((c) => buildEvents(c.track));
+kits.forEach((c, i) => {
+  if (!kitEvents[i].some((e) => e.type === 'marker' && e.name === 'fill')) problems.push(`${c.name}: no fill`);
+  if (c.name.startsWith('drums') && !kitEvents[i].some((e) => e.type === 'hit' && e.name === 'crash')) problems.push(`${c.name}: no crash`);
+});
+for (const art of ['flam', 'choke']) if (!kitEvents.some((list) => list.some((e) => e.layer === 'drums' && e.art === art))) problems.push(`no ${art} in any kit case`);
+write('kits.json', kits);
+
+// Hits per name over the kit cases (drums and percussion cases each count their own layer), and the arts the voice meets.
+const hitCount = {};
+let flams = 0, chokes = 0;
+for (const list of kitEvents) for (const e of list) {
+  if (e.type !== 'hit') continue;
+  hitCount[e.name] = (hitCount[e.name] ?? 0) + 1;
+  if (e.art === 'flam') flams++;
+  if (e.art === 'choke') chokes++;
+}
+// rideBell and hatHalf: no rule of the generator writes them (articulation.js 176 renames the hats only to 'ride'; src/core has them only in DRUM_NAMES and DRUM_FALLBACK)
+const DRUM_ONLY = ['kick', 'snare', 'hat', 'openHat', 'tomHigh', 'tomMid', 'tomLow', 'crash', 'sideStick', 'rimshot', 'ride', 'rideBell', 'hatHalf', 'hatPedal'];
+const PERCUSSION = ['shaker', 'tambourine', 'congaHigh', 'congaLow', 'bongoHigh', 'bongoLow', 'claves', 'cowbell'];
+console.log(`kits.json: ${kits.length} cases. Hits per name over all cases, flam ${flams}, choke ${chokes}:`);
+for (const n of [...DRUM_ONLY, ...PERCUSSION]) console.log(`  ${n.padEnd(10)} ${hitCount[n] ?? 0}`);
+for (const n of PERCUSSION) if (!hitCount[n]) problems.push(`no ${n} in any kit case`);
 for (const p of problems) console.error(`ERROR ${p}`);
 process.exit(problems.length ? 1 : 0);

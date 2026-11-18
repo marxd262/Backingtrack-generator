@@ -106,7 +106,7 @@ struct Tone {
     double offTime = 0.0;
 
     void start(const Note& n, double sampleRate, uint64_t number);
-    void choke(long long inFrames, double timeConstant, double sampleRate);
+    void choke(long long inFrames, double timeConstant, double sampleRate); // inFrames count from the tone's own start, not from the chunk's
     void render(float* left, float* right, int count);
 };
 
@@ -139,6 +139,8 @@ struct VoiceState {
     double lastSong = -INFINITY;          // strum: stream time of the last chord tone and its place in the run
     int strumRun = 0;
     const Pack::Zone* lastNoteZone[128][23] = {}; // round robin of format-2 notes by key and art: 0 = none, 1 + ART_NAMES index
+    int openHat = -1;                     // format-1 kits: index in Tones::all of the last open hat's tone, and that tone's serial
+    uint64_t openHatSerial = 0;           // (a reused tone is not choked)
 };
 
 // One layer's chosen voice: built on the control thread, immutable afterwards.

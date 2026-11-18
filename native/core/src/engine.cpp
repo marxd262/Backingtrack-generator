@@ -338,7 +338,7 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
                         PlayEvent late = e;
                         late.leadBeats = ahead * secondsPerBeat > 0.02 ? ahead : 0.0;
                         late.durBeats -= e.leadBeats - late.leadBeats;
-                        voice->play(late, static_cast<int>((ahead - late.leadBeats) / step), secondsPerBeat, m.states[e.layer], m.tones);
+                        voice->play(late, step > 0 ? static_cast<int>((ahead - late.leadBeats) / step) : 0, secondsPerBeat, m.states[e.layer], m.tones);
                         continue;
                     }
                     const int delay = std::clamp(static_cast<int>((e.beat + lap - from) / step), 0, count - 1);

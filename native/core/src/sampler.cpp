@@ -324,10 +324,11 @@ public:
     }
 };
 
-// sample-hits.js, sampleHitVoice, format 2: drums and percussion.
+// sample-hits.js, sampleHitVoice: drums and percussion.
 class SampleHits final : public Voice {
 public:
-    struct Hit { int key = -1; bool halfChoke = false; };
+    // closes: the name after the fallback is hat, or the event's own is hatPedal; opens: it is openHat (format 1: the closed hat chokes the open one)
+    struct Hit { int key = -1; bool halfChoke = false, closes = false, opens = false; };
     std::array<Hit, std::size(HIT_NAMES)> hits; // per HIT_NAMES index: the key that plays it, -1 = none
 
     SampleHits(Engine::Layer voiceLayer, const std::string& key, const Pack& p) {
@@ -337,6 +338,7 @@ public:
         const auto own = hitKeys.find(key);
         const auto& keyMap = own != hitKeys.end() ? own->second : hitKeys.at(LAYER_NAMES[voiceLayer]);
         const auto& gm = hitKeys.at("drums");
+        const auto& keys = p.version == 2 ? p.keys : keyMap; // format 1 packs bring no keys: the voice's map
         for (size_t i = 0; i < hits.size(); ++i) {
             std::string n = HIT_NAMES[i];
             // a name the voice's key map puts on the GM key of another plays that one's sample (kit rimshot: snare -> sideStick)
@@ -344,12 +346,14 @@ public:
             if (p.version == 2 && mapped != keyMap.end() && (!gm.count(n) || gm.at(n) != mapped->second))
                 for (const auto& [name, gmKey] : gm) if (gmKey == mapped->second) { n = name; break; }
             const auto fallback = DRUM_FALLBACK.find(n);
-            if (!p.keys.count(n) && fallback != DRUM_FALLBACK.end()) {
+            if (!keys.count(n) && fallback != DRUM_FALLBACK.end()) {
                 hits[i].halfChoke = n == "hatHalf"; // the open hat stands in and chokes itself after 0.1 s
                 n = fallback->second;
             }
-            const auto found = p.keys.find(n);
-            hits[i].key = found != p.keys.end() ? found->second : -1;
+            const auto found = keys.find(n);
+            hits[i].key = found != keys.end() ? found->second : -1;
+            hits[i].closes = n == "hat" || std::string(HIT_NAMES[i]) == "hatPedal";
+            hits[i].opens = n == "openHat";
         }
     }
 
@@ -359,32 +363,43 @@ public:
         if (hit.key < 0) return;
         double selfChoke = e.art == Art::choke ? (std::isfinite(e.artTime) ? e.artTime : 0.1) : 0.0;
         if (hit.halfChoke && selfChoke == 0.0) selfChoke = 0.1;
-        double cents = 0.0, gain = tuned.level;
+        const bool v2 = pack->version == 2;
+        double cents = 0.0, gain = tuned.level, pickVel = e.vel;
         if (std::isfinite(tuned.humanDb)) { // always all three draws, so the sequence stays the same
-            const double pitch = state.rng.next(), loud = state.rng.next();
-            state.rng.next(); // spread of the velocity layers, format 1 only
+            const double pitch = state.rng.next(), loud = state.rng.next(), spread = state.rng.next();
             cents = (2 * pitch - 1) * tuned.humanCents;
             gain *= std::pow(10.0, -((2 * loud - 1) * tuned.humanDb) / 20);
+            pickVel = clamp(e.vel + (2 * spread - 1) * tuned.layerSpread, 0, 1); // format 1: neighbouring velocity layers alternate
         }
-        const double vel = e.vel > 0 && std::isfinite(tuned.velCurve) ? std::pow(e.vel, tuned.velCurve) : e.vel;
+        const double vel = v2 && e.vel > 0 && std::isfinite(tuned.velCurve) ? std::pow(e.vel, tuned.velCurve) : e.vel;
         const Pack::Zone* best[16];
-        const int count = pickZones(*pack, hit.key, vel, nullptr, best, 16);
+        const int count = pickZones(*pack, hit.key, v2 ? vel : pickVel, nullptr, best, 16);
         if (count == 0) return;
-        const Pack::Zone* zone = roundRobin(best, count, state.lastZone[hit.key & 127], state.rng);
+        const Pack::Zone* zone = v2 ? roundRobin(best, count, state.lastZone[hit.key & 127], state.rng) : best[0];
         const auto start = [&](int sample, double g) {
             const Pack::Sample& s = pack->samples[sample];
             const double length = s.frames / s.rate / std::pow(2.0, ((hit.key - zone->rootKey) * 100 + zone->tuneCents) / 1200);
             return tones.start({ .pack = pack.get(), .zone = zone, .sample = sample, .key = hit.key, .dur = length, .vel = vel, .gain = g, .cents = cents,
                                  .delay = delay, .layer = layer, .voice = state.serial });
         };
-        Tone* started[2] = { start(zone->sample, gain), zone->room >= 0 ? start(zone->room, gain * (std::isfinite(tuned.roomMic) ? tuned.roomMic : 1.0)) : nullptr };
+        Tone* started[2] = { start(zone->sample, gain), v2 && zone->room >= 0 ? start(zone->room, gain * (std::isfinite(tuned.roomMic) ? tuned.roomMic : 1.0)) : nullptr };
+        if (!v2) { // 66 to 71: the kit's own choke rule
+            if (selfChoke > 0) started[0]->choke(static_cast<long long>(selfChoke * tones.sr), CHOKE_TC, tones.sr);
+            if (tuned.choke >= 0.5 && (hit.closes || hit.opens)) {
+                Tone* open = state.openHat >= 0 ? &tones.all[static_cast<size_t>(state.openHat)] : nullptr;
+                if (hit.closes && open && open->active && open->serial == state.openHatSerial) open->choke(std::max(0, delay - open->delay), CHOKE_TC, tones.sr);
+                state.openHat = hit.opens && selfChoke == 0 ? static_cast<int>(started[0] - tones.all.data()) : -1;
+                state.openHatSerial = started[0]->serial;
+            }
+            return;
+        }
         for (Tone& t : tones.all) { // the library's off_by among this voice's tones
             if (!t.active || &t == started[0] || &t == started[1] || !t.offBy || t.voice != state.serial) continue;
-            if (std::find(zone->chokes.begin(), zone->chokes.end(), t.offBy) != zone->chokes.end()) t.choke(delay, t.offTime / 3, tones.sr);
+            if (std::find(zone->chokes.begin(), zone->chokes.end(), t.offBy) != zone->chokes.end()) t.choke(std::max(0, delay - t.delay), t.offTime / 3, tones.sr);
         }
         for (Tone* t : started) {
             if (!t) continue;
-            if (selfChoke > 0) t->choke(delay + static_cast<long long>(selfChoke * tones.sr), CHOKE_TC, tones.sr);
+            if (selfChoke > 0) t->choke(static_cast<long long>(selfChoke * tones.sr), CHOKE_TC, tones.sr);
             t->offBy = zone->offBy;
             t->offTime = zone->offTime > 0 ? zone->offTime : 3 * CHOKE_TC;
         }
@@ -399,8 +414,6 @@ std::shared_ptr<const Voice> makeVoice(Engine::Layer layer, const std::string& k
                         v("lowDb"), v("midDb"), v("midHz"), v("highDb"), v("highHz"), v("layerSpread"), v("choke"), v("roomMic"), v("velCurve"), v("kitPan") };
     std::shared_ptr<Voice> voice;
     if (layer == Engine::drums || layer == Engine::percussion) {
-        // shortcut: kits of format 1 (GM keys, their own choke rule) are not ported, their layer is silent; port them with the kit cases.
-        if (pack->version != 2) return nullptr;
         voice = std::make_shared<SampleHits>(layer, key, *pack);
     } else {
         auto notes = std::make_shared<SampleNotes>();
