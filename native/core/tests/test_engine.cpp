@@ -1,9 +1,13 @@
 #include "btg/engine.h"
+#include "btg/generator.h"
 #include "btg/pack.h"
 #include "btg/transport.h"
 
+#include "../src/sampler.h"
+
 #include <algorithm>
 #include <cmath>
+#include <complex>
 #include <cstdio>
 #include <fstream>
 #include <iterator>
@@ -60,7 +64,14 @@ static std::shared_ptr<const btg::Pack> source(const std::string& id) {
     if (id == "drums-naked") return kit();
     if (id == "bass-finger" || id == "bass-upright") return tonePack(45, 0.5f, 0.2);
     if (id == "bass-pick") return tonePack(45, 0.25f, 0.2);
+    if (id == "pad-strings") return tonePack(57, 0.5f, 4.0); // the engine caps the release at 2 s
     throw std::runtime_error("not in the test: " + id);
+}
+
+// |H| in dB of a biquad at `hz`.
+static double gainDb(const btg::detail::Biquad& f, double hz, double sr) {
+    const std::complex<double> z = std::polar(1.0, -2 * 3.14159265358979 * hz / sr); // e^-jw
+    return 20 * std::log10(std::abs((f.b0 + f.b1 * z + f.b2 * z * z) / (1.0 + f.a1 * z + f.a2 * z * z)));
 }
 
 struct Result { std::vector<float> left; double rms = 0.0, peak = 0.0; };
@@ -111,6 +122,29 @@ int main(int argc, char** argv) {
     CHECK(refused);
     CHECK(btg::loadPack(R"({"samples":[{"offset":0,"frames":4,"rate":22050}],"zones":[{"sample":0}]})", pcm, sizeof pcm).zones.size() == 1);
 
+    // The filters of the Web Audio spec: the gain where each type defines it.
+    {
+        using namespace btg::detail;
+        CHECK(std::fabs(gainDb(peaking(2400, -6, 0.8, 48000), 2400, 48000) + 6) < 0.01);
+        CHECK(std::fabs(gainDb(lowshelf(200, 5, 48000), 0, 48000) - 5) < 0.01);
+        CHECK(std::fabs(gainDb(highshelf(2600, -4, 48000), 24000, 48000) + 4) < 0.01);
+        CHECK(std::fabs(gainDb(lowpass(1000, 1, 48000), 1000, 48000) - 1) < 0.01); // Q in dB is the gain at the corner
+        CHECK(std::fabs(gainDb(highpass(50, 1, 48000), 50, 48000) - 1) < 0.01);
+        CHECK(std::fabs(gainDb(highshelf(1800, 0, 48000), 5000, 48000)) < 1e-9);    // 0 dB passes unchanged
+    }
+    // sample-zones.js, artZones: own zones for an art when the pack has them, else the plain ones; release zones never.
+    {
+        btg::Pack pack;
+        pack.samples.push_back({ 0, 4, 22050.0, 0, 0 });
+        for (const char* art : { "", "palmMute", "" }) { btg::Pack::Zone z; z.keyLo = 40; z.keyHi = 80; z.art = art; pack.zones.push_back(z); }
+        pack.zones[2].releaseTrigger = true;
+        const btg::Pack::Zone* best[4];
+        bool own = false;
+        CHECK(btg::detail::pickZones(pack, 60, 0.8, "palmMute", best, 4, &own) == 1 && best[0] == &pack.zones[1] && own);
+        CHECK(btg::detail::pickZones(pack, 60, 0.8, "dead", best, 4, &own) == 1 && best[0] == &pack.zones[0] && !own);
+        CHECK(btg::detail::pickZones(pack, 60, 0.8, nullptr, best, 4, &own) == 1 && best[0] == &pack.zones[0] && !own);
+    }
+
     // Engine with the fixture track.
     if (argc < 2) { std::printf("usage: btg_engine_tests <track.json>\n"); return 2; }
     std::ifstream file(argv[1], std::ios::binary);
@@ -155,6 +189,28 @@ int main(int argc, char** argv) {
     CHECK(live.beats() >= 40.0 && live.beats() < 44.0);
     live.stop();
     CHECK(render(engine, live, 1.0, 480).left.back() == 0.0f); // silent a second after the stop
+
+    // A new start restarts the voices also when no stopped block falls between stop and play (the web UI's restart sends
+    // stop, track, play back to back): 0.5 s after it, the engine sounds as a fresh one started there.
+    {
+        const auto from64 = [&](bool playedBefore) {
+            btg::Engine engine;
+            engine.setPackSource(source);
+            engine.setTrack(track);
+            engine.prepare(rate);
+            btg::Transport t;
+            if (playedBefore) {
+                t.play(0.0, engine.bpm());
+                render(engine, t, 1.0, 480);
+            }
+            t.play(64.0, engine.bpm());
+            return render(engine, t, 2.0, 480);
+        };
+        const Result fresh = from64(false), restarted = from64(true);
+        double most = 0.0;
+        for (size_t i = rate / 2; i < fresh.left.size(); ++i) most = std::max(most, static_cast<double>(std::fabs(fresh.left[i] - restarted.left[i])));
+        CHECK(most < 1e-6);
+    }
 
     // The voice chosen plays (upright: the same test pack as finger, level 3 instead of 4 in tunables.js), a fine value acts
     // and is clamped, a synth voice is silent and says so. Drums muted, no limiter: the bass alone, linear.
@@ -210,34 +266,130 @@ int main(int argc, char** argv) {
     }
 
     // Review Focus 2: the bass changes its voice in every block for 10 s. Old tones ring out and nothing clicks: the second
-    // difference of these sines stays below 0.005; a cut tone jumps by its amplitude (0.1 and more).
+    // difference of these sines stays below 0.01; a cut tone jumps by its amplitude (0.1 and more). The voice does change:
+    // the pick's test pack has half the amplitude, so the run is clearly quieter than with the finger voice alone.
     {
-        btg::Engine engine;
-        engine.setPackSource(source);
-        engine.setTrack(track);
-        engine.setMuted(btg::Engine::drums, true);
-        engine.setLimiter(false);
-        engine.prepare(rate);
-        btg::Transport t;
-        t.play(64.0, engine.bpm());
-        std::vector<float> l(480), r(480), out;
-        for (int block = 0; block < 1000; ++block) {
-            engine.setVoices(block % 2 ? R"({"bass":{"id":"sample","variant":"pick"}})" : R"({"bass":{"id":"sample","variant":"finger"}})");
-            const auto b = t.advance(480, rate);
-            engine.render(l.data(), r.data(), b.frames, b);
-            out.insert(out.end(), l.begin(), l.begin() + b.frames);
+        double rms[2] = {};
+        for (const bool alternate : { true, false }) {
+            btg::Engine engine;
+            engine.setPackSource(source);
+            engine.setTrack(track);
+            engine.setMuted(btg::Engine::drums, true);
+            engine.setLimiter(false);
+            engine.prepare(rate);
+            btg::Transport t;
+            t.play(64.0, engine.bpm());
+            std::vector<float> l(480), r(480), out;
+            for (int block = 0; block < 1000; ++block) {
+                engine.setVoices(alternate && block % 2 ? R"({"bass":{"id":"sample","variant":"pick"}})" : R"({"bass":{"id":"sample","variant":"finger"}})");
+                const auto b = t.advance(480, rate);
+                engine.render(l.data(), r.data(), b.frames, b);
+                out.insert(out.end(), l.begin(), l.begin() + b.frames);
+            }
+            bool finite = true;
+            double jump = 0.0, squares = 0.0;
+            for (size_t i = 2; i < out.size(); ++i) {
+                finite = finite && std::isfinite(out[i]);
+                jump = std::max(jump, std::fabs(out[i] - 2.0 * out[i - 1] + out[i - 2]));
+                squares += static_cast<double>(out[i]) * out[i];
+            }
+            rms[alternate ? 0 : 1] = std::sqrt(squares / static_cast<double>(out.size()));
+            CHECK(finite);
+            CHECK(jump < 0.01); // -40 dBFS
+            CHECK(rms[alternate ? 0 : 1] > 0.005);
+            CHECK(engine.voiceStatus().find(R"("bass":"ready")") != std::string::npos);
         }
-        bool finite = true;
-        double jump = 0.0, squares = 0.0;
-        for (size_t i = 2; i < out.size(); ++i) {
-            finite = finite && std::isfinite(out[i]);
-            jump = std::max(jump, std::fabs(out[i] - 2.0 * out[i - 1] + out[i - 2]));
-            squares += static_cast<double>(out[i]) * out[i];
+        CHECK(std::fabs(rms[0] / rms[1] - 1) > 0.1);
+    }
+
+    // Review Focus 4: a jump or a loop wrap while a pad chord is held. The held tones end at once, 2.5 s later the output is
+    // below -60 dBFS. The pad switches to a silent voice at the jump, so only what sounded before can still be heard.
+    {
+        std::string band = track;
+        band.replace(band.find(R"("pad":false)"), 11, R"("pad":true)");
+        double from = -1.0; // beat of the first pad note of at least 2 s (track-funk: 100 bpm; the same product as setTrack, to the bit)
+        for (const btg::Event& e : btg::buildEvents(band))
+            if (e.type == btg::Event::Type::note && e.layer == "pad" && e.dur >= 2.0) { from = e.t * (100.0 / 60.0); break; }
+        CHECK(from >= 0.0);
+        for (const bool loop : { false, true }) {
+            btg::Engine engine;
+            engine.setPackSource(source);
+            engine.setTrack(band);
+            engine.setMuted(btg::Engine::drums, true);
+            engine.setMuted(btg::Engine::bass, true);
+            engine.setLimiter(false);
+            engine.prepare(rate);
+            btg::Transport t;
+            t.play(from, engine.bpm());
+            CHECK(render(engine, t, 0.3, 480).rms > 0.001); // the pad sounds
+            engine.setVoices(R"({"pad":{"id":"synth","variant":"classic"}})");
+            if (loop) t.setLoop(from - 4.0, from + 1.0); else t.seek(from + 8.0);
+            const Result after = render(engine, t, 2.6, 480);
+            double tail = 0.0; // the last 0.1 s
+            for (size_t i = after.left.size() - rate / 10; i < after.left.size(); ++i) tail = std::max(tail, static_cast<double>(std::fabs(after.left[i])));
+            CHECK(tail < 0.001);
         }
-        CHECK(finite);
-        CHECK(jump < 0.01); // -40 dBFS
-        CHECK(std::sqrt(squares / static_cast<double>(out.size())) > 0.005);
-        CHECK(engine.voiceStatus().find(R"("bass":"ready")") != std::string::npos);
+        // A block that stands still where the last one ended (btg_render's 0.2 s after the song) is no jump: the held pad tone keeps
+        // its level. One frame further on (1/28800 beat at 100 bpm, 48 kHz) is a jump, and the tone's release begins.
+        for (const double off : { 0.0, 1.0 / 28800 }) {
+            btg::Engine engine;
+            engine.setPackSource(source);
+            engine.setTrack(band);
+            engine.setMuted(btg::Engine::drums, true);
+            engine.setMuted(btg::Engine::bass, true);
+            engine.setLimiter(false);
+            engine.prepare(rate);
+            btg::Transport t;
+            t.play(from, engine.bpm());
+            std::vector<float> l(480), r(480), out;
+            btg::Transport::Block last;
+            for (int i = 0; i < 60; ++i) { // 0.6 s: past the swell (0.37 s) of the chord held for 2.4 s
+                last = t.advance(480, rate);
+                engine.render(l.data(), r.data(), last.frames, last);
+                out.insert(out.end(), l.begin(), l.begin() + last.frames);
+            }
+            const btg::Transport::Block stand { true, last.beats + last.frames * last.beatsPerFrame + off, 0.0, 480, last.starts };
+            for (int i = 0; i < 50; ++i) { // 0.5 s
+                engine.render(l.data(), r.data(), stand.frames, stand);
+                out.insert(out.end(), l.begin(), l.end());
+            }
+            const auto rms = [&](size_t at) { double s = 0.0; for (size_t i = at; i < at + rate / 10; ++i) s += static_cast<double>(out[i]) * out[i]; return std::sqrt(s / (rate / 10)); };
+            // the last 0.1 s against the 0.1 s before the stand (measured 0.985 and 0.136; the chord's three sines beat a little)
+            const double kept = rms(out.size() - rate / 10) / rms(28800 - rate / 10);
+            CHECK(off == 0.0 ? kept > 0.9 : kept < 0.5);
+        }
+    }
+
+    // A slide's tone begins before its note (the lead). A start, a seek or a loop that lands on the note still plays it, with what
+    // is left of the lead. Until the jump the bass plays a silent voice, so the 0.1 s after it hold only the slide's tone.
+    {
+        double slide = -1.0; // beat of the first bass slideIn with a lead (track-funk: 100 bpm)
+        for (const btg::Event& e : btg::buildEvents(track))
+            if (e.type == btg::Event::Type::note && e.layer == "bass" && e.art == "slideIn" && e.t > 0.02) { slide = e.t * (100.0 / 60.0); break; }
+        CHECK(slide > 0.0);
+        for (const int how : { 0, 1, 2 }) { // start there, seek there, a loop that starts there wraps
+            btg::Engine engine;
+            engine.setPackSource(source);
+            engine.setTrack(track);
+            engine.setMuted(btg::Engine::drums, true);
+            engine.setLimiter(false);
+            engine.prepare(rate);
+            btg::Transport t;
+            if (how > 0) {
+                engine.setVoices(R"({"bass":{"id":"synth","variant":"classic"}})");
+                if (how == 2) t.setLoop(slide, slide + 1.0);
+                t.play(how == 1 ? slide - 8.0 : slide + 0.5, engine.bpm());
+                render(engine, t, 0.3, 480); // the loop: up to its end
+                engine.setVoices(R"({"bass":{"id":"sample","variant":"finger"}})");
+                if (how == 1) t.seek(slide);
+            } else {
+                t.play(slide, engine.bpm());
+            }
+            const Result after = render(engine, t, 0.15, 480);
+            double squares = 0.0; // 0.02 s to 0.12 s: the slide's note is 0.13 s long
+            for (int i = rate / 50; i < rate * 12 / 100; ++i) squares += static_cast<double>(after.left[i]) * after.left[i];
+            CHECK(std::sqrt(squares / (rate / 10)) > 0.01);
+        }
     }
 
     std::printf(failures ? "%d check(s) failed\n" : "all checks passed\n", failures);

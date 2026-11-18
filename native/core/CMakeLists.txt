@@ -49,6 +49,7 @@ add_library(btg_core STATIC
     src/percussion.cpp
     src/pack.cpp
     src/engine.cpp
+    src/sampler.cpp
     src/analysis.cpp
     src/file_player.cpp
     src/decode.cpp

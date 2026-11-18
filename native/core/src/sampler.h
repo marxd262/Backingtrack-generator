@@ -1,0 +1,159 @@
+#pragma once
+
+// The sampler of the engine. It follows the web app: src/audio/voices/sampler.js (playNote), sample-zones.js,
+// sample-hits.js (format 2 kits) and sample.js (notes). The fine values of the voices come from tunables.js through
+// sound.json (sound_data.h). The engine (engine.cpp) hands every event to the voice of its layer and renders the tones.
+
+#include "btg/engine.h"
+#include "btg/pack.h"
+#include "generator_internal.h"
+#include "sound_data.h"
+
+#include <array>
+#include <cmath>
+#include <cstdint>
+#include <memory>
+#include <string>
+
+namespace btg::detail {
+
+constexpr int TONES = 256;
+extern const char* const LAYER_NAMES[Engine::layerCount];
+// DRUM_NAMES, then PERCUSSION_NAMES of src/core/events.js
+extern const char* const HIT_NAMES[22];
+
+enum class Art { none, staccato, dead, chuck, choke, palmMute, hammer, slideIn, scoop, slideOff, fall, bend, vibrato, swell };
+// Every art text the generator writes (articulation.js, organ.js); PlayEvent::artName points into it (art zones compare it).
+extern const char* const ART_NAMES[22];
+
+struct PlayEvent {
+    double beat = 0.0, durBeats = 0.0; // when the engine triggers it and how long, in beats; a glide's lead is in both
+    double leadBeats = 0.0;            // slideIn, scoop: the tone starts this much before its event, the glide ends on the event
+    Engine::Layer layer = Engine::drums;
+    bool hit = false;
+    int midi = 0, name = -1;           // notes; hits: index into HIT_NAMES
+    double vel = 0.0;
+    Art art = Art::none;               // what the sampler computes (pull is hammer; arts it ignores are none)
+    const char* artName = nullptr;     // the event's art text from ART_NAMES, nullptr = none
+    double artSemi = NAN, artTime = NAN, artRate = NAN;
+    int strumIndex = -1, strumCount = 0; // chords: place of the tone in its stab and the stab's size (Event::strum)
+    double strumUp = NAN;
+    bool ring = false;
+    double t = 0.0;                    // the event's time in the stream (s): the strum compares it
+    double beatInBar = NAN;            // Event::beat
+};
+
+struct Biquad { // Web Audio BiquadFilterNode, coefficients divided by a0; process() is direct form 1
+    double b0 = 1.0, b1 = 0.0, b2 = 0.0, a1 = 0.0, a2 = 0.0, x1 = 0.0, x2 = 0.0, y1 = 0.0, y2 = 0.0;
+    double process(double x) {
+        const double y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+        x2 = x1; x1 = x; y2 = y1; y1 = y;
+        return y;
+    }
+};
+Biquad lowpass(double hz, double qDb, double sr);
+Biquad highpass(double hz, double qDb, double sr);
+Biquad peaking(double hz, double db, double q, double sr);
+Biquad lowshelf(double hz, double db, double sr);
+Biquad highshelf(double hz, double db, double sr);
+
+struct Eq { double lowDb, midDb, midHz, highDb, highHz; }; // sampler.js: shelf at 200 Hz, bell at midHz, shelf from highHz
+
+struct Note { // what playNote gets; the defaults are playNote's. Build it with designated initialisers.
+    const Pack* pack = nullptr;
+    const Pack::Zone* zone = nullptr;
+    int sample = 0, key = 0;
+    double dur = 0.0, vel = 0.0, gain = 1.0, cents = 0.0;
+    Art art = Art::none;
+    double artSemi = NAN, artTime = NAN, artRate = NAN, filter = 20000.0, naturalDecay = 0.0;
+    double lead = 0.0;              // s the tone starts before its event (glides)
+    const Eq* eq = nullptr;         // none; the tone copies what it needs
+    bool oneShot = false, ring = false;
+    int delay = 0;
+    Engine::Layer layer = Engine::drums;
+    uint64_t voice = 0;             // serial of the voice that starts it
+};
+
+// One sounding sample. Points only into its pack, never into the voice that started it: it rings out after a voice change.
+struct Tone {
+    bool active = false;
+    uint64_t serial = 0, voice = 0;
+    Engine::Layer layer = Engine::drums;
+    int delay = 0; // frames until it starts (position of the event inside the block)
+    const float* data = nullptr;
+    int channels = 1, frames = 0, loopStart = 0, loopEnd = 0;
+    bool loop = false;
+    double pos = 0.0, rate = 1.0, sr = 48000.0; // rate: frames of the sample per output frame at the note's pitch
+    // envelope: attack (linear), hold, decay (exponential) to sustain, release (exponential) from the note end
+    enum Stage { attack, hold, decay, sustain, release } stage = attack;
+    double level = 0.0, peak = 0.0, sustainLevel = 0.0, attackInc = 0.0, decayMul = 1.0, releaseMul = 1.0;
+    int holdLeft = 0, decayLeft = 0, releaseN = 1, releaseLeft = 0;
+    long long toNoteEnd = 0;
+    double tailGain = 1.0, tailMul = 1.0;   // extra decay of the tone (naturalDecay)
+    double chokeGain = 1.0, chokeMul = 1.0; // choke: falls with a time constant once chokeIn has run out
+    long long chokeIn = -1;
+    // The computed articulation that moves pitch, bend shelf or fade, as a function of the time since the start (sampler.js 201 to 234).
+    // artFrom, artLength (s): glide 0 and its length; bend hold and bend time; vibrato start and length; fall start and noteEnd - start.
+    Art art = Art::none;
+    long long age = 0;                       // frames since the start
+    double r0 = 1.0, artFrom = 0.0, artLength = 0.0;
+    double vibratoCents = 0.0, vibratoHz = 0.0, vibratoX = 0.0; // vibratoX: x where the web's curve ends, (N - 1) / 200
+    double shelfDb = 0.0, shelfNow = 0.0;    // bend: the shelf's depth d and its gain now
+    int filterCount = 0;
+    Biquad filters[5][2];                    // per channel: highpass and EQ (when eq), lowpass (when filter < 20000)
+    Biquad shelf[2];                         // bend: high shelf at 1800 Hz, after the lowpass
+    int offBy = 0;
+    double offTime = 0.0;
+
+    void start(const Note& n, double sampleRate, uint64_t number);
+    void choke(long long inFrames, double timeConstant, double sampleRate);
+    void render(float* left, float* right, int count);
+};
+
+// The pool of tones of all layers.
+struct Tones {
+    std::array<Tone, TONES> all;
+    uint64_t serial = 0;
+    double sr = 48000.0;
+
+    Tone* start(const Note& n);
+};
+
+// sample-zones.js, pickZones over artZones(zones, art): the zones as good as the best (key distance, velocity distance, width),
+// in list order. Release zones never count. `own` (optional) says whether zones of this art were found.
+int pickZones(const Pack& pack, int key, double vel01, const char* art, const Pack::Zone** best, int capacity, bool* own = nullptr);
+
+double velocityBrightnessHz(double vel, double softHz);
+
+// The fine values a voice reads (tunables.js), NaN where the voice has none.
+struct Tuned {
+    double level, decay, velExp, softHz, oneShot, humanCents, humanDb, strum, strumUp, strumTilt, lowDb, midDb, midHz, highDb, highHz, layerSpread,
+        choke, roomMic, velCurve, kitPan;
+};
+
+// What the web keeps inside a voice instance; starts over when the layer gets a new voice and when playing starts.
+struct VoiceState {
+    Rng rng { 1 };
+    const Pack::Zone* lastZone[128] = {}; // round robin: the zone played last on each key
+    uint64_t serial = 0;                  // of the voice it belongs to
+    double lastSong = -INFINITY;          // strum: stream time of the last chord tone and its place in the run
+    int strumRun = 0;
+    const Pack::Zone* lastNoteZone[128][23] = {}; // round robin of format-2 notes by key and art: 0 = none, 1 + ART_NAMES index
+};
+
+// One layer's chosen voice: built on the control thread, immutable afterwards.
+class Voice {
+public:
+    virtual ~Voice() = default;
+    // Audio thread: start what event `e` plays, `delay` frames into the current chunk. No allocation, no lock.
+    virtual void play(const PlayEvent& e, int delay, double secondsPerBeat, VoiceState& state, Tones& tones) const = 0;
+    Rng startRng { 1 }; // what state.rng starts from: Rng(1).fork("voice-<layer>")
+    Tuned tuned {};
+    std::shared_ptr<const Pack> pack;
+    Engine::Layer layer = Engine::drums;
+};
+
+// The voice for the sample voice `key` ("bass/sample/finger") with its pack; nullptr for a voice the core cannot play (the layer is silent).
+std::shared_ptr<const Voice> makeVoice(Engine::Layer layer, const std::string& key, std::shared_ptr<const Pack> pack, const Tuning& tuning);
+
+} // namespace btg::detail

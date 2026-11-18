@@ -1,6 +1,6 @@
 // Offline render of a track with the engine of the core, no JUCE:
 //   btg_render <track.json> <folder with the sample packs> <out.wav> [sample rate, default 48000] [--dry]
-// The track is JSON as normalizeTrack() of the web app writes it (see native/tools). Plays the song once.
+// The track is JSON as normalizeTrack() of the web app writes it (see native/tools). Plays the song once, then 0.2 s in which the tones ring out.
 // --dry: no limiter (the sum only gets the master gain), written as 32-bit float WAV so that nothing clips; for native/tools/sound-compare.mjs.
 #include "btg/engine.h"
 #include "btg/pack.h"
@@ -47,11 +47,15 @@ int main(int argc, char** argv) {
         std::vector<float> left(block), right(block);
         std::vector<float> samples;
         double peak = 0.0, squares = 0.0;
-        for (long long done = 0; done < songFrames + static_cast<long long>(0.2 * rate); done += block) {
-            if (done >= songFrames) transport.stop(); // the engine fades out
-            const auto position = transport.advance(block, rate);
-            engine.render(left.data(), right.data(), block, position);
-            for (int i = 0; i < block; ++i) {
+        // As native/tools/web-render.mjs renders: the song once (the last block ends on its end, so nothing of the next lap starts),
+        // then that render's 0.2 s with the clock standing at the end (playing, no advance, so no event), in which the tones ring out.
+        btg::Transport::Block position;
+        for (long long done = 0; done < songFrames + static_cast<long long>(0.2 * rate); done += position.frames) {
+            if (done < songFrames) position = transport.advance(static_cast<int>(std::min<long long>(block, songFrames - done)), rate);
+            else // exactly where the last block ended (lengthBeats may lie up to a frame on: a jump); the same start, another count would be a new one
+                position = { true, position.beats + position.frames * position.beatsPerFrame, 0.0, block, position.starts };
+            engine.render(left.data(), right.data(), position.frames, position);
+            for (int i = 0; i < position.frames; ++i) {
                 for (const float x : { left[i], right[i] }) {
                     peak = std::max(peak, static_cast<double>(std::fabs(x)));
                     squares += static_cast<double>(x) * x;

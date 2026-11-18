@@ -14,6 +14,7 @@ public:
     void play(double startBeats, double bpm) {
         bpm_ = bpm;
         seek_ = startBeats;
+        ++starts_;
         playing_ = true;
     }
     void stop() { playing_ = false; }
@@ -34,6 +35,7 @@ public:
         double beats = 0.0;         // position of the first frame
         double beatsPerFrame = 0.0;
         int frames = 0;             // how many frames this block covers (fewer than asked at a loop end)
+        unsigned starts = 0;        // calls of play() so far: a change is a new start, also without a stopped block between
     };
 
     // Audio thread. Covers at most `frames`; call again for the rest when a loop end cuts the block.
@@ -42,7 +44,7 @@ public:
         double beats = seek == seek ? seek : beats_.load(); // NaN != NaN: no jump pending
         if (!playing_) {
             beats_ = beats;
-            return { false, beats, 0.0, frames };
+            return { false, beats, 0.0, frames, starts_ };
         }
         const double step = bpm_ / 60.0 / sampleRate;
         const double start = loopStart_, end = loopEnd_;
@@ -53,12 +55,13 @@ public:
         double next = beats + count * step;
         if (looping && next >= end) next = start + (next - end);
         beats_ = next;
-        return { true, beats, step, count };
+        return { true, beats, step, count, starts_ };
     }
 
 private:
     static constexpr double none = std::numeric_limits<double>::quiet_NaN();
     std::atomic<bool> playing_ { false };
+    std::atomic<unsigned> starts_ { 0 };
     std::atomic<double> bpm_ { 120.0 };
     std::atomic<double> beats_ { 0.0 };
     std::atomic<double> seek_ { none };
