@@ -144,7 +144,7 @@ add_executable(btg_analyze tools/analyze.cpp)
 target_link_libraries(btg_analyze PRIVATE btg_core)
 btg_uses_beats(btg_analyze)
 
-# Generator against the web app at the tag port-base: Node writes the reference, the test compares.
+# Generator against the web app in the working tree (src/): Node writes the reference, the test compares.
 add_executable(btg_parity_tests tests/test_parity.cpp)
 target_link_libraries(btg_parity_tests PRIVATE btg_core nlohmann_json::nlohmann_json)
 find_program(NODE node)

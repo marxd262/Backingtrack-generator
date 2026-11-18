@@ -1,22 +1,15 @@
-// Writes the reference for the C++ generator from the web app at the tag `port-base` (read-only: the tag is
-// unpacked into the output folder, the working tree is not touched).
+// Writes the reference for the C++ generator from the web app in the working tree (src/, read only).
 //   node native/tools/export-events.mjs <outDir>           -> <outDir>/cases.json (tracks and their events)
 //   node native/tools/export-events.mjs <outDir> --data    -> also rewrites native/core/data/grooves.json
-// Only drums and bass are switched on: that is the part of the generator the core has so far.
-import { execFileSync } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+// The first groups switch on drums and bass only; the groups of the other layers follow them.
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const out = resolve(process.argv[2] ?? join(repo, 'native/build/parity'));
-const base = join(out, 'port-base');
-rmSync(base, { recursive: true, force: true });
-mkdirSync(base, { recursive: true });
-const tar = execFileSync('git', ['-C', repo, 'archive', 'port-base', 'src/core', 'src/i18n', 'src/index.js', 'src/audio', 'package.json'], { maxBuffer: 1 << 28 });
-execFileSync('tar', ['-x'], { input: tar, cwd: base }); // cwd, not -C: GNU tar reads "c:" as a host name
 
-const load = (file) => import(pathToFileURL(join(base, 'src', file)).href);
+const load = (file) => import(pathToFileURL(join(repo, 'src', file)).href);
 const { buildEvents, STYLE_PRESETS, GROOVES, METERS } = await load('index.js');
 const { normalizeTrack } = await load('core/track.js');
 const { resolveVoices } = await load('core/voices.js');
