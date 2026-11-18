@@ -184,7 +184,7 @@ void drumRules(Env& env) {
             for (int beat = 1; beat < b.beats; beat += 2) add(b, beat * b.sub, "hatPedal", 0.35);
         }
         // before a stop: crash on the last hit before the silence, choked after 50 to 150 ms (sample kits only)
-        if (c.stop && env.track.drumsVoice == "sample") {
+        if (c.stop && env.track.voice("drums").id == "sample") {
             const std::vector<Event*>& now = *hitsOf(index);
             Event* last = now[0];
             for (Event* e : now) if (e->t > last->t) last = e;
@@ -218,7 +218,7 @@ void drumRules(Env& env) {
 }
 
 void bassRules(Env& env) {
-    const std::string& variant = env.track.bassVariant;
+    const std::string& variant = env.track.voice("bass").variant;
     const BassProfile P = bassProfile(env.profile);
     if (variant == "upright") return; // the double bass has rules of its own
     const auto& bars = env.bars;
@@ -347,7 +347,7 @@ void drumRulesB(Env& env) {
 void bassRulesB(Env& env) {
     const BassBProfile P = bassBProfile(env.profile);
     const double beat = 60 / env.track.bpm;
-    if (env.track.bassVariant == "upright") return;
+    if (env.track.voice("bass").variant == "upright") return;
     const std::vector<Event*> notes = env.notes("bass");
     for (size_t i = 0; i < notes.size(); ++i) {
         Event& n = *notes[i];
@@ -382,6 +382,45 @@ void bassRulesB(Env& env) {
     }
 }
 
+// Pad and strings: voice leading, and a swell at the start of a part (in a ballad at every chord change).
+void padRules(Env& env) {
+    std::map<int, std::vector<Event*>> byBar; // in the order of the stream
+    for (Event* e : env.out) if (isNote(*e, "pad")) byBar[e->bar].push_back(e);
+    std::vector<int> prev; // where the basic voices lay in the bar before
+    int prevBar = -2;
+    for (auto& [index, notes] : byBar) {
+        const Context& c = env.ctx[index];
+        const size_t n = chordTones(env.bars[index].chord, 3).size(), base = std::min(n, notes.size());
+        // every chord tone takes the octave nearest to a tone of the chord before (shared tones stay), within 48..72;
+        // the doubling of a wide pad follows. After a gap the voicing starts anew
+        if (prevBar == index - 1) {
+            for (size_t k = 0; k < base; ++k) {
+                Event& e = *notes[k];
+                int best = e.midi, dist = std::numeric_limits<int>::max();
+                for (const int m : prev) {
+                    const int d = ((((e.midi - m) % 12) + 18) % 12) - 6;
+                    if (std::abs(d) < dist) { dist = std::abs(d); best = m + d; }
+                }
+                while (best < 48) best += 12;
+                while (best > 72) best -= 12;
+                e.midi = best;
+                if (n + k < notes.size()) notes[n + k]->midi = best + 12;
+            }
+        }
+        prev.clear();
+        for (size_t k = 0; k < base; ++k) prev.push_back(notes[k]->midi);
+        prevBar = index;
+        // swell: 0.3 to 1.5 s, at most half the note
+        if (c.first || (env.profile == "ballad" && c.change)) {
+            const double time = clamp((0.3 + 1.2 * env.roll(c, "pad", "swell")) * env.tempo, 0.3, 1.5);
+            for (Event* e : notes) {
+                e->art = "swell";
+                e->artTime = r6(std::min(time, e->dur / 2));
+            }
+        }
+    }
+}
+
 } // namespace
 
 std::vector<Event> articulate(const std::vector<Event>& events, const Track& track, const std::vector<Bar>& bars,
@@ -396,6 +435,7 @@ std::vector<Event> articulate(const std::vector<Event>& events, const Track& tra
     // the order of the groups is the order of RULES in the JavaScript
     if (track.layer("drums")) drumRules(env);
     if (track.layer("bass")) bassRules(env);
+    if (track.layer("pad")) padRules(env);
     if (track.layer("drums")) drumRulesB(env);
     if (track.layer("bass")) bassRulesB(env);
     sortByTime(env.out);

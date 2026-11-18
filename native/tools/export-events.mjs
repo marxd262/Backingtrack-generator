@@ -33,7 +33,7 @@ function add(name, style, seed, extra = {}) {
   const pick = createRng(seed * 7919 + cases.length).fork('case');
   const meter = extra.meter ?? [4, 4];
   const beats = METERS[`${meter[0]}/${meter[1]}`].beats;
-  const key = pick.pick(KEYS);
+  const key = pick.pick(extra.keys ?? KEYS);
   const track = {
     key, bpm: style.bpm, seed, meter,
     bars: progressionFor(key, seed).map((chord, i) => ({ chord, beats: extra.oddBeats?.[i] ?? beats })),
@@ -89,6 +89,22 @@ for (const [g, id] of Object.keys(GROOVES).entries()) {
     add(`groove-${id}`, style, seed, { meter, track: { groove: id, ...(seed % 2 ? { length: 16 } : {}) }, ...(seed % 2 ? {} : { form: rolled(['pop', 'blues', 'buildDrop'][seed % 3], [24, 32]) }) });
   }
   add(`odd-${id}`, styles[g % styles.length], 601, { meter, oddBeats: [2, 6, 3, 5], track: { groove: id, length: 12 } });
+}
+
+// ---- The layers after drums and bass. Their groups come last and draw from their own list of keys, so the
+// cases above stay exactly as they were.
+const KEYS_ALL = [...KEYS, { root: 'E', mode: 'phrygian' }, { root: 'F', mode: 'lydian' }, { root: 'G', mode: 'mixolydian' }];
+const autoForm = (style) => (track, pick) => rollForm({ template: 'auto', style: style.id, targetBars: pick.pick([24, 32, 48]), seed: track.seed, tags: track.tags });
+
+// pad: every pad voice, with and without a form; two styles get a wide pad (`dreamy` lifts padWidth over 0.6)
+const PAD_VOICES = [{ id: 'sample', variant: 'strings' }, { id: 'sample', variant: 'warm' }, { id: 'synth', variant: 'classic' }];
+for (const [s, style] of STYLE_PRESETS.entries()) {
+  for (let seed = 701; seed <= 708; seed++) {
+    const track = { voices: { ...style.voices, pad: PAD_VOICES[(s + seed) % PAD_VOICES.length] } };
+    if (s % 4 === 1) track.tags = { ...style.tags, mood: ['dreamy'] };
+    if (seed > 706) track.length = 24;
+    add('pad', style, seed, { layers: { ...ONLY, pad: true }, keys: KEYS_ALL, track, ...(seed > 706 ? {} : { form: autoForm(style) }) });
+  }
 }
 
 mkdirSync(out, { recursive: true });

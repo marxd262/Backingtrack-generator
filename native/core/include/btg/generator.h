@@ -29,8 +29,8 @@ struct Event {
     bool ring = false;          // chords: the stab rings out
 };
 
-// Port of buildEvents() of the web app (src/core/events.js at the tag port-base), so far for the layers
-// drums and bass. `trackJson` is a track as normalizeTrack() writes it, with `voices` filled in; it is not
+// Port of buildEvents() of the web app (src/core/events.js), so far for the layers
+// drums, bass and pad. `trackJson` is a track as normalizeTrack() writes it, with `voices` filled in; it is not
 // validated here. Throws std::runtime_error for a track this port cannot play (another layer switched on).
 std::vector<Event> buildEvents(const std::string& trackJson);
 

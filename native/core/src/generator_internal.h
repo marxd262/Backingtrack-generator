@@ -73,7 +73,9 @@ struct Track {
     std::vector<std::pair<std::string, std::vector<std::string>>> tags; // in the order given: it decides the order of sums
     std::map<std::string, bool> layers;
     uint32_t seed = 1;
-    std::string bassVariant, drumsVoice;      // voices.bass.variant, voices.drums.id
+    struct Voice { std::string id, variant; };
+    std::map<std::string, Voice> voices;      // voices.<layer>: the rules ask which voice plays
+    std::map<std::string, std::string> jobs;  // jobs.<layer>, for the layers that have jobs (lead, percussion)
     bool hasForm = false;
     std::vector<Part> parts;
     double dynamics = 0.6, pauses = 0.4, randomness = 0.5; // form.feel
@@ -83,6 +85,11 @@ struct Track {
         return false;
     }
     bool layer(const std::string& id) const { const auto it = layers.find(id); return it != layers.end() && it->second; }
+    const Voice& voice(const std::string& layer) const {
+        static const Voice none;
+        const auto it = voices.find(layer);
+        return it != voices.end() ? it->second : none;
+    }
 };
 
 struct Bar { // src/core/timeline.js, barTimeline
@@ -102,7 +109,8 @@ struct Resolved { // src/core/form-types.js, resolveSection
 
 struct Section {
     int start = 0, bars = 0;
-    bool drums = false, bass = false; // layers that play in it
+    std::map<std::string, bool> layers; // which layers play in it
+    bool plays(const std::string& layer) const { const auto it = layers.find(layer); return it != layers.end() && it->second; }
     bool fillAtEnd = false;
     std::string kind;                 // type of the part, empty without a form
     int index = 0;
@@ -130,6 +138,7 @@ double densityAt(const Resolved& r, int barInSection);
 double levelAt(const Resolved& r, int barInSection);
 std::string grooveIdFor(const Track& track);
 std::vector<std::pair<int, int>> phrasesOf(const Section& sec); // start, bars
+std::vector<int> chordTones(const Chord& chord, int octave);    // src/core/music.js: MIDI = 12 * (octave + 1) + pitch class + interval
 
 std::vector<Event> articulate(const std::vector<Event>& events, const Track& track, const std::vector<Bar>& bars,
                               const std::vector<Section>& sections, const Params& params, const Rng& rng);

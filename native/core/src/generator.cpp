@@ -1,6 +1,6 @@
-// Port of the event generator of the web app (src/core at the tag port-base): events.js, event-helpers.js,
+// Port of the event generator of the web app (src/core): events.js, event-helpers.js,
 // timeline.js, tags.js, grooves.js, arrange.js, form-arrange.js, form-types.js, form.js (chordIndex),
-// form-post.js, microtiming.js. Layers so far: drums and bass. See generator_internal.h for the rules of the port.
+// form-post.js, microtiming.js. Layers so far: drums, bass and pad. See generator_internal.h for the rules of the port.
 #include "generator_internal.h"
 
 #include <nlohmann/json.hpp>
@@ -131,8 +131,11 @@ Track parseTrack(const std::string& text) {
     for (const auto& [category, list] : j.at("tags").items()) t.tags.push_back({ category, list.get<std::vector<std::string>>() });
     for (const auto& [id, on] : j.at("layers").items()) t.layers[id] = on.is_boolean() && on.get<bool>();
     t.seed = static_cast<uint32_t>(static_cast<int64_t>(j.at("seed").get<double>())); // seed >>> 0
-    t.bassVariant = j.at("voices").at("bass").value("variant", "");
-    t.drumsVoice = j.at("voices").at("drums").value("id", "");
+    for (const auto& [layer, voice] : j.at("voices").items()) t.voices[layer] = { voice.value("id", ""), voice.value("variant", "") };
+    // completeJobs: the job given, else the first one of the layer
+    t.jobs = { { "lead", "off" }, { "percussion", "mixed" } };
+    if (j.contains("jobs") && j["jobs"].is_object())
+        for (auto& [layer, job] : t.jobs) if (j["jobs"].contains(layer) && j["jobs"][layer].is_string()) job = j["jobs"][layer].get<std::string>();
     if (j.contains("form") && j["form"].is_object()) {
         const auto& form = j["form"];
         t.hasForm = true;
@@ -260,7 +263,12 @@ int levelOf(double value, const std::vector<double>& thresholds) {
 
 // ---------- arrangement ----------
 
-bool contains(const std::vector<std::string>& list, const char* item) { return std::find(list.begin(), list.end(), item) != list.end(); }
+// layers.js: lead plays where the chords play, percussion where the drums play (`follows`)
+void setLayers(Section& sec, const std::vector<std::string>& on) {
+    static const std::pair<const char*, const char*> FOLLOWS[] = {
+        { "drums", "drums" }, { "bass", "bass" }, { "chords", "chords" }, { "pad", "pad" }, { "lead", "chords" }, { "percussion", "drums" } };
+    for (const auto& [id, source] : FOLLOWS) sec.layers[id] = std::find(on.begin(), on.end(), source) != on.end();
+}
 
 // src/core/arrange.js: without a form, sections of 8 bars
 std::vector<Section> buildArrangement(const Track& track, const Params& params, Rng& rng) {
@@ -279,8 +287,7 @@ std::vector<Section> buildArrangement(const Track& track, const Params& params, 
         Section sec;
         sec.start = i * 8;
         sec.bars = std::min(8, track.length - sec.start);
-        sec.drums = contains(on, "drums");
-        sec.bass = contains(on, "bass");
+        setLayers(sec, on);
         sec.fillAtEnd = !isLast;
         out.push_back(sec);
     }
@@ -324,8 +331,7 @@ std::vector<Section> buildFormArrangement(const Track& track) {
         Section sec;
         sec.start = start;
         sec.bars = track.parts[index].bars;
-        sec.drums = contains(resolved[index].layers, "drums");
-        sec.bass = contains(resolved[index].layers, "bass");
+        setLayers(sec, resolved[index].layers);
         sec.fillAtEnd = index + 1 < resolved.size() && resolved[index + 1].transition == "fill";
         sec.kind = track.parts[index].type;
         sec.index = static_cast<int>(index);
@@ -463,6 +469,25 @@ void playBass(std::vector<Event>& events, const Bar& b, const BassPattern& patte
     }
 }
 
+void playPad(std::vector<Event>& events, const Bar& b, Rng& rng, const Params& params) {
+    std::vector<int> midis = chordTones(b.chord, 3);
+    if (params.padWidth > 0.6) // a wide pad doubles the voicing an octave up
+        for (size_t i = 0, n = midis.size(); i < n; ++i) midis.push_back(midis[i] + 12);
+    const double t = r6(b.start);
+    for (const int m : midis) {
+        Event e;
+        e.t = t;
+        e.bar = b.index;
+        e.beat = 0.0;
+        e.type = Event::Type::note;
+        e.layer = "pad";
+        e.midi = m;
+        e.vel = humanVel(0.6, rng);
+        e.dur = r6(std::min(b.end - b.start, b.end - t));
+        events.push_back(e);
+    }
+}
+
 // ---------- song form on the finished stream (src/core/form-post.js) ----------
 
 std::vector<Event> postProcess(std::vector<Event> out, const Track& track, const std::vector<Bar>& bars, const std::vector<Section>& sections, Rng rng) {
@@ -492,7 +517,7 @@ std::vector<Event> postProcess(std::vector<Event> out, const Track& track, const
         const int lastBar = sec.start + sec.bars - 1;
         const Bar& b = bars[lastBar];
         const std::string transition = transitionAfter(sec);
-        if (transition == "roll" && track.layer("drums") && sec.drums) {
+        if (transition == "roll" && track.layer("drums") && sec.plays("drums")) {
             const double half = b.beats / 2.0, unit = b.sub == 4 ? 2 : 1, mid = b.steps / 2.0;
             std::vector<double> steps;
             for (double s = mid; s < mid + (b.steps - mid) / 2; s += unit) steps.push_back(s);
@@ -577,7 +602,8 @@ std::vector<Event> applyMicrotiming(std::vector<Event> out, const Track& track, 
             name = e.name == "snare" && e.vel < 0.3 ? "ghost" : basic != DRUM_FALLBACK.end() ? basic->second : e.name;
         }
         const auto offset = offsets.find(name);
-        const Drift& d = drifts[e.layer];
+        const auto found = drifts.find(e.layer); // the pad has none
+        const Drift d = found != drifts.end() ? found->second : Drift { 0, 1, 1, 0, 0 };
         const double drift = d.ms * (0.6 * std::sin((2 * pi * e.t) / d.p1 + d.f1) + 0.4 * std::sin((2 * pi * e.t) / d.p2 + d.f2));
         const double ms = amount * (1 * (offset != offsets.end() ? offset->second : 0.0) + 1 * drift);
         const double t = r6(std::min(b.end - 0.001, std::max(b.start, e.t + ms / 1000)));
@@ -613,6 +639,19 @@ std::vector<std::pair<int, int>> phrasesOf(const Section& sec) {
     return out;
 }
 
+std::vector<int> chordTones(const Chord& chord, int octave) {
+    static const std::map<std::string, std::vector<int>> INTERVALS { // src/core/chords.js
+        { "maj", { 0, 4, 7 } }, { "min", { 0, 3, 7 } }, { "dim", { 0, 3, 6 } }, { "aug", { 0, 4, 8 } }, { "sus2", { 0, 2, 7 } }, { "sus4", { 0, 5, 7 } },
+        { "power", { 0, 7 } }, { "dom7", { 0, 4, 7, 10 } }, { "maj7", { 0, 4, 7, 11 } }, { "min7", { 0, 3, 7, 10 } }, { "m7b5", { 0, 3, 6, 10 } },
+        { "dim7", { 0, 3, 6, 9 } }, { "maj6", { 0, 4, 7, 9 } }, { "min6", { 0, 3, 7, 9 } }, { "add9", { 0, 4, 7, 14 } }, { "dom9", { 0, 4, 7, 10, 14 } },
+        { "min9", { 0, 3, 7, 10, 14 } },
+    };
+    const int base = 12 * (octave + 1) + noteToPc(chord.root);
+    std::vector<int> out;
+    for (const int i : INTERVALS.at(chord.quality)) out.push_back(base + i);
+    return out;
+}
+
 } // namespace detail
 
 std::vector<Event> buildEvents(const std::string& trackJson) { return buildSong(trackJson).events; }
@@ -621,7 +660,7 @@ Song buildSong(const std::string& trackJson) {
     using namespace detail;
     const Track track = parseTrack(trackJson);
     for (const auto& [id, on] : track.layers)
-        if (on && id != "drums" && id != "bass") throw std::runtime_error("layer not ported yet: " + id);
+        if (on && id != "drums" && id != "bass" && id != "pad") throw std::runtime_error("layer not ported yet: " + id);
 
     const Rng master(track.seed);
     Rng tagRng = master.fork("tags");
@@ -675,14 +714,17 @@ Song buildSong(const std::string& trackJson) {
         }
     }
 
-    // One random stream per layer. With a form: per 4-bar phrase a new pattern with probability `randomness`
-    // (the coin has its own stream), and whenever the density ramps.
-    const auto run = [&](const std::string& layer, bool Section::*plays, auto section, auto play) {
+    // One random stream per layer, in the order of the layers (it decides the order of events at the same time).
+    // With a form: per 4-bar phrase a new pattern with probability `randomness` (the coin has its own stream), and
+    // whenever the density ramps. Lead and percussion follow another layer and have no coin: they keep their state
+    // over the whole part.
+    const auto run = [&](const std::string& layer, auto section, auto play) {
         if (!track.layer(layer)) return;
         Rng rng = master.fork(layer);
         Rng coin = master.fork("form:" + layer);
+        const bool tossed = track.hasForm && layer != "lead" && layer != "percussion";
         for (const Section& sec : sections) {
-            if (!(sec.*plays)) continue;
+            if (!sec.plays(layer)) continue;
             const int last = sec.start + sec.bars - 1;
             const auto paramsAt = [&](int i) { return track.hasForm ? withSection(params, sec.resolved, i - sec.start, track.randomness) : params; };
             decltype(section(params, rng, sec)) v {};
@@ -690,22 +732,25 @@ Song buildSong(const std::string& trackJson) {
             const auto phrases = track.hasForm ? phrasesOf(sec) : std::vector<std::pair<int, int>> { { sec.start, sec.bars } };
             for (const auto& [start, count] : phrases) {
                 const double density = track.hasForm ? densityAt(sec.resolved, start - sec.start) : 0.0;
-                const bool coinHit = start != sec.start && track.hasForm && coin.next() < track.randomness;
-                if (start == sec.start || coinHit || (track.hasForm && density != prevDensity)) v = section(paramsAt(start), rng, sec);
+                const bool coinHit = start != sec.start && tossed && coin.next() < track.randomness;
+                if (start == sec.start || coinHit || (tossed && density != prevDensity)) v = section(paramsAt(start), rng, sec);
                 prevDensity = density;
                 for (int i = start; i < start + count; ++i) play(bars[i], v, rng, paramsAt(i), sec.fillAtEnd && i == last);
             }
         }
     };
-    run("drums", &Section::drums,
+    run("drums",
         [&](const Params& p, Rng& rng, const Section& sec) { return drumSection(p, rng, g, sec); },
         [&](const Bar& b, const DrumVoicing& v, Rng& rng, const Params& p, bool fill) { playDrums(events, b, v, rng, p, fill, g); });
-    run("bass", &Section::bass,
+    run("bass",
         [&](const Params& p, Rng& rng, const Section&) {
             const int step = levelOf(p.bassMovement, g.bassThresholds);
             return rng.pick(pool(g.bassTiers[step], g.bassExtra[step], p));
         },
         [&](const Bar& b, const BassPattern* v, Rng& rng, const Params& p, bool) { playBass(events, b, *v, rng, p, g); });
+    run("pad",
+        [](const Params&, Rng&, const Section&) { return 0; }, // the pad has no pattern to choose
+        [&](const Bar& b, int, Rng& rng, const Params& p, bool) { playPad(events, b, rng, p); });
 
     sortByTime(events);
     if (track.hasForm) events = postProcess(std::move(events), track, bars, sections, master.fork("form"));
