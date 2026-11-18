@@ -91,7 +91,7 @@ Bis auf Bruchstücke, die der Generator braucht, ist nichts davon im Kern. Zusam
 
 **Bleibt in der Seite (JavaScript):** nur Anzeige und Eingabe: DOM, Zeichnen (Spuren, Griffbrett, Akkordrad, Drehknöpfe) mit seiner Geometrie, Texte in beiden Sprachen, Ziehen und Ablegen, Tastaturbedienung, und der reine Anzeigezustand (Fokus oder Einstellen, Beschriftung, Bünde, Sprache). Die Seite rechnet keine Musik, keinen Klang und keinen gespeicherten Zustand mehr.
 
-**Lesart, vom Nutzer zu bestätigen:** „Weg von JavaScript“ ist hier als „Logik und Zustand in den Kern“ umgesetzt; die Oberfläche bleibt HTML in der WebView. Ein Neubau der Oberfläche mit JUCE-Bausteinen wäre ein eigenes Vorhaben von Wochen, würfe die Rack-Oberfläche weg und stünde dem späteren Hosten im Web entgegen (offene Entscheidung 1).
+**Vom Nutzer bestätigt (2026-11-18):** „Weg von JavaScript“ heißt „Logik und Zustand in den Kern“; die Oberfläche bleibt HTML in der WebView.
 
 **Später, nicht in diesem Plan:**
 
@@ -105,7 +105,7 @@ Bis auf Bruchstücke, die der Generator braucht, ist nichts davon im Kern. Zusam
 - Regelgruppe `chordsB` (Slide-Akkord, Verzierung): im Standard aus (`ART_DEFAULTS.chordsB = 0`) und in der Oberfläche nicht einschaltbar.
 - Optionen `timing` und `ornaments` von `play`: nur die Hörprobe-Seite gibt sie mit, die Oberfläche nie.
 - Eigenes Fenster für die Audio-Einstellungen: das Fenster der JUCE-Hülle reicht.
-- Spektrogramm-Seite (`spectrogram.html`): Entwicklerwerkzeug der Web-Version, entfällt mit ihr. Zur Hörprobe-Seite siehe offene Entscheidung 2.
+- Spektrogramm-Seite (`spectrogram.html`): Entwicklerwerkzeug der Web-Version, entfällt mit ihr. Die Hörprobe-Seite kommt in die App (Task 35a).
 
 ## Global Constraints
 
@@ -537,7 +537,7 @@ Fertig, wenn die Seiten der App keine Zeile aus `src/core` oder `src/audio` mehr
 
 **Files:** Create `native/tests/ui/` (Playwright-Tests, Vorrichtung, die die App stumm startet und sich wie `ui-check.mjs` verbindet); Modify `playwright.config.js`.
 
-**Inhalt:** Die 21 Testdateien aus `tests/e2e`, die die Oberfläche prüfen, werden übernommen und angepasst (Start der Seite, Zugriff auf den Zustand). Nicht übernommen werden die 9 Dateien, die Web Audio messen (`levels`, `mix`, `play`, `sample-v2`, `sound`, `voices-*-sound`; ihren Zweck erfüllen `sound-compare.mjs` und die Engine-Tests), und `spectrogram`; `audition` hängt an der offenen Entscheidung 2.
+**Inhalt:** Die 21 Testdateien aus `tests/e2e`, die die Oberfläche prüfen, werden übernommen und angepasst (Start der Seite, Zugriff auf den Zustand). Nicht übernommen werden die 9 Dateien, die Web Audio messen (`levels`, `mix`, `play`, `sample-v2`, `sound`, `voices-*-sound`; ihren Zweck erfüllen `sound-compare.mjs` und die Engine-Tests), und `spectrogram`; `audition` wird mit Task 35a übernommen.
 
 **Prüfung:** alle übernommenen Tests grün gegen die App; in `native/UEBERGABE.md` steht je nicht übernommenem Test, was ihn ersetzt.
 
@@ -558,6 +558,14 @@ Fertig, wenn die Seiten der App keine Zeile aus `src/core` oder `src/audio` mehr
 **Inhalt:** Profil und Ordner speichern, laden und sichern über den Dateidialog der App (Formate aus Task 30) statt über den Download-Link der Web-Version; „Weitermachen“ nach Neustart der App; die Seite „Credits“; ein Profil aus der Web-Version mit der entfernten Stimme `chords sample/organ` lässt sich laden.
 
 **Prüfung:** die vier Wege als Tests in `native/tests/ui`.
+
+### Task 35a: Hörprobe-Seite in der App
+
+**Files:** Create `native/app/ui/audition.html` mit ihrem Skript (nach `src/ui/render-harness.html`); Modify `native/app/PluginEditor.cpp` (dritte Seite in der Leiste).
+
+**Inhalt:** Stimme und Variante je Instrument wählen, auch im Spiel; Feinwerte live verstellen (`Engine::setTuning`); „Ton anspielen“; „Werte exportieren“ schreibt die geänderten Feinwerte im Format von `native/core/data/sound.json`. Die Seite ist ein Werkzeug für den Nutzer und hält sich an dieselbe Regel wie die anderen: Sie zeichnet und schickt Eingaben.
+
+**Prüfung:** `audition` aus `tests/e2e` als Test in `native/tests/ui`: ein verstellter Feinwert ändert den Pegel der Schicht messbar, der Export enthält genau die geänderten Werte.
 
 ---
 
@@ -610,10 +618,10 @@ In Arbeitstagen der KI, ohne Hör- und Testzeit des Nutzers; Grundlage sind die 
 - **Die Web-Version entfällt**, sobald die native App alles abdeckt (Nutzer, 2026-11-18; Phase 9).
 - **WebAssembly fürs Hosten im Web** ist ein späterer Schritt und nicht Teil dieses Plans (Nutzer, 2026-11-18).
 
+- **Die Oberfläche bleibt HTML in der WebView** und wird reine Anzeige (Nutzer, 2026-11-18); kein Neubau mit JUCE-Bausteinen.
+- **Die Hörprobe-Seite kommt in die App** (Nutzer, 2026-11-18): als dritte Seite auf der Engine, Task 35a in Phase 8.
+- **Die JavaScript-Schnittstelle `src/index.js` entfällt mit Phase 9** (Nutzer, 2026-11-18); Interactive Scales bindet den Generator später über die WebAssembly-Fassung ein.
+
 ## Offene Entscheidungen des Nutzers
 
-Keine davon hält die Phasen 1 bis 5 auf.
-
-1. **Oberfläche:** Bleibt sie HTML in der WebView und wird reine Anzeige (so steht es im Plan), oder soll auch sie mit JUCE-Bausteinen neu gebaut werden? Das zweite wäre ein eigenes Vorhaben von Wochen und stünde dem späteren Hosten im Web entgegen. (Vor Phase 7.)
-2. **Hörprobe-Seite:** Mit der Web-Version entfällt die Seite, auf der die Feinwerte live verstellt und exportiert werden. Soll es sie in der App geben? Vorschlag: ja, als dritte Seite auf der Engine, eingeplant in Phase 8, sobald entschieden. (Vor Phase 8.)
-3. **Interactive Scales:** Einverstanden, dass die JavaScript-Schnittstelle `src/index.js` mit Phase 9 entfällt? (Vor Task 37.)
+Keine.
