@@ -172,6 +172,17 @@ for (const [g, id] of Object.keys(GROOVES).entries()) {
   add(`lead-${id}`, style, 1150 + g, { meter, layers: WITH_LEAD, keys: KEYS_ALL, form: autoForm(style), track: { groove: id, jobs: { lead: LEAD_JOBS[g % 4] }, voices: { ...style.voices, lead: LEAD_VOICES[g % LEAD_VOICES.length] } } });
 }
 
+// percussion: every job in every groove, sparse, normal and dense
+const PERCUSSION_JOBS = ['mixed', 'shaker', 'tambourine', 'congas', 'bongos', 'claves', 'cowbell'];
+for (const [g, id] of Object.keys(GROOVES).entries()) {
+  for (const [j, job] of PERCUSSION_JOBS.entries()) {
+    const k = g + j, style = styles[k % styles.length], plain = k % 4 === 3;
+    const track = { groove: id, jobs: { percussion: job }, complexity: [0.1, 0.5, 0.9][k % 3] };
+    if (plain) track.length = 16;
+    add(`percussion-${id}`, style, 1200 + j, { meter: GROOVES[id].meter.split('/').map(Number), layers: { ...ONLY, percussion: true }, keys: KEYS_ALL, track, ...(plain ? {} : { form: autoForm(style) }) });
+  }
+}
+
 mkdirSync(out, { recursive: true });
 writeFileSync(join(out, 'cases.json'), JSON.stringify(cases));
 const total = cases.reduce((n, c) => n + c.events.length, 0);

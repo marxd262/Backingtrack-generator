@@ -44,6 +44,7 @@ add_library(btg_core STATIC
     src/articulation_harmony.cpp
     src/organ.cpp
     src/lead.cpp
+    src/percussion.cpp
     src/pack.cpp
     src/engine.cpp
     src/analysis.cpp

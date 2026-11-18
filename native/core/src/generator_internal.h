@@ -160,6 +160,11 @@ struct LeadState { // what the jobs remember over a part
 // `arpStep` is the groove's (chords.arpStep). The job comes from track.jobs; `off` writes nothing and draws nothing.
 void playLead(std::vector<Event>& events, const Bar& b, LeadState& v, Rng& rng, const Params& params, bool fill, int arpStep, const Track& track);
 
+// src/core/percussion.js. From the groove: the thresholds of the drums, the length of its cycle in steps, and the
+// backbeat (the snare steps of the second drum level).
+void playPercussion(std::vector<Event>& events, const Bar& b, Rng& rng, const Params& params, const std::string& job,
+                    const std::vector<double>& drumThresholds, int cycle, const std::vector<int>& backbeat);
+
 std::vector<Event> articulate(const std::vector<Event>& events, const Track& track, const std::vector<Bar>& bars,
                               const std::vector<Section>& sections, const Params& params, const Rng& rng);
 

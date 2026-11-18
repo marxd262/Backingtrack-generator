@@ -737,8 +737,6 @@ std::vector<Event> buildEvents(const std::string& trackJson) { return buildSong(
 Song buildSong(const std::string& trackJson) {
     using namespace detail;
     const Track track = parseTrack(trackJson);
-    for (const auto& [id, on] : track.layers)
-        if (on && id == "percussion") throw std::runtime_error("layer not ported yet: " + id);
 
     const Rng master(track.seed);
     Rng tagRng = master.fork("tags");
@@ -835,6 +833,9 @@ Song buildSong(const std::string& trackJson) {
     run("lead",
         [](const Params&, Rng&, const Section& sec) { LeadState v; v.start = sec.start; v.bars = sec.bars; return v; },
         [&](const Bar& b, LeadState& v, Rng& rng, const Params& p, bool fill) { playLead(events, b, v, rng, p, fill, g.arpStep, track); });
+    run("percussion",
+        [](const Params&, Rng&, const Section&) { return 0; },
+        [&](const Bar& b, int, Rng& rng, const Params& p, bool) { playPercussion(events, b, rng, p, track.jobs.at("percussion"), g.drumThresholds, g.cycle, g.drumTiers[1].snare); });
 
     sortByTime(events);
     if (track.hasForm) events = postProcess(std::move(events), track, bars, sections, master.fork("form"));
