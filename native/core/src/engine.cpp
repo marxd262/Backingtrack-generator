@@ -222,6 +222,7 @@ struct Engine::Impl {
     std::atomic<int> beatsPerBar { 4 };
     std::atomic<float> fader[layerCount], pan[layerCount], master { 1.0f }, drive { 0.0f }, peaks[layerCount + 1];
     std::atomic<bool> muted[layerCount];
+    std::atomic<bool> limiterOn { true };
 
     // audio side
     std::shared_ptr<const PlaySong> song;
@@ -370,6 +371,7 @@ void Engine::setMuted(Layer layer, bool muted) { impl_->muted[layer] = muted; }
 void Engine::setPan(Layer layer, float pan) { impl_->pan[layer] = std::clamp(pan, -1.0f, 1.0f); }
 void Engine::setMaster(float fader) { impl_->master = std::clamp(fader, 0.0f, 1.0f); }
 void Engine::setBassDrive(float amount) { impl_->drive = std::clamp(amount, 0.0f, 1.0f); }
+void Engine::setLimiter(bool on) { impl_->limiterOn = on; }
 float Engine::takePeak(int channel) { return impl_->peaks[channel].exchange(0.0f); }
 
 void Engine::prepare(double sampleRate) {
@@ -444,6 +446,7 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
         for (Voice& v : m.voices) if (v.active) v.render(m.buffers[v.layer][0], m.buffers[v.layer][1], count);
 
         const float driveTarget = m.drive, masterTarget = m.master * m.master;
+        const bool limit = m.limiterOn;
         float peak[layerCount + 1] = {};
         for (int i = 0; i < count; ++i) {
             // drive on the bass: a soft clipper, blended in so that 0 leaves the signal untouched
@@ -467,14 +470,18 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
             }
             // Limiter as in the web sum (-10 dB, ratio 20, 1 ms / 100 ms, with its automatic make-up of 5.7 dB).
             // shortcut: plain peak follower with 6 ms look-ahead, not the browser's compressor (its knee and adaptive release); the sound match of the full port needs that one rebuilt.
-            const double in = std::max(std::fabs(sum[0]), std::fabs(sum[1])) * MASTER;
-            m.limiterEnv = in + (m.limiterEnv - in) * (in > m.limiterEnv ? limiterAttack : limiterRelease);
-            for (int c = 0; c < 2; ++c) std::swap(sum[c], m.ahead[c][m.aheadAt]); // out comes what went in 6 ms ago
-            m.aheadAt = (m.aheadAt + 1) % m.aheadFrames;
-            const double over = 20 * std::log10(std::max(m.limiterEnv, 1e-9)) + 10;
-            const double gain = (over > 0 ? std::pow(10.0, -over * (1 - 1.0 / 20) / 20) : 1.0) * 1.928 * MASTER;
+            double gain = MASTER; // limiter off: the sum only gets the fixed master gain
+            if (limit) {
+                const double in = std::max(std::fabs(sum[0]), std::fabs(sum[1])) * MASTER;
+                m.limiterEnv = in + (m.limiterEnv - in) * (in > m.limiterEnv ? limiterAttack : limiterRelease);
+                for (int c = 0; c < 2; ++c) std::swap(sum[c], m.ahead[c][m.aheadAt]); // out comes what went in 6 ms ago
+                m.aheadAt = (m.aheadAt + 1) % m.aheadFrames;
+                const double over = 20 * std::log10(std::max(m.limiterEnv, 1e-9)) + 10;
+                gain = (over > 0 ? std::pow(10.0, -over * (1 - 1.0 / 20) / 20) : 1.0) * 1.928 * MASTER;
+            }
             m.masterNow += smoothLevel * (masterTarget - m.masterNow);
-            const float l = std::clamp(static_cast<float>(sum[0] * gain) * m.masterNow, -1.0f, 1.0f), r = std::clamp(static_cast<float>(sum[1] * gain) * m.masterNow, -1.0f, 1.0f);
+            float l = static_cast<float>(sum[0] * gain) * m.masterNow, r = static_cast<float>(sum[1] * gain) * m.masterNow;
+            if (limit) { l = std::clamp(l, -1.0f, 1.0f); r = std::clamp(r, -1.0f, 1.0f); }
             peak[layerCount] = std::max(peak[layerCount], std::max(std::fabs(l), std::fabs(r)));
             left[done + i] = l;
             right[done + i] = r;

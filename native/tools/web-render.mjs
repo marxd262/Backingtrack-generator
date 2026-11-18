@@ -9,7 +9,8 @@ const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.json': 'applic
 // warps (optional, per track): points [seconds as generated, seconds as rendered], ascending: a tempo curve laid
 // over the track's steady tempo. Every event starts at its moved time.
 // shortcut: note lengths and echo times stay at the track's own tempo, fine for a few percent of change; move them too when the curve gets steep.
-export async function renderWeb(repo, tracks, rate, warps = []) {
+// options (optional, per track): { tuning, limiter } as createInstruments takes them (limiter: false renders the mix before the limiter).
+export async function renderWeb(repo, tracks, rate, warps = [], options = []) {
   const browser = await chromium.launch();
   try {
     const page = await browser.newPage();
@@ -21,7 +22,7 @@ export async function renderWeb(repo, tracks, rate, warps = []) {
     await page.goto('http://btg.local/ui/credits.html'); // any page of the origin, for the module imports
     const out = [];
     for (const track of tracks) {
-      const base64 = await page.evaluate(async ([t, r, points]) => {
+      const base64 = await page.evaluate(async ([t, r, points, extra]) => {
         const warp = (x) => {
           if (!points) return x;
           let i = 1;
@@ -38,7 +39,7 @@ export async function renderWeb(repo, tracks, rate, warps = []) {
         const seconds = warp(chordTimeline(t).reduce((sum, bar) => sum + bar.durationSec, 0));
         const ctx = new OfflineAudioContext(2, Math.ceil(r * (seconds + 0.2)), r);
         // as play() does it: timbre and voices of the track, everything else at its defaults
-        const { output, layers, whenReady } = createInstruments(ctx, { bpm: t.bpm, timbre: resolveTrackTimbre(t), voices: resolveVoices(t) });
+        const { output, layers, whenReady } = createInstruments(ctx, { bpm: t.bpm, timbre: resolveTrackTimbre(t), voices: resolveVoices(t), ...extra });
         await whenReady();
         output.connect(ctx.destination);
         for (const e of events) if (e.layer) layers[e.layer].trigger(e, warp(e.t));
@@ -49,7 +50,7 @@ export async function renderWeb(repo, tracks, rate, warps = []) {
         let text = '';
         for (let i = 0; i < bytes.length; i += 0x8000) text += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
         return btoa(text);
-      }, [track, rate, warps[out.length] ?? null]);
+      }, [track, rate, warps[out.length] ?? null, options[out.length] ?? {}]);
       const raw = Buffer.from(base64, 'base64');
       out.push(new Float32Array(raw.buffer, raw.byteOffset, raw.byteLength / 4));
     }

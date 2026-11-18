@@ -32,6 +32,7 @@ public:
     void setPan(Layer layer, float pan);     // -1 left .. 1 right
     void setMaster(float fader);
     void setBassDrive(float amount);         // 0 = off (signal unchanged) .. 1
+    void setLimiter(bool on);                // default on; off (for measuring): no limiter, no delay, no make-up, no clamp, the sum only gets the master gain
     float takePeak(int channel);             // a Layer, or layerCount for the output: peak since the last call
 
     // Audio thread: no locks held, no allocation.
