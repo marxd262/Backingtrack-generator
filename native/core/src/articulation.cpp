@@ -395,10 +395,13 @@ std::vector<Event> articulate(const std::vector<Event>& events, const Track& tra
     // the order of the groups is the order of RULES in the JavaScript
     if (track.layer("drums")) drumRules(env);
     if (track.layer("bass")) bassRules(env);
+    if (track.layer("chords")) keyRules(env);
     if (track.layer("pad")) padRules(env);
     if (track.layer("chords")) chordRules(env);
+    if (track.layer("chords")) keyRulesB(env);
     if (track.layer("drums")) drumRulesB(env);
     if (track.layer("bass")) bassRulesB(env);
+    if (track.layer("chords")) organRules(env, sections);
     sortByTime(env.out);
     std::vector<Event> out;
     for (const Event* e : env.out) out.push_back(*e);

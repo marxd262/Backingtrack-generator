@@ -54,5 +54,9 @@ struct Env {
 
 // articulation_harmony.cpp: the groups of the chord layer
 void chordRules(Env& env); // rhythm guitar, sample guitars only
+void keyRules(Env& env);   // keys, the electric piano only
+void keyRulesB(Env& env);
+// organ.cpp: leslie and swell, when the chord layer plays the organ
+void organRules(Env& env, const std::vector<Section>& sections);
 
 } // namespace btg::detail

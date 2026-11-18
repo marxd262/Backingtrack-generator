@@ -1,4 +1,5 @@
-// Port of src/core/articulation.js: the rule groups of the chord layer. So far: chords (rhythm guitar).
+// Port of src/core/articulation.js: the rule groups of the chord layer: chords (rhythm guitar), keys and keysB
+// (electric piano).
 #include "articulation_internal.h"
 
 #include <cstdlib>
@@ -170,6 +171,104 @@ void chordRules(Env& env) {
             // a chuck mutes the strings: what sounds before it ends there
             if (art == "chuck" && k > 0)
                 for (Event* e : bySteps.at(order[k - 1])) e->dur = r6(std::min(e->dur, std::max(0.001, stab[0]->t - e->t)));
+        }
+    }
+}
+
+namespace {
+
+bool playsElectricPiano(const Track& track) {
+    const Track::Voice& voice = track.voice("chords");
+    return voice.id == "epiano" || (voice.id == "sample" && voice.variant == "epiano");
+}
+
+} // namespace
+
+// Keys, the electric piano only (sample and FM; the organ has rules of its own): weighting of the voices, pedal, staccato.
+void keyRules(Env& env) {
+    const Track& track = env.track;
+    if (!playsElectricPiano(track)) return;
+    // KEY_PROFILES: pedal (probability per bar), staccato (short stabs)
+    const std::string& profile = env.profile;
+    const double pedal = profile == "ballad" ? 1 : profile == "rock" || profile == "shuffle" || profile == "slowBlues" ? 0.5 : 0;
+    const bool staccato = profile == "funk";
+    std::map<int, double> lastT; // the last stroke of every bar (for the stop)
+    for (const Event* e : env.out) {
+        if (!isNote(*e, "chords")) continue;
+        const auto found = lastT.find(e->bar);
+        lastT[e->bar] = std::max(found != lastT.end() ? found->second : 0.0, e->t);
+    }
+    for (Event* e : env.out) {
+        if (!isNote(*e, "chords")) continue;
+        const Bar& b = env.bars[e->bar];
+        const Context& c = env.ctx[e->bar];
+        // weighting in the stab: the top tone (melody) 10 % louder, the middle voices 10 % quieter
+        if (e->strum && e->strum->second > 2) e->vel = roundVel(e->vel * (e->strum->first == e->strum->second - 1 ? 1.1 : e->strum->first > 0 ? 0.9 : 1));
+        // before a stop everybody plays short (band rule 3): the last stroke a sixteenth at most
+        if (c.stop && e->t >= lastT.at(e->bar) - 1e-6) {
+            e->art = "staccato";
+            e->dur = r6(std::min(e->dur, 15 / track.bpm));
+            continue;
+        }
+        // pedal (per bar, from the plan): the tone holds to the end of the bar; where the chord changes there, the pedal
+        // lifts 20 to 50 ms before. A stop stays silent
+        if (pedal > 0 && !c.stop && env.roll(c, "keys", "pedal") < env.p(pedal)) {
+            const double lift = c.nextChange ? 0.02 + 0.03 * env.roll(c, "keys", "lift") : 0;
+            e->art = "pedal";
+            e->dur = r6(std::max(0.02, b.end - lift - e->t));
+        } else if (staccato && e->strum) { // short stabs, a sixteenth to an eighth
+            e->art = "staccato";
+            e->dur = r6(std::min(e->dur, (15 / track.bpm) * (1 + env.roll(c, "keys", "staccato"))));
+        }
+    }
+}
+
+// Keys, second group: rolled chords in the ballad, a crushed third in the blues, a barked stab in funk.
+void keyRulesB(Env& env) {
+    if (!playsElectricPiano(env.track)) return;
+    const std::string& profile = env.profile;
+    struct Stab { int bar, step; std::vector<Event*> tones; };
+    std::vector<Stab> stabs; // a Map "bar:step" -> tones, in the order the stabs come in the stream
+    for (Event* e : env.out) {
+        if (!isNote(*e, "chords") || !e->strum) continue;
+        const int step = env.stepOf(*e);
+        auto found = std::find_if(stabs.begin(), stabs.end(), [&](const Stab& stab) { return stab.bar == e->bar && stab.step == step; });
+        if (found == stabs.end()) found = stabs.insert(stabs.end(), Stab { e->bar, step, {} });
+        found->tones.push_back(e);
+    }
+    double lastT = -std::numeric_limits<double>::infinity();
+    for (const Stab& stab : stabs) lastT = std::max(lastT, stab.tones[0]->t);
+    for (const Stab& stab : stabs) {
+        const Bar& b = env.bars[stab.bar];
+        const Context& c = env.ctx[b.index];
+        const int s = stab.step, root = chordTones(b.chord, 3)[0];
+        const auto shift = [&](Event& e, double d) {
+            e.t = r6(e.t + d);
+            e.beat = *e.beat + d / (b.stepSec * b.sub);
+            e.dur = r6(std::max(0.02, e.dur - d));
+        };
+        if (profile == "ballad" && ((s == 0 && c.change) || stab.tones[0]->t == lastT) && env.roll(c, "keysB", "roll", s) < env.p(0.2)) {
+            const double total = 0.015 + 0.025 * env.roll(c, "keysB", "rollTime", s);
+            std::vector<Event*> all = stab.tones;
+            std::stable_sort(all.begin(), all.end(), [](const Event* x, const Event* y) { return x->midi < y->midi; });
+            for (size_t i = 1; i < all.size(); ++i)
+                if (all[i]->t + total < b.end - 0.01) shift(*all[i], (total * static_cast<double>(i)) / static_cast<double>(all.size() - 1));
+        } else if ((profile == "shuffle" || profile == "slowBlues") && env.roll(c, "keysB", "crush", s) < env.p(0.2)) {
+            const auto third = std::find_if(stab.tones.begin(), stab.tones.end(), [&](const Event* e) { return (((e->midi - root) % 12) + 12) % 12 == 4; });
+            const double d = 0.03 + 0.03 * env.roll(c, "keysB", "crushTime", s);
+            if (third == stab.tones.end() || (*third)->t + d >= b.end - 0.01) continue;
+            Event grace = **third; // the tone a semitone below, without a place in the stab
+            grace.strum.reset();
+            grace.midi = (*third)->midi - 1;
+            grace.dur = r6(d);
+            grace.art = "crush";
+            env.add(grace);
+            shift(**third, d);
+        } else if (profile == "funk" && s % b.sub == 0 && env.roll(c, "keysB", "bark", s) < env.p(0.3)) {
+            for (Event* e : stab.tones) {
+                e->art = "bark";
+                e->vel = roundVel(e->vel * 1.15);
+            }
         }
     }
 }

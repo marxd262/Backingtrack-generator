@@ -132,6 +132,23 @@ for (const [g, id] of Object.keys(GROOVES).entries()) {
   add(`arp-${id}`, style, 850 + g, { meter: GROOVES[id].meter.split('/').map(Number), layers: WITH_CHORDS, keys: KEYS_ALL, bars: colored(CHORD_COLORS[g % 4]), track, form: autoForm(style) });
 }
 
+// keys: the electric pianos with their rules and the organ with leslie and swell; every groove too, so that every
+// style profile of the key rules occurs
+const KEY_VOICES = [{ id: 'epiano', variant: 'rhodes' }, { id: 'sample', variant: 'epiano' }, ...['jazz', 'rock', 'gospel', 'ballad'].map((variant) => ({ id: 'organ', variant }))];
+for (const [s, style] of STYLE_PRESETS.entries()) {
+  for (const [v, voice] of KEY_VOICES.entries()) {
+    const k = s + v;
+    add('keys', style, 900 + v, { layers: WITH_CHORDS, keys: KEYS_ALL, bars: colored(CHORD_COLORS[k % 4]), form: autoForm(style), track: { voices: { ...style.voices, chords: voice }, ornaments: [0.5, 1, 0.75][k % 3] } });
+  }
+  add('keys-plain', style, 910, { layers: WITH_CHORDS, keys: KEYS_ALL, track: { voices: { ...style.voices, chords: KEY_VOICES[s % KEY_VOICES.length] }, length: 24 } });
+}
+for (const [g, id] of Object.keys(GROOVES).entries()) {
+  const style = styles[g % styles.length];
+  for (const [v, voice] of [KEY_VOICES[g % 2], KEY_VOICES[2 + (g % 4)]].entries()) {
+    add(`keys-${id}`, style, 920 + v, { meter: GROOVES[id].meter.split('/').map(Number), layers: WITH_CHORDS, keys: KEYS_ALL, form: autoForm(style), track: { groove: id, voices: { ...style.voices, chords: voice } } });
+  }
+}
+
 mkdirSync(out, { recursive: true });
 writeFileSync(join(out, 'cases.json'), JSON.stringify(cases));
 const total = cases.reduce((n, c) => n + c.events.length, 0);
