@@ -83,11 +83,12 @@ static std::shared_ptr<const btg::Pack> dcKit(bool v2) {
     }
     return pack;
 }
-// A looped sine of 200 frames per period; the loop holds exactly 100 periods, so the seam does not click.
-static std::shared_ptr<const btg::Pack> tonePack(int rootKey, float amplitude, double release) {
+// A looped sine of `period` frames (200, or 10 for a tone above the timbre's lowpass of 400 Hz); the loop holds a whole number of
+// periods (20000 / period), so the seam does not click.
+static std::shared_ptr<const btg::Pack> tonePack(int rootKey, float amplitude, double release, int period = 200) {
     auto pack = std::make_shared<btg::Pack>();
     pack->samples.push_back({ 0, 22050, 22050.0, 1000, 21000 });
-    for (int i = 0; i < 22050; ++i) pack->audio.push_back(amplitude * static_cast<float>(std::sin(2 * 3.14159265358979 * i / 200.0)));
+    for (int i = 0; i < 22050; ++i) pack->audio.push_back(amplitude * static_cast<float>(std::sin(2 * 3.14159265358979 * i / period)));
     btg::Pack::Zone zone;
     zone.rootKey = rootKey;
     zone.loop = true;
@@ -113,6 +114,48 @@ static double gainDb(const btg::detail::Biquad& f, double hz, double sr) {
 }
 
 struct Result { std::vector<float> left; double rms = 0.0, peak = 0.0, rmsRight = 0.0; };
+
+static double rmsOf(const std::vector<float>& x, size_t from, size_t to) {
+    double squares = 0.0;
+    for (size_t i = from; i < to; ++i) squares += static_cast<double>(x[i]) * x[i];
+    return std::sqrt(squares / static_cast<double>(to - from));
+}
+
+// One note (midi `midi`, velocity 1, `seconds` long, one beat a second) of the voice `layer` builds with `timbre` from `pack`, rendered
+// on the left for `frames` frames: the voice alone, no engine.
+static std::vector<float> noteOf(btg::Engine::Layer layer, const char* key, std::shared_ptr<const btg::Pack> pack, const btg::detail::Timbre& timbre, int midi, double seconds, int frames, const char* tuning = "{}") {
+    using namespace btg::detail;
+    const auto voice = makeVoice(layer, key, std::move(pack), parseTuning(tuning), timbre);
+    auto tones = std::make_unique<Tones>();
+    tones->sr = rate;
+    VoiceState state;
+    state.rng = voice->startRng;
+    PlayEvent e;
+    e.layer = layer;
+    e.midi = midi;
+    e.vel = 1.0;
+    e.durBeats = seconds;
+    voice->play(e, 0, 1.0, state, *tones);
+    std::vector<float> left(static_cast<size_t>(frames)), right(static_cast<size_t>(frames));
+    for (Tone& t : tones->all) if (t.active) t.render(left.data(), right.data(), frames);
+    return left;
+}
+
+// The envelope of a note in windows of 48 frames: the time to half its highest level and the time from the note's end (`noteEnd` s)
+// until it has fallen to a tenth of it.
+struct Envelope { double rise, fall; };
+static Envelope envelopeOf(const std::vector<float>& x, double noteEnd) {
+    const size_t win = 48;
+    std::vector<float> peaks;
+    for (size_t at = 0; at + win <= x.size(); at += win) peaks.push_back(*std::max_element(x.begin() + static_cast<long>(at), x.begin() + static_cast<long>(at + win), [](float a, float b) { return std::fabs(a) < std::fabs(b); }));
+    for (float& p : peaks) p = std::fabs(p);
+    float sustain = 0.0f;
+    for (size_t i = 0; i < static_cast<size_t>(noteEnd * rate) / win; ++i) sustain = std::max(sustain, peaks[i]);
+    Envelope r { -1.0, -1.0 };
+    for (size_t i = 0; i < peaks.size() && r.rise < 0; ++i) if (peaks[i] >= 0.5f * sustain) r.rise = static_cast<double>(i * win) / rate;
+    for (size_t i = static_cast<size_t>(noteEnd * rate) / win; i < peaks.size() && r.fall < 0; ++i) if (peaks[i] < 0.1f * sustain) r.fall = static_cast<double>(i * win) / rate - noteEnd;
+    return r;
+}
 
 static Result render(btg::Engine& engine, btg::Transport& transport, double seconds, int blockSize) {
     Result r;
@@ -500,7 +543,7 @@ int main(int argc, char** argv) {
     for (const bool v2 : { true, false }) {
         using namespace btg::detail;
         const std::string key = v2 ? "drums/sample/standard" : "drums/sample/brushes";
-        const auto voice = makeVoice(btg::Engine::drums, key, dcKit(v2), {});
+        const auto voice = makeVoice(btg::Engine::drums, key, dcKit(v2), {}, Timbre {});
         CHECK(voice != nullptr);
         if (!voice) continue;
         const auto nameIndex = [](const char* name) { return static_cast<int>(std::find_if(std::begin(HIT_NAMES), std::end(HIT_NAMES), [&](const char* n) { return std::string(n) == name; }) - std::begin(HIT_NAMES)); };
@@ -598,6 +641,129 @@ int main(int argc, char** argv) {
     CHECK(std::fabs(sides(btg::Engine::drums, brushes, 0.0f, R"({"mix/pan":{"kit":0}})") - 1.0) < 1e-6);
     CHECK(sides(btg::Engine::drums, brushes, 0.0f, "{}") > 1.02);
     CHECK(std::fabs(sides(btg::Engine::drums, standard, 0.0f, "{}") - sides(btg::Engine::drums, standard, 0.0f, R"({"mix/pan":{"kit":0}})")) < 1e-9);
+
+    // setSound: master.width spreads the layers (synth.js 173: mix.width = 2 * master.width times the pan, then clamped): width 0 is mono,
+    // 1 doubles the bass's pan of 0.25 to 0.5 (1.5 / 0.5), the neutral 0.5 keeps it (1.25 / 0.75). A timbre that is no JSON is the neutral one.
+    // The timbres are dry (reverb, echo and room at 0) so that only the dry layers are measured, also once the sends exist (Task 14).
+    {
+        const auto ratio = [&](const char* sound) {
+            btg::Engine engine;
+            engine.setPackSource(source);
+            engine.setSound(sound);
+            engine.setTrack(track);
+            engine.setMuted(btg::Engine::drums, true);
+            engine.setLimiter(false);
+            engine.setPan(btg::Engine::bass, 0.25f);
+            engine.prepare(rate);
+            btg::Transport t;
+            t.play(64.0, engine.bpm());
+            const Result r = render(engine, t, 5.0, 480);
+            return r.rmsRight / r.rms;
+        };
+        CHECK(std::fabs(ratio(R"({"master":{"width":0,"reverb":0,"echo":0,"roomWet":0}})") - 1.0) < 1e-6);
+        CHECK(std::fabs(ratio(R"({"master":{"width":1,"reverb":0,"echo":0,"roomWet":0}})") - 3.0) < 0.01);
+        CHECK(std::fabs(ratio(R"({"master":{"reverb":0,"echo":0,"roomWet":0}})") - 1.25 / 0.75) < 0.01);
+        CHECK(ratio("no json") == ratio("{}"));
+    }
+
+    // setSound reaches the voices, in the order the app sends it (setTuning, setTrack, setSound; play.js) and while playing. The bass plays a
+    // tone of 2205 Hz at its root, so that cutoff 0 (a lowpass at 400 Hz) takes a lot of it away: that effect lives in the voice, not in the sum.
+    {
+        const auto bright = [](const std::string& id) -> std::shared_ptr<const btg::Pack> { return id == "bass-finger" ? tonePack(45, 0.5f, 0.2, 10) : source(id); };
+        const char* dark = R"({"bass":{"cutoff":0},"master":{"reverb":0,"echo":0,"roomWet":0}})";
+        const auto heard = [&](const char* sound, bool afterTrack) {
+            btg::Engine engine;
+            engine.setPackSource(bright);
+            if (sound && !afterTrack) engine.setSound(sound);
+            engine.setTrack(track);
+            if (sound && afterTrack) engine.setSound(sound);
+            engine.setMuted(btg::Engine::drums, true);
+            engine.setLimiter(false);
+            engine.prepare(rate);
+            btg::Transport t;
+            t.play(64.0, engine.bpm());
+            return render(engine, t, 5.0, 480);
+        };
+        const Result neutral = heard(nullptr, false), before = heard(dark, false), after = heard(dark, true);
+        CHECK(before.rms < 0.7 * neutral.rms); // the timbre acts in the voice
+        CHECK(after.left == before.left);      // setSound after setTrack sounds as setSound before it
+        // setSound while playing: what starts after it sounds as the timbre says (the bass's notes end within a bar, 2.4 s), as in an
+        // engine that had the timbre from the start; with no setSound it stays neutral.
+        const auto changing = [&](const char* sound, bool atStart) {
+            btg::Engine engine;
+            engine.setPackSource(bright);
+            if (sound && atStart) engine.setSound(sound);
+            engine.setTrack(track);
+            engine.setMuted(btg::Engine::drums, true);
+            engine.setLimiter(false);
+            engine.prepare(rate);
+            btg::Transport t;
+            t.play(64.0, engine.bpm());
+            render(engine, t, 1.0, 480);
+            if (sound && !atStart) engine.setSound(sound);
+            return render(engine, t, 5.0, 480).left;
+        };
+        const auto fromStart = changing(dark, true), whilePlaying = changing(dark, false), never = changing(nullptr, false);
+        const size_t from = 3 * rate, to = 5 * rate;
+        CHECK(std::fabs(rmsOf(whilePlaying, from, to) / rmsOf(fromStart, from, to) - 1.0) < 1e-3);
+        CHECK(rmsOf(never, from, to) > 1.2 * rmsOf(fromStart, from, to));
+    }
+
+    // The sampler's timbre, voice by voice: the lowpass of the brightness knobs (bass.cutoff, chords.brightness, pad.cutoff), the time scale of
+    // chords.length and pad.attack, the kit's pan by the width. Notes of a tone at 2205 Hz, above the lowpass at 400 Hz of knob 0.
+    {
+        using namespace btg::detail;
+        const auto timed = [](double attack, double release) { auto p = std::make_shared<btg::Pack>(*tonePack(45, 0.5f, release, 10)); p->zones[0].attack = attack; return std::shared_ptr<const btg::Pack>(p); };
+        struct Knob { btg::Engine::Layer layer; const char* key; double* (*field)(Timbre&); };
+        const Knob lowpass[] = { { btg::Engine::bass, "bass/sample/finger", [](Timbre& t) { return &t.bass.cutoff; } },
+                                 { btg::Engine::chords, "chords/sample/funk", [](Timbre& t) { return &t.chords.brightness; } },
+                                 { btg::Engine::pad, "pad/sample/strings", [](Timbre& t) { return &t.pad.cutoff; } } };
+        for (const Knob& k : lowpass) {
+            const auto level = [&](double value) { Timbre t; *k.field(t) = value; return rmsOf(noteOf(k.layer, k.key, timed(0.0, 0.2), t, 45, 0.5, rate / 2), rate / 10, rate / 2); };
+            const double dark = level(0.0), quarter = level(0.1), middle = level(0.5), open = level(1.0);
+            CHECK(dark < 0.4 * middle);                  // 400 Hz against a tone of 2205 Hz
+            CHECK(quarter > dark && quarter < middle);
+            CHECK(middle == open);                       // from 0.5 up the voice is not filtered
+        }
+        const Knob scaled[] = { { btg::Engine::chords, "chords/sample/funk", [](Timbre& t) { return &t.chords.length; } },
+                                { btg::Engine::pad, "pad/sample/strings", [](Timbre& t) { return &t.pad.attack; } } };
+        for (const Knob& k : scaled) {
+            const auto times = [&](double value) { Timbre t; *k.field(t) = value; return envelopeOf(noteOf(k.layer, k.key, timed(0.1, 0.6), t, 45, 1.0, 3 * rate, "{\"chords/sample/funk\":{\"decay\":10,\"oneShot\":0}}"), 1.0); }; // the guitar's natural decay at its slowest, no one-shot end of the sample
+            const Envelope shortest = times(0.0), middle = times(0.5), longest = times(1.0);
+            CHECK(std::fabs(middle.rise - 0.05) < 0.01 && middle.fall > 0.05);           // attack 0.1 s reaches half at 0.05 s
+            CHECK(std::fabs(longest.rise / middle.rise / 3 - 1) < 0.12 && std::fabs(longest.fall / middle.fall / 3 - 1) < 0.12);
+            CHECK(std::fabs(shortest.rise / middle.rise * 3 - 1) < 0.12 && std::fabs(shortest.fall / middle.fall * 3 - 1) < 0.12);
+        }
+        // the lead has neither (sample.js 46 to 75)
+        Timbre all;
+        all.bass.cutoff = all.chords.brightness = all.pad.cutoff = 0.0;
+        all.chords.length = all.pad.attack = 1.0;
+        CHECK(noteOf(btg::Engine::lead, "lead/sample/flute", timed(0.1, 0.6), all, 45, 1.0, rate) == noteOf(btg::Engine::lead, "lead/sample/flute", timed(0.1, 0.6), Timbre {}, 45, 1.0, rate));
+        // the kit's pan: width * mix/pan kit * the hat's place (KIT_PAN), as a ratio of the right to the left level of a constant sample
+        const auto nameIndex = [](const char* name) { return static_cast<int>(std::find_if(std::begin(HIT_NAMES), std::end(HIT_NAMES), [&](const char* n) { return std::string(n) == name; }) - std::begin(HIT_NAMES)); };
+        const auto hatSides = [&](double width) {
+            Timbre t;
+            t.master.width = width;
+            const auto voice = makeVoice(btg::Engine::drums, "drums/sample/brushes", dcKit(false), {}, t);
+            auto tones = std::make_unique<Tones>();
+            tones->sr = rate;
+            VoiceState state;
+            state.rng = voice->startRng;
+            PlayEvent e;
+            e.hit = true;
+            e.vel = 1.0;
+            e.name = nameIndex("hat");
+            voice->play(e, 0, 0.5, state, *tones);
+            std::vector<float> left(4000), right(4000);
+            for (Tone& tone : tones->all) if (tone.active) tone.render(left.data(), right.data(), 4000);
+            return right[3000] / left[3000];
+        };
+        const double place = soundData().kitPan.at("hat") * tunedValue("mix/pan", "kit", {});
+        for (const double width : { 0.0, 0.25, 0.5, 1.0 }) {
+            const double pan = std::min(1.0, 2 * width * place); // mix.width = 2 * master.width
+            CHECK(place > 0.0 && std::fabs(hatSides(width) - (1 + pan) / (1 - pan)) < 1e-4);
+        }
+    }
 
     std::printf(failures ? "%d check(s) failed\n" : "all checks passed\n", failures);
     return failures ? 1 : 0;

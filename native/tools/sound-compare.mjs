@@ -3,7 +3,8 @@
 //   node native/tools/sound-compare.mjs --self-check                  (the measuring itself: must pass, and must catch -2 dB and a treble tilt)
 // cases.json: array of { name, track, sound?, tuning?, dry?, kind? }
 //   track  path to a track JSON (relative to cases.json) or the track object
-//   sound  timbre overrides like track.timbre ({ master: { brightness: 0.3 } }), laid over the track's own
+//   sound  timbre overrides like track.timbre ({ master: { brightness: 0.3 } }), laid over the track's own; both renders read the result
+//          (the web render resolves it in the browser, the native one gets resolveTrackTimbre(track) as btg_render --sound, as play.js sends it)
 //   tuning fine values as setTuning takes them ({ 'mix/room': { wet: 0 } }), given to both renders (btg_render --tuning)
 //   dry    no limiter, master.reverb 0, master.echo 0, mix/room wet 0, on both sides
 //   kind   "sample" (default) or "synth": chooses the limits
@@ -15,11 +16,12 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { renderWeb, wavBytes } from './web-render.mjs';
 import { writeAbPage } from './ab-page.mjs';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+const { resolveTrackTimbre } = await import(pathToFileURL(join(repo, 'src/core/timbre.js')).href);
 const RATE = 48000;
 const BANDS = [63, 125, 250, 500, 1000, 2000, 4000, 8000];
 const LIMITS = { sample: { level: 0.5, band: 1.5, env: 0.98 }, synth: { level: 1, band: 3, env: 0.95 } };
@@ -165,10 +167,11 @@ async function renderCase(c) {
   try {
     const trackFile = join(temp, `${c.name}.json`), wavFile = join(temp, `${c.name}.wav`);
     writeFileSync(trackFile, JSON.stringify(c.track));
-    const tuningFile = join(temp, `${c.name}-tuning.json`);
+    const tuningFile = join(temp, `${c.name}-tuning.json`), soundFile = join(temp, `${c.name}-sound.json`);
     if (c.options.tuning) writeFileSync(tuningFile, JSON.stringify(c.options.tuning));
+    writeFileSync(soundFile, JSON.stringify(resolveTrackTimbre(c.track))); // what play.js sends; web-render.mjs resolves the same in the browser
     try {
-      execFileSync(render, [trackFile, join(repo, 'src/assets/samples'), wavFile, String(RATE), ...(c.dry ? ['--dry'] : []), ...(c.options.tuning ? ['--tuning', tuningFile] : [])], { encoding: 'utf8', stdio: 'pipe' });
+      execFileSync(render, [trackFile, join(repo, 'src/assets/samples'), wavFile, String(RATE), ...(c.dry ? ['--dry'] : []), '--sound', soundFile, ...(c.options.tuning ? ['--tuning', tuningFile] : [])], { encoding: 'utf8', stdio: 'pipe' });
     } catch (error) { // btg_render says why on stdout (also on its legitimate exit 1 for a silent render)
       throw new Error(`btg_render: ${[error.stdout, error.stderr].filter(Boolean).join(' ').trim() || error.message}`);
     }

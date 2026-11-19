@@ -1,6 +1,6 @@
 // Writes the cases of the sound comparison (native/tools/sound-compare.mjs) from the web app in the working tree (src/, read only):
 //   node native/tools/sound-cases/make-cases.mjs   -> samples.json (and the files later tasks add) next to this file
-// Every case is dry and plays with the neutral sound (DEFAULT_TIMBRE): the core has no timbre before Task 16.
+// Every case sets the sound it measures (the core reads it since Task 16): the neutral one (DEFAULT_TIMBRE) unless the case says otherwise.
 // Prints how often each articulation occurs over the sample cases and exits 1 when one the sampler computes never does.
 import { writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -12,7 +12,7 @@ const { STYLE_PRESETS, buildEvents } = await load('index.js');
 const { normalizeTrack } = await load('core/track.js');
 const { resolveVoices } = await load('core/voices.js');
 const { progressionFor } = await load('core/progressions.js');
-const { DEFAULT_TIMBRE } = await load('core/timbre.js');
+const { DEFAULT_TIMBRE, resolveTrackTimbre } = await load('core/timbre.js');
 const { tunedValue } = await load('audio/voices/tunables.js');
 const { rollForm } = await load('core/form-roll.js');
 
@@ -114,14 +114,83 @@ for (const n of PERCUSSION) if (!hitCount[n]) problems.push(`no ${n} in any kit 
 
 // Task 13: one track per style, all six layers with the style's voices, a rolled form, the layers where mix/pan puts them (width 0.5).
 // The same set is the A/B set for listening (native/tools/ab-samples.cmd).
+const bandOf = (id) => track(id, { layers: { drums: true, bass: true, chords: true, pad: true, lead: true, percussion: true },
+  extra: { form: rollForm({ template: 'auto', style: id, targetBars: 24, seed: 1, tags: STYLE_PRESETS.find((s) => s.id === id).tags }) } });
+const bands = Object.fromEntries(STYLE_PRESETS.map((s) => [s.id, bandOf(s.id)]));
 write('band.json', STYLE_PRESETS.map((style) => ({
   name: `band-${style.id}`,
-  track: track(style.id, {
-    layers: { drums: true, bass: true, chords: true, pad: true, lead: true, percussion: true },
-    extra: { form: rollForm({ template: 'auto', style: style.id, targetBars: 24, seed: 1, tags: style.tags }) },
-  }),
+  track: bands[style.id],
   sound: neutral(0.5),
   dry: true,
 })));
+
+// --- Phase 3 (Tasks 16, 14, 15, 17): the sound model, the sends and the sum ---
+// The knobs of the layer effects (Phase 4) are 0 in every Phase 3 case, so that the cases measure only what the core plays.
+const PHASE4 = ['fuzz', 'overdrive', 'distortion', 'vibrato', 'chorus'];
+const unplugged = (timbre) => Object.fromEntries(Object.entries(timbre).map(([group, fields]) =>
+  [group, Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, PHASE4.includes(k) ? 0 : v]))]));
+const styleSound = (t) => unplugged(resolveTrackTimbre(t)); // what the page sends for this track
+const set = (sound, fields) => { const s = structuredClone(sound); for (const [path, v] of Object.entries(fields)) { const [g, f] = path.split('.'); s[g][f] = v; } return s; };
+// What a case claims to measure: make-cases exits 1 when a claim does not hold for the case as written. Sample-voice knobs act only in
+// part of their range (the lowpass below 0.5, see brightnessHz; the time scale away from 0.5); their layer must play notes with a sample voice.
+const CLAIMS = {};
+const knob = (path, layer, acts) => {
+  CLAIMS[path] = (c, events) => {
+    const [g, f] = path.split('.'), v = c.sound[g][f];
+    if (!acts(v)) return `${path} = ${v} does nothing`;
+    if (layer && !(c.track.voices[layer]?.id === 'sample' && events.some((e) => e.layer === layer && e.type === 'note'))) return `no ${layer} notes with a sample voice`;
+    return '';
+  };
+};
+knob('bass.cutoff', 'bass', (v) => v < 0.5); knob('chords.brightness', 'chords', (v) => v < 0.5); knob('pad.cutoff', 'pad', (v) => v < 0.5);
+knob('chords.length', 'chords', (v) => v !== 0.5); knob('pad.attack', 'pad', (v) => v !== 0.5);
+knob('master.brightness', null, (v) => v !== 0.5); knob('master.width', null, (v) => v !== 0.5);
+// the width acts on a kit through mix/pan kit only where the voice places its hits (kitPan not 0: format 1) and plays hits that have a place
+const KIT_PLACES = ['hat', 'openHat', 'crash', 'tomHigh', 'tomLow']; // KIT_PAN of synth.js
+CLAIMS['kit.places'] = (c, events) => {
+  const voice = c.track.voices.drums;
+  if (voice?.id !== 'sample' || tunedValue(`drums/sample/${voice.variant}`, 'kitPan', {}) === 0) return 'the kit does not place its hits';
+  return events.some((e) => e.layer === 'drums' && e.type === 'hit' && KIT_PLACES.includes(e.name)) ? '' : 'no hit with a place in the kit';
+};
+function claimed(c, claims) {
+  const events = buildEvents(c.track);
+  for (const g of ['bass', 'chords', 'pad', 'lead']) for (const k of PHASE4) if (c.sound[g][k] !== 0) problems.push(`${c.name}: ${g}.${k} is not 0 (Phase 4)`);
+  for (const what of claims) { const why = CLAIMS[what](c, events); if (why) problems.push(`${c.name}: ${why}`); }
+  return c;
+}
+const neutralSound = neutral(0.5), funk = bands.funk;
+const SAMPLE_KNOBS = ['bass.cutoff', 'chords.brightness', 'chords.length', 'pad.cutoff', 'pad.attack'];
+const soloOf = (name, layer, variant, style, fields, claims, extra = {}, tuning = undefined) => claimed({ name, dry: true, sound: set(neutralSound, fields), tuning,
+  track: track(style, { layers: { [layer]: true }, voices: { [layer]: { id: 'sample', variant } }, extra }) }, claims);
+
+// Task 16: the sound model on the whole band, dry (plan: neutral, psych, dreamy; neutral is band.json): the styles' own timbres,
+// and the funk band at the ends of the knobs
+const timbreCases = [
+  // no knob of psych's own timbre is visible within the limits in the full band; the solo cases below prove the knobs, one each
+  claimed({ name: 'timbre-psych', track: bands.psych, sound: styleSound(bands.psych), dry: true }, []),
+  claimed({ name: 'timbre-dreamy', track: bands.dreamy, sound: styleSound(bands.dreamy), dry: true }, ['master.brightness', 'bass.cutoff', 'chords.brightness', 'chords.length', 'pad.attack']),
+  claimed({ name: 'timbre-bright', track: funk, sound: set(neutralSound, { 'master.brightness': 1, 'master.width': 1 }), dry: true }, ['master.brightness', 'master.width']),
+  claimed({ name: 'timbre-dark', track: funk, sound: set(neutralSound, { 'master.brightness': 0, 'master.width': 0 }), dry: true }, ['master.brightness', 'master.width']),
+  claimed({ name: 'timbre-short', track: funk, sound: set(neutralSound, { 'bass.cutoff': 0, 'chords.brightness': 0, 'chords.length': 0, 'pad.cutoff': 0, 'pad.attack': 0 }), dry: true }, SAMPLE_KNOBS),
+  // One layer alone with a sample voice, one knob each (the sound the knob acts on is not lost in a full band); the funk band at the
+  // ends of the knobs above is the group check. Each case must fail when the core ignores its knob (checked by a build of btg_render in
+  // which makeVoice leaves filterHz, timeScale and the kit's width factor out, see task-16-report.md).
+  // The length and attack knobs scale the zone's times, which only shows in notes that end inside them: bpm 240 (the chords' release,
+  // 0.6 s; the warm pad's attack, 0.8 s).
+  soloOf('timbre-bass-dark', 'bass', 'finger', 'funk', { 'bass.cutoff': 0 }, ['bass.cutoff']),
+  soloOf('timbre-chords-dark', 'chords', 'nylon', 'reggae', { 'chords.brightness': 0 }, ['chords.brightness']),
+  soloOf('timbre-chords-short', 'chords', 'steel', 'country', { 'chords.length': 0 }, ['chords.length'], { bpm: 240, ornaments: 0 }),
+  soloOf('timbre-chords-long', 'chords', 'steel', 'country', { 'chords.length': 1 }, ['chords.length'], { bpm: 240, ornaments: 0 }),
+  soloOf('timbre-pad-dark', 'pad', 'strings', 'dreamy', { 'pad.cutoff': 0 }, ['pad.cutoff']),
+  soloOf('timbre-pad-quick', 'pad', 'warm', 'psych', { 'pad.attack': 0 }, ['pad.attack'], { bpm: 240 }),
+  soloOf('timbre-pad-slow', 'pad', 'warm', 'psych', { 'pad.attack': 1 }, ['pad.attack'], { bpm: 240 }),
+  // The kit (format 1, so it places its hits by KIT_PAN times width times mix/pan kit), the kit's place at its largest (1) so that the
+  // balance sees it: hats on the right against crash and toms on the left cancel in the level, and the width moves the balance of a
+  // whole kit by under 0.9 dB at most. Width 0 puts every hit in the middle. No case for width 1: from 0.5 to 1 the balance moves
+  // by 0.05 dB at this kit place (the places clip at +-1), too little to see within +-0.5 dB; test_engine.cpp proves that width.
+  soloOf('timbre-kit-mono', 'drums', 'jazz', 'blues', { 'master.width': 0 }, ['master.width', 'kit.places'], { form: KIT_FORM, ornaments: 1 }, { 'mix/pan': { kit: 1 } }),
+];
+write('timbre.json', timbreCases);
+console.log(`timbre.json: ${timbreCases.length} cases`);
 for (const p of problems) console.error(`ERROR ${p}`);
 process.exit(problems.length ? 1 : 0);

@@ -50,6 +50,7 @@ add_library(btg_core STATIC
     src/pack.cpp
     src/engine.cpp
     src/sampler.cpp
+    src/sound_model.cpp
     src/analysis.cpp
     src/file_player.cpp
     src/decode.cpp
@@ -156,12 +157,20 @@ btg_uses_beats(btg_analyze)
 # Generator against the web app in the working tree (src/): Node writes the reference, the test compares.
 add_executable(btg_parity_tests tests/test_parity.cpp)
 target_link_libraries(btg_parity_tests PRIVATE btg_core nlohmann_json::nlohmann_json)
+
+# The logic of the core (sound model, later more) function by function against the web app in the working tree.
+add_executable(btg_logic_tests tests/test_logic.cpp)
+target_link_libraries(btg_logic_tests PRIVATE btg_core nlohmann_json::nlohmann_json)
 find_program(NODE node)
 if(NODE)
     add_test(NAME parity_export COMMAND ${NODE} ${PROJECT_SOURCE_DIR}/tools/export-events.mjs ${PROJECT_BINARY_DIR}/parity)
     add_test(NAME parity COMMAND btg_parity_tests ${PROJECT_BINARY_DIR}/parity/cases.json)
     set_tests_properties(parity_export PROPERTIES FIXTURES_SETUP parity_reference)
     set_tests_properties(parity PROPERTIES FIXTURES_REQUIRED parity_reference)
+    add_test(NAME logic_export COMMAND ${NODE} ${PROJECT_SOURCE_DIR}/tools/export-logic.mjs ${PROJECT_BINARY_DIR}/logic)
+    add_test(NAME logic COMMAND btg_logic_tests ${PROJECT_BINARY_DIR}/logic/logic.json)
+    set_tests_properties(logic_export PROPERTIES FIXTURES_SETUP logic_reference)
+    set_tests_properties(logic PROPERTIES FIXTURES_REQUIRED logic_reference)
     # sound.json must be what the web app in the working tree exports (native/tools/export-events.mjs --data rewrites it)
     add_test(NAME sound_data_export COMMAND ${NODE} ${PROJECT_SOURCE_DIR}/tools/export-events.mjs --data-only ${PROJECT_BINARY_DIR}/data-check)
     add_test(NAME sound_data COMMAND ${CMAKE_COMMAND} -E compare_files --ignore-eol ${PROJECT_BINARY_DIR}/data-check/sound.json ${CMAKE_CURRENT_SOURCE_DIR}/data/sound.json)

@@ -82,13 +82,13 @@ void Tone::start(const Note& n, double sampleRate, uint64_t number) {
         : zone.velGain[0] + (zone.velGain[1] - zone.velGain[0]) * (zone.velHi > zone.velLo ? clamp((v * 127 - zone.velLo) / (zone.velHi - zone.velLo), 0, 1) : 1.0);
     peak = std::max(FLOOR, gain * std::pow(10.0, -std::max(0.0, zone.attenuationDb) / 20) * velocity);
     sustainLevel = std::max(FLOOR, peak * std::pow(10.0, -zone.sustainDb / 20));
-    const double attackTime = std::max(art == Art::swell ? (std::isfinite(n.artTime) ? n.artTime : 0.5) : art == Art::hammer ? 0.02 : 0.003, zone.attack);
+    const double attackTime = std::max(art == Art::swell ? (std::isfinite(n.artTime) ? n.artTime : 0.5) : art == Art::hammer ? 0.02 : 0.003, zone.attack * n.timeScale); // 146
     const int attackN = std::max(1, static_cast<int>(attackTime * sr));
     attackInc = peak / attackN;
-    holdLeft = static_cast<int>(zone.hold * sr);
-    decayLeft = std::max(1, static_cast<int>(std::max(0.001, zone.decay) * sr));
+    holdLeft = static_cast<int>(zone.hold * n.timeScale * sr); // 147
+    decayLeft = std::max(1, static_cast<int>(std::max(0.001, zone.decay * n.timeScale) * sr));
     decayMul = std::pow(sustainLevel / peak, 1.0 / decayLeft);
-    double release = n.ring ? MAX_RELEASE : art == Art::staccato || art == Art::choke || art == Art::chuck ? 0.03 : std::min(MAX_RELEASE, std::max(MIN_RELEASE, zone.release));
+    double release = n.ring ? MAX_RELEASE : art == Art::staccato || art == Art::choke || art == Art::chuck ? 0.03 : std::min(MAX_RELEASE, std::max(MIN_RELEASE, zone.release * n.timeScale)); // 161
     double span = std::max(0.02, dur); // noteEnd
     if (n.oneShot && zone.loop) { // 149: without its loop the sample ends; the release ends with it
         const double sampleEnd = s.frames / s.rate / pitch;
@@ -276,6 +276,7 @@ const Pack::Zone* roundRobin(const Pack::Zone* const* best, int count, const Pac
 class SampleNotes final : public Voice {
 public:
     Eq eq {}; // the guitar's equaliser (tuned midDb finite)
+    double filterHz = 20000.0, timeScale = 1.0; // the timbre's lowpass and time scale for this layer (makeVoice)
 
     void play(const PlayEvent& e, int delay, double secondsPerBeat, VoiceState& state, Tones& tones) const override {
         if (e.hit) return;
@@ -299,7 +300,7 @@ public:
             }
             later = static_cast<int>(jsRound(pos * step * tones.sr));
         }
-        double gain = tuned.level * strumGain, cents = 0.0, filter = 20000.0;
+        double gain = tuned.level * strumGain, cents = 0.0, filter = filterHz;
         bool oneShot = false;
         if (std::isfinite(tuned.velExp)) { // 79: always both draws, so the sequence stays the same
             const double pitch = state.rng.next(), loud = state.rng.next();
@@ -320,7 +321,7 @@ public:
         }
         tones.start({ .pack = pack.get(), .zone = zone, .sample = zone->sample, .key = e.midi, .dur = dur, .vel = e.vel, .gain = gain, .cents = cents,
                       .art = own ? Art::none : e.art, .artSemi = e.artSemi, .artTime = e.artTime, .artRate = e.artRate, .filter = filter,
-                      .naturalDecay = std::isfinite(tuned.decay) ? tuned.decay : 0.0, .lead = e.leadBeats * secondsPerBeat,
+                      .naturalDecay = std::isfinite(tuned.decay) ? tuned.decay : 0.0, .timeScale = timeScale, .lead = e.leadBeats * secondsPerBeat,
                       .eq = std::isfinite(tuned.midDb) ? &eq : nullptr, .oneShot = oneShot, .ring = e.ring, .delay = delay + later, .layer = layer,
                       .voice = state.serial });
     }
@@ -333,7 +334,7 @@ public:
     struct Hit { int key = -1; bool halfChoke = false, closes = false, opens = false; float panLeft = 1.0f, panRight = 1.0f; };
     std::array<Hit, std::size(HIT_NAMES)> hits; // per HIT_NAMES index: the key that plays it, -1 = none
 
-    // kit: mix/pan "kit" when the voice places its hits in the kit (synth.js 198), else 0
+    // kit: the timbre's width times mix/pan "kit" when the voice places its hits in the kit (synth.js 174, 198), else 0
     SampleHits(Engine::Layer voiceLayer, const std::string& key, const Pack& p, double kit) {
         static const std::map<std::string, std::string> DRUM_FALLBACK { // src/core/event-helpers.js
             { "sideStick", "snare" }, { "rimshot", "snare" }, { "ride", "hat" }, { "rideBell", "hat" }, { "hatHalf", "openHat" }, { "hatPedal", "hat" } };
@@ -361,7 +362,6 @@ public:
             // the place goes by the event's name after the fallback (DRUM_FALLBACK[name] ?? name), whichever key plays it
             const auto stand = DRUM_FALLBACK.find(HIT_NAMES[i]);
             const auto place = kitPan.find(stand != DRUM_FALLBACK.end() ? stand->second : HIT_NAMES[i]);
-            // shortcut: width 1 (synth.js mix.width = 2 * master.width, 1 at the default timbre); the timbre's width comes with Task 16.
             const double pan = clamp(kit * (place != kitPan.end() ? place->second : 0.0), -1, 1);
             hits[i].panLeft = static_cast<float>(1 - pan);
             hits[i].panRight = static_cast<float>(1 + pan);
@@ -419,18 +419,27 @@ public:
 
 } // namespace
 
-std::shared_ptr<const Voice> makeVoice(Engine::Layer layer, const std::string& key, std::shared_ptr<const Pack> pack, const Tuning& tuning) {
+std::shared_ptr<const Voice> makeVoice(Engine::Layer layer, const std::string& key, std::shared_ptr<const Pack> pack, const Tuning& tuning, const Timbre& timbre) {
     const auto v = [&](const char* name) { return tunedValue(key, name, tuning); };
     const Tuned tuned { v("level"), v("decay"), v("velExp"), v("softHz"), v("oneShot"), v("humanCents"), v("humanDb"), v("strum"), v("strumUp"), v("strumTilt"),
                         v("lowDb"), v("midDb"), v("midHz"), v("highDb"), v("highHz"), v("layerSpread"), v("choke"), v("roomMic"), v("velCurve"), v("kitPan") };
     std::shared_ptr<Voice> voice;
     if (layer == Engine::drums || layer == Engine::percussion) {
         // synth.js 198: a drums voice places its hits unless its kitPan is 0 (NaN counts as not 0: every format-1 kit)
-        const double kit = layer == Engine::drums && !(tuned.kitPan == 0) ? tunedValue("mix/pan", "kit", tuning) : 0.0;
+        const double kit = layer == Engine::drums && !(tuned.kitPan == 0) ? masterParams(timbre.master).width * tunedValue("mix/pan", "kit", tuning) : 0.0;
         voice = std::make_shared<SampleHits>(layer, key, *pack, kit);
     } else {
         auto notes = std::make_shared<SampleNotes>();
         notes->eq = { tuned.lowDb, tuned.midDb, tuned.midHz, tuned.highDb, tuned.highHz };
+        // sample.js 46 to 75: the lowpass of the brightness knobs and the time scale of the length knobs; the lead has neither
+        if (layer == Engine::bass) notes->filterHz = brightnessHz(timbre.bass.cutoff);
+        else if (layer == Engine::chords) {
+            notes->filterHz = brightnessHz(timbre.chords.brightness);
+            notes->timeScale = std::pow(3.0, (timbre.chords.length - 0.5) * 2);
+        } else if (layer == Engine::pad) {
+            notes->filterHz = brightnessHz(timbre.pad.cutoff);
+            notes->timeScale = std::pow(3.0, (timbre.pad.attack - 0.5) * 2);
+        }
         voice = std::move(notes);
     }
     voice->tuned = tuned;

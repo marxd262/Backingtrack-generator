@@ -8,6 +8,7 @@
 #include "btg/pack.h"
 #include "generator_internal.h"
 #include "sound_data.h"
+#include "sound_model.h"
 
 #include <array>
 #include <cmath>
@@ -66,7 +67,8 @@ struct Note { // what playNote gets; the defaults are playNote's. Build it with 
     double dur = 0.0, vel = 0.0, gain = 1.0, cents = 0.0;
     Art art = Art::none;
     double artSemi = NAN, artTime = NAN, artRate = NAN, filter = 20000.0, naturalDecay = 0.0;
-    double lead = 0.0;              // s the tone starts before its event (glides)
+    double timeScale = 1.0;         // factor on the zone's attack, hold, decay and release (the chords' length and the pad's attack knob)
+    double lead = 0.0;             // s the tone starts before its event (glides)
     const Eq* eq = nullptr;         // none; the tone copies what it needs
     bool oneShot = false, ring = false;
     int delay = 0;
@@ -158,6 +160,7 @@ public:
 };
 
 // The voice for the sample voice `key` ("bass/sample/finger") with its pack; nullptr for a voice the core cannot play (the layer is silent).
-std::shared_ptr<const Voice> makeVoice(Engine::Layer layer, const std::string& key, std::shared_ptr<const Pack> pack, const Tuning& tuning);
+// `timbre` is the sound model's (sound_model.h): the lowpass and time scale of the note voices and the width of the kit's pan.
+std::shared_ptr<const Voice> makeVoice(Engine::Layer layer, const std::string& key, std::shared_ptr<const Pack> pack, const Tuning& tuning, const Timbre& timbre);
 
 } // namespace btg::detail

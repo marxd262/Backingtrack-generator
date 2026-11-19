@@ -1,11 +1,12 @@
 // The engine: the events of the song, handed to the voice of each layer (sampler.h), and the layer chain of the web app's
-// synth.js (mute, fader, trim, balance, master, limiter).
+// synth.js (mute, fader, trim, balance, master, brightness shelf, limiter).
 #include "btg/engine.h"
 
 #include "btg/generator.h"
 #include "btg/pack.h"
 #include "sampler.h"
 #include "sound_data.h"
+#include "sound_model.h"
 
 #include <nlohmann/json.hpp>
 
@@ -33,18 +34,20 @@ using detail::VoiceState;
 using json = nlohmann::json;
 
 const int CHUNK = 256;
-const float MASTER = 0.6f;
+const double MASTER = 0.6; // synth.js: master.gain.value = MASTER * mix.level
 
 struct PlaySong {
     std::vector<PlayEvent> events; // by trigger beat
     double lengthBeats = 0.0, maxLeadBeats = 0.0;
 };
 
-// What the audio thread plays with: the voice of every layer (nullptr = silent), its serial and the layer's place by mix/pan.
+// What the audio thread plays with: the voice of every layer (nullptr = silent), its serial and the layer's place by mix/pan, and the
+// sum's values from the timbre (masterParams): gain, shelf and the width that multiplies every place.
 struct Setup {
     std::shared_ptr<const Voice> voice[Engine::layerCount];
     uint64_t serial[Engine::layerCount] = {};
     float pan[Engine::layerCount] = {};
+    double masterGain = 0.6, shelfDb = 0.0, shelfHz = 800.0, width = 1.0;
 };
 
 } // namespace
@@ -56,6 +59,7 @@ struct Engine::Impl {
     std::map<std::string, std::shared_ptr<const Pack>> packs;
     struct Chosen { std::string key, status = "silent"; std::shared_ptr<const Voice> voice; uint64_t serial = 0; } chosen[layerCount];
     Tuning tuning;
+    detail::Timbre timbre; // DEFAULT_TIMBRE until setSound
     uint64_t serials = 0;
     // Song and setup reach the audio thread through `pending`; it hands the ones it dropped back through `retired`, freed here.
     std::mutex swap;
@@ -80,6 +84,8 @@ struct Engine::Impl {
     unsigned starts = 0; // Transport::Block::starts of the last block
     double skipBefore = -INFINITY; // song beat of the last jump less a frame: events triggered before it do not play (but see render)
     float gainNow[layerCount] = {}, panNow[layerCount] = {}, masterNow = 1.0f, driveNow = 0.0f;
+    double masterGainNow = MASTER, shelfNow = 0.0, shelfSet = 0.0; // the sum's gain (synth.js `master`) and the shelf's gain now, and the one its coefficients are for
+    detail::Biquad shelf[2];
     double limiterEnv = 0.0;
     float ahead[2][1024] = {}; // the limiter sees the signal 6 ms before it leaves, like the browser's compressor
     int aheadAt = 0, aheadFrames = 288;
@@ -108,15 +114,31 @@ struct Engine::Impl {
         for (int l = 0; l < layerCount; ++l) {
             made->voice[l] = chosen[l].voice;
             made->serial[l] = chosen[l].serial;
-            // shortcut: width 1 (synth.js mix.width = 2 * master.width, 1 at the default timbre); the timbre's width comes with Task 16.
             made->pan[l] = static_cast<float>(detail::tunedValue("mix/pan", LAYER_NAMES[l], tuning));
         }
+        const detail::MasterParams mix = detail::masterParams(timbre.master);
+        made->masterGain = MASTER * mix.level;
+        made->shelfDb = mix.shelfDb;
+        made->shelfHz = mix.shelfFreq;
+        made->width = mix.width;
         publish<Setup>(std::move(made), pendingSetup, retiredSetup);
     }
-    // Audio thread: where the layer goes, the mixer's pan or else the place mix/pan gives it.
+    // Control thread: the built voices again from the current tuning and timbre, with the same serial (the layer's state goes on, as in the web).
+    void rebuildVoices() {
+        for (int l = 0; l < layerCount; ++l)
+            if (chosen[l].voice) chosen[l].voice = makeVoice(static_cast<Layer>(l), chosen[l].key, chosen[l].voice->pack, tuning, timbre);
+    }
+    // Audio thread: where the layer goes, the mixer's pan or else the place mix/pan gives it, times the timbre's width (synth.js 173).
     float panTarget(int l) const {
         const float p = pan[l];
-        return std::isnan(p) ? (setup ? setup->pan[l] : 0.0f) : p;
+        const double place = std::isnan(p) ? (setup ? setup->pan[l] : 0.0f) : p;
+        return static_cast<float>(std::clamp((setup ? setup->width : 1.0) * place, -1.0, 1.0));
+    }
+    // Audio thread: the sum's gain and shelf at the values the setup says, at once, with the shelf's state empty.
+    void settleSum() {
+        masterGainNow = setup ? setup->masterGain : MASTER;
+        shelfNow = shelfSet = setup ? setup->shelfDb : 0.0;
+        for (detail::Biquad& f : shelf) f = detail::highshelf(setup ? setup->shelfHz : 800.0, shelfNow, tones.sr);
     }
 
     // Audio thread: layers whose voice changed (all: when playing starts) begin with the state of a voice just built.
@@ -222,7 +244,7 @@ void Engine::setVoices(const std::string& voicesJson) {
                 if (pack == nullptr) throw std::runtime_error("no pack");
                 m.packs[id->second] = pack;
             }
-            c.voice = makeVoice(static_cast<Layer>(l), key, std::move(pack), m.tuning);
+            c.voice = makeVoice(static_cast<Layer>(l), key, std::move(pack), m.tuning, m.timbre);
             if (c.voice) c.status = "ready";
         } catch (const std::exception& error) {
             c.status = "error: " + id->second + ": " + error.what();
@@ -234,8 +256,14 @@ void Engine::setVoices(const std::string& voicesJson) {
 void Engine::setTuning(const std::string& tuningJson) {
     Impl& m = *impl_;
     m.tuning = detail::parseTuning(tuningJson);
-    for (int l = 0; l < layerCount; ++l) // same serial: the layer's state goes on, as in the web
-        if (m.chosen[l].voice) m.chosen[l].voice = makeVoice(static_cast<Layer>(l), m.chosen[l].key, m.chosen[l].voice->pack, m.tuning);
+    m.rebuildVoices();
+    m.publishSetup();
+}
+
+void Engine::setSound(const std::string& timbreJson) {
+    Impl& m = *impl_;
+    m.timbre = detail::completeTimbre(timbreJson);
+    m.rebuildVoices();
     m.publishSetup();
 }
 
@@ -266,6 +294,7 @@ void Engine::prepare(double sampleRate) {
         m.panNow[l] = m.panTarget(l);
     }
     m.masterNow = m.master * m.master;
+    m.settleSum();
     m.driveNow = m.drive;
     m.limiterEnv = 0.0;
     m.aheadFrames = std::clamp(static_cast<int>(0.006 * sampleRate), 1, 1024);
@@ -291,7 +320,10 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
                 m.retiredSetup = std::move(m.setup);
                 m.setup = std::move(m.pendingSetup);
                 m.restart(false);
-                if (first) for (int l = 0; l < layerCount; ++l) m.panNow[l] = m.panTarget(l); // the places at once, not a sweep from the middle
+                if (first) { // the places, the gain and the shelf at once, not a sweep from the middle
+                    for (int l = 0; l < layerCount; ++l) m.panNow[l] = m.panTarget(l);
+                    m.settleSum();
+                }
             }
             m.hasPending = false;
         }
@@ -368,6 +400,7 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
 
         const float driveTarget = m.drive, masterTarget = m.master * m.master;
         const bool limit = m.limiterOn;
+        const double masterGainTarget = m.setup ? m.setup->masterGain : MASTER, shelfTarget = m.setup ? m.setup->shelfDb : 0.0, shelfHz = m.setup ? m.setup->shelfHz : 800.0;
         float peak[layerCount + 1] = {};
         for (int i = 0; i < count; ++i) {
             // drive on the bass: a soft clipper, blended in so that 0 leaves the signal untouched
@@ -390,19 +423,28 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
                 sum[0] += x;
                 sum[1] += y;
             }
+            // The sum (synth.js 64, 88): the master gain, then the brightness shelf; both follow their targets.
+            m.masterGainNow += smoothLevel * (masterGainTarget - m.masterGainNow);
+            m.shelfNow += smoothLevel * (shelfTarget - m.shelfNow);
+            if (std::fabs(m.shelfNow - m.shelfSet) > 1e-4) { // new coefficients, the filters' state stays
+                const detail::Biquad f = detail::highshelf(shelfHz, m.shelfNow, sr);
+                for (detail::Biquad& b : m.shelf) { b.b0 = f.b0; b.b1 = f.b1; b.b2 = f.b2; b.a1 = f.a1; b.a2 = f.a2; }
+                m.shelfSet = m.shelfNow;
+            }
+            float x[2] = { static_cast<float>(m.shelf[0].process(sum[0] * m.masterGainNow)), static_cast<float>(m.shelf[1].process(sum[1] * m.masterGainNow)) };
             // Limiter as in the web sum (-10 dB, ratio 20, 1 ms / 100 ms, with its automatic make-up of 5.7 dB).
             // shortcut: plain peak follower with 6 ms look-ahead, not the browser's compressor (its knee and adaptive release); the sound match of the full port needs that one rebuilt.
-            double gain = MASTER; // limiter off: the sum only gets the fixed master gain
+            double gain = 1.0; // limiter off: the sum is x
             if (limit) {
-                const double in = std::max(std::fabs(sum[0]), std::fabs(sum[1])) * MASTER;
+                const double in = std::max(std::fabs(x[0]), std::fabs(x[1]));
                 m.limiterEnv = in + (m.limiterEnv - in) * (in > m.limiterEnv ? limiterAttack : limiterRelease);
-                for (int c = 0; c < 2; ++c) std::swap(sum[c], m.ahead[c][m.aheadAt]); // out comes what went in 6 ms ago
+                for (int c = 0; c < 2; ++c) std::swap(x[c], m.ahead[c][m.aheadAt]); // out comes what went in 6 ms ago
                 m.aheadAt = (m.aheadAt + 1) % m.aheadFrames;
                 const double over = 20 * std::log10(std::max(m.limiterEnv, 1e-9)) + 10;
-                gain = (over > 0 ? std::pow(10.0, -over * (1 - 1.0 / 20) / 20) : 1.0) * 1.928 * MASTER;
+                gain = (over > 0 ? std::pow(10.0, -over * (1 - 1.0 / 20) / 20) : 1.0) * 1.928;
             }
             m.masterNow += smoothLevel * (masterTarget - m.masterNow);
-            float l = static_cast<float>(sum[0] * gain) * m.masterNow, r = static_cast<float>(sum[1] * gain) * m.masterNow;
+            float l = static_cast<float>(x[0] * gain) * m.masterNow, r = static_cast<float>(x[1] * gain) * m.masterNow;
             if (limit) { l = std::clamp(l, -1.0f, 1.0f); r = std::clamp(r, -1.0f, 1.0f); }
             peak[layerCount] = std::max(peak[layerCount], std::max(std::fabs(l), std::fabs(r)));
             left[done + i] = l;

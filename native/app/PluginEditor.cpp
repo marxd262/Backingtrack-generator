@@ -44,7 +44,7 @@ const juce::StringArray layerNames { "drums", "bass", "chords", "pad", "lead", "
 
 // Messages that build the song (and read its packs) or start, stop or move the transport: they run on the processor's loader
 // thread in the order the page sent them, so a play waits for its track's packs and a stop sent meanwhile comes after it.
-const juce::StringArray queued { "track", "voices", "tuning", "pack", "play", "stop", "tempo", "seek", "loop", "playFile", "fileRate" };
+const juce::StringArray queued { "track", "voices", "tuning", "timbre", "pack", "play", "stop", "tempo", "seek", "loop", "playFile", "fileRate" };
 
 struct Done { juce::String failed, status; double ms = 0.0; }; // status: btg::Engine::voiceStatus after a track or voices
 
@@ -64,6 +64,7 @@ Done control (BackingtrackProcessor& p, const juce::var& message) {
         p.engine.setVoices (message["json"].toString().toStdString());
         done.status = p.engine.voiceStatus();
     } else if (type == "tuning") p.engine.setTuning (message["json"].toString().toStdString());
+    else if (type == "timbre") p.engine.setSound (message["json"].toString().toStdString());
     else if (type == "pack") {
         try { p.pack (message["id"].toString().toStdString()); } catch (const std::exception& e) { done.failed = e.what(); }
     } else if (type == "play") {
