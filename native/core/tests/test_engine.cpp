@@ -3,6 +3,7 @@
 #include "btg/pack.h"
 #include "btg/transport.h"
 
+#include "../src/compressor.h"
 #include "../src/convolver.h"
 #include "../src/echo.h"
 #include "../src/sampler.h"
@@ -16,6 +17,7 @@
 #include <iterator>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -338,17 +340,64 @@ int main(int argc, char** argv) {
             for (btg::detail::Echo* e : { &whole, &fraction }) { e->prepare(sr); e->setTone(2400); }
             whole.setTarget(1000.0 / sr, true);
             fraction.setTarget(1000.25 / sr, true);
-            std::vector<float> r(1200), x(1200);
+            std::vector<float> exact(1200), x(1200);
             double worst = 0.0, level = 0.0;
-            for (size_t i = 0; i < r.size(); ++i) {
+            for (size_t i = 0; i < exact.size(); ++i) {
                 float unused = 0.0f, outFraction = 0.0f;
-                whole.process(i == 0 ? 1.0f : 0.0f, 0.0f, 0.0, r[i], unused);
+                whole.process(i == 0 ? 1.0f : 0.0f, 0.0f, 0.0, exact[i], unused);
                 fraction.process(i == 0 ? 1.0f : 0.0f, 0.0f, 0.0, outFraction, unused);
                 x[i] = outFraction;
-                if (i >= 1000) { worst = std::max(worst, std::fabs(static_cast<double>(outFraction) - (0.75 * r[i] + 0.25 * r[i - 1]))); level = std::max(level, std::fabs(static_cast<double>(r[i]))); }
+                if (i >= 1000) { worst = std::max(worst, std::fabs(static_cast<double>(outFraction) - (0.75 * exact[i] + 0.25 * exact[i - 1]))); level = std::max(level, std::fabs(static_cast<double>(exact[i]))); }
             }
             CHECK(level > 1e-3 && worst < 1e-7 && x[999] == 0.0f);
         }
+    }
+
+    // compressor.h, Chromium's DynamicsCompressor: the signal leaves (unsigned)(0.006f * rate) frames late (288 at 48 kHz, 264 at 44.1, 576 at
+    // 96); below the threshold it only gets the automatic make-up (1 / Saturate(1))^0.6, with knee 0 10^(-0.6 * threshold * (1 - 1/ratio) / 20):
+    // 4.5709 for -24 dB and ratio 12, 1.6218 for -14 dB and ratio 2. One impulse of -40 dBFS after 1 s of silence (the detector has settled),
+    // chunks of 100 frames; every other frame stays exactly 0. This says nothing about the 32-frame division across calls: the signal lies
+    // below both thresholds, so detector and gain are 1 in every division (the check after this loop does that).
+    for (const auto& [sr, late] : { std::pair { 48000.0f, 288 }, std::pair { 44100.0f, 264 }, std::pair { 96000.0f, 576 } })
+        for (const auto& [threshold, ratio, makeup] : { std::tuple { -24.0f, 12.0f, 4.5709 }, std::tuple { -14.0f, 2.0f, 1.6218 } }) {
+            btg::detail::Compressor c;
+            c.prepare(sr);
+            c.set(threshold, 0.0f, ratio, 0.003f, 0.25f);
+            CHECK(c.preDelay() == late);
+            std::vector<float> l(static_cast<size_t>(sr) + 1000, 0.0f), r(l.size(), 0.0f);
+            l[static_cast<size_t>(sr)] = 0.01f;
+            for (size_t at = 0; at < l.size(); at += 100) c.process(&l[at], &r[at], static_cast<int>(std::min<size_t>(100, l.size() - at)));
+            const size_t peakAt = static_cast<size_t>(std::max_element(l.begin(), l.end(), [](float a, float b) { return std::fabs(a) < std::fabs(b); }) - l.begin());
+            CHECK(peakAt == static_cast<size_t>(sr) + late);
+            CHECK(std::fabs(l[peakAt] / 0.01 / makeup - 1) < 1e-3);
+            CHECK(std::count_if(l.begin(), l.end(), [](float x) { return x != 0.0f; }) == 1 && *std::max_element(r.begin(), r.end()) == 0.0f);
+        }
+    // The length of the calls changes nothing: noise at 0 dBFS, 40 dB lower, +3 dBFS, -30 dBFS (0.3 s each, so attack and release both run
+    // and the compressor really works the signal), through the glue's and the limiter's settings in one call and in calls of 100, 7 and 128
+    // frames (the engine's chunks have remainders; the browser's calls have 128): the four outputs are bit-identical, and the quiet stretch
+    // comes out louder against its input than the loud one by at least 10 % (the signal was compressed).
+    for (const auto& setting : { std::tuple { -14.0f, 2.0f, 0.03f, 0.25f }, std::tuple { -2.0f, 20.0f, 0.001f, 0.1f } }) {
+        const float threshold = std::get<0>(setting), ratio = std::get<1>(setting), attack = std::get<2>(setting), release = std::get<3>(setting); // plain locals: older Clang cannot capture structured bindings
+        const size_t part = 14400, frames = 4 * part;
+        std::vector<float> left(frames), right(frames);
+        unsigned int seed = 5;
+        const auto noise = [&] { seed = seed * 1664525u + 1013904223u; return static_cast<float>(seed >> 8) / 8388608.0f - 1.0f; };
+        const float amplitude[4] = { 1.0f, 0.01f, 1.4125f, 0.0316f };
+        for (size_t i = 0; i < frames; ++i) { left[i] = amplitude[i / part] * noise(); right[i] = 0.6f * amplitude[i / part] * noise(); }
+        const auto through = [&](size_t chunk) {
+            btg::detail::Compressor c;
+            c.prepare(48000.0f);
+            c.set(threshold, 0.0f, ratio, attack, release);
+            std::vector<float> l = left, r = right;
+            for (size_t at = 0; at < frames; at += chunk) c.process(&l[at], &r[at], static_cast<int>(std::min(chunk, frames - at)));
+            return std::make_pair(l, r);
+        };
+        const auto whole = through(frames);
+        for (const size_t chunk : { 100, 7, 128 }) CHECK(through(chunk) == whole);
+        const auto gainOf = [&](size_t from) { // output (late by the pre-delay) against input over 0.1 s
+            return rmsOf(whole.first, from + 288, from + 288 + 4800) / rmsOf(left, from, from + 4800);
+        };
+        CHECK(gainOf(part - 4800) * 1.1 < gainOf(2 * part - 4800)); // measured: 0.756 against 1.616 (glue), 0.938 against 1.122 (limiter)
     }
 
     // Engine with the fixture track.
@@ -378,8 +427,60 @@ int main(int argc, char** argv) {
     CHECK(play(480, 0.8f, false, 0.0).left != a.left);      // the drive is audible
     CHECK(play(480, 0.0f, false, 64.0).rms > 0.01);         // starting inside the song plays
 
+    // mix/bus on 0 takes the old limiter alone (-10 dB with its make-up), on 1 the glue and the limiter: both finite, below 1.0, not the same.
+    // The fine value's default is on 0 (tunables.js, MIX_TUNABLES), so no tuning is the old limiter.
+    {
+        const auto bus = [&](const char* tuning) {
+            btg::Engine engine;
+            engine.setPackSource(source);
+            engine.setTuning(tuning);
+            engine.setTrack(track);
+            engine.prepare(rate);
+            btg::Transport t;
+            t.play(0.0, engine.bpm());
+            return render(engine, t, 5.0, 480);
+        };
+        const Result glued = bus(R"({"mix/bus":{"on":1}})"), old = bus(R"({"mix/bus":{"on":0}})");
+        CHECK(glued.finite && old.finite && glued.peak < 1.0 && old.peak < 1.0 && glued.left != old.left);
+        CHECK(bus("{}").left == old.left);
+    }
+
+    // A compressor that was left out of the chain starts empty when it comes back: its pre-delay ring would otherwise play up to 1024
+    // frames of what went in before the switch (and the detector and gain would be stale). Play 2 s, switch off, play 1 s, switch on:
+    // the compressor that comes back delivers exactly 0 for its first 288 frames (its pre-delay), not old audio. The limiter's switch
+    // (setLimiter) brings back the limiter (default bus: old limiter alone) or both (on 1: glue first, limiter behind it: 576 frames);
+    // the bus's switch (mix/bus on 1 -> 0 -> 1) brings back the glue only, so the limiter's own late frames (0..287) are still music
+    // and the glue's silence reaches the output at 288..575.
+    {
+        const auto peakOf = [](const Result& r, size_t from, size_t to) { return *std::max_element(r.left.begin() + static_cast<long>(from), r.left.begin() + static_cast<long>(to), [](float a, float b) { return std::fabs(a) < std::fabs(b); }); };
+        const auto afterSwitch = [&](const char* tuning, const char* off, bool limiterSwitch) {
+            btg::Engine engine;
+            engine.setPackSource(source);
+            engine.setTuning(tuning);
+            engine.setTrack(track);
+            engine.prepare(rate);
+            btg::Transport t;
+            t.play(64.0, engine.bpm());
+            render(engine, t, 2.0, 480);
+            if (limiterSwitch) engine.setLimiter(false); else engine.setTuning(off);
+            render(engine, t, 1.0, 480);
+            if (limiterSwitch) engine.setLimiter(true); else engine.setTuning(tuning);
+            return render(engine, t, 0.1, 480);
+        };
+        const char *ON = R"({"mix/bus":{"on":1}})", *OFF = R"({"mix/bus":{"on":0}})";
+        const Result limiterOnly = afterSwitch(OFF, OFF, true), both = afterSwitch(ON, ON, true), glueOnly = afterSwitch(ON, OFF, false);
+        CHECK(peakOf(limiterOnly, 0, 288) == 0.0f && std::fabs(peakOf(limiterOnly, 288, 2000)) > 0.01f);
+        CHECK(peakOf(both, 0, 576) == 0.0f && std::fabs(peakOf(both, 576, 2000)) > 0.01f);
+        CHECK(std::fabs(peakOf(glueOnly, 0, 288)) > 0.01f && peakOf(glueOnly, 288, 576) == 0.0f && std::fabs(peakOf(glueOnly, 576, 2000)) > 0.01f);
+    }
+
     // Tempo extremes: all six layers (test packs), reverb, room (1 s) and echo up, the limiter on; at 20 and at 400 bpm, 20 s each: every
-    // sample finite, the peak below 1.0, and the render takes less than a quarter of the time it plays (the load limit of the plan).
+    // sample finite, and the render takes less than a quarter of the time it plays (the load limit of the plan). The peak: the core's
+    // limiter equals Chromium's compressor sample for sample (compressor-compare.mjs), and with these loud synthetic packs the chain
+    // reaches 0.869 (20 bpm) and 1.064 (400 bpm) at the fader's 1, the latter a little above full scale (the shell clips); no web render
+    // of these packs exists, so nothing more is known about why. The fader goes to 0.7, which is a gain of 0.49 (the square), and the
+    // test asserts only that the peak stays below 1.0 there (about 2.0 before the fader: a runaway chain would not); "below full scale
+    // at both tempos" is proven with the real packs in mix.json (mix-funk-20bpm, mix-funk-400bpm).
     // Both start at beat 64, where all six layers play (20 bpm for 20 s covers only 6.7 beats), and every layer has a peak after the render
     // (this also catches a pack that did not load).
     {
@@ -399,7 +500,7 @@ int main(int argc, char** argv) {
             engine.setPackSource(source);
             engine.setSound(R"({"master":{"reverb":1,"echo":1,"roomWet":1,"roomSize":1}})");
             engine.setTrack(band);
-            engine.setMaster(0.7f); // the test packs are loud: with all six layers playing the output reaches the clamp at the fader's 1 (peak 1.000)
+            engine.setMaster(0.7f); // fader 0.7 = gain 0.49; not the fader's 1, where the peaks are 0.869 and 1.064 (see above)
             engine.prepare(rate);
             btg::Transport t;
             t.play(64.0, bpm);
@@ -504,6 +605,9 @@ int main(int argc, char** argv) {
             engine.setPackSource(source);
             engine.setSound(DRY);
             engine.setTrack(track);
+            // its subject is the voices: the compressors keep their state across a restart without a stopped block (design open point 7), and
+            // their gain remembers more than 0.5 s of the music before, which the peak follower of Phase 2 did not
+            engine.setLimiter(false);
             engine.prepare(rate);
             btg::Transport t;
             if (playedBefore) {

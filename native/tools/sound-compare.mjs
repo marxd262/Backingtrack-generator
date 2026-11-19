@@ -12,6 +12,8 @@
 //   kind   "sample" (default) or "synth": chooses the limits
 // Exit code 1 if a case fails (also one that cannot render, or whose renders differ in length by more than 50 ms).
 // balance = (right minus left level of the native render) minus (the same of the web render); limit as the level limit.
+// peak = the native render's largest sample minus the web render's, in dB; printed on every line, judged (+-1 dB, the plan's limit for the
+// full mix) only for cases rendered with the limiter.
 // The listening files (<name>-web.wav, <name>-nativ.wav, 16 bit) of a pair above full scale are turned down by one common gain;
 // the measurement uses the unscaled floats. A run of cases ends with the A/B page index.html in the output folder (ab-page.mjs).
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -26,7 +28,7 @@ const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const { resolveTrackTimbre } = await import(pathToFileURL(join(repo, 'src/core/timbre.js')).href);
 const RATE = 48000;
 const BANDS = [63, 125, 250, 500, 1000, 2000, 4000, 8000];
-const LIMITS = { sample: { level: 0.5, band: 1.5, env: 0.98 }, synth: { level: 1, band: 3, env: 0.95 } };
+const LIMITS = { sample: { level: 0.5, band: 1.5, env: 0.98, peak: 1 }, synth: { level: 1, band: 3, env: 0.95, peak: 1 } };
 const UNJUDGED_DB = -70; // a band below this (relative to the web render's full band) in both renders is not judged
 const WINDOW = 0.05; // envelope window in seconds
 const MAX_LENGTH_GAP = 0.05; // seconds the two renders may differ in length
@@ -112,8 +114,11 @@ const power = (x, channel) => { let s = 0; for (let i = channel; i < x.length; i
 // every limit check is written `!(x <= limit)` so that a NaN fails it on its own
 const over = (x, limit) => !(Math.abs(x) <= limit);
 
+const peakOf = (x) => { let m = 0; for (let i = 0; i < x.length; i++) m = Math.max(m, Math.abs(x[i])); return m; }; // a NaN stays NaN
+const peakDb = (x) => 20 * Math.log10(Math.max(peakOf(x), 1e-15)); // Math.max keeps the NaN
+
 // both over the length of the shorter one (a length difference above MAX_LENGTH_GAP fails); differences are native minus web
-function measure(web, native, kind = 'sample') {
+function measure(web, native, kind = 'sample', judgePeak = false) {
   const limit = LIMITS[kind];
   if (!limit) throw new Error(`unknown kind: ${kind}`);
   const seconds = [web.length / 2 / RATE, native.length / 2 / RATE];
@@ -132,18 +137,20 @@ function measure(web, native, kind = 'sample') {
   const size = (d) => (Number.isNaN(d) ? Infinity : Math.abs(d)); // a NaN band is the worst one
   bands.forEach((d, i) => { if (d !== null && (worst < 0 || size(d) > size(bands[worst]))) worst = i; });
   const env = pearson(envelope(w), envelope(v));
+  const peaks = [peakDb(w), peakDb(v)], peak = peaks[1] - peaks[0];
   const failed = {
     level: over(level, limit.level), balance: balance !== null && over(balance, limit.level), bands: bands.some((d) => d !== null && over(d, limit.band)),
-    envelope: !(env >= limit.env), length: !(Math.abs(seconds[0] - seconds[1]) <= MAX_LENGTH_GAP),
+    envelope: !(env >= limit.env), length: !(Math.abs(seconds[0] - seconds[1]) <= MAX_LENGTH_GAP), peak: judgePeak && over(peak, limit.peak),
   };
-  return { level, balance, bands, bandMax: worst >= 0 ? bands[worst] : null, bandHz: worst >= 0 ? BANDS[worst] : null, env, seconds, failed, pass: !Object.values(failed).some(Boolean) };
+  return { level, balance, peak, peaks, bands, bandMax: worst >= 0 ? bands[worst] : null, bandHz: worst >= 0 ? BANDS[worst] : null, env, seconds, failed, pass: !Object.values(failed).some(Boolean) };
 }
 
 function line(name, m) {
   const max = m.bandMax === null ? '-' : signed(m.bandMax), at = m.bandHz ?? '-', balance = m.balance === null ? '-' : signed(m.balance);
   const length = m.failed.length ? `  LENGTH web ${m.seconds[0].toFixed(2)} s, native ${m.seconds[1].toFixed(2)} s` : '';
-  let text = `${name}  level ${signed(m.level)} dB  balance ${balance} dB  bands max ${max} dB at ${at}  envelope ${m.env.toFixed(3)}${length}  ${m.pass ? 'PASS' : 'FAIL'}`;
-  if (!m.pass) text += `\n    bands ${BANDS.map((hz, i) => `${hz}: ${m.bands[i] === null ? '-' : signed(m.bands[i])}`).join('  ')}`;
+  const peak = `peak ${signed(m.peak)} dB (web ${signed(m.peaks[0])}, native ${signed(m.peaks[1])} dBFS)`;
+  let text = `${name}  level ${signed(m.level)} dB  balance ${balance} dB  ${peak}  bands max ${max} dB at ${at}  envelope ${m.env.toFixed(3)}${length}  ${m.pass ? 'PASS' : 'FAIL'}`;
+  if (!m.pass) text += `\n    failed: ${Object.keys(m.failed).filter((k) => m.failed[k]).join(', ')}\n    bands ${BANDS.map((hz, i) => `${hz}: ${m.bands[i] === null ? '-' : signed(m.bands[i])}`).join('  ')}`;
   return text;
 }
 
@@ -205,7 +212,7 @@ async function runCases(raw, baseDir, out) {
       const c = prepareCase(entry, baseDir);
       const { web, native } = await renderCase(c);
       const gain = writePair(out, c.name, web, native);
-      const m = measure(web, native, c.kind);
+      const m = measure(web, native, c.kind, c.limiter);
       console.log(line(c.name, m));
       if (gain < 1) console.log(turnedDown(gain, c.dry));
       results.push({ name, m });
@@ -239,6 +246,9 @@ async function selfCheck(out) {
   const c = prepareCase({ name: 'selfcheck-funk', track: join(repo, 'native/core/tests/track-funk.json'), dry: true }, repo);
   const { web, native } = await renderCase(c);
   writePair(out, c.name, web, native);
+  let top = 0, topAt = 0; // the native render's largest sample, raised by 1.5 dB: only the peak notices (judged here as for a case with the limiter)
+  native.forEach((v, i) => { if (Math.abs(v) > top) { top = Math.abs(v); topAt = i; } });
+  const raised = native.map((v, i) => (i === topAt ? v * 10 ** (1.5 / 20) : v));
   const checks = [
     ['as it is', native, 'must PASS', (m) => m.pass],
     ['native 2 dB quieter', native.map((v) => v * 10 ** (-2 / 20)), 'must FAIL on level', (m) => m.failed.level],
@@ -246,10 +256,11 @@ async function selfCheck(out) {
     ['native 1 s short', native.subarray(0, native.length - 2 * RATE), 'must FAIL on length', (m) => m.failed.length],
     ['native left -2 dB, right +2 dB', native.map((v, i) => v * 10 ** ((i % 2 ? 2 : -2) / 20)), 'must FAIL on balance', (m) => m.failed.balance],
     ['native with a NaN', native.map((v, i) => (i === 1000 ? NaN : v)), 'must FAIL on level, balance and bands', (m) => m.failed.level && m.failed.balance && m.failed.bands],
+    ['native peak +1.5 dB (its largest sample)', raised, 'must FAIL on peak', (m) => m.failed.peak, true],
   ];
   let ok = true;
-  for (const [what, samples, want, good] of checks) {
-    const m = measure(web, samples, c.kind);
+  for (const [what, samples, want, good, judgePeak = false] of checks) {
+    const m = measure(web, samples, c.kind, judgePeak);
     console.log(line(`${c.name} (${what})`, m));
     console.log(`  ${good(m) ? 'ok' : 'WRONG'}: ${want}`);
     ok &&= good(m);

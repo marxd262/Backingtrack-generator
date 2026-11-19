@@ -244,5 +244,22 @@ const wetCases = [
 ];
 write('wet.json', wetCases);
 console.log(`echo.json: ${echoCases.length} cases, wet.json: ${wetCases.length} cases`);
+
+// Task 17: the nine bands with everything: their styles' timbres (Phase 4 knobs 0), reverb, room, echo and the sum with the limiter,
+// ringing 2.5 s past the song. The A/B set for listening (native/tools/ab-mix.cmd). Then the funk band at the tempo extremes (the plan:
+// all six layers, everything on, at 20 and 400 bpm, below full scale), with the real packs: a form of 4 bars at 20 bpm (48 s), the rolled
+// form of 24 bars at 400 bpm.
+const mixCases = STYLE_PRESETS.map((s) => claimed({ name: `mix-${s.id}`, track: bands[s.id], sound: styleSound(bands[s.id]), tail: 2.5 }, ['reverb', 'room', 'echo']));
+const SIX = { drums: true, bass: true, chords: true, pad: true, lead: true, percussion: true };
+const funkAt = (bpm, form) => track('funk', { layers: SIX, extra: { bpm, form } });
+const slow = funkAt(20, { sections: [{ type: 'verse', bars: 2 }, { type: 'chorus', bars: 2 }] }), fast = funkAt(400, bands.funk.form);
+for (const [name, t] of [['mix-funk-20bpm', slow], ['mix-funk-400bpm', fast]]) mixCases.push(claimed({ name, track: t, sound: styleSound(t), tail: 2.5 }, ['reverb', 'room', 'echo']));
+// The fine value mix/bus on is 0 by default (tunables.js): the nine cases above run the old limiter alone, shelf -> limiter at -10 dB.
+// The glue compressor (on 1: glue, its gain, limiter at -2 dBFS) is the user's to switch on; three styles measure it, the loudest ones and one
+// with a dense envelope.
+CLAIMS.glue = (c) => (tunedValue('mix/bus', 'on', c.tuning ?? {}) >= 0.5 ? '' : 'the glue is off');
+for (const id of ['funk', 'rock', 'poppunk']) mixCases.push(claimed({ name: `mix-${id}-glue`, track: bands[id], sound: styleSound(bands[id]), tuning: { 'mix/bus': { on: 1 } }, tail: 2.5 }, ['reverb', 'room', 'echo', 'glue']));
+write('mix.json', mixCases);
+console.log(`mix.json: ${mixCases.length} cases (nine styles, funk at 20 and 400 bpm, three styles with the glue)`);
 for (const p of problems) console.error(`ERROR ${p}`);
 process.exit(problems.length ? 1 : 0);

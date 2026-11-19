@@ -80,7 +80,7 @@ Bis auf Bruchstücke, die der Generator braucht, ist nichts davon im Kern. Zusam
 | Werkzeug | Zweck |
 |---|---|
 | `btg_parity_tests` mit `native/tools/export-events.mjs` | Ereignisstrom Kern gegen Web, Feld für Feld |
-| `btg_render`, `native/tools/render-ab.mjs`, `web-render.mjs` | derselbe Track aus Web und Kern als WAV, für A/B |
+| `btg_render`, `web-render.mjs`, `native/tools/sound-compare.mjs` | derselbe Track aus Web und Kern als WAV, gemessen und als A/B-Paar (bis Phase 3 gab es dafür `native/tools/render-ab.mjs`) |
 | `native/tools/ui-check.mjs` | Oberfläche in der echten App: Fehler, Position, Pegel, Reaktionszeit (stumm) |
 | `btg_engine_tests` | Engine: Transport, Schleife, Pegel |
 | `tests/core` (746), `tests/e2e` (355) | Web-Version: Logik und Oberfläche; von den 32 Testdateien unter `tests/e2e` messen 9 Web Audio, 2 gehören zur Hörprobe- und Spektrogramm-Seite |

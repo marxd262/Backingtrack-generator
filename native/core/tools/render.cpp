@@ -4,7 +4,7 @@
 // which the tones and the sends ring out; the file holds exactly the song's frames plus the tail's.
 // --sound: the timbre as the web app's resolveTrackTimbre(track) gives it (without the option: DEFAULT_TIMBRE), set before the track is built.
 // --tuning: fine values as the web app's setTuning takes them ({"bass/sample/finger":{"level":2}}), set before the track is built (before the timbre).
-// --dry: no limiter, written as 32-bit float WAV so that nothing clips; for native/tools/sound-compare.mjs.
+// --dry: no limiter (no glue compressor either). The file is always a 32-bit float WAV, so that nothing clips; for native/tools/sound-compare.mjs.
 #include "btg/engine.h"
 #include "btg/pack.h"
 
@@ -83,15 +83,14 @@ int main(int argc, char** argv) {
             }
         }
 
-        std::vector<int16_t> pcm;
-        if (!dry) for (const float x : samples) pcm.push_back(static_cast<int16_t>(std::lround(x * 32767.0f)));
-        const uint32_t width = dry ? 4 : 2, bytes = static_cast<uint32_t>(samples.size() * width), hz = static_cast<uint32_t>(rate);
+        // 32-bit float always: the core does not clamp, and what the chain makes is what gets measured
+        const uint32_t bytes = static_cast<uint32_t>(samples.size() * 4), hz = static_cast<uint32_t>(rate);
         std::ofstream out(argv[3], std::ios::binary);
         const auto u32 = [&](uint32_t v) { out.write(reinterpret_cast<const char*>(&v), 4); }; // little endian hosts only
         const auto u16 = [&](uint16_t v) { out.write(reinterpret_cast<const char*>(&v), 2); };
-        out.write("RIFF", 4); u32(36 + bytes); out.write("WAVEfmt ", 8); u32(16); u16(dry ? 3 : 1); u16(2); u32(hz); u32(hz * 2 * width); u16(static_cast<uint16_t>(2 * width)); u16(static_cast<uint16_t>(8 * width));
+        out.write("RIFF", 4); u32(36 + bytes); out.write("WAVEfmt ", 8); u32(16); u16(3); u16(2); u32(hz); u32(hz * 8); u16(8); u16(32);
         out.write("data", 4); u32(bytes);
-        out.write(dry ? reinterpret_cast<const char*>(samples.data()) : reinterpret_cast<const char*>(pcm.data()), bytes);
+        out.write(reinterpret_cast<const char*>(samples.data()), bytes);
         if (!out) throw std::runtime_error(std::string("cannot write ") + argv[3]);
 
         const double rms = std::sqrt(squares / static_cast<double>(samples.size()));

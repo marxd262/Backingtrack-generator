@@ -1,6 +1,6 @@
 # Credits
 
-Die Sample-Klänge des Backingtrack Generators stammen aus freien Sammlungen. Je Quelle: Name, Urheber, Lizenz, Link und was für die App verändert wurde. Die vollständigen Lizenztexte liegen neben den Packs in `src/assets/samples/` (`LICENSE-*.md`). In der App steht dasselbe auf der Seite „Credits“ (`src/ui/credits.html`, Link auf der Startseite).
+Die Sample-Klänge des Backingtrack Generators stammen aus freien Sammlungen. Je Quelle: Name, Urheber, Lizenz, Link und was für die App verändert wurde. Die vollständigen Lizenztexte liegen neben den Packs in `src/assets/samples/` (`LICENSE-*.md`). In der App steht dasselbe auf der Seite „Credits“ (`src/ui/credits.html`, Link auf der Startseite). Programmcode aus fremden Quellen steht am Ende; dieser Abschnitt (Chromium) kommt mit der nativen App auf die Seite „Credits“ (Task 35).
 
 ## MuseScore_General
 
@@ -33,3 +33,66 @@ Die Sample-Klänge des Backingtrack Generators stammen aus freien Sammlungen. Je
 - Quelle: https://github.com/sfzinstruments/DrumGizmo.MuldjordKit
 - Verändert: Auswahl von 11 Schlägen (86 Zonen), Mikrofone nach dem Standard-Mix des Mappings zu Direkt und Raum gemischt (Triggerkanal weggelassen), links und rechts getauscht, gekürzt mit Ausblendung, Crash um 3 dB angehoben, ein Pegelfaktor für das ganze Pack, 16 Bit / 44,1 kHz, FLAC (`scripts/import-sfz.mjs`)
 - Lizenztext: `src/assets/samples/LICENSE-drums-muldjord.md`
+
+## Chromium (Web Audio): Kompressor und Normierung des Halls
+
+- Urheber: Google Inc. (Copyright 2010: `reverb.cc`, `audio_utilities.cc`; Copyright 2011: `dynamics_compressor.cc`)
+- Lizenz: BSD-3-Clause (`reverb.cc`, `dynamics_compressor.cc`) und BSD mit zwei Bedingungen (`audio_utilities.cc`), Wortlaut unten
+- Quelle: https://chromium.googlesource.com/chromium/src/+/refs/tags/158.0.8127.18/third_party/blink/renderer/platform/audio/ (`audio_utilities.cc`: gelesen am Stand main)
+- Verändert: nach C++ für den Kern übertragen, ohne Chromium; der Kompressor in `native/core/src/compressor.cpp` (ohne die Messung der Pegelminderung; mit den zwei Einzeilern `DecibelsToLinear` und `LinearToDecibels` aus `audio_utilities.cc`), die Normierung der Impulsantwort in `native/core/src/convolver.cpp`
+- Wortlaut von `reverb.cc` und `dynamics_compressor.cc` (in beiden Dateien gleich, nur das Jahr unterscheidet sich):
+
+```
+    Copyright (C) 2010, 2011 Google Inc. All rights reserved.
+
+    Redistribution and use in source and binary forms, with or without
+    modification, are permitted provided that the following conditions
+    are met:
+
+    1.  Redistributions of source code must retain the above copyright
+        notice, this list of conditions and the following disclaimer.
+    2.  Redistributions in binary form must reproduce the above copyright
+        notice, this list of conditions and the following disclaimer in the
+        documentation and/or other materials provided with the distribution.
+    3.  Neither the name of Apple Computer, Inc. ("Apple") nor the names of
+        its contributors may be used to endorse or promote products derived
+        from this software without specific prior written permission.
+
+    THIS SOFTWARE IS PROVIDED BY APPLE AND ITS CONTRIBUTORS "AS IS" AND ANY
+    EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+    WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+    DISCLAIMED. IN NO EVENT SHALL APPLE OR ITS CONTRIBUTORS BE LIABLE FOR ANY
+    DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+    (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+    LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+    ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+    (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+    THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+- Wortlaut von `audio_utilities.cc`:
+
+```
+    Copyright (C) 2010, Google Inc. All rights reserved.
+
+    Redistribution and use in source and binary forms, with or without
+    modification, are permitted provided that the following conditions
+    are met:
+    1.  Redistributions of source code must retain the above copyright
+       notice, this list of conditions and the following disclaimer.
+    2.  Redistributions in binary form must reproduce the above copyright
+       notice, this list of conditions and the following disclaimer in the
+       documentation and/or other materials provided with the distribution.
+
+    THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS'' AND
+    ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+    IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+    ARE DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS BE LIABLE
+    FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+    DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+    SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+    CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+    LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+    OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
+    DAMAGE.
+```

@@ -52,6 +52,7 @@ add_library(btg_core STATIC
     src/sampler.cpp
     src/sound_model.cpp
     src/convolver.cpp
+    src/compressor.cpp
     src/analysis.cpp
     src/file_player.cpp
     src/decode.cpp
@@ -149,6 +150,10 @@ add_test(NAME analysis COMMAND btg_analysis_tests)
 add_executable(btg_render tools/render.cpp)
 target_link_libraries(btg_render PRIVATE btg_core)
 add_test(NAME render COMMAND btg_render ${CMAKE_CURRENT_SOURCE_DIR}/tests/track-funk.json ${btg_samples} ${PROJECT_BINARY_DIR}/render-test.wav)
+
+# The compressor alone on a raw file, for native/tools/compressor-compare.mjs (against Chromium's DynamicsCompressorNode).
+add_executable(btg_compressor tools/compressor.cpp)
+target_link_libraries(btg_compressor PRIVATE btg_core)
 
 # Analysis of an audio file to JSON (tempo, beats, chords, key).
 add_executable(btg_analyze tools/analyze.cpp)

@@ -1,9 +1,10 @@
 // The engine: the events of the song, handed to the voice of each layer (sampler.h), and the layer chain of the web app's
-// synth.js (mute, fader, trim, balance, master, the reverb and the shared room, brightness shelf, limiter).
+// synth.js (mute, fader, trim, balance, master, the reverb and the shared room, echo, brightness shelf, bus compressor and limiter).
 #include "btg/engine.h"
 
 #include "btg/generator.h"
 #include "btg/pack.h"
+#include "compressor.h"
 #include "convolver.h"
 #include "echo.h"
 #include "sampler.h"
@@ -46,7 +47,7 @@ struct PlaySong {
 // What the audio thread plays with: the voice of every layer (nullptr = silent), its serial and the layer's place by mix/pan, and the
 // sum's values from the timbre (masterParams): gain, shelf and the width that multiplies every place; the sends (masterParams,
 // drumParams, mix/room) and their two convolvers, built on the control thread for the rate of the last prepare (none before it) and
-// used and changed only by the audio thread; the echo's values (its line lives on the audio side).
+// used and changed only by the audio thread; the echo's values (its line lives on the audio side); the bus (applyBus of synth.js).
 struct Setup {
     std::shared_ptr<const Voice> voice[Engine::layerCount];
     uint64_t serial[Engine::layerCount] = {};
@@ -55,6 +56,10 @@ struct Setup {
     double reverbWet = 0.15, roomSend = 0.0, roomWet = 1.0, roomTone = 7000.0, roomSends[Engine::layerCount] = {};
     std::shared_ptr<detail::Convolver> reverb, room;
     double echoWet = 0.3, echoFeedback = 0.38, echoTone = 2400.0;
+    // The sum's compressors (threshold dB, knee dB, ratio, attack s, release s) and the gains behind them: on = glue compressor, then
+    // limiter at the ceiling; off = the old limiter alone (-10 dB, with the make-up the compressor gives itself).
+    // The defaults are the web's (MIX_TUNABLES: on 0); only setCompressors() without a setup reads them, and that one never runs without one.
+    struct Bus { bool on = false; float glue[5] = { 0, 0, 1, 0.03f, 0.25f }, limiter[5] = { -10, 0, 20, 0.001f, 0.1f }; double glueOut = 1.0, limiterOut = 1.0; } bus;
 };
 
 void clear(detail::Biquad& f) { f.x1 = f.x2 = f.y1 = f.y2 = 0.0; } // the filter's state, not its coefficients
@@ -102,9 +107,9 @@ struct Engine::Impl {
     float gainNow[layerCount] = {}, panNow[layerCount] = {}, masterNow = 1.0f, driveNow = 0.0f;
     double masterGainNow = MASTER, shelfNow = 0.0, shelfSet = 0.0; // the sum's gain (synth.js `master`) and the shelf's gain now, and the one its coefficients are for
     detail::Biquad shelf[2];
-    double limiterEnv = 0.0;
-    float ahead[2][1024] = {}; // the limiter sees the signal 6 ms before it leaves, like the browser's compressor
-    int aheadAt = 0, aheadFrames = 288;
+    detail::Compressor glue, limiter; // Chromium's compressors (limiter: the name of the node in synth.js); each keeps its state across a restart
+    double glueOutNow = 1.0, limiterOutNow = 1.0; // the gains behind them
+    bool glueWasIn = false, limiterWasIn = false; // in the chain in the last chunk (a compressor that comes back is reset)
     // the sends now (they follow the setup's values) and the room's return filters, and the tone their coefficients are for
     double reverbWetNow = 0.0, roomWetNow = 0.0, roomSendNow = 0.0, roomToneSet = 7000.0;
     float roomSendsNow[layerCount] = {};
@@ -117,7 +122,7 @@ struct Engine::Impl {
     bool wetClosed = false;                     // a stop's fade is over: the wet returns stay at 0 until playing resumes
     bool quiet = false;                         // stopped, faded and no tone: the chain is skipped
     float buffers[layerCount][2][CHUNK];
-    float mixed[2][CHUNK], reverbIn[2][CHUNK], reverbOut[2][CHUNK], roomIn[2][CHUNK], roomOut[2][CHUNK];
+    float mixed[2][CHUNK], reverbIn[2][CHUNK], reverbOut[2][CHUNK], roomIn[2][CHUNK], roomOut[2][CHUNK], shelved[2][CHUNK];
 
     Impl() {
         for (int l = 0; l < layerCount; ++l) {
@@ -161,6 +166,14 @@ struct Engine::Impl {
         made->echoWet = mix.echoWet;
         made->echoFeedback = mix.echoFeedback;
         made->echoTone = mix.echoTone;
+        // applyBus (synth.js 77 to 86); the compressor's own make-up (autoMakeupDb, knee 0) is taken back by the gain behind it
+        const auto v = [&](const char* name) { return detail::tunedValue("mix/bus", name, tuning); };
+        const auto autoMakeupDb = [](double threshold, double ratio) { return -0.6 * threshold * (1 - 1 / ratio); };
+        const bool on = v("on") >= 0.5;
+        const double glueDb = on ? v("glueDb") : 0, glueRatio = on ? v("glueRatio") : 1, ceiling = on ? v("ceilingDb") : -10;
+        made->bus = { on, { static_cast<float>(glueDb), 0, static_cast<float>(glueRatio), static_cast<float>(v("glueAttack")), static_cast<float>(v("glueRelease")) },
+                      { static_cast<float>(ceiling), 0, 20, 0.001f, 0.1f }, on ? std::pow(10.0, (v("gainDb") - autoMakeupDb(glueDb, glueRatio)) / 20) : 1.0,
+                      on ? std::pow(10.0, -autoMakeupDb(ceiling, 20) / 20) : 1.0 };
         if (rate > 0) {
             if (!reverb) reverb = std::make_shared<detail::Convolver>(detail::normalizedNoise("reverb", 2, 3, rate));
             if (!room || roomSize != mix.roomSize) {
@@ -184,6 +197,13 @@ struct Engine::Impl {
         const double place = std::isnan(p) ? (setup ? setup->pan[l] : 0.0f) : p;
         return static_cast<float>(std::clamp((setup ? setup->width : 1.0) * place, -1.0, 1.0));
     }
+    // Audio thread: the compressors' parameters from the setup (they jump: the web ramps them 20 ms, design open point 9); their state stays.
+    void setCompressors() {
+        const Setup::Bus defaults {};
+        const Setup::Bus& b = setup ? setup->bus : defaults;
+        glue.set(b.glue[0], b.glue[1], b.glue[2], b.glue[3], b.glue[4]);
+        limiter.set(b.limiter[0], b.limiter[1], b.limiter[2], b.limiter[3], b.limiter[4]);
+    }
     // Audio thread: the sum's gain, shelf and sends at the values the setup says, at once, with the filters' state empty.
     void settleSum() {
         masterGainNow = setup ? setup->masterGain : MASTER;
@@ -198,7 +218,10 @@ struct Engine::Impl {
             echoWetNow = setup->echoWet;
             echoFeedbackNow = setup->echoFeedback;
             echo.setTone(echoToneSet = setup->echoTone);
+            glueOutNow = setup->bus.glueOut;
+            limiterOutNow = setup->bus.limiterOut;
         }
+        setCompressors();
         for (int c = 0; c < 2; ++c) {
             roomHp[c] = detail::highpass(120, 1, tones.sr);
             roomLp[c] = detail::lowpass(roomToneSet, 1, tones.sr);
@@ -386,12 +409,10 @@ void Engine::prepare(double sampleRate) {
     m.masterNow = m.master * m.master;
     m.echo.prepare(sampleRate); // allocates: the line's size depends on the rate
     m.echoAtOnce = true;
+    m.glue.prepare(static_cast<float>(sampleRate)); // a fresh node, before settleSum gives it its parameters
+    m.limiter.prepare(static_cast<float>(sampleRate));
     m.settleSum();
     m.driveNow = m.drive;
-    m.limiterEnv = 0.0;
-    m.aheadFrames = std::clamp(static_cast<int>(0.006 * sampleRate), 1, 1024);
-    m.aheadAt = 0;
-    for (auto& channel : m.ahead) std::fill(std::begin(channel), std::end(channel), 0.0f);
     m.clearSends(); // a cached convolver may hold an old tail
     m.wetFadeFrames = std::max(1, static_cast<int>(std::lround(0.05 * sampleRate)));
     m.wetFadeLeft = -1;
@@ -427,6 +448,7 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
                         m.roomToneSet = m.setup->roomTone;
                     }
                     if (m.setup->echoTone != m.echoToneSet) m.echo.setTone(m.echoToneSet = m.setup->echoTone);
+                    m.setCompressors();
                 }
             }
             m.hasPending = false;
@@ -435,9 +457,6 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
     const double sr = m.tones.sr, length = m.song ? m.song->lengthBeats : 0.0;
     const double step = block.beatsPerFrame, secondsPerBeat = step > 0 ? 1 / (step * sr) : 0.0;
     const float smoothLevel = static_cast<float>(1 - std::exp(-1 / (0.020 * sr))), smoothDrive = static_cast<float>(1 - std::exp(-1 / (0.005 * sr)));
-    // Attack 0.1 ms, not the web's nominal 1 ms: measured against the web render (native/tools/render-ab.mjs) this
-    // gives the same RMS and the closest peaks; the browser's compressor reacts faster than its attack value says.
-    const double limiterAttack = std::exp(-1 / (0.0001 * sr)), limiterRelease = std::exp(-1 / (0.100 * sr));
 
     const bool restarted = block.playing && m.wasPlaying && block.starts != m.starts; // play() again, no stopped block between
     m.starts = block.starts;
@@ -478,7 +497,7 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
         m.echo.setTarget(0.75 / (step * sr), m.echoAtOnce);
         m.echoAtOnce = false;
     }
-    // Stopped, the fade over and no tone left: the shelf and the limiter start empty, and the chain is skipped until playing resumes.
+    // Stopped, the fade over and no tone left: the shelf and the compressors start empty, and the chain is skipped until playing resumes.
     if (block.playing) {
         m.quiet = false;
         if (m.wetClosed) {
@@ -487,9 +506,8 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
         }
     } else if (!m.quiet && m.wetFadeLeft < 0 && std::none_of(m.tones.all.begin(), m.tones.all.end(), [](const Tone& t) { return t.active; })) {
         for (detail::Biquad& f : m.shelf) clear(f);
-        m.limiterEnv = 0.0;
-        m.aheadAt = 0;
-        for (auto& channel : m.ahead) std::fill(std::begin(channel), std::end(channel), 0.0f);
+        m.glue.reset();
+        m.limiter.reset();
         m.quiet = true;
     }
     if (m.quiet) {
@@ -539,6 +557,7 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
         const double masterGainTarget = s ? s->masterGain : MASTER, shelfTarget = s ? s->shelfDb : 0.0, shelfHz = s ? s->shelfHz : 800.0;
         const double reverbWetTarget = s ? s->reverbWet : 0.0, roomWetTarget = s ? s->roomWet : 0.0, roomSendTarget = s ? s->roomSend : 0.0;
         const double echoWetTarget = s ? s->echoWet : 0.0, echoFeedbackTarget = s ? s->echoFeedback : 0.0;
+        const double glueOutTarget = s ? s->bus.glueOut : 1.0, limiterOutTarget = s ? s->bus.limiterOut : 1.0;
         float peak[layerCount + 1] = {};
         // First pass: the layers and the echo's return into the dry sum (m = dry · master gain), the reverb's input (m and the drums' send)
         // and the room's. The wet fade's value of each frame is kept for the second pass.
@@ -594,7 +613,7 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
         if (s && s->room) s->room->process(m.roomIn[0], m.roomIn[1], m.roomOut[0], m.roomOut[1], count);
         else for (auto& channel : m.roomOut) std::fill(channel, channel + count, 0.0f);
         // Second pass (synth.js 88 to 91, 214 to 226): the bus is the dry sum, the reverb's return and the room's (120 Hz highpass, tone lowpass),
-        // then the brightness shelf, the limiter and the master fader. Wet values and the shelf follow their targets.
+        // then the brightness shelf. Wet values and the shelf follow their targets.
         for (int i = 0; i < count; ++i) {
             m.reverbWetNow += smoothLevel * (reverbWetTarget - m.reverbWetNow);
             m.roomWetNow += smoothLevel * (roomWetTarget - m.roomWetNow);
@@ -610,21 +629,33 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
                 for (detail::Biquad& b : m.shelf) { b.b0 = f.b0; b.b1 = f.b1; b.b2 = f.b2; b.a1 = f.a1; b.a2 = f.a2; }
                 m.shelfSet = m.shelfNow;
             }
-            float x[2] = { static_cast<float>(m.shelf[0].process(bus[0])), static_cast<float>(m.shelf[1].process(bus[1])) };
-            // Limiter as in the web sum (-10 dB, ratio 20, 1 ms / 100 ms, with its automatic make-up of 5.7 dB).
-            // shortcut: plain peak follower with 6 ms look-ahead, not the browser's compressor (its knee and adaptive release); the sound match of the full port needs that one rebuilt.
-            double gain = 1.0; // limiter off: the sum is x
-            if (limit) {
-                const double in = std::max(std::fabs(x[0]), std::fabs(x[1]));
-                m.limiterEnv = in + (m.limiterEnv - in) * (in > m.limiterEnv ? limiterAttack : limiterRelease);
-                for (int c = 0; c < 2; ++c) std::swap(x[c], m.ahead[c][m.aheadAt]); // out comes what went in 6 ms ago
-                m.aheadAt = (m.aheadAt + 1) % m.aheadFrames;
-                const double over = 20 * std::log10(std::max(m.limiterEnv, 1e-9)) + 10;
-                gain = (over > 0 ? std::pow(10.0, -over * (1 - 1.0 / 20) / 20) : 1.0) * 1.928;
+            for (int c = 0; c < 2; ++c) m.shelved[c][i] = static_cast<float>(m.shelf[c].process(bus[c]));
+        }
+        // The bus compressors (applyBus): glue, its gain, limiter, its gain; the glue only when the bus is on. Limiter off: none of it.
+        // One that was left out comes back empty (its ring would replay up to 1024 frames from before, its detector and gain are stale).
+        const bool glueIn = limit && s && s->bus.on;
+        if (glueIn && !m.glueWasIn) m.glue.reset();
+        if (limit && !m.limiterWasIn) m.limiter.reset();
+        m.glueWasIn = glueIn;
+        m.limiterWasIn = limit;
+        if (limit) {
+            if (glueIn) {
+                m.glue.process(m.shelved[0], m.shelved[1], count);
+                for (int i = 0; i < count; ++i) {
+                    m.glueOutNow += smoothLevel * (glueOutTarget - m.glueOutNow);
+                    for (auto& channel : m.shelved) channel[i] *= static_cast<float>(m.glueOutNow);
+                }
             }
+            m.limiter.process(m.shelved[0], m.shelved[1], count);
+            for (int i = 0; i < count; ++i) {
+                m.limiterOutNow += smoothLevel * (limiterOutTarget - m.limiterOutNow);
+                for (auto& channel : m.shelved) channel[i] *= static_cast<float>(m.limiterOutNow);
+            }
+        }
+        // The master fader; nothing clamps here (the shell clips), so that what the chain makes is what gets measured.
+        for (int i = 0; i < count; ++i) {
             m.masterNow += smoothLevel * (masterTarget - m.masterNow);
-            float l = static_cast<float>(x[0] * gain) * m.masterNow, r = static_cast<float>(x[1] * gain) * m.masterNow;
-            if (limit) { l = std::clamp(l, -1.0f, 1.0f); r = std::clamp(r, -1.0f, 1.0f); }
+            const float l = m.shelved[0][i] * m.masterNow, r = m.shelved[1][i] * m.masterNow;
             peak[layerCount] = std::max(peak[layerCount], std::max(std::fabs(l), std::fabs(r)));
             left[done + i] = l;
             right[done + i] = r;

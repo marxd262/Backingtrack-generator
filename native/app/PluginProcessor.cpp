@@ -8,6 +8,7 @@
 #include <btg/pack.h>
 #include <btg_platform/system_audio.h>
 
+#include <cmath>
 #include <filesystem>
 
 juce::AudioProcessorEditor* createBackingtrackEditor (BackingtrackProcessor&); // PluginEditor.cpp
@@ -64,6 +65,11 @@ void BackingtrackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
         if (file) filePlayer.render (left, right, block.frames, block);
         else engine.render (left, right, block.frames, block);
         done += block.frames;
+    }
+    // the device clips there anyway; this keeps a fault in the chain from the speakers: a finite sample is limited to +-1, a non-finite one becomes 0
+    for (int c = 0; c < 2; ++c) {
+        auto* x = buffer.getWritePointer (c);
+        for (int i = 0; i < frames; ++i) x[i] = std::isfinite (x[i]) ? juce::jlimit (-1.0f, 1.0f, x[i]) : 0.0f;
     }
     if (muted) buffer.clear();
     const double used = juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - started);
