@@ -14,6 +14,7 @@
 //          case FAILs, with the figure, when that peak is not below it (the plan's "below full scale": 0)
 // Exit code 1 if a case fails (also one that cannot render, or whose renders differ in length by more than 50 ms).
 // balance = (right minus left level of the native render) minus (the same of the web render); limit as the level limit.
+// diff = power of (native - web) over the power of web, dB, and stereo = L/R correlation of each render: printed on every line, never judged.
 // peak = the native render's largest sample minus the web render's, in dB; printed on every line, judged (+-1 dB, the plan's limit for the
 // full mix) only for cases rendered with the limiter.
 // The listening files (<name>-web.wav, <name>-nativ.wav, 16 bit) of a pair above full scale are turned down by one common gain;
@@ -140,19 +141,28 @@ function measure(web, native, kind = 'sample', judgePeak = false, peakBelow = nu
   bands.forEach((d, i) => { if (d !== null && (worst < 0 || size(d) > size(bands[worst]))) worst = i; });
   const env = pearson(envelope(w), envelope(v));
   const peaks = [peakDb(w), peakDb(v)], peak = peaks[1] - peaks[0];
+  // printed, not judged (phase-4-design.md 6.2): diff = power of (native - web) over that of web; stereo = L/R correlation of each render
+  let dd = 0, ww = 0;
+  const s = [0, 0, 0, 0, 0, 0]; // web LL, RR, LR, native LL, RR, LR
+  for (let i = 0; i < n; i += 2) {
+    const a = w[i], b = w[i + 1], c = v[i], d = v[i + 1];
+    dd += (c - a) ** 2 + (d - b) ** 2; ww += a * a + b * b;
+    s[0] += a * a; s[1] += b * b; s[2] += a * b; s[3] += c * c; s[4] += d * d; s[5] += c * d;
+  }
+  const diff = dd === 0 ? -Infinity : db(dd / ww), stereo = [s[2] / Math.sqrt(s[0] * s[1]), s[5] / Math.sqrt(s[3] * s[4])];
   const failed = {
     level: over(level, limit.level), balance: balance !== null && over(balance, limit.level), bands: bands.some((d) => d !== null && over(d, limit.band)),
     envelope: !(env >= limit.env), length: !(Math.abs(seconds[0] - seconds[1]) <= MAX_LENGTH_GAP), peak: judgePeak && over(peak, limit.peak),
     peakBelow: peakBelow !== null && !(peaks[1] < peakBelow), // a NaN fails
   };
-  return { level, balance, peak, peaks, peakBelow, bands, bandMax: worst >= 0 ? bands[worst] : null, bandHz: worst >= 0 ? BANDS[worst] : null, env, seconds, failed, pass: !Object.values(failed).some(Boolean) };
+  return { level, balance, peak, peaks, peakBelow, diff, stereo, bands, bandMax: worst >= 0 ? bands[worst] : null, bandHz: worst >= 0 ? BANDS[worst] : null, env, seconds, failed, pass: !Object.values(failed).some(Boolean) };
 }
 
 function line(name, m) {
   const max = m.bandMax === null ? '-' : signed(m.bandMax), at = m.bandHz ?? '-', balance = m.balance === null ? '-' : signed(m.balance);
   const length = m.failed.length ? `  LENGTH web ${m.seconds[0].toFixed(2)} s, native ${m.seconds[1].toFixed(2)} s` : '';
   const peak = `peak ${signed(m.peak)} dB (web ${signed(m.peaks[0])}, native ${signed(m.peaks[1])} dBFS)${m.peakBelow === null ? '' : m.failed.peakBelow ? `  NATIVE PEAK ${signed(m.peaks[1])} dBFS NOT BELOW ${m.peakBelow}` : ` (native below ${m.peakBelow})`}`;
-  let text = `${name}  level ${signed(m.level)} dB  balance ${balance} dB  ${peak}  bands max ${max} dB at ${at}  envelope ${m.env.toFixed(3)}${length}  ${m.pass ? 'PASS' : 'FAIL'}`;
+  let text = `${name}  level ${signed(m.level)} dB  balance ${balance} dB  ${peak}  bands max ${max} dB at ${at}  envelope ${m.env.toFixed(3)}  diff ${Number.isFinite(m.diff) ? m.diff.toFixed(1) : m.diff} dB  stereo web ${m.stereo[0].toFixed(3)} native ${m.stereo[1].toFixed(3)}${length}  ${m.pass ? 'PASS' : 'FAIL'}`;
   if (!m.pass) text += `\n    failed: ${Object.keys(m.failed).filter((k) => m.failed[k]).join(', ')}\n    bands ${BANDS.map((hz, i) => `${hz}: ${m.bands[i] === null ? '-' : signed(m.bands[i])}`).join('  ')}`;
   return text;
 }
@@ -255,6 +265,7 @@ async function selfCheck(out) {
   const raised = native.map((v, i) => (i === topAt ? v * 10 ** (1.5 / 20) : v));
   const checks = [
     ['as it is', native, 'must PASS', (m) => m.pass],
+    ['web against itself', web, 'must give diff -Infinity and equal stereo figures', (m) => m.diff === -Infinity && m.stereo[0] === m.stereo[1]],
     ['native 2 dB quieter', native.map((v) => v * 10 ** (-2 / 20)), 'must FAIL on level', (m) => m.failed.level],
     ['native +3 dB above 2 kHz', tilt(native, 2000, 3), 'must FAIL on bands', (m) => m.failed.bands],
     ['native 1 s short', native.subarray(0, native.length - 2 * RATE), 'must FAIL on length', (m) => m.failed.length],

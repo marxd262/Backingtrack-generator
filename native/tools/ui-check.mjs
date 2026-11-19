@@ -170,6 +170,23 @@ try {
   result.loadWhilePlaying = +afterBand.load.toFixed(3);
   if (result.dropoutsWhilePlaying > 0) problems.push(`dropouts while playing: ${result.dropoutsWhilePlaying}`);
   if (afterBand.load > 0.25) problems.push(`engine load ${(100 * afterBand.load).toFixed(1)} % (limit 25 %)`);
+  // The layer effects (Task 18): every distortion knob of bass, chords, pad and lead at 1, so every chain is built and computes each frame;
+  // 4 s of play: the load stays under the plan's 25 %, no dropout, the bass keeps a level. Then the page's own timbre again.
+  result.effects = await page.evaluate(async () => {
+    const before = window.sent.findLast((s) => s.type === 'timbre').json, timbre = JSON.parse(before);
+    for (const layer of ['bass', 'chords', 'pad', 'lead']) Object.assign(timbre[layer], { fuzz: 1, overdrive: 1, distortion: 1 });
+    const start = window.lastEngine();
+    window.bridge('timbre', { json: JSON.stringify(timbre) });
+    window.engineLog.length = 0;
+    await new Promise((r) => setTimeout(r, 4000));
+    const end = window.lastEngine();
+    const peaks = Object.fromEntries(['bass', 'chords', 'pad', 'lead'].map((l) => [l, +Math.max(0, ...window.engineLog.map((m) => m.peaks?.[l] ?? 0)).toFixed(3)]));
+    window.bridge('timbre', { json: before });
+    return { load: +end.load.toFixed(3), dropouts: end.xruns - start.xruns, peaks };
+  });
+  if (result.effects.dropouts > 0) problems.push(`dropouts with every effect on: ${result.effects.dropouts}`);
+  if (!(result.effects.load <= 0.25)) problems.push(`engine load with every effect on ${(100 * result.effects.load).toFixed(1)} % (limit 25 %)`);
+  if (!(result.effects.peaks.bass > 0)) problems.push('bass: no level with every effect on');
   result.position = await page.locator('#play-position').innerText();
   result.chord = await page.locator('#play-now').innerText();
   result.framesPerSecond = await page.evaluate(() => new Promise((done) => {
@@ -260,12 +277,12 @@ try {
         ping.push(await new Promise((done) => { window.pongs.set(id, (t) => done(t - t0)); window.bridge('ping', { id }); }));
         await pause(7 + (id % 5) * 3);
       }
-      for (let i = 0; i < 40; i++) { // an effect control: the drive on the bass
-        window.bridge('drive', { value: i % 2 ? 0.6 : 0.2 });
+      for (let i = 0; i < 40; i++) { // a direct control: the bass fader (the old drive message went with Task 18)
+        window.bridge('level', { layer: 'bass', value: i % 2 ? 0.9 : 0.7 });
         await pause(90 + (i % 7) * 4);
         control.push(window.lastEngine().reactionMs);
       }
-      window.bridge('drive', { value: 0 });
+      window.bridge('level', { layer: 'bass', value: 1 });
       const last = window.sent.findLast((s) => s.type === 'track'); // a new event stream, as the ornaments knob sends
       for (let i = 0; i < 20; i++) {
         window.bridge('track', { json: last.json });
@@ -298,12 +315,12 @@ try {
       input.value = String(20 + i * 3);
       input.dispatchEvent(new Event('input', { bubbles: true }));
       await new Promise((r) => setTimeout(r, 60));
-      const message = window.sent.slice(before).find((s) => s.type === 'drive');
+      const message = window.sent.slice(before).find((s) => s.type === 'timbre');
       if (message) times.push(message.at - t0);
     }
     input.value = '0';
     input.dispatchEvent(new Event('input', { bubbles: true }));
-    return times.length ? { n: times.length, mean: +(times.reduce((a, b) => a + b, 0) / times.length).toFixed(2), max: +Math.max(...times).toFixed(2) } : 'no drive message';
+    return times.length ? { n: times.length, mean: +(times.reduce((a, b) => a + b, 0) / times.length).toFixed(2), max: +Math.max(...times).toFixed(2) } : 'no timbre message';
   });
   // what the web version would get on this machine: latency of the browser's own audio output
   result.webAudioLatencyMs = await page.evaluate(async () => {

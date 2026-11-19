@@ -51,6 +51,14 @@ struct Biquad { // Web Audio BiquadFilterNode, coefficients divided by a0; proce
         x2 = x1; x1 = x; y2 = y1; y1 = y;
         return y;
     }
+    // BiquadFilterNode as Chromium runs it (platform/audio/biquad.cc, Biquad::Process, Copyright (C) 2010 Google Inc.; its notice is at the head
+    // of guitar_fx.cpp): the sum in double, the output rounded to float and that kept as the state. Only the layer effects' chains use it;
+    // the sampler's and the sum's filters keep double.
+    float step(float x) {
+        const float y = static_cast<float>(b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2);
+        x2 = x1; x1 = x; y2 = y1; y1 = y;
+        return y;
+    }
 };
 Biquad lowpass(double hz, double qDb, double sr);
 Biquad highpass(double hz, double qDb, double sr);

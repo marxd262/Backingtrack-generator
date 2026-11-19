@@ -192,7 +192,6 @@ private:
             shows (true);
             sentTrack = -1; // a page that just opened gets the analysis of the loaded track again
         } else if (type == "master") setParameter ("master", value);
-        else if (type == "drive") setParameter ("bassDrive", value);
         else if (type == "level" && layer >= 0) processor.engine.setLevel (static_cast<btg::Engine::Layer> (layer), value);
         else if (type == "mute" && layer >= 0) processor.engine.setMuted (static_cast<btg::Engine::Layer> (layer), (bool) message["on"]);
         else if (type == "pan" && layer >= 0) // null: the place mix/pan gives the layer

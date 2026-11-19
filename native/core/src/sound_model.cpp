@@ -24,8 +24,6 @@ double db(double x) { return std::pow(10.0, x / 20); }
 const double OD_MAKEUP = 0.19, DIST_MAKEUP = 0.055, FUZZ_MAKEUP = 0.113;
 double mix(double a) { return std::min(1.0, 8 * a); }
 
-struct LayerFx { double trimOd, trimDist, trimFuzz, odSlope; }; // LAYER_FX: only what fxChainParams reads
-
 // mod-fx.js
 const double VIB_CENTS = 40, CHORUS_LEVEL = 0.7; // MOD.vibCents, MOD.chorusLevel
 
@@ -165,16 +163,24 @@ MasterParams masterParams(const MasterTimbre& t) {
     return p;
 }
 
+const LayerFx& layerFx(Engine::Layer layer) {
+    static const LayerFx BASS { 0.17, { 1.43, 1.4, 1.12 }, 0, 60, 800, 40, 3200, 90, 3 }, CHORDS { 0.35, { 1, 1, 1 }, 0.45, 150, 1500, 90, 5000, 2500, 4 },
+        PAD { 0.68, { 0.7, 0.78, 0.86 }, 0.45, 150, 1500, 90, 5000, 2500, 4 }, LEAD { 0.29, { 0.5, 0.6, 0.9 }, 0.45, 150, 1500, 90, 5000, 2500, 4 };
+    if (layer == Engine::bass) return BASS;
+    if (layer == Engine::chords) return CHORDS;
+    if (layer == Engine::pad) return PAD;
+    if (layer == Engine::lead) return LEAD;
+    throw std::invalid_argument("layerFx: no effect chain on this layer");
+}
+
 FxChainParams fxChainParams(double fuzz, double overdrive, double distortion, Engine::Layer layer) {
-    static const LayerFx BASS { 1.43, 1.4, 1.12, 0 }, CHORDS { 1, 1, 1, 0.45 }, PAD { 0.7, 0.78, 0.86, 0.45 }, LEAD { 0.5, 0.6, 0.9, 0.45 };
-    const LayerFx* fx = layer == Engine::bass ? &BASS : layer == Engine::chords ? &CHORDS : layer == Engine::pad ? &PAD : layer == Engine::lead ? &LEAD : nullptr;
-    if (!fx) throw std::invalid_argument("fxChainParams: no effect chain on this layer");
+    const LayerFx& fx = layerFx(layer);
     const double f = num(fuzz), o = num(overdrive), d = num(distortion);
     FxChainParams p;
     p.active = f > 0 || o > 0 || d > 0;
-    p.od = { mix(o), db(30 * o), OD_MAKEUP * fx->trimOd * std::pow(db(30 * o) / 3, -fx->odSlope) };
-    p.dist = { mix(d), db(50 * d), DIST_MAKEUP * fx->trimDist };
-    p.fuzz = { mix(f), db(6 + 40 * f), FUZZ_MAKEUP * fx->trimFuzz };
+    p.od = { mix(o), db(30 * o), OD_MAKEUP * fx.trim.od * std::pow(db(30 * o) / 3, -fx.odSlope) };
+    p.dist = { mix(d), db(50 * d), DIST_MAKEUP * fx.trim.dist };
+    p.fuzz = { mix(f), db(6 + 40 * f), FUZZ_MAKEUP * fx.trim.fuzz };
     p.cab = mix(std::max(std::max(f, o), d));
     return p;
 }

@@ -25,8 +25,10 @@ struct DrumParams { double kickStart, kickEnd, kickDrop, kickDecay, kickPeak, ki
 struct BassParams { double sawDetune, q, lpStart, lpEnd, lpTime, sawMix, triMix, sineGain, peak, sustain, attack, release, holdMin, holdCut; };
 struct ChordParams { double lpStart, lpEnd, lpTime, holdScale, release, peak, attack, chorusMix, chorusDetune, tremRate, tremDepth, tremBase; };
 struct PadParams { double attack, peak, holdMin, holdCut, holdAttack, release, cutoff, q, lfoSpeed, lfoDepth, spread, extraMix, shimmerMix; };
-struct FxStage { double mix, drive, makeup; };
-struct FxChainParams { bool active; FxStage od, dist, fuzz; double cab; };
+struct FxStage { double mix, drive, makeup; bool operator==(const FxStage&) const = default; };
+struct FxChainParams { bool active; FxStage od, dist, fuzz; double cab; bool operator==(const FxChainParams&) const = default; };
+// LAYER_FX of fx-params.js: what the distortion chain and fxChainParams read of a layer (frequencies in Hz, gains in dB).
+struct LayerFx { double ref; struct { double od, dist, fuzz; } trim; double odSlope, distHp, toneHz, cabHp, cabLp, cabPeakHz, cabPeakDb; };
 struct ModParams { bool active; struct { bool on; double hz, depth; } vibrato; struct { double wet, norm; } chorus; };
 
 // Calls f(group, field, value) for the 47 fields of t in DEFAULT_TIMBRE's order (completeTimbre and the logic test use it).
@@ -40,6 +42,8 @@ DrumParams drumParams(const DrumsTimbre&);
 BassParams bassParams(const BassTimbre&);
 ChordParams chordParams(const ChordsTimbre&);
 PadParams padParams(const PadTimbre&);
+// bass, chords, pad, lead; throws std::invalid_argument for the other layers, as LAYER_FX[layer] is undefined for them.
+const LayerFx& layerFx(Engine::Layer layer);
 // bass, chords, pad, lead; a missing or invalid (NaN) knob counts 0. Throws std::invalid_argument for the other layers, as LAYER_FX[layer] does.
 FxChainParams fxChainParams(double fuzz, double overdrive, double distortion, Engine::Layer layer);
 ModParams modParams(double vibrato, double chorus, double bpm); // NaN bpm counts 100

@@ -127,6 +127,9 @@ write('band.json', STYLE_PRESETS.map((style) => ({
 // --- Phase 3 (Tasks 16, 14, 15, 17): the sound model, the sends and the sum ---
 // The knobs of the layer effects (Phase 4) are 0 in every Phase 3 case, so that the cases measure only what the core plays.
 const PHASE4 = ['fuzz', 'overdrive', 'distortion', 'vibrato', 'chorus'];
+const FX = ['fuzz', 'overdrive', 'distortion'], FX_LAYERS = ['bass', 'chords', 'pad', 'lead'];
+const claimOf = (layer, k) => `${FX.includes(k) ? 'fx' : 'mod'}:${layer}.${k}`;
+const effectsOn = (sound) => FX_LAYERS.some((g) => PHASE4.some((k) => sound[g][k] !== 0));
 const unplugged = (timbre) => Object.fromEntries(Object.entries(timbre).map(([group, fields]) =>
   [group, Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, PHASE4.includes(k) ? 0 : v]))]));
 const styleSound = (t) => unplugged(resolveTrackTimbre(t)); // what the page sends for this track
@@ -154,7 +157,8 @@ CLAIMS['kit.places'] = (c, events) => {
 };
 function claimed(c, claims) {
   const events = buildEvents(c.track);
-  for (const g of ['bass', 'chords', 'pad', 'lead']) for (const k of PHASE4) if (c.sound[g][k] !== 0) problems.push(`${c.name}: ${g}.${k} is not 0 (Phase 4)`);
+  for (const g of FX_LAYERS) for (const k of PHASE4) if (c.sound[g][k] !== 0 && !claims.includes(claimOf(g, k))) problems.push(`${c.name}: ${g}.${k} is on but not claimed`);
+  if ((c.kind === 'synth') !== effectsOn(c.sound)) problems.push(`${c.name}: kind must be 'synth' exactly where a layer effect is on`);
   for (const what of claims) { const why = CLAIMS[what](c, events); if (why) problems.push(`${c.name}: ${why}`); }
   return c;
 }
@@ -261,5 +265,27 @@ CLAIMS.glue = (c) => (tunedValue('mix/bus', 'on', c.tuning ?? {}) >= 0.5 ? '' : 
 for (const id of ['funk', 'rock', 'poppunk']) mixCases.push(claimed({ name: `mix-${id}-glue`, track: bands[id], sound: styleSound(bands[id]), tuning: { 'mix/bus': { on: 1 } }, tail: 2.5 }, ['reverb', 'room', 'echo', 'glue']));
 write('mix.json', mixCases);
 console.log(`mix.json: ${mixCases.length} cases (nine styles, funk at 20 and 400 bpm, three styles with the glue)`);
+
+// --- Phase 4 (Tasks 18, 19): the layer effects. One layer alone with its sample voice, one knob (or the named ones), dry: the chain is all
+// that differs from samples.json. The limits of effects (kind 'synth', Global Constraints). fx:<layer>.<knob>: the knob above 0 on a layer
+// that plays notes with a sample voice; every other layer effect 0 (claimed). blend: a stage between bypass and full (mix = min(1, 8 v),
+// fx-params.js 18), where the bypass and the 128-frame-late wet path add up to a comb.
+for (const layer of FX_LAYERS) for (const k of PHASE4) CLAIMS[claimOf(layer, k)] = (c, events) => {
+  const v = c.sound[layer][k];
+  if (!(v > 0 && v <= 1)) return `${layer}.${k} = ${v} does nothing`;
+  return c.track.voices[layer]?.id === 'sample' && events.some((e) => e.layer === layer && e.type === 'note') ? '' : `no ${layer} notes with a sample voice`;
+};
+CLAIMS.blend = (c) => (FX_LAYERS.some((g) => FX.some((k) => c.sound[g][k] > 0 && 8 * c.sound[g][k] < 1)) ? '' : 'no stage between bypass and full');
+const effectSolo = (name, layer, variant, style, fields, claims) => claimed({ name, dry: true, kind: 'synth', sound: set(neutralSound, fields),
+  track: track(style, { layers: { [layer]: true }, voices: { [layer]: { id: 'sample', variant } } }) }, claims);
+const fxCases = [];
+for (const [layer, variant, style] of [['bass', 'finger', 'funk'], ['chords', 'guitar', 'rock']])
+  for (const k of FX) for (const v of [0.3, 1]) fxCases.push(effectSolo(`fx-${layer}-${k}-${v}`, layer, variant, style, { [`${layer}.${k}`]: v }, [claimOf(layer, k)]));
+for (const [layer, variant, style] of [['pad', 'strings', 'dreamy'], ['lead', 'guitar', 'rock']])
+  for (const k of FX) fxCases.push(effectSolo(`fx-${layer}-${k}-0.3`, layer, variant, style, { [`${layer}.${k}`]: 0.3 }, [claimOf(layer, k)]));
+fxCases.push(effectSolo('fx-chords-overdrive-blend', 'chords', 'guitar', 'rock', { 'chords.overdrive': 0.06 }, [claimOf('chords', 'overdrive'), 'blend']));
+fxCases.push(effectSolo('fx-bass-all', 'bass', 'finger', 'funk', { 'bass.fuzz': 0.5, 'bass.overdrive': 0.5, 'bass.distortion': 0.5 }, FX.map((k) => claimOf('bass', k))));
+write('fx.json', fxCases);
+console.log(`fx.json: ${fxCases.length} cases`);
 for (const p of problems) console.error(`ERROR ${p}`);
 process.exit(problems.length ? 1 : 0);

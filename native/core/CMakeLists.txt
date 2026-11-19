@@ -53,6 +53,7 @@ add_library(btg_core STATIC
     src/sound_model.cpp
     src/convolver.cpp
     src/compressor.cpp
+    src/guitar_fx.cpp
     src/analysis.cpp
     src/file_player.cpp
     src/decode.cpp
@@ -141,6 +142,10 @@ add_executable(btg_engine_tests tests/test_engine.cpp)
 target_link_libraries(btg_engine_tests PRIVATE btg_core)
 add_test(NAME engine COMMAND btg_engine_tests ${CMAKE_CURRENT_SOURCE_DIR}/tests/track-funk.json)
 
+add_executable(btg_fx_tests tests/test_fx.cpp)
+target_link_libraries(btg_fx_tests PRIVATE btg_core)
+add_test(NAME fx COMMAND btg_fx_tests)
+
 add_executable(btg_analysis_tests tests/test_analysis.cpp)
 target_link_libraries(btg_analysis_tests PRIVATE btg_core)
 btg_uses_beats(btg_analysis_tests)
@@ -154,6 +159,10 @@ add_test(NAME render COMMAND btg_render ${CMAKE_CURRENT_SOURCE_DIR}/tests/track-
 # The compressor alone on a raw file, for native/tools/compressor-compare.mjs (against Chromium's DynamicsCompressorNode).
 add_executable(btg_compressor tools/compressor.cpp)
 target_link_libraries(btg_compressor PRIVATE btg_core)
+
+# The layer effects alone on a raw file, for native/tools/fx-compare.mjs (against the web app's chains in Chromium).
+add_executable(btg_fx tools/fx.cpp)
+target_link_libraries(btg_fx PRIVATE btg_core)
 
 # Analysis of an audio file to JSON (tempo, beats, chords, key).
 add_executable(btg_analyze tools/analyze.cpp)

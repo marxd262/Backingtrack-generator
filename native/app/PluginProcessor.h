@@ -69,7 +69,6 @@ private:
     void run() override;
 
     std::atomic<float>* master = parameters.getRawParameterValue ("master");
-    std::atomic<float>* bassDrive = parameters.getRawParameterValue ("bassDrive");
     std::atomic<juce::int64> controlAt { 0 };
     // BTG_MUTE=1 in the environment: everything runs and is measured, nothing reaches the output (automatic checks)
     const bool muted = juce::SystemStats::getEnvironmentVariable ("BTG_MUTE", {}) == "1";

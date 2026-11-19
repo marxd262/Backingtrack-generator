@@ -47,9 +47,12 @@ json toJson(const ModParams& p) { return { { "active", p.active }, { "vibrato", 
 Timbre group(const char* name, const json& in) { return completeTimbre(json { { name, in } }.dump()); }
 double number(const json& in, const char* field) { const auto f = in.find(field); return f != in.end() && f->is_number() ? f->get<double>() : NAN; }
 Engine::Layer layerOf(const std::string& name) {
-    static const std::map<std::string, Engine::Layer> LAYERS { { "bass", Engine::bass }, { "chords", Engine::chords }, { "pad", Engine::pad }, { "lead", Engine::lead } };
+    static const std::map<std::string, Engine::Layer> LAYERS { { "drums", Engine::drums }, { "bass", Engine::bass }, { "chords", Engine::chords }, { "pad", Engine::pad },
+                                                               { "lead", Engine::lead }, { "percussion", Engine::percussion } };
     return LAYERS.at(name);
 }
+json toJson(const LayerFx& p) { return { { "ref", p.ref }, { "trim", { { "od", p.trim.od }, { "dist", p.trim.dist }, { "fuzz", p.trim.fuzz } } }, { "odSlope", p.odSlope },
+    { "distHp", p.distHp }, { "toneHz", p.toneHz }, { "cabHp", p.cabHp }, { "cabLp", p.cabLp }, { "cabPeakHz", p.cabPeakHz }, { "cabPeakDb", p.cabPeakDb } }; }
 
 const std::map<std::string, std::function<json(const json&)>> FUNCTIONS {
     { "completeTimbre", [](const json& in) { return toJson(completeTimbre(in.dump())); } },
@@ -62,6 +65,17 @@ const std::map<std::string, std::function<json(const json&)>> FUNCTIONS {
         return toJson(fxChainParams(number(t, "fuzz"), number(t, "overdrive"), number(t, "distortion"), layerOf(in.at("layer").get<std::string>()))); } },
     { "modParams", [](const json& in) { const json& t = in.at("timbre"); return toJson(modParams(number(t, "vibrato"), number(t, "chorus"), number(in, "bpm"))); } },
     { "brightnessHz", [](const json& in) { return json(brightnessHz(in.is_number() ? in.get<double>() : NAN)); } },
+    { "LAYER_FX", [](const json& in) { return toJson(layerFx(layerOf(in.get<std::string>()))); } },
+    // an error is an output like any other: { "threw": true } when fxChainParams throws std::invalid_argument (the web: a TypeError)
+    { "fxChainThrows", [](const json& in) {
+        try { fxChainParams(0.5, 0, 0, layerOf(in.get<std::string>())); return json { { "threw", false } }; }
+        catch (const std::invalid_argument&) { return json { { "threw", true } }; } } },
+    // the 47 fields in the order and with the defaults of DEFAULT_TIMBRE
+    { "timbreFields", [](const json&) {
+        Timbre t;
+        json names = json::array(), defaults = json::array();
+        forEachField(t, [&](const char* group, const char* field, double& value) { names.push_back(std::string(group) + "." + field); defaults.push_back(value); });
+        return json { { "names", names }, { "defaults", defaults } }; } },
     { "noiseBuffer", [](const json& in) {
         const auto buffer = noiseBuffer(Rng(1).fork(in.at("label").get<std::string>()), in.at("seconds").get<double>(), in.at("channels").get<int>(),
                                         in.at("decay").get<double>(), in.at("sampleRate").get<double>());

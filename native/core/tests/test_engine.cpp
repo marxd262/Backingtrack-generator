@@ -467,12 +467,11 @@ int main(int argc, char** argv) {
     std::ifstream file(argv[1], std::ios::binary);
     const std::string track((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
     CHECK(!track.empty());
-    const auto play = [&](int blockSize, float drive, bool muteAll, double startBeats) {
+    const auto play = [&](int blockSize, bool muteAll, double startBeats) {
         btg::Engine engine;
         engine.setPackSource(source);
         engine.setSound(DRY);
         engine.setTrack(track);
-        engine.setBassDrive(drive);
         engine.setMuted(btg::Engine::drums, muteAll);
         engine.setMuted(btg::Engine::bass, muteAll);
         engine.prepare(rate);
@@ -481,13 +480,12 @@ int main(int argc, char** argv) {
         CHECK(engine.lengthBeats() > 0 && engine.bpm() > 0);
         return render(engine, t, 20.0, blockSize);
     };
-    const Result a = play(480, 0.0f, false, 0.0), again = play(480, 0.0f, false, 0.0), small = play(64, 0.0f, false, 0.0);
+    const Result a = play(480, false, 0.0), again = play(480, false, 0.0), small = play(64, false, 0.0);
     CHECK(a.rms > 0.01 && a.peak <= 1.0);
     CHECK(a.left == again.left);                            // same track, same sound
     CHECK(std::fabs(small.rms / a.rms - 1.0) < 0.02);       // the block size does not change the mix
-    CHECK(play(480, 0.0f, true, 0.0).peak == 0.0);          // muted layers are silent
-    CHECK(play(480, 0.8f, false, 0.0).left != a.left);      // the drive is audible
-    CHECK(play(480, 0.0f, false, 64.0).rms > 0.01);         // starting inside the song plays
+    CHECK(play(480, true, 0.0).peak == 0.0);                // muted layers are silent
+    CHECK(play(480, false, 64.0).rms > 0.01);               // starting inside the song plays
 
     // mix/bus on 0 takes the old limiter alone (-10 dB with its make-up), on 1 the glue and the limiter: both finite, below 1.0, not the same.
     // The fine value's default is on 0 (tunables.js, MIX_TUNABLES), so no tuning is the old limiter.
@@ -505,6 +503,82 @@ int main(int argc, char** argv) {
         const Result glued = bus(R"({"mix/bus":{"on":1}})"), old = bus(R"({"mix/bus":{"on":0}})");
         CHECK(glued.finite && old.finite && glued.peak < 1.0 && old.peak < 1.0 && glued.left != old.left);
         CHECK(bus("{}").left == old.left);
+    }
+
+    // The distortion chain in the engine (phase-4-design.md 3): the bass alone (drums muted), dry, no limiter, from beat 64 where the
+    // fixture's bass plays; f has bass.fuzz 1, c not. near(): within 1e-6 (the sum's shelf carries the rounding of a different past).
+    {
+        const char *CLEAN = R"({"master":{"reverb":0,"echo":0,"roomWet":0}})", *FUZZ = R"({"master":{"reverb":0,"echo":0,"roomWet":0},"bass":{"fuzz":1}})";
+        const auto make = [&](const char* sound) {
+            auto e = std::make_unique<btg::Engine>();
+            e->setPackSource(source); e->setSound(sound); e->setTrack(track); e->setMuted(btg::Engine::drums, true); e->setLimiter(false); e->prepare(rate);
+            return e;
+        };
+        const auto near = [](const Result& a, const Result& b, size_t from, size_t to) {
+            for (size_t i = from; i < to; ++i) if (std::fabs(a.left[i] - b.left[i]) > 1e-6f) return false;
+            return true;
+        };
+        const auto differs = [](const Result& a, const Result& b, size_t from, size_t to) {
+            for (size_t i = from; i < to; ++i) if (std::fabs(a.left[i] - b.left[i]) > 1e-3f) return true;
+            return false;
+        };
+        const size_t hold = static_cast<size_t>(0.08 * rate), lazy = static_cast<size_t>(0.15 * rate), n = static_cast<size_t>(0.5 * rate);
+        { // 1. a start: the creation fade lets the input through for 0.08 s, then the chain
+            auto f = make(FUZZ), c = make(CLEAN);
+            btg::Transport tf, tc;
+            tf.play(64.0, f->bpm()); tc.play(64.0, c->bpm());
+            const Result a = render(*f, tf, 0.5, 480), b = render(*c, tc, 0.5, 480);
+            CHECK(rmsOf(b.left, 0, hold) > 1e-3 && near(a, b, 0, hold)); // passes red too
+            CHECK(differs(a, b, hold, n));                                // red: there is no chain
+        }
+        { // 2. a jump keeps the chain: no new fade after it
+            auto f = make(FUZZ), c = make(CLEAN);
+            btg::Transport tf, tc;
+            tf.play(64.0, f->bpm()); tc.play(64.0, c->bpm());
+            render(*f, tf, 1.0, 480); render(*c, tc, 1.0, 480);
+            tf.seek(64.0); tc.seek(64.0);
+            CHECK(differs(render(*f, tf, 0.1, 480), render(*c, tc, 0.1, 480), 0, hold)); // red: no chain
+        }
+        { // 3. a restart (play again, no stop) builds the chain anew: dry for 0.08 s again
+            auto f = make(FUZZ), c = make(CLEAN);
+            btg::Transport tf, tc;
+            tf.play(64.0, f->bpm()); tc.play(64.0, c->bpm());
+            render(*f, tf, 1.0, 480); render(*c, tc, 1.0, 480);
+            tf.play(64.0, f->bpm()); tc.play(64.0, c->bpm());
+            const Result a = render(*f, tf, 0.5, 480), b = render(*c, tc, 0.5, 480);
+            CHECK(near(a, b, 0, hold));      // passes red too
+            CHECK(differs(a, b, hold, n));   // red: no chain
+        }
+        { // 4. the first knob above 0 while playing: dry for 0.15 s (LAZY), then the chain
+            auto f = make(CLEAN), c = make(CLEAN);
+            btg::Transport tf, tc;
+            tf.play(64.0, f->bpm()); tc.play(64.0, c->bpm());
+            render(*f, tf, 1.0, 480); render(*c, tc, 1.0, 480);
+            f->setSound(FUZZ);
+            const Result a = render(*f, tf, 0.6, 480), b = render(*c, tc, 0.6, 480);
+            CHECK(near(a, b, 0, lazy));                                       // passes red too
+            CHECK(differs(a, b, lazy, a.left.size()));                        // red: no chain
+        }
+        { // 5. back to 0 while playing: the chain is no longer heard (within 1e-6) from 0.21 s after the change (the ramp ends 0.2 s after it
+          // reaches the chain, the block after the control call), and the first 50 ms differ (a ramp, not a jump)
+            auto f = make(FUZZ), c = make(CLEAN);
+            btg::Transport tf, tc;
+            tf.play(64.0, f->bpm()); tc.play(64.0, c->bpm());
+            render(*f, tf, 1.0, 480); render(*c, tc, 1.0, 480);
+            f->setSound(CLEAN);
+            const Result a = render(*f, tf, 1.0, 480), b = render(*c, tc, 1.0, 480);
+            CHECK(differs(a, b, 0, static_cast<size_t>(0.05 * rate)));       // the ramp, not a jump; red: no chain
+            CHECK(near(a, b, static_cast<size_t>(0.21 * rate), a.left.size())); // passes red too
+        }
+        { // 6. a start with the web app's lead: the chain is built at the lead's first block and not again when the clock begins to move, so
+          // its creation fade has run by the song's first frame (0.15 s, fade over at 0.16 s): the song's first 0.08 s are not dry again
+            auto f = make(FUZZ), c = make(CLEAN);
+            btg::Transport tf, tc;
+            tf.play(64.0, f->bpm(), 0.15); tc.play(64.0, c->bpm(), 0.15);
+            const Result a = render(*f, tf, 0.15 + 0.5, 480), b = render(*c, tc, 0.15 + 0.5, 480);
+            const size_t lead = static_cast<size_t>(0.15 * rate);
+            CHECK(rmsOf(b.left, lead, lead + hold) > 1e-3 && differs(a, b, lead, lead + hold)); // red: no chain; a rebuild when the clock moves
+        }
     }
 
     // The lead (design: the web app starts its song 0.15 s after play(); the limiter settles while its input is silent). The limiter's gain

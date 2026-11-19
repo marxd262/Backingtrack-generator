@@ -1,5 +1,6 @@
 // The engine: the events of the song, handed to the voice of each layer (sampler.h), and the layer chain of the web app's
-// synth.js (mute, fader, trim, balance, master, the reverb and the shared room, echo, brightness shelf, bus compressor and limiter).
+// synth.js (the distortion chain of bass, chords, pad and lead, mute, fader, trim, balance, master, the reverb and the shared room, echo,
+// brightness shelf, bus compressor and limiter).
 #include "btg/engine.h"
 
 #include "btg/generator.h"
@@ -7,6 +8,7 @@
 #include "compressor.h"
 #include "convolver.h"
 #include "echo.h"
+#include "guitar_fx.h"
 #include "sampler.h"
 #include "sound_data.h"
 #include "sound_model.h"
@@ -47,11 +49,13 @@ struct PlaySong {
 // What the audio thread plays with: the voice of every layer (nullptr = silent), its serial and the layer's place by mix/pan, and the
 // sum's values from the timbre (masterParams): gain, shelf and the width that multiplies every place; the sends (masterParams,
 // drumParams, mix/room) and their two convolvers, built on the control thread for the rate of the last prepare (none before it) and
-// used and changed only by the audio thread; the echo's values (its line lives on the audio side); the bus (applyBus of synth.js).
+// used and changed only by the audio thread; the echo's values (its line lives on the audio side); the bus (applyBus of synth.js); the
+// layer effects' values (fxChainParams, only the four layers with a chain have any).
 struct Setup {
     std::shared_ptr<const Voice> voice[Engine::layerCount];
     uint64_t serial[Engine::layerCount] = {};
     float pan[Engine::layerCount] = {};
+    detail::FxChainParams fx[Engine::layerCount] = {};
     double masterGain = 0.6, shelfDb = 0.0, shelfHz = 800.0, width = 1.0;
     double reverbWet = 0.15, roomSend = 0.0, roomWet = 1.0, roomTone = 7000.0, roomSends[Engine::layerCount] = {};
     std::shared_ptr<detail::Convolver> reverb, room;
@@ -87,7 +91,7 @@ struct Engine::Impl {
     std::atomic<bool> hasPending { false };
     std::atomic<double> lengthBeats { 0.0 }, bpm { 120.0 };
     std::atomic<int> beatsPerBar { 4 };
-    std::atomic<float> fader[layerCount], pan[layerCount], master { 1.0f }, drive { 0.0f }, peaks[layerCount + 1];
+    std::atomic<float> fader[layerCount], pan[layerCount], master { 1.0f }, peaks[layerCount + 1];
     std::atomic<bool> muted[layerCount];
     std::atomic<bool> limiterOn { true };
     float trim[layerCount]; // synth.js, LAYER_AUDIO
@@ -105,7 +109,12 @@ struct Engine::Impl {
     bool startPending = false; // a play began and the clock has not moved yet (a lead): the song's place is taken at its first moving block
     unsigned starts = 0; // Transport::Block::starts of the last block
     double skipBefore = -INFINITY; // song beat of the last jump less a frame: events triggered before it do not play (but see render)
-    float gainNow[layerCount] = {}, panNow[layerCount] = {}, masterNow = 1.0f, driveNow = 0.0f;
+    float gainNow[layerCount] = {}, panNow[layerCount] = {}, masterNow = 1.0f;
+    // The layers with a distortion chain (src/core/layers.js 10 to 15: fx), their state, and the values they were last given.
+    static constexpr Layer FX_LAYERS[] = { bass, chords, pad, lead };
+    detail::GuitarFx guitar[layerCount];
+    detail::FxChainParams fxApplied[layerCount] = {};
+    bool fxAtOnce = true; // the next playing block with a setup is a start: the chains are built anew (createInstruments, { immediate: true })
     double masterGainNow = MASTER, shelfNow = 0.0, shelfSet = 0.0; // the sum's gain (synth.js `master`) and the shelf's gain now, and the one its coefficients are for
     detail::Biquad shelf[2];
     detail::Compressor glue, limiter; // Chromium's compressors (limiter: the name of the node in synth.js); each keeps its state across a restart
@@ -167,6 +176,10 @@ struct Engine::Impl {
         made->echoWet = mix.echoWet;
         made->echoFeedback = mix.echoFeedback;
         made->echoTone = mix.echoTone;
+        made->fx[bass] = detail::fxChainParams(timbre.bass.fuzz, timbre.bass.overdrive, timbre.bass.distortion, bass);
+        made->fx[chords] = detail::fxChainParams(timbre.chords.fuzz, timbre.chords.overdrive, timbre.chords.distortion, chords);
+        made->fx[pad] = detail::fxChainParams(timbre.pad.fuzz, timbre.pad.overdrive, timbre.pad.distortion, pad);
+        made->fx[lead] = detail::fxChainParams(timbre.lead.fuzz, timbre.lead.overdrive, timbre.lead.distortion, lead);
         // applyBus (synth.js 77 to 86); the compressor's own make-up (autoMakeupDb, knee 0) is taken back by the gain behind it
         const auto v = [&](const char* name) { return detail::tunedValue("mix/bus", name, tuning); };
         const auto autoMakeupDb = [](double threshold, double ratio) { return -0.6 * threshold * (1 - 1 / ratio); };
@@ -234,6 +247,18 @@ struct Engine::Impl {
         if (setup && setup->room) setup->room->reset();
         echo.reset();
         for (detail::Biquad* f : { &roomHp[0], &roomHp[1], &roomLp[0], &roomLp[1] }) clear(*f);
+    }
+
+    // Audio thread: the chains' values from the setup. At a start every chain is built anew from them (the web's new graph at every play());
+    // later only a layer whose values changed gets them (the web sets them again on every change, with the same result once its ramps are over).
+    void applyFx(bool atStart) {
+        for (const Layer l : FX_LAYERS) {
+            if (atStart) {
+                guitar[l].reset();
+                guitar[l].set(setup->fx[l], true);
+            } else if (!(setup->fx[l] == fxApplied[l])) guitar[l].set(setup->fx[l], false);
+            fxApplied[l] = setup->fx[l];
+        }
     }
 
     // Audio thread: layers whose voice changed (all: when playing starts) begin with the state of a voice just built.
@@ -383,7 +408,6 @@ void Engine::setLevel(Layer layer, float fader) { impl_->fader[layer] = std::cla
 void Engine::setMuted(Layer layer, bool muted) { impl_->muted[layer] = muted; }
 void Engine::setPan(Layer layer, float pan) { impl_->pan[layer] = std::isnan(pan) ? pan : std::clamp(pan, -1.0f, 1.0f); }
 void Engine::setMaster(float fader) { impl_->master = std::clamp(fader, 0.0f, 1.0f); }
-void Engine::setBassDrive(float amount) { impl_->drive = std::clamp(amount, 0.0f, 1.0f); }
 void Engine::setLimiter(bool on) { impl_->limiterOn = on; }
 float Engine::takePeak(int channel) { return impl_->peaks[channel].exchange(0.0f); }
 
@@ -413,7 +437,11 @@ void Engine::prepare(double sampleRate) {
     m.glue.prepare(static_cast<float>(sampleRate)); // a fresh node, before settleSum gives it its parameters
     m.limiter.prepare(static_cast<float>(sampleRate));
     m.settleSum();
-    m.driveNow = m.drive;
+    for (const Layer l : Impl::FX_LAYERS) { // allocation-free; the curves and kernels are computed here, never first on the audio thread
+        m.guitar[l].prepare(l, sampleRate);
+        m.fxApplied[l] = {};
+    }
+    m.fxAtOnce = true;
     m.clearSends(); // a cached convolver may hold an old tail
     m.wetFadeFrames = std::max(1, static_cast<int>(std::lround(0.05 * sampleRate)));
     m.wetFadeLeft = -1;
@@ -457,7 +485,7 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
     }
     const double sr = m.tones.sr, length = m.song ? m.song->lengthBeats : 0.0;
     const double step = block.beatsPerFrame, secondsPerBeat = step > 0 ? 1 / (step * sr) : 0.0;
-    const float smoothLevel = static_cast<float>(1 - std::exp(-1 / (0.020 * sr))), smoothDrive = static_cast<float>(1 - std::exp(-1 / (0.005 * sr)));
+    const float smoothLevel = static_cast<float>(1 - std::exp(-1 / (0.020 * sr)));
 
     const bool restarted = block.playing && m.wasPlaying && block.starts != m.starts; // play() again, no stopped block between
     m.starts = block.starts;
@@ -475,6 +503,7 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
     if (block.playing && (!m.wasPlaying || restarted)) { // the web builds its voices (and its delay, with the time of the tempo) anew at every play()
         m.restart(true);
         m.echoAtOnce = true;
+        m.fxAtOnce = true;
         m.startPending = true;
     }
     if (block.playing && length > 0 && !block.lead) {
@@ -505,6 +534,13 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
     if (block.playing && step > 0 && !(m.echoAtOnce && m.wetFadeLeft >= 0)) {
         m.echo.setTarget(0.75 / (step * sr), m.echoAtOnce);
         m.echoAtOnce = false;
+    }
+    // The layer effects: built at a play's first block, a lead's too (the creation fade and the bias then run in the lead as in the live web
+    // app), and not again when the clock begins to move; later blocks only hand over what changed. Not in the echo's block: a start inside the
+    // wet fade must still build the chains.
+    if (block.playing && m.setup) {
+        m.applyFx(m.fxAtOnce);
+        m.fxAtOnce = false;
     }
     // Stopped, the fade over and no tone left: the shelf and the compressors start empty, and the chain is skipped until playing resumes.
     if (block.playing) {
@@ -563,8 +599,15 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
         }
         for (auto& layer : m.buffers) for (auto& channel : layer) std::fill(channel, channel + count, 0.0f);
         for (Tone& t : m.tones.all) if (t.active) t.render(m.buffers[t.layer][0], m.buffers[t.layer][1], count);
+        // The distortion chains hear the sum of the layer's tones, before mute, fader and trim (synth.js: voice -> fx.input); mono, so the
+        // right channel takes the left (the four layers' packs are mono: guitar_fx.cpp, the shortcut at process)
+        for (const Layer l : Impl::FX_LAYERS) {
+            if (!m.guitar[l].built()) continue;
+            m.guitar[l].process(m.buffers[l][0], count);
+            std::copy(m.buffers[l][0], m.buffers[l][0] + count, m.buffers[l][1]);
+        }
 
-        const float driveTarget = m.drive, masterTarget = m.master * m.master;
+        const float masterTarget = m.master * m.master;
         const bool limit = m.limiterOn;
         const Setup* s = m.setup.get();
         const double masterGainTarget = s ? s->masterGain : MASTER, shelfTarget = s ? s->shelfDb : 0.0, shelfHz = s ? s->shelfHz : 800.0;
@@ -575,15 +618,6 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
         // First pass: the layers and the echo's return into the dry sum (m = dry · master gain), the reverb's input (m and the drums' send)
         // and the room's. The wet fade's value of each frame is kept for the second pass.
         for (int i = 0; i < count; ++i) {
-            // drive on the bass: a soft clipper, blended in so that 0 leaves the signal untouched
-            m.driveNow += smoothDrive * (driveTarget - m.driveNow);
-            if (m.driveNow > 1e-4f) {
-                const float amount = std::min(1.0f, m.driveNow * 10), push = 1 + 30 * m.driveNow, level = 1 / (1 + 3 * m.driveNow);
-                for (int c = 0; c < 2; ++c) {
-                    float& x = m.buffers[bass][c][i];
-                    x += amount * (std::tanh(x * push) * level - x);
-                }
-            }
             float sum[2] = { 0.0f, 0.0f }, room[2] = { 0.0f, 0.0f }, drumsSend[2] = { 0.0f, 0.0f }, echoIn[2] = { 0.0f, 0.0f };
             for (int l = 0; l < layerCount; ++l) {
                 const float target = m.muted[l] ? 0.0f : m.fader[l] * m.fader[l];

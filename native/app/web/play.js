@@ -28,8 +28,8 @@ const engineBeats = () => engine.beats + (engine.playing && !engine.standing ? (
 
 // The engine takes the track as normalizeTrack writes it, with the voices filled in.
 const sendTrack = (track) => send('track', { json: JSON.stringify({ ...normalizeTrack(track), voices: resolveVoices(track) }) });
-// the whole sound model (the core maps it, Task 16); drive: the bass's simple drive of the core until Task 18 replaces it
-const sendTimbre = (timbre) => { send('timbre', { json: JSON.stringify(timbre) }); send('drive', { value: timbre?.bass?.overdrive ?? 0 }); };
+// the whole sound model (the core maps it: Task 16; the layer effects: Task 18)
+const sendTimbre = (timbre) => send('timbre', { json: JSON.stringify(timbre) });
 
 let runs = 0;
 const TICK_MS = 10;

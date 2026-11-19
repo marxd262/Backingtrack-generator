@@ -65,6 +65,16 @@ add('noiseBuffer', ({ label, seconds, channels, decay, sampleRate }) => summary(
   [44100, 48000, 96000].flatMap((sampleRate) => [{ label: 'reverb', seconds: 2, channels: 2, decay: 3, sampleRate },
     ...[0.15, 0.4, 1].map((seconds) => ({ label: 'room', seconds, channels: 2, decay: 6.9 / seconds, sampleRate }))]));
 
+// Task 18: the layer profiles of the distortion chain, whole (the chain reads ref, distHp, toneHz and the cabinet; fxChainParams the trims)
+const { LAYER_FX } = await load('audio/fx-params.js');
+add('LAYER_FX', (layer) => LAYER_FX[layer], Object.keys(LAYER_FX));
+// Task 18 (the two minors of Task 16): a layer without a chain throws in the web (LAYER_FX[layer] is undefined); the case's output is
+// { threw: true }, which the core's function writes when it throws std::invalid_argument. And the order of the timbre's fields.
+add('fxChainThrows', (layer) => { try { fxChainParams({ fuzz: 0.5 }, layer); return { threw: false }; } catch (error) { return { threw: error instanceof TypeError }; } },
+  ['drums', 'percussion', 'bass', 'lead']);
+add('timbreFields', (timbre) => ({ names: Object.entries(timbre).flatMap(([group, fields]) => Object.keys(fields).map((field) => `${group}.${field}`)),
+  defaults: Object.values(timbre).flatMap((fields) => Object.values(fields)) }), [DEFAULT_TIMBRE]);
+
 mkdirSync(outDir, { recursive: true });
 writeFileSync(join(outDir, 'logic.json'), JSON.stringify(cases));
 console.log(`logic.json: ${cases.length} cases of ${new Set(cases.map((c) => c.fn)).size} functions`);

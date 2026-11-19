@@ -21,7 +21,6 @@ static juce::AudioProcessorValueTreeState::ParameterLayout createParameters() {
     return {
         // Fader position as in the web mixer: gain is the square, 1 = unchanged.
         std::make_unique<Float>(juce::ParameterID { "master", 1 }, "Master", juce::NormalisableRange<float> (0.0f, 1.0f), 1.0f),
-        std::make_unique<Float>(juce::ParameterID { "bassDrive", 1 }, "Bass drive", juce::NormalisableRange<float> (0.0f, 1.0f), 0.0f),
     };
 }
 
@@ -55,7 +54,6 @@ void BackingtrackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
     }
     const bool file = playsFile;
     engine.setMaster (master->load());
-    engine.setBassDrive (bassDrive->load());
     filePlayer.setGain (master->load() * master->load());
     // a loop end inside the block cuts it: the transport hands out the block in pieces
     for (int done = 0; done < frames;) {
