@@ -4,6 +4,7 @@
 // src/audio (tunables.js, pack-id.js, sample-hits.js, synth.js) and embedded by CMake. Control thread only.
 
 #include <map>
+#include <set>
 #include <string>
 
 namespace btg::detail {
@@ -14,6 +15,7 @@ struct SoundData {
     std::map<std::string, std::string> packs;                     // every sample voice "layer/sample/variant" -> pack id
     std::map<std::string, std::map<std::string, int>> hitKeys;    // "drums", "percussion", "drums/sample/rimshot" -> hit name -> key
     std::map<std::string, double> trim;                           // layerAudio: layer -> trim
+    std::set<std::string> roomLayers;                             // layerAudio: the layers with room: true (their sum goes into the reverb)
     std::map<std::string, double> kitPan;                         // synth.js KIT_PAN: hit name -> place in the kit (a hit not named stays in the middle)
 };
 const SoundData& soundData(); // parsed on first use

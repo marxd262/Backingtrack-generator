@@ -2,6 +2,7 @@
 // Usage: btg_logic_tests <logic.json>   (written by native/tools/export-logic.mjs)
 // Every case is { fn, in, out }: the core's function of that name gets `in` and must give `out`, compared as the parity test compares
 // events (json_compare.h): numbers bit for bit ("identical") or within 1.5e-6 ("close"); anything else fails, also an unknown fn.
+#include "../src/convolver.h"
 #include "../src/sound_model.h"
 #include "json_compare.h"
 
@@ -60,6 +61,19 @@ const std::map<std::string, std::function<json(const json&)>> FUNCTIONS {
         return toJson(fxChainParams(number(t, "fuzz"), number(t, "overdrive"), number(t, "distortion"), layerOf(in.at("layer").get<std::string>()))); } },
     { "modParams", [](const json& in) { const json& t = in.at("timbre"); return toJson(modParams(number(t, "vibrato"), number(t, "chorus"), number(in, "bpm"))); } },
     { "brightnessHz", [](const json& in) { return json(brightnessHz(in.is_number() ? in.get<double>() : NAN)); } },
+    { "noiseBuffer", [](const json& in) {
+        const auto buffer = noiseBuffer(Rng(1).fork(in.at("label").get<std::string>()), in.at("seconds").get<double>(), in.at("channels").get<int>(),
+                                        in.at("decay").get<double>(), in.at("sampleRate").get<double>());
+        json sums = json::array(), at = json::object();
+        for (const auto& c : buffer) { double s = 0; for (const float x : c) s += static_cast<double>(x) * x; sums.push_back(s); }
+        const size_t length = buffer[0].size();
+        for (const size_t i : { size_t { 0 }, size_t { 1 }, size_t { 2 }, size_t { 1000 }, length - 1 }) {
+            json v = json::array();
+            for (const auto& c : buffer) v.push_back(c[i]);
+            at[std::to_string(i)] = v;
+        }
+        return json { { "length", length }, { "sumSquares", sums }, { "at", at } };
+    } },
 };
 
 } // namespace

@@ -9,7 +9,8 @@ const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.json': 'applic
 // warps (optional, per track): points [seconds as generated, seconds as rendered], ascending: a tempo curve laid
 // over the track's steady tempo. Every event starts at its moved time.
 // shortcut: note lengths and echo times stay at the track's own tempo, fine for a few percent of change; move them too when the curve gets steep.
-// options (optional, per track): { tuning, limiter } as createInstruments takes them (limiter: false renders the mix before the limiter).
+// options (optional, per track): { tuning, limiter } as createInstruments takes them (limiter: false renders the mix before the limiter),
+// and tail: the seconds the render rings past the song (default 0.2).
 export async function renderWeb(repo, tracks, rate, warps = [], options = []) {
   const browser = await chromium.launch();
   try {
@@ -37,9 +38,10 @@ export async function renderWeb(repo, tracks, rate, warps = [], options = []) {
         const { createInstruments } = await import('/audio/synth.js');
         const events = buildEvents(t);
         const seconds = warp(chordTimeline(t).reduce((sum, bar) => sum + bar.durationSec, 0));
-        const ctx = new OfflineAudioContext(2, Math.ceil(r * (seconds + 0.2)), r);
+        const { tail = 0.2, ...rest } = extra;
+        const ctx = new OfflineAudioContext(2, Math.ceil(r * (seconds + tail)), r);
         // as play() does it: timbre and voices of the track, everything else at its defaults
-        const { output, layers, whenReady } = createInstruments(ctx, { bpm: t.bpm, timbre: resolveTrackTimbre(t), voices: resolveVoices(t), ...extra });
+        const { output, layers, whenReady } = createInstruments(ctx, { bpm: t.bpm, timbre: resolveTrackTimbre(t), voices: resolveVoices(t), ...rest });
         await whenReady();
         output.connect(ctx.destination);
         for (const e of events) if (e.layer) layers[e.layer].trigger(e, warp(e.t));

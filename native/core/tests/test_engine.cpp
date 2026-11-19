@@ -3,6 +3,7 @@
 #include "btg/pack.h"
 #include "btg/transport.h"
 
+#include "../src/convolver.h"
 #include "../src/sampler.h"
 
 #include <algorithm>
@@ -21,6 +22,7 @@ static int failures = 0;
     do { if (!(cond)) { std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); ++failures; } } while (0)
 
 static const int rate = 48000;
+static const char* DRY = R"({"master":{"reverb":0,"echo":0,"roomWet":0}})";
 
 // A kit and a bass built in memory: decaying noise for the hits, a looped sine for the bass.
 static std::shared_ptr<const btg::Pack> kit() {
@@ -227,6 +229,56 @@ int main(int argc, char** argv) {
         CHECK(btg::detail::pickZones(pack, 60, 0.8, "dead", best, 4, &own) == 1 && best[0] == &pack.zones[0] && !own);
         CHECK(btg::detail::pickZones(pack, 60, 0.8, nullptr, best, 4, &own) == 1 && best[0] == &pack.zones[0] && !own);
     }
+    // convolver.h: the same as a direct convolution, without latency, for any chunk size. 3000 taps: the head (512) and five partitions,
+    // the last one cut short.
+    {
+        unsigned int seed = 3;
+        const auto noise = [&] { seed = seed * 1664525u + 1013904223u; return static_cast<float>(seed >> 8) / 8388608.0f - 1.0f; };
+        std::vector<std::vector<float>> h(2, std::vector<float>(3000)), x(2, std::vector<float>(6000)), y(2, std::vector<float>(6000));
+        for (auto& c : h) for (float& v : c) v = 0.01f * noise();
+        for (auto& c : x) for (float& v : c) v = noise();
+        btg::detail::Convolver conv(h);
+        CHECK(conv.frames() == 3000 && conv.partitions() == 5);
+        const int sizes[] = { 1, 7, 256, 480, 513, 64 };
+        for (int at = 0, k = 0; at < 6000; at += sizes[k++ % 6])
+            conv.process(&x[0][at], &x[1][at], &y[0][at], &y[1][at], std::min(sizes[k % 6], 6000 - at));
+        double worst = 0.0;
+        for (int c = 0; c < 2; ++c)
+            for (int n = 0; n < 6000; ++n) {
+                double want = 0.0;
+                for (int k = 0; k <= std::min(n, 2999); ++k) want += static_cast<double>(h[c][k]) * x[c][n - k];
+                worst = std::max(worst, std::fabs(want - y[c][n]));
+            }
+        CHECK(worst < 1e-5);
+        conv.reset();
+        std::vector<float> silence(600, 0.0f), out(600, 1.0f), out2(600, 1.0f);
+        conv.process(silence.data(), silence.data(), out.data(), out2.data(), 600);
+        CHECK(*std::max_element(out.begin(), out.end()) == 0.0f && *std::min_element(out.begin(), out.end()) == 0.0f);
+    }
+    // Chromium reverb.cc, CalculateNormalizationScale: 1 / rms over both channels, times 10^(-58/20), times 44100 / rate; silence: 1 / 0.000125.
+    {
+        using btg::detail::normalizationScale;
+        const std::vector<std::vector<float>> ir = { { 0.5f, -0.5f, 0.5f, -0.5f }, { 1.0f, 1.0f, -1.0f, -1.0f } }; // rms sqrt(5 / 8)
+        CHECK(std::fabs(normalizationScale(ir, 48000) / (1 / std::sqrt(0.625) * std::pow(10.0, -2.9) * 44100 / 48000) - 1) < 1e-6);
+        CHECK(std::fabs(normalizationScale({ { 0.0f, 0.0f }, { 0.0f, 0.0f } }, 44100) / (1 / 0.000125 * std::pow(10.0, -2.9)) - 1) < 1e-6);
+    }
+    // Review Focus 5, the responses: at 44.1, 48 and 96 kHz the reverb (2 s, decay 3) and the room (0.4 s, decay 6.9 / 0.4) have the same length
+    // in seconds and decay at the same speed (power from 0.5..1.0 s to 1.0..1.5 s: e^-3 = -13.03 dB; room 0.05..0.2 s to 0.2..0.35 s:
+    // e^-5.175 = -22.47 dB; the tolerances cover the noise of the draws), and their summed square goes with Chromium's normalisation,
+    // 10^-5.8 * 44100^2 * seconds / rate per channel: the reverb's power is 3.01 dB lower at 96 kHz than at 48 kHz (design open point 3).
+    for (const double sr : { 44100.0, 48000.0, 96000.0 }) {
+        const auto reverb = btg::detail::normalizedNoise("reverb", 2.0, 3.0, sr), room = btg::detail::normalizedNoise("room", 0.4, 6.9 / 0.4, sr);
+        const auto energy = [sr](const std::vector<float>& x, double from, double to) {
+            double s = 0.0;
+            for (size_t i = static_cast<size_t>(from * sr); i < static_cast<size_t>(to * sr); ++i) s += static_cast<double>(x[i]) * x[i];
+            return s;
+        };
+        CHECK(reverb.size() == 2 && reverb[0].size() == static_cast<size_t>(std::ceil(2.0 * sr)) && room[1].size() == static_cast<size_t>(std::ceil(0.4 * sr)));
+        CHECK(std::fabs(10 * std::log10(energy(reverb[0], 1.0, 1.5) / energy(reverb[0], 0.5, 1.0)) + 13.03) < 0.3);
+        CHECK(std::fabs(10 * std::log10(energy(room[0], 0.2, 0.35) / energy(room[0], 0.05, 0.2)) + 22.47) < 0.5);
+        const double perChannel = (energy(reverb[0], 0.0, 2.0) + energy(reverb[1], 0.0, 2.0)) / 2;
+        CHECK(std::fabs(10 * std::log10(perChannel / (std::pow(10.0, -5.8) * 44100.0 * 44100.0 * 2.0 / sr))) < 0.01);
+    }
 
     // Engine with the fixture track.
     if (argc < 2) { std::printf("usage: btg_engine_tests <track.json>\n"); return 2; }
@@ -236,6 +288,7 @@ int main(int argc, char** argv) {
     const auto play = [&](int blockSize, float drive, bool muteAll, double startBeats) {
         btg::Engine engine;
         engine.setPackSource(source);
+        engine.setSound(DRY);
         engine.setTrack(track);
         engine.setBassDrive(drive);
         engine.setMuted(btg::Engine::drums, muteAll);
@@ -257,6 +310,7 @@ int main(int argc, char** argv) {
     // Live: a new track, a jump and a loop while playing do not break the stream.
     btg::Engine engine;
     engine.setPackSource(source);
+    engine.setSound(DRY);
     engine.setTrack(track);
     engine.prepare(rate);
     btg::Transport live;
@@ -279,6 +333,7 @@ int main(int argc, char** argv) {
         const auto from64 = [&](bool playedBefore) {
             btg::Engine engine;
             engine.setPackSource(source);
+            engine.setSound(DRY);
             engine.setTrack(track);
             engine.prepare(rate);
             btg::Transport t;
@@ -300,6 +355,7 @@ int main(int argc, char** argv) {
     const auto bassOnly = [&](const char* voices, const char* tuning) {
         btg::Engine engine;
         engine.setPackSource(source);
+        engine.setSound(DRY);
         engine.setTrack(track);
         engine.setVoices(voices);
         engine.setTuning(tuning);
@@ -336,6 +392,7 @@ int main(int argc, char** argv) {
             if (id == "chords-funk") return std::make_shared<const btg::Pack>(btg::loadPack(R"({"samples":[{"offset":0,)", none, sizeof none)); // the JSON is cut off
             return source(id);
         });
+        engine.setSound(DRY);
         engine.setTrack(track);
         const std::string status = engine.voiceStatus();
         CHECK(status.find(R"("pad":"error: pad-strings: pack: cannot open no-such-folder/pad-strings.json")") != std::string::npos);
@@ -377,6 +434,7 @@ int main(int argc, char** argv) {
                 if (id == "pad-strings") return std::make_shared<const btg::Pack>(btg::loadPack(text, audio, sizeof audio));
                 return source(id);
             });
+            engine.setSound(DRY);
             engine.setTrack(track);
             CHECK(engine.voiceStatus().find(R"("pad":"error: pad-strings: )") != std::string::npos);
             engine.prepare(rate);
@@ -404,6 +462,7 @@ int main(int argc, char** argv) {
         for (const bool alternate : { true, false }) {
             btg::Engine engine;
             engine.setPackSource(source);
+            engine.setSound(DRY);
             engine.setTrack(track);
             engine.setMuted(btg::Engine::drums, true);
             engine.setLimiter(false);
@@ -445,6 +504,7 @@ int main(int argc, char** argv) {
         for (const bool loop : { false, true }) {
             btg::Engine engine;
             engine.setPackSource(source);
+            engine.setSound(DRY);
             engine.setTrack(band);
             engine.setMuted(btg::Engine::drums, true);
             engine.setMuted(btg::Engine::bass, true);
@@ -465,6 +525,7 @@ int main(int argc, char** argv) {
         for (const double off : { 0.0, 1.0 / 28800 }) {
             btg::Engine engine;
             engine.setPackSource(source);
+            engine.setSound(DRY);
             engine.setTrack(band);
             engine.setMuted(btg::Engine::drums, true);
             engine.setMuted(btg::Engine::bass, true);
@@ -501,6 +562,7 @@ int main(int argc, char** argv) {
         for (const int how : { 0, 1, 2 }) { // start there, seek there, a loop that starts there wraps
             btg::Engine engine;
             engine.setPackSource(source);
+            engine.setSound(DRY);
             engine.setTrack(track);
             engine.setMuted(btg::Engine::drums, true);
             engine.setLimiter(false);
@@ -527,6 +589,7 @@ int main(int argc, char** argv) {
     {
         btg::Engine engine;
         engine.setPackSource(source);
+        engine.setSound(DRY);
         engine.setTrack(track);
         engine.setVoices(R"({"drums":{"id":"sample","variant":"brushes"}})");
         engine.setMuted(btg::Engine::bass, true);
@@ -603,6 +666,7 @@ int main(int argc, char** argv) {
         CHECK(slide > 0.0 && lead > 0.0);
         btg::Engine engine;
         engine.setPackSource(source);
+        engine.setSound(DRY);
         engine.setTrack(track);
         engine.setMuted(btg::Engine::drums, true);
         engine.setLimiter(false); // no look-ahead: frame 0 of the output is frame 0 of the tone
@@ -619,6 +683,7 @@ int main(int argc, char** argv) {
     const auto sides = [&](btg::Engine::Layer layer, const char* voices, float pan, const char* tuning) {
         btg::Engine engine;
         engine.setPackSource(source);
+        engine.setSound(DRY);
         engine.setTrack(track);
         engine.setVoices(voices);
         engine.setTuning(tuning);
@@ -665,15 +730,130 @@ int main(int argc, char** argv) {
         CHECK(std::fabs(ratio(R"({"master":{"reverb":0,"echo":0,"roomWet":0}})") - 1.25 / 0.75) < 0.01);
         CHECK(ratio("no json") == ratio("{}"));
     }
+    // Review Focus 5, pitch: the bass test tone (a 200-frame sine at 22050 Hz, root key 45: 110.25 Hz) at key 57 is 220.5 Hz at 44.1, 48
+    // and 96 kHz, within 2 cents, measured between the first and the last upward zero crossing after 0.1 s.
+    for (const double sr : { 44100.0, 48000.0, 96000.0 }) {
+        const auto pack = tonePack(45, 0.5f, 0.2);
+        auto tones = std::make_unique<btg::detail::Tones>(); // 256 tones: too large for the stack
+        tones->sr = sr;
+        tones->start({ .pack = pack.get(), .zone = &pack->zones[0], .sample = 0, .key = 57, .dur = 2.0, .vel = 1.0, .layer = btg::Engine::bass });
+        std::vector<float> l(static_cast<size_t>(sr)), r(l.size());
+        for (size_t at = 0; at < l.size(); at += 256)
+            for (btg::detail::Tone& t : tones->all) if (t.active) t.render(&l[at], &r[at], static_cast<int>(std::min<size_t>(256, l.size() - at)));
+        double first = -1.0, last = -1.0;
+        int crossings = 0;
+        for (size_t i = static_cast<size_t>(0.1 * sr); i + 1 < l.size(); ++i)
+            if (l[i] <= 0 && l[i + 1] > 0) {
+                last = (static_cast<double>(i) + l[i] / (l[i] - l[i + 1])) / sr;
+                if (first < 0) first = last;
+                ++crossings;
+            }
+        CHECK(std::fabs(1200 * std::log2((crossings - 1) / (last - first) / 220.5)) < 2);
+    }
+    // ... the engine builds the responses for the rate it is prepared at: at 44.1 and 96 kHz the drums' reverb rings on after the song stands
+    // (the last hit dies within 0.2 s) until about 2.14 s, and is gone from 2.25 s on (a response built for 48 kHz would ring at 44.1 kHz until
+    // about 2.32 s, and end at 96 kHz before 1.6 s). Played from beat 64: the fixture's intro (9.6 s) has no drums.
+    for (const double sr : { 44100.0, 96000.0 }) {
+        btg::Engine engine;
+        engine.setPackSource(source);
+        engine.setSound(R"({"master":{"reverb":1,"echo":0,"roomWet":0}})");
+        engine.setTrack(track);
+        engine.setMuted(btg::Engine::bass, true);
+        engine.setLimiter(false);
+        engine.prepare(sr);
+        btg::Transport t;
+        t.play(64.0, engine.bpm());
+        std::vector<float> l(480), r(480), after;
+        btg::Transport::Block b;
+        for (double done = 0; done < 2.0 * sr; done += b.frames) { b = t.advance(480, sr); engine.render(l.data(), r.data(), b.frames, b); }
+        const btg::Transport::Block still { true, b.beats + b.frames * b.beatsPerFrame, 0.0, 480, b.starts };
+        while (after.size() < 2.6 * sr) { engine.render(l.data(), r.data(), 480, still); after.insert(after.end(), l.begin(), l.end()); }
+        const auto peak = [&](double from, double to) {
+            double p = 0.0;
+            for (size_t i = static_cast<size_t>(from * sr); i < static_cast<size_t>(to * sr); ++i) p = std::max(p, std::fabs(static_cast<double>(after[i])));
+            return p;
+        };
+        CHECK(peak(1.6, 1.9) > 1e-6);
+        CHECK(peak(2.25, 2.6) < 1e-9);
+    }
+    // A stop: the wet returns fade with the web's 0.05 s (play.js FADE), 0.2 s after it everything is exactly silent; a start after that
+    // sounds as a fresh engine (reverb, room and their filters start empty, as the web's new graph at every play()). From beat 64 the
+    // drums and the bass still sound when the fade ends (the choke takes about 0.14 s), and their tails go into the closed sends after it.
+    for (const double from : { 0.0, 64.0 }) {
+        const char* WET = R"({"master":{"reverb":1,"roomWet":1}})";
+        btg::Engine used, fresh;
+        for (btg::Engine* e : { &used, &fresh }) { e->setPackSource(source); e->setSound(WET); e->setTrack(track); e->setLimiter(false); e->prepare(rate); }
+        btg::Transport t, t2;
+        t.play(from, used.bpm());
+        render(used, t, 2.0, 480);
+        t.stop();
+        const Result after = render(used, t, 0.3, 480);
+        double late = 0.0;
+        for (size_t i = rate / 5; i < after.left.size(); ++i) late = std::max(late, std::fabs(static_cast<double>(after.left[i])));
+        CHECK(late == 0.0);
+        t.play(0.0, used.bpm());
+        t2.play(0.0, fresh.bpm());
+        CHECK(render(used, t, 0.5, 480).left == render(fresh, t2, 0.5, 480).left);
+    }
+    // The stop as heard, from beat 64: the wet part of the output (the difference to a dry twin: the same engine, track and transport with
+    // reverb, echo and room at 0) fades linearly over the 2400 frames of 0.05 s from the peak it had before the stop, and is exactly 0 from
+    // the fade's end on, while the choke tails still ring and feed the sends. A start 80 ms after the stop (the fade over, the tails still
+    // ringing) sounds wet as a fresh engine started there (measured 5e-5 of its peak apart: the tails after the start); a start 20 ms after
+    // it (inside the fade) brings back no tail of what played before the stop: from the fade's end on its wet part is the same whether beat
+    // 64 or beat 32 played before (measured 9e-4 apart: the choke tails; uncleared sends 0.26). Limits 1 % of the peak.
+    {
+        const char* WET = R"({"master":{"reverb":1,"roomWet":1}})";
+        // play `before` s from beat `from` and stop for `stopped` s (neither when before is 0), then play `after` s from beat 64; wet minus dry, left
+        const auto wetPart = [&](double from, double before, double stopped, double after) {
+            btg::Engine e[2];
+            btg::Transport t[2];
+            std::vector<double> out[2];
+            for (int k = 0; k < 2; ++k) { e[k].setPackSource(source); e[k].setSound(k ? DRY : WET); e[k].setTrack(track); e[k].setLimiter(false); e[k].prepare(rate); }
+            const auto run = [&](double seconds) { for (int k = 0; k < 2; ++k) for (const float x : render(e[k], t[k], seconds, 480).left) out[k].push_back(x); };
+            if (before > 0) {
+                for (btg::Transport& x : t) x.play(from, e[0].bpm());
+                run(before);
+                for (btg::Transport& x : t) x.stop();
+                run(stopped);
+            }
+            for (btg::Transport& x : t) x.play(64.0, e[0].bpm());
+            run(after);
+            for (size_t i = 0; i < out[0].size(); ++i) out[0][i] -= out[1][i];
+            return out[0];
+        };
+        const auto peakIn = [](const std::vector<double>& x, size_t from, size_t to) { double p = 0.0; for (size_t i = from; i < to; ++i) p = std::max(p, std::fabs(x[i])); return p; };
+        const auto rmsIn = [](const std::vector<double>& x, size_t from, size_t to) { double s = 0.0; for (size_t i = from; i < to; ++i) s += x[i] * x[i]; return std::sqrt(s / static_cast<double>(to - from)); };
+        const size_t stop = 2 * rate, fade = rate / 20; // the stop's frame, the fade's frames
+        const std::vector<double> stopped = wetPart(64.0, 2.0, 0.3, 0.0), fresh = wetPart(64.0, 0.0, 0.0, 0.5);
+        const double before = peakIn(stopped, 0, stop);
+        double over = 0.0; // the most a frame of the fade lies above the line from that peak to 0 (one frame allowed for rounding), in units of the peak
+        for (size_t n = 0; n < fade; ++n) over = std::max(over, std::fabs(stopped[stop + n]) / before - (1 - (static_cast<double>(n) - 1) / fade));
+        const double fadeLevel = rmsIn(stopped, stop, stop + 480) / rmsIn(stopped, stop - 480, stop);
+        const double afterFade = peakIn(stopped, stop + fade, stopped.size());
+        const std::vector<double> late = wetPart(64.0, 2.0, 0.08, 0.5), early = wetPart(64.0, 2.0, 0.02, 0.5), early32 = wetPart(32.0, 2.0, 0.02, 0.5);
+        double most = 0.0;
+        for (size_t i = 0; i < fresh.size(); ++i) most = std::max(most, std::fabs(late[stop + rate * 8 / 100 + i] - fresh[i]));
+        const double lateGap = most / peakIn(fresh, 0, fresh.size());
+        most = 0.0;
+        for (size_t i = stop + fade; i < early.size(); ++i) most = std::max(most, std::fabs(early[i] - early32[i]));
+        const double earlyGap = most / peakIn(early, stop + fade, early.size());
+        CHECK(before > 0.01 && over <= 0.0);
+        CHECK(fadeLevel > 0.5);  // a fade, not a cut
+        CHECK(afterFade == 0.0); // the returns stay closed
+        CHECK(lateGap < 0.01);   // the start empties the sends
+        CHECK(earlyGap < 0.01);  // the fade's end empties them
+    }
 
     // setSound reaches the voices, in the order the app sends it (setTuning, setTrack, setSound; play.js) and while playing. The bass plays a
     // tone of 2205 Hz at its root, so that cutoff 0 (a lowpass at 400 Hz) takes a lot of it away: that effect lives in the voice, not in the sum.
+    // Every engine starts from DRY (neutral voices, no sends), so that only the dry bass is compared.
     {
         const auto bright = [](const std::string& id) -> std::shared_ptr<const btg::Pack> { return id == "bass-finger" ? tonePack(45, 0.5f, 0.2, 10) : source(id); };
         const char* dark = R"({"bass":{"cutoff":0},"master":{"reverb":0,"echo":0,"roomWet":0}})";
         const auto heard = [&](const char* sound, bool afterTrack) {
             btg::Engine engine;
             engine.setPackSource(bright);
+            engine.setSound(DRY);
             if (sound && !afterTrack) engine.setSound(sound);
             engine.setTrack(track);
             if (sound && afterTrack) engine.setSound(sound);
@@ -688,10 +868,11 @@ int main(int argc, char** argv) {
         CHECK(before.rms < 0.7 * neutral.rms); // the timbre acts in the voice
         CHECK(after.left == before.left);      // setSound after setTrack sounds as setSound before it
         // setSound while playing: what starts after it sounds as the timbre says (the bass's notes end within a bar, 2.4 s), as in an
-        // engine that had the timbre from the start; with no setSound it stays neutral.
+        // engine that had the timbre from the start; with no setSound after DRY it stays neutral.
         const auto changing = [&](const char* sound, bool atStart) {
             btg::Engine engine;
             engine.setPackSource(bright);
+            engine.setSound(DRY);
             if (sound && atStart) engine.setSound(sound);
             engine.setTrack(track);
             engine.setMuted(btg::Engine::drums, true);

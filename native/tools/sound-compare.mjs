@@ -1,12 +1,14 @@
 // Sound comparison: renders the same tracks with the web app and with the native core and checks level, octave bands and envelope.
 //   node native/tools/sound-compare.mjs <cases.json> [output folder]   (default folder: .superpowers/audio-ab/compare)
 //   node native/tools/sound-compare.mjs --self-check                  (the measuring itself: must pass, and must catch -2 dB and a treble tilt)
-// cases.json: array of { name, track, sound?, tuning?, dry?, kind? }
+// cases.json: array of { name, track, sound?, tuning?, dry?, limiter?, tail?, kind? }
 //   track  path to a track JSON (relative to cases.json) or the track object
 //   sound  timbre overrides like track.timbre ({ master: { brightness: 0.3 } }), laid over the track's own; both renders read the result
 //          (the web render resolves it in the browser, the native one gets resolveTrackTimbre(track) as btg_render --sound, as play.js sends it)
 //   tuning fine values as setTuning takes them ({ 'mix/room': { wet: 0 } }), given to both renders (btg_render --tuning)
 //   dry    no limiter, master.reverb 0, master.echo 0, mix/room wet 0, on both sides
+//   limiter  default true; dry turns it off (false: both renders without the limiter, the native one as btg_render --dry)
+//   tail   seconds the renders ring past the song, both sides, default 0.2
 //   kind   "sample" (default) or "synth": chooses the limits
 // Exit code 1 if a case fails (also one that cannot render, or whose renders differ in length by more than 50 ms).
 // balance = (right minus left level of the native render) minus (the same of the web render); limit as the level limit.
@@ -155,7 +157,8 @@ function prepareCase(c, baseDir) {
   if (c.dry) timbre = lay(timbre, { master: { reverb: 0, echo: 0 } });
   if (c.sound || c.dry) track.timbre = timbre;
   const tuning = c.dry ? lay(c.tuning, { 'mix/room': { wet: 0 } }) : c.tuning;
-  return { name: c.name, kind: c.kind ?? 'sample', dry: !!c.dry, track, options: { tuning, limiter: c.dry ? false : undefined } };
+  const limiter = c.dry ? false : c.limiter !== false;
+  return { name: c.name, kind: c.kind ?? 'sample', dry: !!c.dry, limiter, track, options: { tuning, limiter: limiter ? undefined : false, tail: c.tail ?? 0.2 } };
 }
 
 // One case after the other, each in its own browser, so that a case that cannot render costs only itself. Throws with the reason.
@@ -171,7 +174,7 @@ async function renderCase(c) {
     if (c.options.tuning) writeFileSync(tuningFile, JSON.stringify(c.options.tuning));
     writeFileSync(soundFile, JSON.stringify(resolveTrackTimbre(c.track))); // what play.js sends; web-render.mjs resolves the same in the browser
     try {
-      execFileSync(render, [trackFile, join(repo, 'src/assets/samples'), wavFile, String(RATE), ...(c.dry ? ['--dry'] : []), '--sound', soundFile, ...(c.options.tuning ? ['--tuning', tuningFile] : [])], { encoding: 'utf8', stdio: 'pipe' });
+      execFileSync(render, [trackFile, join(repo, 'src/assets/samples'), wavFile, String(RATE), '--tail', String(c.options.tail), ...(!c.limiter ? ['--dry'] : []), '--sound', soundFile, ...(c.options.tuning ? ['--tuning', tuningFile] : [])], { encoding: 'utf8', stdio: 'pipe' });
     } catch (error) { // btg_render says why on stdout (also on its legitimate exit 1 for a silent render)
       throw new Error(`btg_render: ${[error.stdout, error.stderr].filter(Boolean).join(' ').trim() || error.message}`);
     }

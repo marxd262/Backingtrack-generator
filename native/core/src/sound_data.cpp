@@ -22,7 +22,10 @@ const SoundData& soundData() {
             for (const auto& [name, s] : specs.items()) out.tunables[key][name] = { s.at("min").get<double>(), s.at("max").get<double>(), s.at("value").get<double>() };
         out.packs = j.at("packs").get<std::map<std::string, std::string>>();
         out.hitKeys = j.at("hitKeys").get<std::map<std::string, std::map<std::string, int>>>();
-        for (const auto& [layer, audio] : j.at("layerAudio").items()) out.trim[layer] = audio.at("trim").get<double>();
+        for (const auto& [layer, audio] : j.at("layerAudio").items()) {
+            out.trim[layer] = audio.at("trim").get<double>();
+            if (audio.value("room", false)) out.roomLayers.insert(layer);
+        }
         out.kitPan = j.at("kitPan").get<std::map<std::string, double>>();
         return out;
     }();

@@ -192,5 +192,35 @@ const timbreCases = [
 ];
 write('timbre.json', timbreCases);
 console.log(`timbre.json: ${timbreCases.length} cases`);
+
+// Task 14: the long reverb and the shared room, wet: no echo (Task 15), no limiter (Task 17), ringing 2.5 s past the song on both sides.
+// At the neutral sound the reverb lies about 25 dB under the dry sum and would not be seen (design section 6): each case turns its send up.
+const { masterParams, drumParams } = await load('audio/voice-params.js');
+const sendsOf = (c) => {
+  const mix = masterParams(c.sound.master);
+  return { reverb: mix.reverbWet, roomSend: drumParams(c.sound.drums).roomSend, room: mix.roomWet * tunedValue('mix/room', 'wet', c.tuning ?? {}), echo: mix.echoWet };
+};
+const plays = (events, layer) => events.some((e) => e.layer === layer && (e.type === 'note' || e.type === 'hit'));
+CLAIMS.reverb = (c) => (sendsOf(c).reverb > 0 ? '' : 'the reverb is off');
+CLAIMS.roomSend = (c, events) => (sendsOf(c).roomSend > 0 && sendsOf(c).reverb > 0 && (plays(events, 'drums') || plays(events, 'percussion')) ? '' : 'no drums into the reverb');
+CLAIMS.room = (c) => (sendsOf(c).room > 0 ? '' : 'the room is off');
+CLAIMS.noEcho = (c) => (sendsOf(c).echo === 0 ? '' : 'the echo is on');
+// only the room sends of bass, chords, pad and lead: drums and percussion send nothing, and one of the four plays with a send
+const MELODIC = ['bass', 'chords', 'pad', 'lead'], roomOf = (c, layer) => tunedValue('mix/room', layer, c.tuning ?? {});
+CLAIMS.melodicRoom = (c, events) => (sendsOf(c).room > 0 && roomOf(c, 'drums') === 0 && roomOf(c, 'percussion') === 0
+  && MELODIC.some((l) => roomOf(c, l) > 0 && plays(events, l)) ? '' : 'not only the melodic layers into the room');
+const WET = { limiter: false, tail: 2.5 };
+const drumsSolo = kits.find((c) => c.name === 'drums-standard').track;
+const sendCases = [
+  claimed({ name: 'reverb-drums', track: drumsSolo, sound: set(neutralSound, { 'master.reverb': 1, 'master.echo': 0, 'master.roomWet': 0, 'drums.room': 1 }), ...WET }, ['reverb', 'roomSend', 'noEcho']),
+  claimed({ name: 'room-drums', track: drumsSolo, sound: set(neutralSound, { 'master.reverb': 0, 'master.echo': 0, 'master.roomSize': 1 }), tuning: { 'mix/room': { wet: 4 } }, ...WET }, ['room', 'noEcho']),
+  // the room at its loudest (roomWet 1 and wet 4: 8 times the neutral), so that its sends, tone and highpass show in a whole band;
+  // room-melodic: the same without drums and percussion, the only case for the sends of bass, chords, pad and lead
+  claimed({ name: 'room-band', track: funk, sound: set(neutralSound, { 'master.reverb': 0, 'master.echo': 0, 'master.roomSize': 0, 'master.roomWet': 1 }), tuning: { 'mix/room': { wet: 4, tone: 3000 } }, ...WET }, ['room', 'noEcho']),
+  claimed({ name: 'room-melodic', track: funk, sound: set(neutralSound, { 'master.reverb': 0, 'master.echo': 0, 'master.roomSize': 0, 'master.roomWet': 1 }), tuning: { 'mix/room': { wet: 4, tone: 3000, drums: 0, percussion: 0 } }, ...WET }, ['room', 'melodicRoom', 'noEcho']),
+  claimed({ name: 'sends-dreamy', track: bands.dreamy, sound: set(styleSound(bands.dreamy), { 'master.reverb': 1, 'master.echo': 0, 'master.roomWet': 0.75 }), ...WET }, ['reverb', 'roomSend', 'room', 'noEcho']),
+];
+write('sends.json', sendCases);
+console.log(`sends.json: ${sendCases.length} cases`);
 for (const p of problems) console.error(`ERROR ${p}`);
 process.exit(problems.length ? 1 : 0);

@@ -51,6 +51,7 @@ add_library(btg_core STATIC
     src/engine.cpp
     src/sampler.cpp
     src/sound_model.cpp
+    src/convolver.cpp
     src/analysis.cpp
     src/file_player.cpp
     src/decode.cpp

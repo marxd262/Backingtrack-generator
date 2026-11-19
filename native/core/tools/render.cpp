@@ -1,9 +1,10 @@
 // Offline render of a track with the engine of the core, no JUCE:
-//   btg_render <track.json> <folder with the sample packs> <out.wav> [sample rate, default 48000] [--dry] [--sound <timbre.json>] [--tuning <file.json>]
-// The track is JSON as normalizeTrack() of the web app writes it (see native/tools). Plays the song once, then 0.2 s in which the tones ring out.
+//   btg_render <track.json> <folder with the sample packs> <out.wav> [sample rate, default 48000] [--dry] [--sound <timbre.json>] [--tuning <file.json>] [--tail <seconds>]
+// The track is JSON as normalizeTrack() of the web app writes it (see native/tools). Plays the song once, then `tail` seconds (default 0.2) in
+// which the tones and the sends ring out; the file holds exactly the song's frames plus the tail's.
 // --sound: the timbre as the web app's resolveTrackTimbre(track) gives it (without the option: DEFAULT_TIMBRE), set before the track is built.
 // --tuning: fine values as the web app's setTuning takes them ({"bass/sample/finger":{"level":2}}), set before the track is built (before the timbre).
-// --dry: no limiter (the sum only gets the master gain), written as 32-bit float WAV so that nothing clips; for native/tools/sound-compare.mjs.
+// --dry: no limiter, written as 32-bit float WAV so that nothing clips; for native/tools/sound-compare.mjs.
 #include "btg/engine.h"
 #include "btg/pack.h"
 
@@ -20,17 +21,19 @@
 
 int main(int argc, char** argv) {
     bool dry = false;
+    double tail = 0.2;
     std::string tuningFile, soundFile;
     std::vector<char*> args;
     for (int i = 0; i < argc; ++i) {
         if (std::string(argv[i]) == "--dry") dry = true;
         else if (std::string(argv[i]) == "--tuning" && i + 1 < argc) tuningFile = argv[++i];
         else if (std::string(argv[i]) == "--sound" && i + 1 < argc) soundFile = argv[++i];
+        else if (std::string(argv[i]) == "--tail" && i + 1 < argc) tail = std::atof(argv[++i]);
         else args.push_back(argv[i]);
     }
     argc = static_cast<int>(args.size());
     argv = args.data();
-    if (argc < 4) { std::printf("usage: btg_render <track.json> <packs folder> <out.wav> [sample rate] [--dry] [--sound <timbre.json>] [--tuning <file.json>]\n"); return 2; }
+    if (argc < 4) { std::printf("usage: btg_render <track.json> <packs folder> <out.wav> [sample rate] [--dry] [--sound <timbre.json>] [--tuning <file.json>] [--tail <seconds>]\n"); return 2; }
     const double rate = argc > 4 ? std::atof(argv[4]) : 48000.0;
     try {
         std::ifstream file(argv[1], std::ios::binary);
@@ -63,12 +66,13 @@ int main(int argc, char** argv) {
         std::vector<float> samples;
         double peak = 0.0, squares = 0.0;
         // As native/tools/web-render.mjs renders: the song once (the last block ends on its end, so nothing of the next lap starts),
-        // then that render's 0.2 s with the clock standing at the end (playing, no advance, so no event), in which the tones ring out.
+        // then that render's tail with the clock standing at the end (playing, no advance, so no event), in which the tones ring out.
         btg::Transport::Block position;
-        for (long long done = 0; done < songFrames + static_cast<long long>(0.2 * rate); done += position.frames) {
+        const long long total = songFrames + static_cast<long long>(tail * rate);
+        for (long long done = 0; done < total; done += position.frames) {
             if (done < songFrames) position = transport.advance(static_cast<int>(std::min<long long>(block, songFrames - done)), rate);
             else // exactly where the last block ended (lengthBeats may lie up to a frame on: a jump); the same start, another count would be a new one
-                position = { true, position.beats + position.frames * position.beatsPerFrame, 0.0, block, position.starts };
+                position = { true, position.beats + position.frames * position.beatsPerFrame, 0.0, static_cast<int>(std::min<long long>(block, total - done)), position.starts };
             engine.render(left.data(), right.data(), position.frames, position);
             for (int i = 0; i < position.frames; ++i) {
                 for (const float x : { left[i], right[i] }) {
@@ -91,7 +95,8 @@ int main(int argc, char** argv) {
         if (!out) throw std::runtime_error(std::string("cannot write ") + argv[3]);
 
         const double rms = std::sqrt(squares / static_cast<double>(samples.size()));
-        std::printf("%.1f s, peak %.3f, rms %.4f (%.1f dBFS)\n", static_cast<double>(samples.size() / 2) / rate, peak, rms, 20 * std::log10(std::max(rms, 1e-9)));
+        const size_t frames = samples.size() / 2;
+        std::printf("%zu frames, %.4f s, peak %.3f, rms %.4f (%.1f dBFS)\n", frames, static_cast<double>(frames) / rate, peak, rms, 20 * std::log10(std::max(rms, 1e-9)));
         return rms > 0.001 ? 0 : 1; // a silent render is a failure
     } catch (const std::exception& error) {
         std::printf("error: %s\n", error.what());
