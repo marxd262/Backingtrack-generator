@@ -357,7 +357,7 @@
    },
    "bass": {
     "sub": 0,
-    "fuzz": 0,
+    "fuzz": 0.6,
     "overdrive": 0,
     "distortion": 0,
     "pluck": 0.5,
@@ -371,7 +371,7 @@
     "brightness": 0.47128472350537776,
     "length": 0.5,
     "vibrato": 0,
-    "chorus": 0,
+    "chorus": 0.75,
     "tremolo": 0,
     "fuzz": 0,
     "overdrive": 0,
@@ -407,7 +407,8 @@
    }
   },
   "limiter": false,
-  "tail": 2.5
+  "tail": 2.5,
+  "kind": "synth"
  },
  {
   "name": "wet-dreamy",

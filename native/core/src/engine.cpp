@@ -1,6 +1,6 @@
 // The engine: the events of the song, handed to the voice of each layer (sampler.h), and the layer chain of the web app's
 // synth.js (the distortion chain of bass, chords, pad and lead, mute, fader, trim, balance, master, the reverb and the shared room, echo,
-// brightness shelf, bus compressor and limiter).
+// brightness shelf, bus compressor and limiter). The vibrato and chorus of those layers come right behind the distortion chain.
 #include "btg/engine.h"
 
 #include "btg/generator.h"
@@ -9,6 +9,7 @@
 #include "convolver.h"
 #include "echo.h"
 #include "guitar_fx.h"
+#include "mod_fx.h"
 #include "sampler.h"
 #include "sound_data.h"
 #include "sound_model.h"
@@ -50,12 +51,13 @@ struct PlaySong {
 // sum's values from the timbre (masterParams): gain, shelf and the width that multiplies every place; the sends (masterParams,
 // drumParams, mix/room) and their two convolvers, built on the control thread for the rate of the last prepare (none before it) and
 // used and changed only by the audio thread; the echo's values (its line lives on the audio side); the bus (applyBus of synth.js); the
-// layer effects' values (fxChainParams, only the four layers with a chain have any).
+// layer effects' values (fxChainParams and the vibrato and chorus knobs, only the four layers with a chain have any).
 struct Setup {
     std::shared_ptr<const Voice> voice[Engine::layerCount];
     uint64_t serial[Engine::layerCount] = {};
     float pan[Engine::layerCount] = {};
     detail::FxChainParams fx[Engine::layerCount] = {};
+    double vibrato[Engine::layerCount] = {}, chorus[Engine::layerCount] = {}; // modParams takes them with the tempo of the moment
     double masterGain = 0.6, shelfDb = 0.0, shelfHz = 800.0, width = 1.0;
     double reverbWet = 0.15, roomSend = 0.0, roomWet = 1.0, roomTone = 7000.0, roomSends[Engine::layerCount] = {};
     std::shared_ptr<detail::Convolver> reverb, room;
@@ -110,10 +112,13 @@ struct Engine::Impl {
     unsigned starts = 0; // Transport::Block::starts of the last block
     double skipBefore = -INFINITY; // song beat of the last jump less a frame: events triggered before it do not play (but see render)
     float gainNow[layerCount] = {}, panNow[layerCount] = {}, masterNow = 1.0f;
-    // The layers with a distortion chain (src/core/layers.js 10 to 15: fx), their state, and the values they were last given.
+    // The layers with a distortion chain and a modulation chain behind it (src/core/layers.js 10 to 15: fx), their state, and the values they
+    // were last given (modApplied: vibrato, chorus and the tempo of the last modParams).
     static constexpr Layer FX_LAYERS[] = { bass, chords, pad, lead };
     detail::GuitarFx guitar[layerCount];
+    detail::ModFx mod[layerCount];
     detail::FxChainParams fxApplied[layerCount] = {};
+    double modApplied[layerCount][3] = {};
     bool fxAtOnce = true; // the next playing block with a setup is a start: the chains are built anew (createInstruments, { immediate: true })
     double masterGainNow = MASTER, shelfNow = 0.0, shelfSet = 0.0; // the sum's gain (synth.js `master`) and the shelf's gain now, and the one its coefficients are for
     detail::Biquad shelf[2];
@@ -180,6 +185,10 @@ struct Engine::Impl {
         made->fx[chords] = detail::fxChainParams(timbre.chords.fuzz, timbre.chords.overdrive, timbre.chords.distortion, chords);
         made->fx[pad] = detail::fxChainParams(timbre.pad.fuzz, timbre.pad.overdrive, timbre.pad.distortion, pad);
         made->fx[lead] = detail::fxChainParams(timbre.lead.fuzz, timbre.lead.overdrive, timbre.lead.distortion, lead);
+        made->vibrato[bass] = timbre.bass.vibrato; made->chorus[bass] = timbre.bass.chorus;
+        made->vibrato[chords] = timbre.chords.vibrato; made->chorus[chords] = timbre.chords.chorus;
+        made->vibrato[pad] = timbre.pad.vibrato; made->chorus[pad] = timbre.pad.chorus;
+        made->vibrato[lead] = timbre.lead.vibrato; made->chorus[lead] = timbre.lead.chorus;
         // applyBus (synth.js 77 to 86); the compressor's own make-up (autoMakeupDb, knee 0) is taken back by the gain behind it
         const auto v = [&](const char* name) { return detail::tunedValue("mix/bus", name, tuning); };
         const auto autoMakeupDb = [](double threshold, double ratio) { return -0.6 * threshold * (1 - 1 / ratio); };
@@ -251,13 +260,21 @@ struct Engine::Impl {
 
     // Audio thread: the chains' values from the setup. At a start every chain is built anew from them (the web's new graph at every play());
     // later only a layer whose values changed gets them (the web sets them again on every change, with the same result once its ramps are over).
-    void applyFx(bool atStart) {
+    // The modulation chain also follows the tempo (setTempo -> applyFx in synth.js): a change of more than 1e-9 bpm gets a ramp of its rate.
+    void applyFx(bool atStart, double tempo) {
         for (const Layer l : FX_LAYERS) {
+            const double v = setup->vibrato[l], c = setup->chorus[l];
             if (atStart) {
                 guitar[l].reset();
                 guitar[l].set(setup->fx[l], true);
-            } else if (!(setup->fx[l] == fxApplied[l])) guitar[l].set(setup->fx[l], false);
+                mod[l].reset();
+                mod[l].set(detail::modParams(v, c, tempo), true);
+            } else {
+                if (!(setup->fx[l] == fxApplied[l])) guitar[l].set(setup->fx[l], false);
+                if (v != modApplied[l][0] || c != modApplied[l][1] || std::fabs(tempo - modApplied[l][2]) > 1e-9) mod[l].set(detail::modParams(v, c, tempo), false);
+            }
             fxApplied[l] = setup->fx[l];
+            modApplied[l][0] = v; modApplied[l][1] = c; modApplied[l][2] = tempo;
         }
     }
 
@@ -439,7 +456,9 @@ void Engine::prepare(double sampleRate) {
     m.settleSum();
     for (const Layer l : Impl::FX_LAYERS) { // allocation-free; the curves and kernels are computed here, never first on the audio thread
         m.guitar[l].prepare(l, sampleRate);
+        m.mod[l].prepare(sampleRate); // allocates: the three rings
         m.fxApplied[l] = {};
+        for (double& v : m.modApplied[l]) v = 0.0;
     }
     m.fxAtOnce = true;
     m.clearSends(); // a cached convolver may hold an old tail
@@ -538,8 +557,10 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
     // The layer effects: built at a play's first block, a lead's too (the creation fade and the bias then run in the lead as in the live web
     // app), and not again when the clock begins to move; later blocks only hand over what changed. Not in the echo's block: a start inside the
     // wet fade must still build the chains.
+    // The vibrato's rate follows the tempo of the moment: the moving clock's (as the echo's), in a lead the block's own (Transport::Block::bpm),
+    // else the song's.
     if (block.playing && m.setup) {
-        m.applyFx(m.fxAtOnce);
+        m.applyFx(m.fxAtOnce, step > 0 ? step * sr * 60 : block.bpm > 0 ? block.bpm : m.bpm.load());
         m.fxAtOnce = false;
     }
     // Stopped, the fade over and no tone left: the shelf and the compressors start empty, and the chain is skipped until playing resumes.
@@ -599,12 +620,13 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
         }
         for (auto& layer : m.buffers) for (auto& channel : layer) std::fill(channel, channel + count, 0.0f);
         for (Tone& t : m.tones.all) if (t.active) t.render(m.buffers[t.layer][0], m.buffers[t.layer][1], count);
-        // The distortion chains hear the sum of the layer's tones, before mute, fader and trim (synth.js: voice -> fx.input); mono, so the
-        // right channel takes the left (the four layers' packs are mono: guitar_fx.cpp, the shortcut at process)
+        // The distortion chains hear the sum of the layer's tones, before mute, fader and trim (synth.js: voice -> fx.input), the modulation
+        // chains what comes out of them; mono, so the right channel takes the left (the four layers' packs are mono: guitar_fx.cpp, the
+        // shortcut at process) until the chorus makes two channels of it.
         for (const Layer l : Impl::FX_LAYERS) {
-            if (!m.guitar[l].built()) continue;
-            m.guitar[l].process(m.buffers[l][0], count);
-            std::copy(m.buffers[l][0], m.buffers[l][0] + count, m.buffers[l][1]);
+            if (m.guitar[l].built()) m.guitar[l].process(m.buffers[l][0], count);
+            if (m.mod[l].built()) m.mod[l].process(m.buffers[l][0], m.buffers[l][0], m.buffers[l][1], count);
+            else if (m.guitar[l].built()) std::copy(m.buffers[l][0], m.buffers[l][0] + count, m.buffers[l][1]);
         }
 
         const float masterTarget = m.master * m.master;

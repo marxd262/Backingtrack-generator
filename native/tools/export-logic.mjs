@@ -75,6 +75,10 @@ add('fxChainThrows', (layer) => { try { fxChainParams({ fuzz: 0.5 }, layer); ret
 add('timbreFields', (timbre) => ({ names: Object.entries(timbre).flatMap(([group, fields]) => Object.keys(fields).map((field) => `${group}.${field}`)),
   defaults: Object.values(timbre).flatMap((fields) => Object.values(fields)) }), [DEFAULT_TIMBRE]);
 
+// Task 19: the constants of the modulation chain, whole (modParams reads vibCents and chorusLevel, the chain the rest)
+const { MOD } = await load('audio/mod-fx.js');
+add('MOD', () => MOD, [null]);
+
 mkdirSync(outDir, { recursive: true });
 writeFileSync(join(outDir, 'logic.json'), JSON.stringify(cases));
 console.log(`logic.json: ${cases.length} cases of ${new Set(cases.map((c) => c.fn)).size} functions`);

@@ -356,7 +356,7 @@
    },
    "bass": {
     "sub": 0,
-    "fuzz": 0,
+    "fuzz": 0.6,
     "overdrive": 0,
     "distortion": 0,
     "pluck": 0.5,
@@ -370,7 +370,7 @@
     "brightness": 0.47128472350537776,
     "length": 0.5,
     "vibrato": 0,
-    "chorus": 0,
+    "chorus": 0.75,
     "tremolo": 0,
     "fuzz": 0,
     "overdrive": 0,
@@ -405,7 +405,8 @@
     "roomWet": 0.5
    }
   },
-  "tail": 2.5
+  "tail": 2.5,
+  "kind": "synth"
  },
  {
   "name": "mix-dreamy",
@@ -963,7 +964,7 @@
    },
    "bass": {
     "sub": 0,
-    "fuzz": 0,
+    "fuzz": 0.3,
     "overdrive": 0,
     "distortion": 0,
     "pluck": 0.5,
@@ -1012,7 +1013,8 @@
     "roomWet": 0.5
    }
   },
-  "tail": 2.5
+  "tail": 2.5,
+  "kind": "synth"
  },
  {
   "name": "mix-hardrock",
@@ -1167,7 +1169,7 @@
    },
    "bass": {
     "sub": 0,
-    "fuzz": 0,
+    "fuzz": 0.8999999999999999,
     "overdrive": 0,
     "distortion": 0,
     "pluck": 0.5,
@@ -1216,7 +1218,8 @@
     "roomWet": 0.5
    }
   },
-  "tail": 2.5
+  "tail": 2.5,
+  "kind": "synth"
  },
  {
   "name": "mix-reggae",
@@ -2585,7 +2588,7 @@
    },
    "bass": {
     "sub": 0,
-    "fuzz": 0,
+    "fuzz": 0.3,
     "overdrive": 0,
     "distortion": 0,
     "pluck": 0.5,
@@ -2639,7 +2642,8 @@
     "on": 1
    }
   },
-  "tail": 2.5
+  "tail": 2.5,
+  "kind": "synth"
  },
  {
   "name": "mix-poppunk-glue",
@@ -2848,5 +2852,411 @@
    }
   },
   "tail": 2.5
+ },
+ {
+  "name": "mix-psych-20bpm",
+  "track": {
+   "key": {
+    "root": "A",
+    "mode": "minor"
+   },
+   "bpm": 20,
+   "seed": 2,
+   "meter": [
+    4,
+    4
+   ],
+   "bars": [
+    {
+     "chord": {
+      "root": "A",
+      "quality": "min"
+     },
+     "beats": 4
+    },
+    {
+     "chord": {
+      "root": "G",
+      "quality": "maj"
+     },
+     "beats": 4
+    },
+    {
+     "chord": {
+      "root": "F",
+      "quality": "maj"
+     },
+     "beats": 4
+    },
+    {
+     "chord": {
+      "root": "G",
+      "quality": "maj"
+     },
+     "beats": 4
+    }
+   ],
+   "tags": {
+    "drums": [
+     "driving"
+    ],
+    "bass": [
+     "deepFat"
+    ],
+    "synths": [
+     "arpeggio",
+     "widePad",
+     "shimmering"
+    ],
+    "rhythm": [
+     "straight"
+    ],
+    "mood": [
+     "psychedelic"
+    ],
+    "development": [
+     "buildsSlowly"
+    ],
+    "drumSound": [],
+    "bassSound": [
+     "fuzz"
+    ],
+    "chordSound": [
+     "chorused"
+    ],
+    "padSound": [
+     "swelling",
+     "glassy"
+    ]
+   },
+   "voices": {
+    "drums": {
+     "id": "sample",
+     "variant": "standard"
+    },
+    "bass": {
+     "id": "sample",
+     "variant": "finger"
+    },
+    "chords": {
+     "id": "sample",
+     "variant": "twelve"
+    },
+    "pad": {
+     "id": "sample",
+     "variant": "strings"
+    },
+    "lead": {
+     "id": "sample",
+     "variant": "flute"
+    },
+    "percussion": {
+     "id": "sample",
+     "variant": "studio"
+    }
+   },
+   "layers": {
+    "drums": true,
+    "bass": true,
+    "chords": true,
+    "pad": true,
+    "lead": true,
+    "percussion": true
+   },
+   "jobs": {
+    "lead": "melody",
+    "percussion": "mixed"
+   },
+   "length": 4,
+   "variety": true,
+   "form": {
+    "sections": [
+     {
+      "type": "verse",
+      "bars": 2
+     },
+     {
+      "type": "chorus",
+      "bars": 2
+     }
+    ],
+    "feel": {
+     "structure": 0.6,
+     "dynamics": 0.6,
+     "pauses": 0.4,
+     "randomness": 0.5
+    }
+   }
+  },
+  "sound": {
+   "drums": {
+    "kickPunch": 0.5,
+    "kickLength": 0.5,
+    "snareTone": 0.4930122924223542,
+    "snareSnap": 0.5,
+    "hatBright": 0.5532168454676867,
+    "hatLength": 0.5,
+    "room": 0
+   },
+   "bass": {
+    "sub": 0,
+    "fuzz": 0.6,
+    "overdrive": 0,
+    "distortion": 0,
+    "pluck": 0.5,
+    "cutoff": 0.49033651925623417,
+    "resonance": 0.5,
+    "roundness": 0,
+    "vibrato": 0,
+    "chorus": 0
+   },
+   "chords": {
+    "brightness": 0.47128472350537776,
+    "length": 0.5,
+    "vibrato": 0,
+    "chorus": 0.75,
+    "tremolo": 0,
+    "fuzz": 0,
+    "overdrive": 0,
+    "distortion": 0
+   },
+   "pad": {
+    "attack": 0.9,
+    "cutoff": 0.8470482134819031,
+    "lfoSpeed": 0.5021005652472377,
+    "lfoDepth": 0.7,
+    "shimmer": 0.35,
+    "thickness": 0.3,
+    "fuzz": 0,
+    "overdrive": 0,
+    "distortion": 0,
+    "vibrato": 0,
+    "chorus": 0
+   },
+   "lead": {
+    "fuzz": 0,
+    "overdrive": 0,
+    "distortion": 0,
+    "vibrato": 0,
+    "chorus": 0
+   },
+   "master": {
+    "brightness": 0.5,
+    "echo": 0.8530319021642209,
+    "reverb": 0.75,
+    "width": 0.5,
+    "roomSize": 0.5,
+    "roomWet": 0.5
+   }
+  },
+  "tail": 2.5,
+  "peakBelow": 0,
+  "kind": "synth"
+ },
+ {
+  "name": "mix-psych-400bpm",
+  "track": {
+   "key": {
+    "root": "A",
+    "mode": "minor"
+   },
+   "bpm": 400,
+   "seed": 2,
+   "meter": [
+    4,
+    4
+   ],
+   "bars": [
+    {
+     "chord": {
+      "root": "A",
+      "quality": "min"
+     },
+     "beats": 4
+    },
+    {
+     "chord": {
+      "root": "G",
+      "quality": "maj"
+     },
+     "beats": 4
+    },
+    {
+     "chord": {
+      "root": "F",
+      "quality": "maj"
+     },
+     "beats": 4
+    },
+    {
+     "chord": {
+      "root": "G",
+      "quality": "maj"
+     },
+     "beats": 4
+    }
+   ],
+   "tags": {
+    "drums": [
+     "driving"
+    ],
+    "bass": [
+     "deepFat"
+    ],
+    "synths": [
+     "arpeggio",
+     "widePad",
+     "shimmering"
+    ],
+    "rhythm": [
+     "straight"
+    ],
+    "mood": [
+     "psychedelic"
+    ],
+    "development": [
+     "buildsSlowly"
+    ],
+    "drumSound": [],
+    "bassSound": [
+     "fuzz"
+    ],
+    "chordSound": [
+     "chorused"
+    ],
+    "padSound": [
+     "swelling",
+     "glassy"
+    ]
+   },
+   "voices": {
+    "drums": {
+     "id": "sample",
+     "variant": "standard"
+    },
+    "bass": {
+     "id": "sample",
+     "variant": "finger"
+    },
+    "chords": {
+     "id": "sample",
+     "variant": "twelve"
+    },
+    "pad": {
+     "id": "sample",
+     "variant": "strings"
+    },
+    "lead": {
+     "id": "sample",
+     "variant": "flute"
+    },
+    "percussion": {
+     "id": "sample",
+     "variant": "studio"
+    }
+   },
+   "layers": {
+    "drums": true,
+    "bass": true,
+    "chords": true,
+    "pad": true,
+    "lead": true,
+    "percussion": true
+   },
+   "jobs": {
+    "lead": "melody",
+    "percussion": "mixed"
+   },
+   "length": 24,
+   "variety": true,
+   "form": {
+    "sections": [
+     {
+      "type": "intro",
+      "bars": 8
+     },
+     {
+      "type": "chorus",
+      "bars": 8
+     },
+     {
+      "type": "outro",
+      "bars": 8
+     }
+    ],
+    "template": "buildDrop",
+    "auto": true,
+    "feel": {
+     "structure": 0.6,
+     "dynamics": 0.6,
+     "pauses": 0.4,
+     "randomness": 0.5
+    }
+   }
+  },
+  "sound": {
+   "drums": {
+    "kickPunch": 0.5,
+    "kickLength": 0.5,
+    "snareTone": 0.4930122924223542,
+    "snareSnap": 0.5,
+    "hatBright": 0.5532168454676867,
+    "hatLength": 0.5,
+    "room": 0
+   },
+   "bass": {
+    "sub": 0,
+    "fuzz": 0.6,
+    "overdrive": 0,
+    "distortion": 0,
+    "pluck": 0.5,
+    "cutoff": 0.49033651925623417,
+    "resonance": 0.5,
+    "roundness": 0,
+    "vibrato": 0,
+    "chorus": 0
+   },
+   "chords": {
+    "brightness": 0.47128472350537776,
+    "length": 0.5,
+    "vibrato": 0,
+    "chorus": 0.75,
+    "tremolo": 0,
+    "fuzz": 0,
+    "overdrive": 0,
+    "distortion": 0
+   },
+   "pad": {
+    "attack": 0.9,
+    "cutoff": 0.8470482134819031,
+    "lfoSpeed": 0.5021005652472377,
+    "lfoDepth": 0.7,
+    "shimmer": 0.35,
+    "thickness": 0.3,
+    "fuzz": 0,
+    "overdrive": 0,
+    "distortion": 0,
+    "vibrato": 0,
+    "chorus": 0
+   },
+   "lead": {
+    "fuzz": 0,
+    "overdrive": 0,
+    "distortion": 0,
+    "vibrato": 0,
+    "chorus": 0
+   },
+   "master": {
+    "brightness": 0.5,
+    "echo": 0.8530319021642209,
+    "reverb": 0.75,
+    "width": 0.5,
+    "roomSize": 0.5,
+    "roomWet": 0.5
+   }
+  },
+  "tail": 2.5,
+  "peakBelow": 0,
+  "kind": "synth"
  }
 ]

@@ -6,6 +6,7 @@
 #include "../src/compressor.h"
 #include "../src/convolver.h"
 #include "../src/echo.h"
+#include "../src/mod_fx.h"
 #include "../src/sampler.h"
 
 #include <algorithm>
@@ -136,7 +137,7 @@ static double gainDb(const btg::detail::Biquad& f, double hz, double sr) {
     return 20 * std::log10(std::abs((f.b0 + f.b1 * z + f.b2 * z * z) / (1.0 + f.a1 * z + f.a2 * z * z)));
 }
 
-struct Result { std::vector<float> left; double rms = 0.0, peak = 0.0, rmsRight = 0.0; bool finite = true; };
+struct Result { std::vector<float> left, right; double rms = 0.0, peak = 0.0, rmsRight = 0.0; bool finite = true; };
 
 static double rmsOf(const std::vector<float>& x, size_t from, size_t to) {
     double squares = 0.0;
@@ -188,6 +189,7 @@ static Result render(btg::Engine& engine, btg::Transport& transport, double seco
         engine.render(l.data(), rr.data(), block.frames, block);
         for (int i = 0; i < block.frames; ++i) {
             r.left.push_back(l[i]);
+            r.right.push_back(rr[i]);
             r.rms += l[i] * l[i];
             r.rmsRight += rr[i] * rr[i];
             r.peak = std::max(r.peak, static_cast<double>(std::max(std::fabs(l[i]), std::fabs(rr[i]))));
@@ -579,6 +581,53 @@ int main(int argc, char** argv) {
             const size_t lead = static_cast<size_t>(0.15 * rate);
             CHECK(rmsOf(b.left, lead, lead + hold) > 1e-3 && differs(a, b, lead, lead + hold)); // red: no chain; a rebuild when the clock moves
         }
+        // 7. vibrato and chorus: chorus 1 puts copies left and right, so the bass is no longer one signal on both sides (correlation 1
+        // without it: the balance only scales); all back to 0 while playing: the chain leaves the path exactly 0.2 s after the change.
+        const auto correlation = [](const Result& r) {
+            double lr = 0, ll = 0, rr = 0;
+            for (size_t i = 0; i < r.left.size(); ++i) { lr += r.left[i] * r.right[i]; ll += r.left[i] * r.left[i]; rr += r.right[i] * r.right[i]; }
+            return lr / std::sqrt(ll * rr);
+        };
+        const char* BOTH = R"({"master":{"reverb":0,"echo":0,"roomWet":0},"bass":{"vibrato":1,"chorus":1}})";
+        {
+            auto f = make(BOTH), c = make(CLEAN);
+            btg::Transport tf, tc;
+            tf.play(64.0, f->bpm()); tc.play(64.0, c->bpm());
+            const Result a = render(*f, tf, 2.0, 480), b = render(*c, tc, 2.0, 480);
+            std::printf("chorus: correlation of left and right %.4f (without: %.6f)\n", correlation(a), correlation(b));
+            CHECK(std::fabs(correlation(b) - 1) < 1e-6); // passes red too
+            CHECK(correlation(a) < 0.99);                // red: no chorus (estimate with it: about 0.8)
+            f->setSound(CLEAN); c->setSound(CLEAN);
+            const Result a2 = render(*f, tf, 1.0, 480), b2 = render(*c, tc, 1.0, 480);
+            CHECK(differs(a2, b2, 0, static_cast<size_t>(0.05 * rate)));              // the ramp; red: no chain
+            CHECK(near(a2, b2, static_cast<size_t>(0.21 * rate), a2.left.size()));     // passes red too
+        }
+        // 8. the tempo in a lead: the vibrato's rate follows the tempo (4 Hz at 60 bpm, 5.5 Hz from 120), and a lead's blocks stand
+        // (beatsPerFrame 0), so they carry it (Block::bpm). The same play twice, the second told 60 bpm in its lead's blocks: its chain is
+        // built at 4 Hz and moves to 5.5 Hz when the clock does, so the first 0.2 s of the song differ; red: no chain, or a chain that
+        // ignores the block's tempo (both would then be the same).
+        {
+            const char* VIBRATO = R"({"master":{"reverb":0,"echo":0,"roomWet":0},"bass":{"vibrato":1}})";
+            const auto play = [&](double leadTempo) {
+                auto e = make(VIBRATO);
+                btg::Transport t;
+                t.play(64.0, 160.0, 0.15);
+                Result r;
+                std::vector<float> l(480), rr(480);
+                for (int done = 0; done < 0.9 * rate;) {
+                    auto block = t.advance(480, rate);
+                    if (block.lead) block.bpm = leadTempo;
+                    e->render(l.data(), rr.data(), block.frames, block);
+                    r.left.insert(r.left.end(), l.begin(), l.begin() + block.frames);
+                    done += block.frames;
+                }
+                return r;
+            };
+            const Result same = play(160.0), told = play(60.0), again = play(160.0);
+            const size_t lead = static_cast<size_t>(0.15 * rate);
+            CHECK(near(same, again, 0, same.left.size()));                  // deterministic
+            CHECK(differs(same, told, lead, lead + static_cast<size_t>(0.2 * rate))); // red: no chain, or the block's tempo is not read
+        }
     }
 
     // The lead (design: the web app starts its song 0.15 s after play(); the limiter settles while its input is silent). The limiter's gain
@@ -728,7 +777,8 @@ int main(int argc, char** argv) {
         CHECK(std::fabs(peakOf(glueOnly, 0, 288)) > 0.01f && peakOf(glueOnly, 288, 576) == 0.0f && std::fabs(peakOf(glueOnly, 576, 2000)) > 0.01f);
     }
 
-    // Tempo extremes: all six layers (test packs), reverb, room (1 s) and echo up, the limiter on; at 20 and at 400 bpm, 20 s each: every
+    // Tempo extremes: all six layers (test packs), reverb, room (1 s) and echo up and every layer effect at 1 (fuzz, overdrive, distortion,
+    // vibrato, chorus on bass, chords, pad and lead), the limiter on; at 20 and at 400 bpm, 20 s each: every
     // sample finite, and the render takes less than a quarter of the time it plays (the load limit of the plan). The peak: the core's
     // limiter equals Chromium's compressor sample for sample (compressor-compare.mjs), and with these loud synthetic packs the chain
     // reaches 0.869 (20 bpm) and 1.064 (400 bpm) at the fader's 1, the latter a little above full scale (the shell clips); no web render
@@ -752,7 +802,9 @@ int main(int argc, char** argv) {
         for (const double bpm : { 20.0, 400.0 }) {
             btg::Engine engine;
             engine.setPackSource(source);
-            engine.setSound(R"({"master":{"reverb":1,"echo":1,"roomWet":1,"roomSize":1}})");
+            engine.setSound(R"({"master":{"reverb":1,"echo":1,"roomWet":1,"roomSize":1},"bass":{"fuzz":1,"overdrive":1,"distortion":1,"vibrato":1,"chorus":1},
+                "chords":{"fuzz":1,"overdrive":1,"distortion":1,"vibrato":1,"chorus":1},"pad":{"fuzz":1,"overdrive":1,"distortion":1,"vibrato":1,"chorus":1},
+                "lead":{"fuzz":1,"overdrive":1,"distortion":1,"vibrato":1,"chorus":1}})");
             engine.setTrack(band);
             engine.setMaster(0.7f); // fader 0.7 = gain 0.49; not the fader's 1, where the peaks are 0.869 and 1.064 (see above)
             engine.prepare(rate);
@@ -769,6 +821,64 @@ int main(int argc, char** argv) {
                 CHECK(sounded);
             }
             CHECK(load < 0.25);
+        }
+        // The engine's wiring of the vibrato, absolute (review I-3): each of the four layers alone (the others muted), from beat 64 with no
+        // lead, reverb, echo and room 0, no limiter, fader and master 1: what stands behind the chain is gains (trim, fader, balance, master
+        // gain 0.6), the shelf at 0 dB (an identity up to double rounding) and sends with a wet gain of 0. So the render with only its vibrato
+        // at 1 must equal ModFx (prepared, set at once with modParams(1, 0, tempo)) fed with the same render with the vibrato at 0 (each
+        // channel through its own chain), from the first frame on, over 1.5 s. A scaled input gives a scaled output (ring, interpolation and gains are linear), so
+        // the only difference left is float rounding: about a dozen roundings of 6e-8 of the signal each (the chain's three gains and two
+        // sums, the interpolation, the engine's trim, balance, master gain and the shelf's cast), so 2e-6 of the render's peak is the
+        // tolerance (about 30 steps at the peak). Bass at 60, 120 and 160 bpm (4, 5 and 5.5 Hz); the others at 120. The tempo is also shown
+        // to count: the 60 bpm render with the vibrato on does not equal ModFx at the tempo 160 (a tempo that the engine took wrongly would
+        // not equal the right one). A layer's knob taken from another layer, a wrong tempo, or a ramp instead of an at-once start fail here.
+        {
+            const auto alone = [&](btg::Engine::Layer layer, double vibrato, double bpm) {
+                btg::Engine engine;
+                engine.setPackSource(source);
+                engine.setSound(std::string(R"({"master":{"reverb":0,"echo":0,"roomWet":0},")") + btg::detail::LAYER_NAMES[layer] + R"(":{"vibrato":)" + std::to_string(vibrato) + "}}");
+                engine.setTrack(band);
+                for (int l = 0; l < btg::Engine::layerCount; ++l) engine.setMuted(static_cast<btg::Engine::Layer>(l), l != layer);
+                engine.setLimiter(false);
+                engine.prepare(rate);
+                btg::Transport t;
+                t.play(64.0, bpm);
+                return render(engine, t, 1.5, 480);
+            };
+            const auto throughChain = [&](const Result& dry, double bpm) {
+                // each channel of the render through its own chain: the layer's balance (1 - pan, 1 + pan) stands behind the chain, so the
+                // two sides carry different gains of the same mono signal
+                Result r;
+                r.left.resize(dry.left.size());
+                r.right.resize(dry.left.size());
+                std::vector<float> unused(dry.left.size());
+                for (const bool side : { false, true }) {
+                    btg::detail::ModFx chain;
+                    chain.prepare(rate);
+                    chain.set(btg::detail::modParams(1, 0, bpm), true);
+                    const std::vector<float>& in = side ? dry.right : dry.left;
+                    chain.process(in.data(), (side ? r.right : r.left).data(), unused.data(), static_cast<int>(in.size()));
+                }
+                return r;
+            };
+            const auto worst = [](const Result& a, const Result& b) {
+                double m = 0.0;
+                for (size_t i = 0; i < a.left.size(); ++i) {
+                    m = std::max(m, static_cast<double>(std::fabs(a.left[i] - b.left[i])));
+                    m = std::max(m, static_cast<double>(std::fabs(a.right[i] - b.right[i])));
+                }
+                return m;
+            };
+            for (const auto layer : { btg::Engine::bass, btg::Engine::chords, btg::Engine::pad, btg::Engine::lead })
+                for (const double bpm : { 60.0, 120.0, 160.0 }) {
+                    if (layer != btg::Engine::bass && bpm != 120.0) continue;
+                    const Result off = alone(layer, 0.0, bpm), on = alone(layer, 1.0, bpm);
+                    const double error = worst(on, throughChain(off, bpm)), effect = worst(on, off), tolerance = 2e-6 * off.peak;
+                    std::printf("wiring %s at %.0f bpm: peak %.4f, effect of the vibrato %.4f, error against ModFx %.2e (tolerance %.2e)\n",
+                                btg::detail::LAYER_NAMES[layer], bpm, off.peak, effect, error, tolerance);
+                    CHECK(off.peak > 1e-3 && effect > 0.01 * off.peak && error <= tolerance);
+                    if (layer == btg::Engine::bass && bpm == 60.0) CHECK(worst(on, throughChain(off, 160.0)) > 0.01 * off.peak);
+                }
         }
         // The echo's time in the engine, with the pad alone (sustained sines, echo 1, reverb and room 0, no limiter).
         std::string pad = band;

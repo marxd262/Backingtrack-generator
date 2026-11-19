@@ -54,6 +54,7 @@ add_library(btg_core STATIC
     src/convolver.cpp
     src/compressor.cpp
     src/guitar_fx.cpp
+    src/mod_fx.cpp
     src/analysis.cpp
     src/file_player.cpp
     src/decode.cpp

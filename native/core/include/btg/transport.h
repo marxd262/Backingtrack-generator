@@ -49,6 +49,7 @@ public:
         int frames = 0;             // how many frames this block covers (fewer than asked at a loop end)
         unsigned starts = 0;        // calls of play() so far: a change is a new start, also without a stopped block between
         bool lead = false;          // a block of a play's lead: playing, standing at the start place, nothing of the song is scheduled yet
+        double bpm = 0.0;           // the tempo the clock will move with, given in a lead's blocks (there beatsPerFrame is 0); 0 where it is not given
     };
 
     // Audio thread. Covers at most `frames`; call again for the rest when a loop end cuts the block.
@@ -71,7 +72,7 @@ public:
             leadLeft_ -= count;
             beats_ = beats;
             standing_ = true;
-            return { true, beats, 0.0, count, starts, true };
+            return { true, beats, 0.0, count, starts, true, bpm_.load() };
         }
         standing_ = false;
         const double step = bpm_ / 60.0 / sampleRate;

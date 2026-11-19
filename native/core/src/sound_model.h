@@ -30,6 +30,9 @@ struct FxChainParams { bool active; FxStage od, dist, fuzz; double cab; bool ope
 // LAYER_FX of fx-params.js: what the distortion chain and fxChainParams read of a layer (frequencies in Hz, gains in dB).
 struct LayerFx { double ref; struct { double od, dist, fuzz; } trim; double odSlope, distHp, toneHz, cabHp, cabLp, cabPeakHz, cabPeakDb; };
 struct ModParams { bool active; struct { bool on; double hz, depth; } vibrato; struct { double wet, norm; } chorus; };
+// MOD of mod-fx.js 7 to 14 as one table (modParams reads vibCents and chorusLevel from it, the modulation chain the rest).
+struct ModTable { double vibCents, vibBase, chorusBase, chorusDepth, chorusHz[2], chorusPan, chorusLevel; };
+extern const ModTable MOD;
 
 // Calls f(group, field, value) for the 47 fields of t in DEFAULT_TIMBRE's order (completeTimbre and the logic test use it).
 void forEachField(Timbre& t, const std::function<void(const char* group, const char* field, double& value)>& f);
@@ -46,7 +49,8 @@ PadParams padParams(const PadTimbre&);
 const LayerFx& layerFx(Engine::Layer layer);
 // bass, chords, pad, lead; a missing or invalid (NaN) knob counts 0. Throws std::invalid_argument for the other layers, as LAYER_FX[layer] does.
 FxChainParams fxChainParams(double fuzz, double overdrive, double distortion, Engine::Layer layer);
-ModParams modParams(double vibrato, double chorus, double bpm); // NaN bpm counts 100
+// NaN bpm counts 100. Pure arithmetic: it also runs on the audio thread (the engine hands it the block's tempo), so it never allocates or throws.
+ModParams modParams(double vibrato, double chorus, double bpm);
 double brightnessHz(double value01);                            // the low-pass of the brightness knobs; NaN counts 0.5
 
 } // namespace btg::detail

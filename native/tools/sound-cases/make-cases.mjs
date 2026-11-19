@@ -125,18 +125,19 @@ write('band.json', STYLE_PRESETS.map((style) => ({
 })));
 
 // --- Phase 3 (Tasks 16, 14, 15, 17): the sound model, the sends and the sum ---
-// The knobs of the layer effects (Phase 4) are 0 in every Phase 3 case, so that the cases measure only what the core plays.
+// The knobs of the layer effects (Phase 4) are 0 in the cases of the sound model and the sends, so that they measure only what they name;
+// the cases of a style's own sound (claim 'style') carry that style's effects.
 const PHASE4 = ['fuzz', 'overdrive', 'distortion', 'vibrato', 'chorus'];
 const FX = ['fuzz', 'overdrive', 'distortion'], FX_LAYERS = ['bass', 'chords', 'pad', 'lead'];
 const claimOf = (layer, k) => `${FX.includes(k) ? 'fx' : 'mod'}:${layer}.${k}`;
 const effectsOn = (sound) => FX_LAYERS.some((g) => PHASE4.some((k) => sound[g][k] !== 0));
-const unplugged = (timbre) => Object.fromEntries(Object.entries(timbre).map(([group, fields]) =>
-  [group, Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, PHASE4.includes(k) ? 0 : v]))]));
-const styleSound = (t) => unplugged(resolveTrackTimbre(t)); // what the page sends for this track
+const styleSound = (t) => resolveTrackTimbre(t); // what the page sends for this track
 const set = (sound, fields) => { const s = structuredClone(sound); for (const [path, v] of Object.entries(fields)) { const [g, f] = path.split('.'); s[g][f] = v; } return s; };
 // What a case claims to measure: make-cases exits 1 when a claim does not hold for the case as written. Sample-voice knobs act only in
 // part of their range (the lowpass below 0.5, see brightnessHz; the time scale away from 0.5); their layer must play notes with a sample voice.
 const CLAIMS = {};
+// style: the case plays its style's own layer effects (resolveTrackTimbre); its limits are the effects' where one is on
+CLAIMS.style = (c) => (FX_LAYERS.every((g) => PHASE4.every((k) => c.sound[g][k] === resolveTrackTimbre(c.track)[g][k])) ? '' : "not the style's own layer effects");
 const knob = (path, layer, acts) => {
   CLAIMS[path] = (c, events) => {
     const [g, f] = path.split('.'), v = c.sound[g][f];
@@ -157,7 +158,8 @@ CLAIMS['kit.places'] = (c, events) => {
 };
 function claimed(c, claims) {
   const events = buildEvents(c.track);
-  for (const g of FX_LAYERS) for (const k of PHASE4) if (c.sound[g][k] !== 0 && !claims.includes(claimOf(g, k))) problems.push(`${c.name}: ${g}.${k} is on but not claimed`);
+  for (const g of FX_LAYERS) for (const k of PHASE4) if (c.sound[g][k] !== 0 && !claims.includes(claimOf(g, k)) && !claims.includes('style')) problems.push(`${c.name}: ${g}.${k} is on but not claimed`);
+  if (claims.includes('style') && effectsOn(c.sound)) c.kind = 'synth';
   if ((c.kind === 'synth') !== effectsOn(c.sound)) problems.push(`${c.name}: kind must be 'synth' exactly where a layer effect is on`);
   for (const what of claims) { const why = CLAIMS[what](c, events); if (why) problems.push(`${c.name}: ${why}`); }
   return c;
@@ -171,8 +173,8 @@ const soloOf = (name, layer, variant, style, fields, claims, extra = {}, tuning 
 // and the funk band at the ends of the knobs
 const timbreCases = [
   // no knob of psych's own timbre is visible within the limits in the full band; the solo cases below prove the knobs, one each
-  claimed({ name: 'timbre-psych', track: bands.psych, sound: styleSound(bands.psych), dry: true }, []),
-  claimed({ name: 'timbre-dreamy', track: bands.dreamy, sound: styleSound(bands.dreamy), dry: true }, ['master.brightness', 'bass.cutoff', 'chords.brightness', 'chords.length', 'pad.attack']),
+  claimed({ name: 'timbre-psych', track: bands.psych, sound: styleSound(bands.psych), dry: true }, ['style']),
+  claimed({ name: 'timbre-dreamy', track: bands.dreamy, sound: styleSound(bands.dreamy), dry: true }, ['style', 'master.brightness', 'bass.cutoff', 'chords.brightness', 'chords.length', 'pad.attack']),
   claimed({ name: 'timbre-bright', track: funk, sound: set(neutralSound, { 'master.brightness': 1, 'master.width': 1 }), dry: true }, ['master.brightness', 'master.width']),
   claimed({ name: 'timbre-dark', track: funk, sound: set(neutralSound, { 'master.brightness': 0, 'master.width': 0 }), dry: true }, ['master.brightness', 'master.width']),
   claimed({ name: 'timbre-short', track: funk, sound: set(neutralSound, { 'bass.cutoff': 0, 'chords.brightness': 0, 'chords.length': 0, 'pad.cutoff': 0, 'pad.attack': 0 }), dry: true }, SAMPLE_KNOBS),
@@ -222,7 +224,7 @@ const sendCases = [
   // room-melodic: the same without drums and percussion, the only case for the sends of bass, chords, pad and lead
   claimed({ name: 'room-band', track: funk, sound: set(neutralSound, { 'master.reverb': 0, 'master.echo': 0, 'master.roomSize': 0, 'master.roomWet': 1 }), tuning: { 'mix/room': { wet: 4, tone: 3000 } }, ...WET }, ['room', 'noEcho']),
   claimed({ name: 'room-melodic', track: funk, sound: set(neutralSound, { 'master.reverb': 0, 'master.echo': 0, 'master.roomSize': 0, 'master.roomWet': 1 }), tuning: { 'mix/room': { wet: 4, tone: 3000, drums: 0, percussion: 0 } }, ...WET }, ['room', 'melodicRoom', 'noEcho']),
-  claimed({ name: 'sends-dreamy', track: bands.dreamy, sound: set(styleSound(bands.dreamy), { 'master.reverb': 1, 'master.echo': 0, 'master.roomWet': 0.75 }), ...WET }, ['reverb', 'roomSend', 'room', 'noEcho']),
+  claimed({ name: 'sends-dreamy', track: bands.dreamy, sound: set(styleSound(bands.dreamy), { 'master.reverb': 1, 'master.echo': 0, 'master.roomWet': 0.75 }), ...WET }, ['style', 'reverb', 'roomSend', 'room', 'noEcho']),
 ];
 write('sends.json', sendCases);
 console.log(`sends.json: ${sendCases.length} cases`);
@@ -243,8 +245,8 @@ write('echo.json', echoCases);
 // Their claims only say that a send is on; the solo cases (sends.json, echo.json) prove the sends.
 const wetCases = [
   claimed({ name: 'wet-neutral', track: funk, sound: neutralSound, ...WET }, ['reverb', 'room', 'echo']),
-  claimed({ name: 'wet-psych', track: bands.psych, sound: styleSound(bands.psych), ...WET }, ['reverb', 'room', 'echo']),
-  claimed({ name: 'wet-dreamy', track: bands.dreamy, sound: styleSound(bands.dreamy), ...WET }, ['reverb', 'roomSend', 'room', 'echo']),
+  claimed({ name: 'wet-psych', track: bands.psych, sound: styleSound(bands.psych), ...WET }, ['style', 'reverb', 'room', 'echo']),
+  claimed({ name: 'wet-dreamy', track: bands.dreamy, sound: styleSound(bands.dreamy), ...WET }, ['style', 'reverb', 'roomSend', 'room', 'echo']),
 ];
 write('wet.json', wetCases);
 console.log(`echo.json: ${echoCases.length} cases, wet.json: ${wetCases.length} cases`);
@@ -253,18 +255,23 @@ console.log(`echo.json: ${echoCases.length} cases, wet.json: ${wetCases.length} 
 // ringing 2.5 s past the song. The A/B set for listening (native/tools/ab-mix.cmd). Then the funk band at the tempo extremes (the plan:
 // all six layers, everything on, at 20 and 400 bpm, below full scale), with the real packs: a form of 4 bars at 20 bpm (48 s), the rolled
 // form of 24 bars at 400 bpm.
-const mixCases = STYLE_PRESETS.map((s) => claimed({ name: `mix-${s.id}`, track: bands[s.id], sound: styleSound(bands[s.id]), tail: 2.5 }, ['reverb', 'room', 'echo']));
+const mixCases = STYLE_PRESETS.map((s) => claimed({ name: `mix-${s.id}`, track: bands[s.id], sound: styleSound(bands[s.id]), tail: 2.5 }, ['style', 'reverb', 'room', 'echo']));
 const SIX = { drums: true, bass: true, chords: true, pad: true, lead: true, percussion: true };
 const funkAt = (bpm, form) => track('funk', { layers: SIX, extra: { bpm, form } });
 const slow = funkAt(20, { sections: [{ type: 'verse', bars: 2 }, { type: 'chorus', bars: 2 }] }), fast = funkAt(400, bands.funk.form);
-for (const [name, t] of [['mix-funk-20bpm', slow], ['mix-funk-400bpm', fast]]) mixCases.push(claimed({ name, track: t, sound: styleSound(t), tail: 2.5, peakBelow: 0 }, ['reverb', 'room', 'echo'])); // peakBelow 0: the plan's "below full scale", asserted on the native peak
+for (const [name, t] of [['mix-funk-20bpm', slow], ['mix-funk-400bpm', fast]]) mixCases.push(claimed({ name, track: t, sound: styleSound(t), tail: 2.5, peakBelow: 0 }, ['style', 'reverb', 'room', 'echo'])); // peakBelow 0: the plan's "below full scale", asserted on the native peak
 // The fine value mix/bus on is 0 by default (tunables.js): the nine cases above run the old limiter alone, shelf -> limiter at -10 dB.
 // The glue compressor (on 1: glue, its gain, limiter at -2 dBFS) is the user's to switch on; three styles measure it, the loudest ones and one
 // with a dense envelope.
 CLAIMS.glue = (c) => (tunedValue('mix/bus', 'on', c.tuning ?? {}) >= 0.5 ? '' : 'the glue is off');
-for (const id of ['funk', 'rock', 'poppunk']) mixCases.push(claimed({ name: `mix-${id}-glue`, track: bands[id], sound: styleSound(bands[id]), tuning: { 'mix/bus': { on: 1 } }, tail: 2.5 }, ['reverb', 'room', 'echo', 'glue']));
+for (const id of ['funk', 'rock', 'poppunk']) mixCases.push(claimed({ name: `mix-${id}-glue`, track: bands[id], sound: styleSound(bands[id]), tuning: { 'mix/bus': { on: 1 } }, tail: 2.5 }, ['style', 'reverb', 'room', 'echo', 'glue']));
+// The same tempo extremes with a style whose own sound has layer effects on (Task 19, the plan's "everything on" with the effects the styles
+// really carry; psych: fuzz on the bass, chorus on the chords).
+const psychAt = (bpm, form) => track('psych', { layers: SIX, extra: { bpm, form } });
+for (const [name, t] of [['mix-psych-20bpm', psychAt(20, { sections: [{ type: 'verse', bars: 2 }, { type: 'chorus', bars: 2 }] })], ['mix-psych-400bpm', psychAt(400, bands.psych.form)]])
+  mixCases.push(claimed({ name, track: t, sound: styleSound(t), tail: 2.5, peakBelow: 0 }, ['style', 'reverb', 'room', 'echo']));
 write('mix.json', mixCases);
-console.log(`mix.json: ${mixCases.length} cases (nine styles, funk at 20 and 400 bpm, three styles with the glue)`);
+console.log(`mix.json: ${mixCases.length} cases (nine styles, funk at 20 and 400 bpm, three styles with the glue, psych at 20 and 400 bpm)`);
 
 // --- Phase 4 (Tasks 18, 19): the layer effects. One layer alone with its sample voice, one knob (or the named ones), dry: the chain is all
 // that differs from samples.json. The limits of effects (kind 'synth', Global Constraints). fx:<layer>.<knob>: the knob above 0 on a layer
@@ -287,5 +294,22 @@ fxCases.push(effectSolo('fx-chords-overdrive-blend', 'chords', 'guitar', 'rock',
 fxCases.push(effectSolo('fx-bass-all', 'bass', 'finger', 'funk', { 'bass.fuzz': 0.5, 'bass.overdrive': 0.5, 'bass.distortion': 0.5 }, FX.map((k) => claimOf('bass', k))));
 write('fx.json', fxCases);
 console.log(`fx.json: ${fxCases.length} cases`);
+
+// Task 19: vibrato and chorus, one layer alone, one knob, dry. The plan's three measures hardly see them (phase-4-design.md 6.2): a
+// vibrato of ±40 cents moves no octave band and no 50 ms window, the chorus keeps the power; these cases guard level and bands, their
+// printed stereo figure shows a chorus (and their diff, where the dry voice's own disagreement is low, a missing effect), fx-compare.mjs
+// proves the chain.
+const modCases = [];
+for (const [layer, variant, style] of [['bass', 'finger', 'funk'], ['chords', 'guitar', 'rock']])
+  for (const k of ['vibrato', 'chorus']) for (const v of [0.3, 1]) modCases.push(effectSolo(`mod-${layer}-${k}-${v}`, layer, variant, style, { [`${layer}.${k}`]: v }, [claimOf(layer, k)]));
+for (const [layer, variant, style] of [['pad', 'strings', 'dreamy'], ['lead', 'guitar', 'rock']])
+  for (const k of ['vibrato', 'chorus']) modCases.push(effectSolo(`mod-${layer}-${k}-1`, layer, variant, style, { [`${layer}.${k}`]: 1 }, [claimOf(layer, k)]));
+// the vibrato's rate follows the tempo (modParams: 4 Hz at 60 bpm, 5.5 Hz from 120 bpm on)
+for (const bpm of [60, 160]) modCases.push(claimed({ name: `mod-chords-both-${bpm}bpm`, dry: true, kind: 'synth', sound: set(neutralSound, { 'chords.vibrato': 0.5, 'chords.chorus': 0.5 }),
+  track: track('rock', { layers: { chords: true }, voices: { chords: { id: 'sample', variant: 'guitar' } }, extra: { bpm } }) }, [claimOf('chords', 'vibrato'), claimOf('chords', 'chorus')]));
+// the plan's style: psych (fuzz on the bass, chorus on the sample twelve-string from its tags), dry, its own timbre as the page sends it
+modCases.push(claimed({ name: 'mod-psych', track: bands.psych, sound: resolveTrackTimbre(bands.psych), dry: true, kind: 'synth' }, [claimOf('bass', 'fuzz'), claimOf('chords', 'chorus')]));
+write('mod.json', modCases);
+console.log(`mod.json: ${modCases.length} cases`);
 for (const p of problems) console.error(`ERROR ${p}`);
 process.exit(problems.length ? 1 : 0);

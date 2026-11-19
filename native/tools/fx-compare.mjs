@@ -3,7 +3,8 @@
 // --none: btg_fx copies its input (no effect): the red run, how far each set's effect lies from its limit.
 // A mono test signal made here goes through the browser (OfflineAudioContext(2, frames, rate) on a page served from src/: buffer source ->
 // node or chain -> destination; a chain is built at frame 0 with { immediate: true } as createInstruments does) and through btg_fx.
-// The limits are estimates (phase-4-design.md 6.1): a difference above one is traced to its cause, never met by widening.
+// The limits of the guitar sets are measured (below); a difference above one is traced to its cause, never met by widening. How those of the
+// mod and series sets were set is under "mod, series".
 //
 // The sets:
 //   curves, shaper: the four curves of the live nodes against btg_fx curves; one WaveShaperNode against Shaper (identity curve, each curve).
@@ -34,6 +35,50 @@
 //     then, the core is given the zeros); a chain built by set(..., false) while sound runs (the lazy fade); knobs changed in the middle of
 //     a ramp; all knobs back to 0 (from then on the output is the dry signal, bit for bit, on both sides: "dry again"). The browser changes
 //     the knobs between render quanta through ctx.suspend(t), set, resume; btg_fx does the same at that frame (--change <frame> f o d).
+//   mod, series (Task 19): createModFx against ModFx, alone and behind a distortion chain (createGuitarFx into createModFx, set in that order);
+//     both channels are compared. The chain is bit-identical to Chromium's; the browser's oscillator is not the core's sine. Evidence, the
+//     "(ideal LFO)" twins: the page replaces every OscillatorNode of the chain by a buffer that holds what the core computes (float sine of the
+//     phase that Chromium's float increment, float(f) * float(4096 / rate), accumulates in double), started when the node is. Every set with
+//     constant LFO frequencies is then bit-identical to the core: max difference 0 (the series with 2x shapers: 1e-38, denormals) at 44.1,
+//     48 and 96 kHz, for vibrato, chorus and both, built at frame 0, built while playing (lazy), in the lead (there the browser plays the
+//     lead's zeros as samples: a source that is merely not started yet has another effect, below), in a ramp, and back to 0.
+//     What the sets with the browser's own oscillators show is the browser's oscillator. A bare OscillatorNode (sine) against the core's LFO,
+//     measured over 2 to 5 s (Chromium 158, fix round 1): below an increment of 0.3 table entries per frame (48 kHz: 3.4 Hz 3.0e-7, 3.5 Hz
+//     3.0e-7) the difference is 3.0e-7 (the table's and its linear interpolation's own size, (2 pi / 4096)^2 / 8 = 2.9e-7); from 0.3 on
+//     (3.52 Hz: 3.9e-6, 3.6 Hz: 2.2e-6) it is 2e-6 to 6e-6, and the jump lies where oscillator_handler.cc 504 goes from the scalar loop to
+//     ProcessKRateVector. The worst over 4 to 5.5 Hz in steps of 0.1 Hz (the vibrato): 5.98e-6 (44.1 kHz, at 4.3 Hz), 5.96e-6 (48 kHz, at
+//     5.0 Hz), 5.62e-6 (96 kHz, at 4.7 Hz; there the increment in 4096 entries is below 0.3, so the browser's table must be larger at that
+//     rate: inferred, not measured); the chorus's 0.6 and 0.8 Hz: 3.0e-7 at every rate. The error is the same every second and does not depend
+//     on the frame within a quantum. The vector kernel's x86 body is not in the workspace: that it carries the read index in float is a
+//     hypothesis, not measured. The wave table is worth the 3e-7 only; the 6e-6 are not the table's.
+//     A delay time moves by depth * that (vibrato 36 to 45 frames * 6e-6 = 2.7e-4 frames; chorus 144 frames * 3e-7 = 4e-5). The delay reads in
+//     float (delay_sse2.cc), and a move this small can flip the rounding of the read position by one step now and then; the step is 2^-12 =
+//     2.4e-4 frames for the vibrato's position at 44.1 and 48 kHz (about 2336, between 2048 and 4096), 1.2e-4 for the chorus's (about 1664),
+//     4.9e-4 at 96 kHz (about 4544). That is consistent with the measured sample differences, not measured on its own: a sample then differs
+//     by up to (move + one step) times the signal's change per frame (0.52 at the sweep's top, 8 kHz at -6 dBFS: up to about 2.6e-4 for the
+//     vibrato), and the largest differences lie on the sweep.
+//     Measured differences of the sets with the browser's oscillators (48 kHz unless said):
+//         vibrato (60, 100, 160 bpm): 1.8e-4, 1.9e-4, 1.9e-4, windows 0.0003 dB      chorus 0.3 and 1: 3.5e-5, 8.8e-5, windows 0.0001 dB
+//         both 0.5: 1.8e-4 (44.1 kHz 2.4e-4, 96 kHz 2.1e-4); in time: from frame 0 1.2e-4, lead 2.0e-4, lazy 1.3e-4, ramps and tempo 1.1e-4,
+//         vibrato then chorus 5.5e-5, then all 0 3.1e-6; windows 0.0003 dB at most
+//     How the limits were set (not by the shifted-input procedure of Task 18): each is 1.5 times the largest measured difference of the sets
+//     of its kind, rounded up: vibrato 3e-4 and 0.0005 dB, chorus 1.4e-4 and 0.0002 dB, both 3.6e-4 and 0.0005 dB. They are fitted to
+//     those measurements. They stand for the browser's side of ruling H in substance because of the "(ideal LFO)" twins: the core equals the
+//     browser's chain with an ideal LFO bit for bit, so a difference of a plain set is the browser's chain with its own oscillators against
+//     its chain with an ideal LFO. A kind's limit is a ceiling for sets far below it: chorus 0.3 (3.5e-5 against 1.4e-4), "vibrato then
+//     chorus" (5.5e-5) and "then all 0" (3.1e-6) against 3.6e-4. The two series sets are each 1.5 times their own measurement, chords all three
+//     0.5 with both 0.5 (9.1e-5, 0.0013 dB, also the 4x stages' residual of the distortion chain) 1.4e-4 and 0.002 dB, bass overdrive 0.3
+//     with vibrato 1 (3.6e-4, 0.0001 dB) 5.5e-4 and 0.0005 dB; that is not ruling H (no spread over shifted inputs was run, and the reason
+//     for the bass's larger value, a larger change per frame behind the clipping overdrive, was not measured). The proof there is the
+//     "(2x exact) (ideal LFO)" twins at 1e-6. What the twins cannot prove: that the page's LFO model equals Chromium's oscillator (the plain
+//     sets bound it to the limits above), the vibrato's frequency ramp of a tempo change (the substitute ignores setTargetAtTime: that set has
+//     no twin and is held only by its plain limit), and tempos and rates other than the sets' (60, 100, 160 bpm; 44.1, 48, 96 kHz).
+//     The lead: in the app the song starts 0.15 s after the build and nothing feeds the chain until then. A browser source that has not
+//     started propagates silence, and a delay node whose input is silent for longer than its tail (0.05 s) does not process: its write index
+//     lags the frame count, the position's float rounding differs, and with the ideal LFO the set differs by 1.0e-4 (limit 1.5e-4 on that
+//     twin); with real zeros played (the plain twin of "(ideal LFO)") it is 0, and with a constant source of 1e-10 feeding the chain from
+//     frame 0 (its delays then process) 3e-8, the offset's own rounding. The core plays on, as the real app's voices do (zeros are not
+//     silence to its engine).
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -82,6 +127,36 @@ const TIME = [
   guitar('bass fuzz 1, lazy, then 0.4, then all 0', 'bass', off, { changes: [{ frame: MID, knob: knobs(1) }, { frame: MID + 12800, knob: knobs(0.4) }, { frame: MID + 25600, knob: off }], dryFrom: MID + 25600 + 12000 }),
 ];
 const exact = (set) => ({ ...set, name: `${set.name} (2x exact)`, two: 'both', limit: 1e-6, windows: 0.001 });
+// Task 19: the modulation chain (createModFx against ModFx), alone ("mod") and behind a distortion chain ("series": createGuitarFx into
+// createModFx, set in that order as synth.js applyFx does). A set's knob is { vibrato, chorus, bpm } (series: with fuzz, overdrive,
+// distortion); both channels of the output are compared. The limits are set in the head of this file.
+const vc = (vibrato = 0, chorus = 0, bpm = 100) => ({ vibrato, chorus, bpm });
+// The browser's oscillator is not a sine: the limits of a set through its LFOs are the browser's own spread (see the head), per kind of set
+const MOD_LIMITS = { vibrato: [3e-4, 5e-4], chorus: [1.4e-4, 2e-4], both: [3.6e-4, 5e-4] };
+const mod = (name, knob, extra = {}) => {
+  const knobs = [knob, ...(extra.changes ?? []).map((c) => c.knob)], v = knobs.some((k) => k.vibrato > 0), c = knobs.some((k) => k.chorus > 0);
+  const [limit, windows] = MOD_LIMITS[v && c ? 'both' : v ? 'vibrato' : 'chorus'];
+  return { name: `mod ${name}`, rate: 48000, kind: 'mod', knob, limit, windows, signal: 'standard', ...extra };
+};
+// the same set with the browser's oscillators replaced by what the core computes ("ideal LFO"), the source from frame 0 (real zeros in the lead)
+const ideal = (set) => ({ ...set, name: `${set.name} (ideal LFO)`, ideal: true, start: 0, limit: 1e-6, windows: 0.001 });
+const MODS = [
+  ...[60, 100, 160].map((bpm) => mod(`vibrato 1 at ${bpm} bpm`, vc(1, 0, bpm))),
+  mod('chorus 0.3', vc(0, 0.3)), mod('chorus 1', vc(0, 1)), mod('both 0.5', vc(0.5, 0.5)),
+  mod('both 0.5 44.1 kHz', vc(0.5, 0.5), { rate: 44100 }), mod('both 0.5 96 kHz', vc(0.5, 0.5), { rate: 96000 }),
+];
+const MOD_TIME = [
+  mod('both 0.5, signal from frame 0', vc(0.5, 0.5), { signal: 'now' }),
+  mod('both 0.5, chord 0.15 s after the build', vc(0.5, 0.5), { signal: 'lead', start: 0.15 }),
+  mod('both 0.5, built while playing (lazy)', vc(), { changes: [{ frame: MID, knob: vc(0.5, 0.5) }] }),
+  mod('knobs and tempo changed in the middle of a ramp', vc(0.5, 0.5), { tempo: true, changes: [{ frame: MID, knob: vc(1, 0.2, 160) }, { frame: MID + 2560, knob: vc(0.3, 0.9, 60) }] }),
+  mod('vibrato 1, then chorus 0.5 only', vc(1, 0), { changes: [{ frame: MID, knob: vc(0, 0.5) }] }),
+  mod('both 0.5, then all 0', vc(0.5, 0.5), { changes: [{ frame: MID, knob: vc() }], dryFrom: MID + 12000 }),
+];
+// a distortion chain into a modulation chain: the limits of a set are 1.5 times its own measured spread (head of this file)
+const series = (name, layer, knob, limit, windows) => ({ name: `series ${name}`, rate: 48000, kind: 'series', layer, knob, limit, windows, signal: 'standard' });
+const SERIES = [series('chords all 0.5 and both 0.5', 'chords', { fuzz: 0.5, overdrive: 0.5, distortion: 0.5, ...vc(0.5, 0.5) }, 1.4e-4, 0.002),
+  series('bass overdrive 0.3 and vibrato 1', 'bass', { fuzz: 0, overdrive: 0.3, distortion: 0, ...vc(1, 0) }, 5.5e-4, 5e-4)];
 // kinds: curves (the four curves of the live nodes against btg_fx curves), shaper (a WaveShaperNode: curve, oversample, gain of the signal),
 // guitar (createGuitarFx)
 const shaper = (name, curve, oversample, gain, extra = {}) => ({ name: `shaper ${name}`, rate: 48000, kind: 'shaper', curve, oversample, gain, limit: 1e-5, windows: 0.01, signal: 'standard', ...extra });
@@ -91,6 +166,11 @@ const SETS = [
   shaper('soft 2 (x4)', 'soft', 2, 4), shaper('hard 4 (x4)', 'hard', 4, 4), shaper('fuzz 4 (x4)', 'fuzz', 4, 4), shaper('muff 2 (x4)', 'muff', 2, 4),
   shaper('hard 4 (x4) 44.1 kHz', 'hard', 4, 4, { rate: 44100 }), shaper('hard 4 (x4) 96 kHz', 'hard', 4, 4, { rate: 96000 }),
   ...BASE, ...TIME, ...BASE.map(exact), ...TIME.map(exact),
+  ...MODS, ...MOD_TIME, ...SERIES, ...MODS.map(ideal), ...MOD_TIME.filter((s) => !s.tempo).map(ideal), ...SERIES.map((s) => ideal(exact(s))),
+  { ...ideal(MOD_TIME[1]), name: `${MOD_TIME[1].name} (ideal LFO, source silent until then)`, start: 0.15, limit: 1.5e-4, windows: 0.0002 },
+  // the same, a constant source of 1e-10 into the chain from frame 0 keeps its delays processing: the difference is gone (it is the core's
+  // 0 plus the offset's 1e-10 times the gains: 1e-6 holds with a margin of 1000)
+  { ...ideal(MOD_TIME[1]), name: `${MOD_TIME[1].name} (ideal LFO, source silent until then, chain kept awake)`, start: 0.15, awake: true },
 ];
 
 function signal(rate, segments) { // mono: the segments one after the other; t counts from the segment's start
@@ -125,6 +205,7 @@ async function renderWeb(page, set, samples, liveCurves) {
     };
     const { createGuitarFx } = await import('/audio/guitar-fx.js');
     const { fxChainParams } = await import('/audio/fx-params.js');
+    const { createModFx, modParams } = await import('/audio/mod-fx.js');
     const made = []; // the shapers of a chain, in the order of their creation: od, dist, fuzz, muff
     const wrapped = (ctx, pinned) => {
       const make = ctx.createWaveShaper.bind(ctx), pin = Object.getOwnPropertyDescriptor(WaveShaperNode.prototype, 'oversample');
@@ -151,6 +232,33 @@ async function renderWeb(page, set, samples, liveCurves) {
     buffer.copyToChannel(x.subarray(start), 0);
     const source = ctx.createBufferSource();
     source.buffer = buffer;
+    if (set.ideal) {
+      // "(ideal LFO)": every OscillatorNode of the chain is replaced by a buffer that holds what the core's LFO computes (a float sine of the
+      // phase that Chromium's increment, float(f) * float(4096 / rate), accumulates in double), started at the context time of o.start():
+      // the chain around it is the browser's own, the wave table is not (constant frequencies only)
+      ctx.createOscillator = () => {
+        const out = ctx.createBufferSource();
+        let at = 0, hz = 440, filled = false;
+        return {
+          connect: (to) => out.connect(to), start() { at = ctx.currentTime; }, stop() {},
+          frequency: {
+            cancelScheduledValues() {}, setValueAtTime() {}, setTargetAtTime() {},
+            get value() { return hz; },
+            set value(v) {
+              hz = v;
+              if (filled) return;
+              filled = true;
+              const first = Math.round(at * r), lfo = new Float32Array(x.length - first), increment = Math.fround(Math.fround(v) * Math.fround(4096 / Math.fround(r)));
+              for (let i = 0, index = 0; i < lfo.length; i++) { lfo[i] = Math.sin((2 * Math.PI * index) / 4096); index += increment; index -= Math.floor(index / 4096) * 4096; }
+              const b = ctx.createBuffer(1, lfo.length, r);
+              b.copyToChannel(lfo, 0);
+              out.buffer = b;
+              out.start(at);
+            },
+          },
+        };
+      };
+    }
     if (set.kind === 'shaper') {
       const shaper = ctx.createWaveShaper();
       shaper.curve = set.curve === 'line' ? Float32Array.of(-1, 1) : toF32(curveBytes);
@@ -158,17 +266,25 @@ async function renderWeb(page, set, samples, liveCurves) {
       const g = ctx.createGain();
       g.gain.value = set.gain;
       source.connect(g).connect(shaper).connect(ctx.destination);
+    } else if (set.kind === 'mod') {
+      const fx = createModFx(ctx, ctx.destination);
+      fx.set(modParams(set.knob, set.knob.bpm), { immediate: true });
+      for (const c of set.changes ?? []) ctx.suspend(c.frame / r).then(() => { fx.set(modParams(c.knob, c.knob.bpm), { immediate: false }); ctx.resume(); });
+      source.connect(fx.input);
+      if (set.awake) { const keep = ctx.createConstantSource(); keep.offset.value = 1e-10; keep.connect(fx.input); keep.start(0); } // not silent: the delays keep processing
     } else {
-      const two = set.two;
+      const two = set.two, series = set.kind === 'series';
       wrapped(ctx, (i) => (i === 1 && (two === 'hard' || two === 'both')) || (i === 2 && (two === 'fuzz' || two === 'both')));
-      const fx = createGuitarFx(ctx, set.layer, ctx.destination);
-      fx.set(fxChainParams(set.knob, set.layer), { immediate: true });
-      for (const c of set.changes ?? []) ctx.suspend(c.frame / r).then(() => { fx.set(fxChainParams(c.knob, set.layer), { immediate: false }); ctx.resume(); });
+      const mod = series ? createModFx(ctx, ctx.destination) : null;
+      const fx = createGuitarFx(ctx, set.layer, mod ? mod.input : ctx.destination);
+      const apply = (knob, options) => { fx.set(fxChainParams(knob, set.layer), options); mod?.set(modParams(knob, knob.bpm), options); };
+      apply(set.knob, { immediate: true });
+      for (const c of set.changes ?? []) ctx.suspend(c.frame / r).then(() => { apply(c.knob, { immediate: false }); ctx.resume(); });
       source.connect(fx.input);
     }
     source.start(start / r);
     const rendered = await ctx.startRendering();
-    return toB64(rendered.getChannelData(0));
+    return { left: toB64(rendered.getChannelData(0)), right: toB64(rendered.getChannelData(1)) };
   }, [b64(samples), set, liveCurves]);
 }
 
@@ -206,40 +322,50 @@ try {
       continue;
     }
     const segments = SIGNALS[set.signal], { samples, starts } = signal(rate, segments);
-    const web = f32(Buffer.from(await renderWeb(page, set, samples, kind === 'shaper' ? live?.[set.curve] ?? null : null), 'base64'));
+    const rendered = await renderWeb(page, set, samples, kind === 'shaper' ? live?.[set.curve] ?? null : null);
+    // one or two channels are compared: the modulation chains write left and right, the others the same on both
+    const stereo = kind === 'mod' || kind === 'series';
+    const webs = (stereo ? [rendered.left, rendered.right] : [rendered.left]).map((c) => f32(Buffer.from(c, 'base64')));
     const input = join(temp, 'in.f32'), output = join(temp, 'out.f32');
     // the core gets the scaled signal itself (the page scales in a gain node: a float multiplication, the same one)
     const given = kind === 'shaper' ? samples.map((v) => Math.fround(v * set.gain)) : samples;
     writeFileSync(input, Buffer.from(given.buffer, given.byteOffset, given.byteLength));
     const knobArgs = (k) => [k.fuzz, k.overdrive, k.distortion].map(String);
+    const modArgs = (k) => [k.vibrato, k.chorus, k.bpm].map(String);
+    const both = (k) => (kind === 'series' ? [...knobArgs(k), ...modArgs(k)] : modArgs(k));
+    const changes = (args) => (set.changes ?? []).flatMap((c) => ['--change', String(c.frame), ...args(c.knob)]);
     const mode = NONE ? ['none'] : kind === 'shaper' ? ['shaper', set.curve, String(set.oversample)]
-      : ['guitar', set.layer, ...knobArgs(set.knob), ...(set.two ? ['--two', set.two] : []), ...(set.changes ?? []).flatMap((c) => ['--change', String(c.frame), ...knobArgs(c.knob)])];
+      : stereo ? [kind, ...(kind === 'series' ? [set.layer] : []), ...both(set.knob), ...(set.two ? ['--two', set.two] : []), ...changes(both)]
+      : ['guitar', set.layer, ...knobArgs(set.knob), ...(set.two ? ['--two', set.two] : []), ...changes(knobArgs)];
     execFileSync(exe, [input, output, String(rate), ...mode], { encoding: 'utf8', stdio: 'pipe' });
-    const raw = f32(readFileSync(output)), core = new Float32Array(raw.length / 2);
-    for (let i = 0; i < core.length; i++) core[i] = raw[2 * i];
-    let largest = 0, at = 0;
-    if (core.length !== web.length) largest = Infinity;
-    else for (let i = 0; i < web.length; i++) { const d = Math.abs(web[i] - core[i]); if (!(d <= largest)) { largest = d; at = i; } } // a NaN is the largest
-    let windows = 0; // the level of 10 ms windows above -80 dBFS
+    const raw = f32(readFileSync(output));
+    const cores = webs.map((_, c) => Float32Array.from({ length: raw.length / 2 }, (_, i) => raw[2 * i + c]));
+    let largest = 0, at = 0, side = 0, windows = 0; // the level of 10 ms windows above -80 dBFS
     const size = Math.round(0.01 * rate);
-    for (let from = 0; from + size <= web.length; from += size) {
-      let a = 0, b = 0;
-      for (let i = from; i < from + size; i++) { a += web[i] * web[i]; b += core[i] * core[i]; }
-      const la = 10 * Math.log10(a / size), lb = 10 * Math.log10(b / size);
-      if (la > -80) windows = Math.max(windows, Math.abs(la - lb));
-    }
+    webs.forEach((web, c) => {
+      const core = cores[c];
+      if (core.length !== web.length) { largest = Infinity; return; }
+      for (let i = 0; i < web.length; i++) { const d = Math.abs(web[i] - core[i]); if (!(d <= largest)) { largest = d; at = i; side = c; } } // a NaN is the largest
+      for (let from = 0; from + size <= web.length; from += size) {
+        let a = 0, b = 0;
+        for (let i = from; i < from + size; i++) { a += web[i] * web[i]; b += core[i] * core[i]; }
+        const la = 10 * Math.log10(a / size), lb = 10 * Math.log10(b / size);
+        if (la > -80) windows = Math.max(windows, Math.abs(la - lb));
+      }
+    });
+    const web = webs[side], core = cores[side];
     // after all knobs are back to 0 and the ramp is over, the output is the dry signal: the largest difference to the input, web and core
     let dry = '', dryOk = true;
     if (set.dryFrom !== undefined) {
-      const away = (out) => { let m = 0; for (let i = set.dryFrom; i < given.length; i++) m = Math.max(m, Math.abs(out[i] - given[i])); return m; };
-      const [w, c] = [away(web), away(core)];
+      const away = (outs) => { let m = 0; for (const out of outs) for (let i = set.dryFrom; i < given.length; i++) m = Math.max(m, Math.abs(out[i] - given[i])); return m; };
+      const [w, c] = [away(webs), away(cores)];
       dryOk = !NONE ? w === 0 && c === 0 : true;
       dry = `  dry again from ${(set.dryFrom / rate).toFixed(3)} s: web ${w.toExponential(1)} core ${c.toExponential(1)}`;
     }
     const segment = starts.findLastIndex((s) => s <= at), [, what, db] = segments[segment];
     const pass = largest <= limit && windows <= set.windows && dryOk;
     failed ||= !pass;
-    console.log(`${name}  max difference ${largest.toExponential(1)}  windows ${windows.toFixed(4)} dB  at ${(at / rate).toFixed(3)} s (${what}${db === undefined ? '' : ` ${db} dBFS`}, web ${web[at].toExponential(3)} core ${core[at].toExponential(3)})${dry}  ${pass ? 'PASS' : 'FAIL'}`);
+    console.log(`${name}  max difference ${largest.toExponential(1)}  windows ${windows.toFixed(4)} dB  at ${(at / rate).toFixed(3)} s${stereo ? ` ${side ? 'right' : 'left'}` : ''} (${what}${db === undefined ? '' : ` ${db} dBFS`}, web ${web[at].toExponential(3)} core ${core[at].toExponential(3)})${dry}  ${pass ? 'PASS' : 'FAIL'}`);
   }
 } finally {
   await browser.close();

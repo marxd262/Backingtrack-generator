@@ -170,11 +170,12 @@ try {
   result.loadWhilePlaying = +afterBand.load.toFixed(3);
   if (result.dropoutsWhilePlaying > 0) problems.push(`dropouts while playing: ${result.dropoutsWhilePlaying}`);
   if (afterBand.load > 0.25) problems.push(`engine load ${(100 * afterBand.load).toFixed(1)} % (limit 25 %)`);
-  // The layer effects (Task 18): every distortion knob of bass, chords, pad and lead at 1, so every chain is built and computes each frame;
-  // 4 s of play: the load stays under the plan's 25 %, no dropout, the bass keeps a level. Then the page's own timbre again.
+  // Every layer effect (Tasks 18 and 19): fuzz, overdrive, distortion, vibrato and chorus of bass, chords, pad and lead at 1, so every chain
+  // is built and computes each frame; 4 s of play: the load stays under the plan's 25 %, no dropout, the bass keeps a level. Then the page's
+  // own timbre again.
   result.effects = await page.evaluate(async () => {
     const before = window.sent.findLast((s) => s.type === 'timbre').json, timbre = JSON.parse(before);
-    for (const layer of ['bass', 'chords', 'pad', 'lead']) Object.assign(timbre[layer], { fuzz: 1, overdrive: 1, distortion: 1 });
+    for (const layer of ['bass', 'chords', 'pad', 'lead']) Object.assign(timbre[layer], { fuzz: 1, overdrive: 1, distortion: 1, vibrato: 1, chorus: 1 });
     const start = window.lastEngine();
     window.bridge('timbre', { json: JSON.stringify(timbre) });
     window.engineLog.length = 0;

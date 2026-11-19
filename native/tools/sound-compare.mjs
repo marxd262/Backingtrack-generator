@@ -14,7 +14,12 @@
 //          case FAILs, with the figure, when that peak is not below it (the plan's "below full scale": 0)
 // Exit code 1 if a case fails (also one that cannot render, or whose renders differ in length by more than 50 ms).
 // balance = (right minus left level of the native render) minus (the same of the web render); limit as the level limit.
-// diff = power of (native - web) over the power of web, dB, and stereo = L/R correlation of each render: printed on every line, never judged.
+// stereo = L/R correlation of each render: printed on every line, never judged; it shows a chorus (a mono layer: 1.000, chorus 1: about 0.83).
+// diff = power of (native - web) over the power of web, dB: printed below every case, never judged and no part of the verdict. It is the
+// sample-by-sample disagreement of the two renders and is dominated by the dry voices' own: with every effect off it already lies at about
+// -31 dB (the bass) to about -3 dB (the lead guitar); the voices are matched by level, bands and envelope, not by waveform. It
+// can show an effect that is missing where that floor is low (a bass without its vibrato: +3.4 dB against -31 dB with it), never where it is
+// high, and never say that an effect that is there is right; the chains are judged sample by sample in fx-compare.mjs.
 // peak = the native render's largest sample minus the web render's, in dB; printed on every line, judged (+-1 dB, the plan's limit for the
 // full mix) only for cases rendered with the limiter.
 // The listening files (<name>-web.wav, <name>-nativ.wav, 16 bit) of a pair above full scale are turned down by one common gain;
@@ -162,7 +167,8 @@ function line(name, m) {
   const max = m.bandMax === null ? '-' : signed(m.bandMax), at = m.bandHz ?? '-', balance = m.balance === null ? '-' : signed(m.balance);
   const length = m.failed.length ? `  LENGTH web ${m.seconds[0].toFixed(2)} s, native ${m.seconds[1].toFixed(2)} s` : '';
   const peak = `peak ${signed(m.peak)} dB (web ${signed(m.peaks[0])}, native ${signed(m.peaks[1])} dBFS)${m.peakBelow === null ? '' : m.failed.peakBelow ? `  NATIVE PEAK ${signed(m.peaks[1])} dBFS NOT BELOW ${m.peakBelow}` : ` (native below ${m.peakBelow})`}`;
-  let text = `${name}  level ${signed(m.level)} dB  balance ${balance} dB  ${peak}  bands max ${max} dB at ${at}  envelope ${m.env.toFixed(3)}  diff ${Number.isFinite(m.diff) ? m.diff.toFixed(1) : m.diff} dB  stereo web ${m.stereo[0].toFixed(3)} native ${m.stereo[1].toFixed(3)}${length}  ${m.pass ? 'PASS' : 'FAIL'}`;
+  let text = `${name}  level ${signed(m.level)} dB  balance ${balance} dB  ${peak}  bands max ${max} dB at ${at}  envelope ${m.env.toFixed(3)}  stereo web ${m.stereo[0].toFixed(3)} native ${m.stereo[1].toFixed(3)}${length}  ${m.pass ? 'PASS' : 'FAIL'}`;
+  text += `\n    diff ${Number.isFinite(m.diff) ? m.diff.toFixed(1) : m.diff} dB (not judged)`; // below the verdict: it is no part of it
   if (!m.pass) text += `\n    failed: ${Object.keys(m.failed).filter((k) => m.failed[k]).join(', ')}\n    bands ${BANDS.map((hz, i) => `${hz}: ${m.bands[i] === null ? '-' : signed(m.bands[i])}`).join('  ')}`;
   return text;
 }

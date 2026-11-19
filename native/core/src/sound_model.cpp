@@ -24,10 +24,10 @@ double db(double x) { return std::pow(10.0, x / 20); }
 const double OD_MAKEUP = 0.19, DIST_MAKEUP = 0.055, FUZZ_MAKEUP = 0.113;
 double mix(double a) { return std::min(1.0, 8 * a); }
 
-// mod-fx.js
-const double VIB_CENTS = 40, CHORUS_LEVEL = 0.7; // MOD.vibCents, MOD.chorusLevel
-
 } // namespace
+
+// mod-fx.js 7 to 14
+const ModTable MOD { 40, 0.004, 0.018, 0.003, { 0.6, 0.8 }, 0.7, 0.7 };
 
 void forEachField(Timbre& t, const std::function<void(const char* group, const char* field, double& value)>& f) {
     f("drums", "kickPunch", t.drums.kickPunch); f("drums", "kickLength", t.drums.kickLength); f("drums", "snareTone", t.drums.snareTone);
@@ -186,11 +186,11 @@ FxChainParams fxChainParams(double fuzz, double overdrive, double distortion, En
 }
 
 ModParams modParams(double vibrato, double chorus, double bpm) {
-    const double v = num(vibrato), wet = CHORUS_LEVEL * num(chorus);
+    const double v = num(vibrato), wet = MOD.chorusLevel * num(chorus);
     const double hz = std::min(5.5, std::max(4.0, 4 + ((std::isfinite(bpm) ? bpm : 100) - 60) / 40));
     ModParams p;
     p.active = v > 0 || wet > 0;
-    p.vibrato = { v > 0, hz, (std::pow(2.0, (VIB_CENTS * v) / 1200) - 1) / (2 * PI * hz) };
+    p.vibrato = { v > 0, hz, (std::pow(2.0, (MOD.vibCents * v) / 1200) - 1) / (2 * PI * hz) };
     p.chorus = { wet, 1 / std::sqrt(1 + 2 * wet * wet) };
     return p;
 }

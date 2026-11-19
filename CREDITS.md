@@ -34,12 +34,12 @@ Die Sample-Klänge des Backingtrack Generators stammen aus freien Sammlungen. Je
 - Verändert: Auswahl von 11 Schlägen (86 Zonen), Mikrofone nach dem Standard-Mix des Mappings zu Direkt und Raum gemischt (Triggerkanal weggelassen), links und rechts getauscht, gekürzt mit Ausblendung, Crash um 3 dB angehoben, ein Pegelfaktor für das ganze Pack, 16 Bit / 44,1 kHz, FLAC (`scripts/import-sfz.mjs`)
 - Lizenztext: `src/assets/samples/LICENSE-drums-muldjord.md`
 
-## Chromium (Web Audio): Kompressor, Normierung des Halls und Verzerrerkette
+## Chromium (Web Audio): Kompressor, Normierung des Halls, Verzerrerkette, Vibrato und Chorus
 
-- Urheber: Google Inc. (Copyright 2010: `reverb.cc`, `audio_utilities.cc`, `biquad.cc`; Copyright 2011: `dynamics_compressor.cc`; Copyright 2013: `up_sampler.cc`, `down_sampler.cc`) und The Chromium Authors (Copyright 2022: `wave_shaper_handler.cc`, `audio_param_handler.cc`)
-- Lizenz: BSD-3-Clause (`reverb.cc`, `dynamics_compressor.cc`, `biquad.cc`, `up_sampler.cc`, `down_sampler.cc`, `wave_shaper_handler.cc`, `audio_param_handler.cc`) und BSD mit zwei Bedingungen (`audio_utilities.cc`), Wortlaut unten
-- Quelle: https://chromium.googlesource.com/chromium/src/+/refs/tags/158.0.8127.18/third_party/blink/renderer/platform/audio/ und .../modules/webaudio/ (`audio_utilities.cc`: gelesen am Stand main)
-- Verändert: nach C++ für den Kern übertragen, ohne Chromium; der Kompressor in `native/core/src/compressor.cpp` (ohne die Messung der Pegelminderung; mit den zwei Einzeilern `DecibelsToLinear` und `LinearToDecibels` aus `audio_utilities.cc`), die Normierung der Impulsantwort in `native/core/src/convolver.cpp`; die Verzerrerkette der Schichten in `native/core/src/guitar_fx.cpp` (die Überabtastung der Wellenformer aus `up_sampler.cc`, `down_sampler.cc` und `wave_shaper_handler.cc`, die Annäherung der Reglerwerte aus `audio_param_handler.cc`, die Filterkoeffizienten und der Rechenschritt des Filters aus `biquad.cc`, die diskrete Zeitkonstante der Annäherung, `DiscreteTimeConstantForSampleRate`, aus `audio_utilities.cc`)
+- Urheber: Google Inc. (Copyright 2010: `reverb.cc`, `audio_utilities.cc`, `biquad.cc`, `delay.cc`; Copyright 2011: `dynamics_compressor.cc`; Copyright 2013: `up_sampler.cc`, `down_sampler.cc`) und The Chromium Authors (Copyright 2022: `wave_shaper_handler.cc`, `audio_param_handler.cc`, `oscillator_handler.cc`; Copyright 2016: `delay_sse2.cc`; Copyright 2014: `stereo_panner.cc`)
+- Lizenz: BSD-3-Clause (`reverb.cc`, `dynamics_compressor.cc`, `biquad.cc`, `up_sampler.cc`, `down_sampler.cc`, `wave_shaper_handler.cc`, `audio_param_handler.cc`, `oscillator_handler.cc`, `delay_sse2.cc`, `stereo_panner.cc`) und BSD mit zwei Bedingungen (`audio_utilities.cc`, `delay.cc`), Wortlaut unten
+- Quelle: https://chromium.googlesource.com/chromium/src/+/refs/tags/158.0.8127.18/third_party/blink/renderer/platform/audio/ (`delay_sse2.cc` darin unter `cpu/x86/`) und .../modules/webaudio/ (`audio_utilities.cc`: gelesen am Stand main)
+- Verändert: nach C++ für den Kern übertragen, ohne Chromium; der Kompressor in `native/core/src/compressor.cpp` (ohne die Messung der Pegelminderung; mit den zwei Einzeilern `DecibelsToLinear` und `LinearToDecibels` aus `audio_utilities.cc`), die Normierung der Impulsantwort in `native/core/src/convolver.cpp`; die Verzerrerkette der Schichten in `native/core/src/guitar_fx.cpp` (die Überabtastung der Wellenformer aus `up_sampler.cc`, `down_sampler.cc` und `wave_shaper_handler.cc`, die Annäherung der Reglerwerte aus `audio_param_handler.cc`, die Filterkoeffizienten und der Rechenschritt des Filters aus `biquad.cc`, die diskrete Zeitkonstante der Annäherung, `DiscreteTimeConstantForSampleRate`, aus `audio_utilities.cc`); Vibrato und Chorus der Schichten in `native/core/src/mod_fx.cpp` (der Verzögerungsring und die Reihenfolge Schreiben vor Lesen aus `delay.cc`, die Länge des Rings mit `TimeToSampleFrame` aus `audio_utilities.cc`, die Leseposition und die Interpolation in float aus `delay_sse2.cc`, die Verstärkungen der Stereo-Lage eines Mono-Eingangs aus `stereo_panner.cc`, die Phase der Sinus-LFOs, ihr Schritt in float und die Summe in double, aus `oscillator_handler.cc`; dessen Wellentabelle ist nicht übernommen)
 - Wortlaut von `reverb.cc`, `dynamics_compressor.cc` und `biquad.cc` (in den Dateien gleich, nur das Jahr unterscheidet sich):
 
 ```
@@ -70,7 +70,7 @@ Die Sample-Klänge des Backingtrack Generators stammen aus freien Sammlungen. Je
     THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-- Wortlaut von `audio_utilities.cc`:
+- Wortlaut von `audio_utilities.cc` und `delay.cc` (in beiden Dateien gleich):
 
 ```
     Copyright (C) 2010, Google Inc. All rights reserved.
@@ -129,7 +129,40 @@ Die Sample-Klänge des Backingtrack Generators stammen aus freien Sammlungen. Je
     OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-- Wortlaut von `wave_shaper_handler.cc` und `audio_param_handler.cc` (beide „Copyright 2022 The Chromium Authors“; der Text ist der der Datei `LICENSE` von Chromium, dort mit „Copyright 2015 The Chromium Authors“):
+- Wortlaut von `delay_sse2.cc` („Copyright 2016 The Chromium Authors“) und `stereo_panner.cc` („Copyright 2014 The Chromium Authors“); derselbe Text wie unten, der der Datei `LICENSE` von Chromium:
+
+```
+    Copyright 2016 The Chromium Authors (delay_sse2.cc)
+    Copyright 2014 The Chromium Authors (stereo_panner.cc)
+
+    Redistribution and use in source and binary forms, with or without
+    modification, are permitted provided that the following conditions are
+    met:
+
+       * Redistributions of source code must retain the above copyright
+    notice, this list of conditions and the following disclaimer.
+       * Redistributions in binary form must reproduce the above
+    copyright notice, this list of conditions and the following disclaimer
+    in the documentation and/or other materials provided with the
+    distribution.
+       * Neither the name of Google LLC nor the names of its
+    contributors may be used to endorse or promote products derived from
+    this software without specific prior written permission.
+
+    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+    "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+    LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+    A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+    OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+    SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+    LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+    DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+    THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+    (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+    OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+- Wortlaut von `wave_shaper_handler.cc`, `audio_param_handler.cc` und `oscillator_handler.cc` (alle „Copyright 2022 The Chromium Authors“; der Text ist der der Datei `LICENSE` von Chromium, dort mit „Copyright 2015 The Chromium Authors“):
 
 ```
     Copyright 2022 The Chromium Authors
