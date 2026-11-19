@@ -11,7 +11,7 @@ namespace btg {
 struct Pack;
 
 // Plays the generator's events of all six layers with the voices chosen for them (sample voices; synth voices stay silent
-// until they are ported), the distortion chain of bass, chords, pad and lead, a mixer, the web app's sends (reverb, shared room, echo) and its sum (brightness shelf,
+// until they are ported), the distortion chain, vibrato and chorus of bass, chords, pad and lead, a mixer, the web app's sends (reverb, shared room, echo) and its sum (brightness shelf,
 // bus compressor and limiter, both after Chromium's DynamicsCompressor, no clamp at the output). The position comes in from outside
 // (Transport::Block), so the same engine runs under the app's own transport, in an offline render and later under a host's play head.
 class Engine {

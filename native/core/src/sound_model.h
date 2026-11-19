@@ -2,7 +2,8 @@
 
 // The sound model of the web app: the timbre knobs (src/core/timbre.js) and what they map to (src/audio/voice-params.js, fx-params.js,
 // mod-fx.js, voices/sample-zones.js). The code follows the JavaScript line by line, in its order of operations and with its names,
-// so that native/core/tests/test_logic.cpp can compare it with the web app function by function. Control thread only.
+// so that native/core/tests/test_logic.cpp can compare it with the web app function by function. Control thread only, except modParams,
+// which the engine also calls on the audio thread.
 
 #include "btg/engine.h"
 

@@ -34,15 +34,20 @@ public:
     void set(const ModParams& p, bool atStart); // mod-fx.js set(): atStart = createInstruments' { immediate: true }
     bool built() const { return built_; }
     // x may be left or right. Not built: both outputs are x, bit for bit.
-    // shortcut: mono, one signal in; the stereo voices of Phase 5 need the panner's stereo case (stereo_panner.cc) and a second ring per copy.
+    // shortcut: mono, one signal in; the stereo voices of Phase 5 need the panner's stereo case (stereo_panner.cc) and a second ring for the
+    // vibrato's delay and for each copy (Chromium keeps one delay kernel per channel). When the input becomes stereo, Chromium's DelayNode
+    // up-mixes its rings into the new channel layout (delay_handler.cc 145 to 196), and its StereoPannerNode switches to the stereo formula
+    // (stereo_panner.cc 63 to 79), under which an up-mixed mono copy at -0.7 comes out at 1.891 x on the left instead of 0.972 x (+5.8 dB).
     void process(const float* x, float* left, float* right, int count);
 
 private:
     // An OscillatorNode of type sine (oscillator_handler.cc): the phase counts wave-table entries (4096) in double and goes on by the float
     // increment frequency * (4096 / rate), the way Chromium accumulates it. The core computes sin() of that phase, not Chromium's table. Measured
     // against a bare OscillatorNode: it differs from this by 3e-7 below an increment of 0.3 entries per frame (the table's and its linear
-    // interpolation's own size) and by 2e-6 to 6e-6 from 0.3 on (the vibrato's 4 to 5.5 Hz at 44.1 and 48 kHz), where oscillator_handler.cc
-    // goes to ProcessKRateVector (its x86 body is not here; that it carries the read index in float is a hypothesis). Not rebuilt.
+    // interpolation's own size) and by up to 6e-6 from 0.3 on (measured: 3.9e-6 at 3.52 Hz and 2.2e-6 at 3.6 Hz, 48 kHz; the worst over the
+    // vibrato's 4 to 5.5 Hz 5.98e-6 at 44.1 kHz and 5.96e-6 at 48 kHz; less at some frequencies, 7e-7 at 4 Hz and 44.1 kHz, 5e-7 at 10 Hz and
+    // 48 kHz), where oscillator_handler.cc goes to ProcessKRateVector (its x86 body is not here; that it carries the read index in float is a
+    // hypothesis). Not rebuilt.
     struct Lfo {
         double index = 0.0;
         float next(float increment);

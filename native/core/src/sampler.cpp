@@ -165,7 +165,10 @@ void Tone::render(float* left, float* right, int count) {
             case sustain: break;
             case release: level *= releaseMul; if (--releaseLeft <= 0) active = false; break;
         }
-        if (chokeIn == 0) { chokeGain *= chokeMul; if (chokeGain < 1e-4) active = false; }
+        // A choked tone ends at a gain of 1e-7. It rings on through its layer's effect chain: behind distortion 1 the end at 1e-4 was a
+        // step of -51 dB re the layer's peak (engine test, chords; -35 dB in the review's probe of the chain alone), and the step falls
+        // with the gain (measured at 1e-7: -154 dB, below the tail's own -94 dB). It costs time: a choked tone rings 16 time constants (9 at 1e-4).
+        if (chokeIn == 0) { chokeGain *= chokeMul; if (chokeGain < 1e-7) active = false; }
         else if (chokeIn > 0) --chokeIn;
         tailGain *= tailMul;
 

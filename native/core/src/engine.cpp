@@ -119,7 +119,7 @@ struct Engine::Impl {
     detail::ModFx mod[layerCount];
     detail::FxChainParams fxApplied[layerCount] = {};
     double modApplied[layerCount][3] = {};
-    bool fxAtOnce = true; // the next playing block with a setup is a start: the chains are built anew (createInstruments, { immediate: true })
+    bool fxAtOnce = true; // the next playing block with a setup is a start: the chains of a layer with no active tone are built anew (createInstruments, { immediate: true })
     double masterGainNow = MASTER, shelfNow = 0.0, shelfSet = 0.0; // the sum's gain (synth.js `master`) and the shelf's gain now, and the one its coefficients are for
     detail::Biquad shelf[2];
     detail::Compressor glue, limiter; // Chromium's compressors (limiter: the name of the node in synth.js); each keeps its state across a restart
@@ -185,6 +185,8 @@ struct Engine::Impl {
         made->fx[chords] = detail::fxChainParams(timbre.chords.fuzz, timbre.chords.overdrive, timbre.chords.distortion, chords);
         made->fx[pad] = detail::fxChainParams(timbre.pad.fuzz, timbre.pad.overdrive, timbre.pad.distortion, pad);
         made->fx[lead] = detail::fxChainParams(timbre.lead.fuzz, timbre.lead.overdrive, timbre.lead.distortion, lead);
+        // shortcut: the chain always takes the chorus knob; synth.js 231 and 234 (ownChorus) give it 0 where the voice makes the chorus
+        // itself (the classic chord synth). Task 22, which ports that voice, adds the rule.
         made->vibrato[bass] = timbre.bass.vibrato; made->chorus[bass] = timbre.bass.chorus;
         made->vibrato[chords] = timbre.chords.vibrato; made->chorus[chords] = timbre.chords.chorus;
         made->vibrato[pad] = timbre.pad.vibrato; made->chorus[pad] = timbre.pad.chorus;
@@ -258,20 +260,27 @@ struct Engine::Impl {
         for (detail::Biquad* f : { &roomHp[0], &roomHp[1], &roomLp[0], &roomLp[1] }) clear(*f);
     }
 
-    // Audio thread: the chains' values from the setup. At a start every chain is built anew from them (the web's new graph at every play());
-    // later only a layer whose values changed gets them (the web sets them again on every change, with the same result once its ramps are over).
-    // The modulation chain also follows the tempo (setTempo -> applyFx in synth.js): a change of more than 1e-9 bpm gets a ramp of its rate.
+    // Audio thread: the chains' values from the setup. At a start a layer none of whose tones is active gets its chains built anew from them
+    // (the web's new graph at every play()). A start that finds a tone of the layer still ringing (choked by a stop shortly before, or by this
+    // play itself; at a start only the old song's tones are active) never resets a chain under it: a built distortion chain and the
+    // modulation chain take the values as a change, as in mid-play (ruling P); an unbuilt distortion chain is still built at once, its
+    // creation fade passes the input bit for bit. The cost: after such a start the new song meets the old chains (bias settled, LFO phases
+    // running on) instead of ones that are 0.15 s old. Later only a layer whose values changed gets them (the web sets them again on every
+    // change, with the same result once its ramps are over). The modulation chain also follows the tempo (setTempo -> applyFx in synth.js):
+    // a change of more than 1e-9 bpm gets a ramp of its rate.
     void applyFx(bool atStart, double tempo) {
         for (const Layer l : FX_LAYERS) {
             const double v = setup->vibrato[l], c = setup->chorus[l];
-            if (atStart) {
+            const bool ringing = atStart && std::any_of(tones.all.begin(), tones.all.end(), [l](const Tone& t) { return t.active && t.layer == l; });
+            if (atStart && !(ringing && guitar[l].built())) {
                 guitar[l].reset();
                 guitar[l].set(setup->fx[l], true);
+            } else if (!(setup->fx[l] == fxApplied[l])) guitar[l].set(setup->fx[l], false);
+            if (atStart && !ringing) {
                 mod[l].reset();
                 mod[l].set(detail::modParams(v, c, tempo), true);
-            } else {
-                if (!(setup->fx[l] == fxApplied[l])) guitar[l].set(setup->fx[l], false);
-                if (v != modApplied[l][0] || c != modApplied[l][1] || std::fabs(tempo - modApplied[l][2]) > 1e-9) mod[l].set(detail::modParams(v, c, tempo), false);
+            } else if (v != modApplied[l][0] || c != modApplied[l][1] || std::fabs(tempo - modApplied[l][2]) > 1e-9) {
+                mod[l].set(detail::modParams(v, c, tempo), false);
             }
             fxApplied[l] = setup->fx[l];
             modApplied[l][0] = v; modApplied[l][1] = c; modApplied[l][2] = tempo;
@@ -555,8 +564,8 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
         m.echoAtOnce = false;
     }
     // The layer effects: built at a play's first block, a lead's too (the creation fade and the bias then run in the lead as in the live web
-    // app), and not again when the clock begins to move; later blocks only hand over what changed. Not in the echo's block: a start inside the
-    // wet fade must still build the chains.
+    // app), and not again when the clock begins to move; later blocks only hand over what changed. A layer whose old tones still ring at
+    // that block keeps its chains (applyFx). Not in the echo's block: a start inside the wet fade must still build the chains.
     // The vibrato's rate follows the tempo of the moment: the moving clock's (as the echo's), in a lead the block's own (Transport::Block::bpm),
     // else the song's.
     if (block.playing && m.setup) {

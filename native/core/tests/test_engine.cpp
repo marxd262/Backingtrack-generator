@@ -181,11 +181,11 @@ static Envelope envelopeOf(const std::vector<float>& x, double noteEnd) {
     return r;
 }
 
-static Result render(btg::Engine& engine, btg::Transport& transport, double seconds, int blockSize) {
+static Result render(btg::Engine& engine, btg::Transport& transport, double seconds, int blockSize, int sampleRate = rate) {
     Result r;
     std::vector<float> l(blockSize), rr(blockSize);
-    for (int done = 0; done < seconds * rate;) {
-        const auto block = transport.advance(blockSize, rate);
+    for (int done = 0; done < seconds * sampleRate;) {
+        const auto block = transport.advance(blockSize, sampleRate);
         engine.render(l.data(), rr.data(), block.frames, block);
         for (int i = 0; i < block.frames; ++i) {
             r.left.push_back(l[i]);
@@ -541,14 +541,20 @@ int main(int argc, char** argv) {
             tf.seek(64.0); tc.seek(64.0);
             CHECK(differs(render(*f, tf, 0.1, 480), render(*c, tc, 0.1, 480), 0, hold)); // red: no chain
         }
-        { // 3. a restart (play again, no stop) builds the chain anew: dry for 0.08 s again
+        { // 3. a restart (play again, no stop) inside a note of the bass (1.55 s after beat 64; see 9) finds the old tones ringing through
+          // the chain and keeps it (ruling P): no dry 0.08 s after it. A start after a stop that has fallen quiet (no tone left, the output
+          // exactly 0) builds it anew: dry for 0.08 s again.
             auto f = make(FUZZ), c = make(CLEAN);
             btg::Transport tf, tc;
             tf.play(64.0, f->bpm()); tc.play(64.0, c->bpm());
-            render(*f, tf, 1.0, 480); render(*c, tc, 1.0, 480);
+            render(*f, tf, 1.55, 480); render(*c, tc, 1.55, 480);
+            tf.play(64.0, f->bpm()); tc.play(64.0, c->bpm());
+            CHECK(differs(render(*f, tf, 1.0, 480), render(*c, tc, 1.0, 480), 0, hold)); // red: a rebuild at the restart (dry), or no chain
+            tf.stop(); tc.stop();
+            CHECK(render(*f, tf, 1.0, 480).left.back() == 0.0f && render(*c, tc, 1.0, 480).left.back() == 0.0f);
             tf.play(64.0, f->bpm()); tc.play(64.0, c->bpm());
             const Result a = render(*f, tf, 0.5, 480), b = render(*c, tc, 0.5, 480);
-            CHECK(near(a, b, 0, hold));      // passes red too
+            CHECK(near(a, b, 0, hold));      // red: the chain kept across a quiet stop
             CHECK(differs(a, b, hold, n));   // red: no chain
         }
         { // 4. the first knob above 0 while playing: dry for 0.15 s (LAZY), then the chain
@@ -628,6 +634,79 @@ int main(int argc, char** argv) {
             CHECK(near(same, again, 0, same.left.size()));                  // deterministic
             CHECK(differs(same, told, lead, lead + static_cast<size_t>(0.2 * rate))); // red: no chain, or the block's tempo is not read
         }
+        // 9. a start under ringing tones keeps the chains (ruling P): a stop (or a play with no stopped block between) chokes the old tones,
+        // which ring on through the chains; a play 20 ms after the stop, or at once, with the app's lead must leave them ringing as a stop
+        // alone does. From the stop to the end of the lead (the new song schedules nothing in it) the engine that got the play equals within
+        // 1e-6 the same engine that only got the stop, up to where that one falls quiet (its output exactly 0 to the end: a quiet engine
+        // skips its chains, while the playing one runs them on; with the bass fuzz that is the chain's own residual, 3e-6 at 140 ms, after the
+        // last bass tone has ended). The layer alone (sends 0, no limiter; the chords from the fixture with its chords switched on), stopped
+        // 1.55 s after beat 64, inside a note of the bass (at 1 s the fixture's bass is between two notes); `peak` is what still rings from
+        // the play on.
+        {
+            std::string chorded = track;
+            chorded.replace(chorded.find("\"chords\":false"), 14, "\"chords\":true");
+            const std::tuple<const char*, const char*, btg::Engine::Layer> cases[] = {
+                { "bass fuzz 1", FUZZ, btg::Engine::bass },
+                { "bass vibrato 1", R"({"master":{"reverb":0,"echo":0,"roomWet":0},"bass":{"vibrato":1}})", btg::Engine::bass },
+                { "chords chorus 1", R"({"master":{"reverb":0,"echo":0,"roomWet":0},"chords":{"chorus":1}})", btg::Engine::chords } };
+            for (const auto& c : cases)
+                for (const double gap : { 0.02, 0.0 }) {
+                    const char* name = std::get<0>(c);
+                    const btg::Engine::Layer alone = std::get<2>(c);
+                    const auto run = [&](bool replay) {
+                        auto e = make(std::get<1>(c));
+                        if (alone == btg::Engine::chords) e->setTrack(chorded);
+                        for (int l = 0; l < btg::Engine::layerCount; ++l) e->setMuted(static_cast<btg::Engine::Layer>(l), l != alone);
+                        btg::Transport t;
+                        t.play(64.0, e->bpm());
+                        render(*e, t, 1.55, 480);
+                        Result r;
+                        if (gap > 0) { t.stop(); r = render(*e, t, gap, 480); }
+                        if (replay) t.play(64.0, e->bpm(), 0.15); else t.stop();
+                        const Result lead = render(*e, t, 0.15, 480);
+                        r.left.insert(r.left.end(), lead.left.begin(), lead.left.end());
+                        return r;
+                    };
+                    const Result a = run(true), b = run(false);
+                    const size_t played = static_cast<size_t>(std::lround(gap * rate));
+                    size_t quiet = b.left.size();
+                    while (quiet > 0 && b.left[quiet - 1] == 0.0f) --quiet;
+                    double most = 0.0, level = 0.0;
+                    for (size_t i = 0; i < quiet; ++i) {
+                        most = std::max(most, static_cast<double>(std::fabs(a.left[i] - b.left[i])));
+                        if (i >= played) level = std::max(level, static_cast<double>(std::fabs(b.left[i])));
+                    }
+                    std::printf("start under ringing tones, %s, play %.0f ms after the stop: largest difference to a stop alone %.2e up to %.0f ms after the stop (peak %.3f)\n",
+                                name, 1000 * gap, most, 1000.0 * static_cast<double>(quiet) / rate, level);
+                    CHECK(a.left.size() == b.left.size() && quiet > played + 2400 && level > 0.01 && most < 1e-6);
+                }
+            // 10. the cut of a choked tone is no step behind a strong distortion (ruling Q): the chords alone with distortion 1 (sends 0, no
+            // limiter), stopped 1 s after beat 64. From 100 ms after the stop on (the chain holds the layer about 80 ms), relative to the
+            // output's peak in the second before the stop: the largest difference between two successive samples, printed only (up to 135 ms
+            // it is the tail's own slope, -59 dB at 100 ms for a tail of about 100 Hz at -21 dB, which no cut changes), and the largest second
+            // difference, asserted below -80 dB (a step of s gives s; the tail's own is -94 dB at 100 ms). With the cut at 1e-4 the tones
+            // ended 138 ms after the stop and the engine fell quiet at the next block, from the tail at -45 dB: a step of -51 dB.
+            {
+                auto e = make(R"({"master":{"reverb":0,"echo":0,"roomWet":0},"chords":{"distortion":1}})");
+                e->setTrack(chorded);
+                for (int l = 0; l < btg::Engine::layerCount; ++l) e->setMuted(static_cast<btg::Engine::Layer>(l), l != btg::Engine::chords);
+                btg::Transport t;
+                t.play(64.0, e->bpm());
+                const Result before = render(*e, t, 1.0, 480);
+                t.stop();
+                const Result after = render(*e, t, 0.5, 480);
+                double peak = 0.0, first = 0.0, second = 0.0;
+                for (size_t i = before.left.size() - rate; i < before.left.size(); ++i) peak = std::max(peak, static_cast<double>(std::fabs(before.left[i])));
+                for (size_t i = static_cast<size_t>(0.1 * rate); i < after.left.size(); ++i) {
+                    const double x = after.left[i], y = after.left[i - 1], z = after.left[i - 2];
+                    first = std::max(first, std::fabs(x - y));
+                    second = std::max(second, std::fabs(x - 2 * y + z));
+                }
+                std::printf("stop behind distortion 1: from 100 ms after the stop, successive samples differ by %.1f dB at most, second difference %.1f dB (re the peak %.3f before it)\n",
+                            20 * std::log10(first / peak), 20 * std::log10(second / peak), peak);
+                CHECK(peak > 0.01 && second < 1e-4 * peak);
+            }
+        }
     }
 
     // The lead (design: the web app starts its song 0.15 s after play(); the limiter settles while its input is silent). The limiter's gain
@@ -683,8 +762,8 @@ int main(int argc, char** argv) {
 
     // A stop and a play back to back (the web UI's restart) with the lead: the old song's sends are cleared within the lead (the wet fade
     // takes 50 ms) and open again before the song, so from the first moving frame on the output is a fresh engine's started with the same
-    // lead, apart from what the engine remembers of the old music: the old tones' choke tails (gone within about 0.2 s of the restart,
-    // that is before the song) and the compressors' state, which has the lead's silence to recover. The bound: the largest absolute
+    // lead, apart from what the engine remembers of the old music: the old tones' choke tails (a choked tone ends at a gain of 1e-7, 0.24 s
+    // after the restart, so up to 0.09 s into the song) and the compressors' state, which has the lead's silence to recover. The bound: the largest absolute
     // difference to that fresh engine over the whole song stretch (1 s, peak 0.26) stays below 1e-6 (measured 3e-8, a few float
     // roundings); the first 50 ms are looked at apart, because there the compressors would show it first. The lead
     // itself is not compared. (The same check with lead 0 gives 0.22 in the first 50 ms and 0.066 after: the old song's
@@ -779,14 +858,16 @@ int main(int argc, char** argv) {
 
     // Tempo extremes: all six layers (test packs), reverb, room (1 s) and echo up and every layer effect at 1 (fuzz, overdrive, distortion,
     // vibrato, chorus on bass, chords, pad and lead), the limiter on; at 20 and at 400 bpm, 20 s each: every
-    // sample finite, and the render takes less than a quarter of the time it plays (the load limit of the plan). The peak: the core's
-    // limiter equals Chromium's compressor sample for sample (compressor-compare.mjs), and with these loud synthetic packs the chain
-    // reaches 0.869 (20 bpm) and 1.064 (400 bpm) at the fader's 1, the latter a little above full scale (the shell clips); no web render
-    // of these packs exists, so nothing more is known about why. The fader goes to 0.7, which is a gain of 0.49 (the square), and the
-    // test asserts only that the peak stays below 1.0 there (about 2.0 before the fader: a runaway chain would not); "below full scale
+    // sample finite, and the render takes less than a quarter of the time it plays (the load limit of the plan; on CI, where the runners
+    // are slower and shared, printed and not asserted: ruling S, CMake passes --ci when the environment has CI). The peak: the core's
+    // limiter equals Chromium's compressor sample for sample (compressor-compare.mjs); with every effect on these loud synthetic packs
+    // reach 0.412 (20 bpm) and 0.469 (400 bpm) at the fader's 0.7, which is a gain of 0.49 (the square), so about 0.84 and 0.96 before it
+    // (Phase 3 measured 0.869 and 1.064 at the fader's 1 without the effects); no web render of these packs exists. The test asserts only
+    // that the peak stays below 1.0 at the fader's 0.7 (about 2.0 before the fader: a runaway chain would not); "below full scale
     // at both tempos" is proven with the real packs in mix.json (mix-funk-20bpm, mix-funk-400bpm).
     // Both start at beat 64, where all six layers play (20 bpm for 20 s covers only 6.7 beats), and every layer has a peak after the render
-    // (this also catches a pack that did not load).
+    // (this also catches a pack that did not load). Then 400 bpm at 96 kHz (blocks of 480 frames), its load printed only: Phase 5's design
+    // needs the figure (ruling S).
     {
         std::string band = track;
         for (const char* layer : { "chords", "pad", "lead", "percussion" }) {
@@ -799,28 +880,30 @@ int main(int argc, char** argv) {
         for (const char* name : { "drums", "bass", "chords", "pad", "lead", "percussion" })
             layers += std::any_of(events.begin(), events.end(), [&](const btg::Event& e) { return e.layer == name; });
         CHECK(layers == 6);
-        for (const double bpm : { 20.0, 400.0 }) {
+        const bool onCi = argc > 2 && std::string(argv[2]) == "--ci";
+        for (const auto& [bpm, sr] : { std::pair { 20.0, rate }, std::pair { 400.0, rate }, std::pair { 400.0, 96000 } }) {
             btg::Engine engine;
             engine.setPackSource(source);
             engine.setSound(R"({"master":{"reverb":1,"echo":1,"roomWet":1,"roomSize":1},"bass":{"fuzz":1,"overdrive":1,"distortion":1,"vibrato":1,"chorus":1},
                 "chords":{"fuzz":1,"overdrive":1,"distortion":1,"vibrato":1,"chorus":1},"pad":{"fuzz":1,"overdrive":1,"distortion":1,"vibrato":1,"chorus":1},
                 "lead":{"fuzz":1,"overdrive":1,"distortion":1,"vibrato":1,"chorus":1}})");
             engine.setTrack(band);
-            engine.setMaster(0.7f); // fader 0.7 = gain 0.49; not the fader's 1, where the peaks are 0.869 and 1.064 (see above)
-            engine.prepare(rate);
+            engine.setMaster(0.7f); // fader 0.7 = gain 0.49 (see above)
+            engine.prepare(sr);
             btg::Transport t;
             t.play(64.0, bpm);
             const auto began = std::chrono::steady_clock::now();
-            const Result r = render(engine, t, 20.0, 480);
+            const Result r = render(engine, t, 20.0, 480, sr);
             const double load = std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count() / 20.0;
-            std::printf("tempo %.0f bpm: peak %.3f, load %.1f %%\n", bpm, r.peak, 100 * load);
+            const bool asserted = sr == rate && !onCi;
+            std::printf("tempo %.0f bpm at %d Hz: peak %.3f, load %.1f %%%s\n", bpm, sr, r.peak, 100 * load, asserted ? "" : " (not asserted)");
             CHECK(r.finite && r.peak < 1.0 && r.rms > 0.001);
             for (int l = 0; l < btg::Engine::layerCount; ++l) {
                 const bool sounded = engine.takePeak(l) > 0.0f;
                 if (!sounded) std::printf("tempo %.0f bpm: the layer %s is silent\n", bpm, btg::detail::LAYER_NAMES[l]);
                 CHECK(sounded);
             }
-            CHECK(load < 0.25);
+            if (asserted) CHECK(load < 0.25);
         }
         // The engine's wiring of the vibrato, absolute (review I-3): each of the four layers alone (the others muted), from beat 64 with no
         // lead, reverb, echo and room 0, no limiter, fader and master 1: what stands behind the chain is gains (trim, fader, balance, master
@@ -829,11 +912,17 @@ int main(int argc, char** argv) {
         // channel through its own chain), from the first frame on, over 1.5 s. A scaled input gives a scaled output (ring, interpolation and gains are linear), so
         // the only difference left is float rounding: about a dozen roundings of 6e-8 of the signal each (the chain's three gains and two
         // sums, the interpolation, the engine's trim, balance, master gain and the shelf's cast), so 2e-6 of the render's peak is the
-        // tolerance (about 30 steps at the peak). Bass at 60, 120 and 160 bpm (4, 5 and 5.5 Hz); the others at 120. The tempo is also shown
-        // to count: the 60 bpm render with the vibrato on does not equal ModFx at the tempo 160 (a tempo that the engine took wrongly would
-        // not equal the right one). A layer's knob taken from another layer, a wrong tempo, or a ramp instead of an at-once start fail here.
+        // tolerance (about 30 steps at the peak). Bass at 60, 100 and 160 bpm (4, 5 and 5.5 Hz: modParams clamps from 120 bpm on); the
+        // others at 100. The tempo is also shown to count: the 60 bpm render with the vibrato on does not equal ModFx at the tempo 160 (a
+        // tempo that the engine took wrongly would not equal the right one). A layer's knob taken from another layer, a wrong tempo, or a
+        // ramp instead of an at-once start fail here.
+        // A tempo change in mid-play (review M-2): the bass at 60 bpm, the transport told 160 bpm after 0.75 s. The engine hands the new rate
+        // to the chain at the first block rendered after the change (applyFx reads the tempo from that block's beatsPerFrame), frame 36000
+        // here: so the render with the vibrato on equals ModFx set at once for 60 bpm and given set(modParams(1, 0, 160), false) at that
+        // frame, fed the render with the vibrato at 0 (with the knob at 0 and at 1 the notes move the same way with the tempo), within the
+        // same tolerance; and it does not equal the chain that never got the change.
         {
-            const auto alone = [&](btg::Engine::Layer layer, double vibrato, double bpm) {
+            const auto alone = [&](btg::Engine::Layer layer, double vibrato, double bpm, double toBpm = 0.0) {
                 btg::Engine engine;
                 engine.setPackSource(source);
                 engine.setSound(std::string(R"({"master":{"reverb":0,"echo":0,"roomWet":0},")") + btg::detail::LAYER_NAMES[layer] + R"(":{"vibrato":)" + std::to_string(vibrato) + "}}");
@@ -843,9 +932,16 @@ int main(int argc, char** argv) {
                 engine.prepare(rate);
                 btg::Transport t;
                 t.play(64.0, bpm);
-                return render(engine, t, 1.5, 480);
+                if (toBpm == 0.0) return render(engine, t, 1.5, 480);
+                Result r = render(engine, t, 0.75, 480);
+                t.setTempo(toBpm);
+                const Result rest = render(engine, t, 0.75, 480);
+                r.left.insert(r.left.end(), rest.left.begin(), rest.left.end());
+                r.right.insert(r.right.end(), rest.right.begin(), rest.right.end());
+                r.peak = std::max(r.peak, rest.peak);
+                return r;
             };
-            const auto throughChain = [&](const Result& dry, double bpm) {
+            const auto throughChain = [&](const Result& dry, double bpm, double toBpm = 0.0, size_t at = 0) {
                 // each channel of the render through its own chain: the layer's balance (1 - pan, 1 + pan) stands behind the chain, so the
                 // two sides carry different gains of the same mono signal
                 Result r;
@@ -857,7 +953,12 @@ int main(int argc, char** argv) {
                     chain.prepare(rate);
                     chain.set(btg::detail::modParams(1, 0, bpm), true);
                     const std::vector<float>& in = side ? dry.right : dry.left;
-                    chain.process(in.data(), (side ? r.right : r.left).data(), unused.data(), static_cast<int>(in.size()));
+                    float* out = (side ? r.right : r.left).data();
+                    const size_t first = toBpm > 0 ? at : in.size();
+                    chain.process(in.data(), out, unused.data(), static_cast<int>(first));
+                    if (first == in.size()) continue;
+                    chain.set(btg::detail::modParams(1, 0, toBpm), false);
+                    chain.process(in.data() + first, out + first, unused.data(), static_cast<int>(in.size() - first));
                 }
                 return r;
             };
@@ -870,8 +971,8 @@ int main(int argc, char** argv) {
                 return m;
             };
             for (const auto layer : { btg::Engine::bass, btg::Engine::chords, btg::Engine::pad, btg::Engine::lead })
-                for (const double bpm : { 60.0, 120.0, 160.0 }) {
-                    if (layer != btg::Engine::bass && bpm != 120.0) continue;
+                for (const double bpm : { 60.0, 100.0, 160.0 }) {
+                    if (layer != btg::Engine::bass && bpm != 100.0) continue;
                     const Result off = alone(layer, 0.0, bpm), on = alone(layer, 1.0, bpm);
                     const double error = worst(on, throughChain(off, bpm)), effect = worst(on, off), tolerance = 2e-6 * off.peak;
                     std::printf("wiring %s at %.0f bpm: peak %.4f, effect of the vibrato %.4f, error against ModFx %.2e (tolerance %.2e)\n",
@@ -879,6 +980,11 @@ int main(int argc, char** argv) {
                     CHECK(off.peak > 1e-3 && effect > 0.01 * off.peak && error <= tolerance);
                     if (layer == btg::Engine::bass && bpm == 60.0) CHECK(worst(on, throughChain(off, 160.0)) > 0.01 * off.peak);
                 }
+            const Result off = alone(btg::Engine::bass, 0.0, 60.0, 160.0), on = alone(btg::Engine::bass, 1.0, 60.0, 160.0);
+            const double error = worst(on, throughChain(off, 60.0, 160.0, 36000)), unchanged = worst(on, throughChain(off, 60.0)), tolerance = 2e-6 * off.peak;
+            std::printf("wiring bass from 60 to 160 bpm: peak %.4f, error against ModFx changed at frame 36000 %.2e (tolerance %.2e), against ModFx left at 60 bpm %.4f\n",
+                        off.peak, error, tolerance, unchanged);
+            CHECK(off.left.size() == 72000 && error <= tolerance && unchanged > 0.01 * off.peak);
         }
         // The echo's time in the engine, with the pad alone (sustained sines, echo 1, reverb and room 0, no limiter).
         std::string pad = band;
@@ -919,8 +1025,8 @@ int main(int argc, char** argv) {
         // its dry twin, which restarts the same way) has no step over the 50 ms from the start above 0.08 of its level (the bound of the glide
         // check below; 0.03 is a clean 240 Hz sine; measured 0.013). From the end of the fade the sends are empty and the time is the new
         // tempo's: against a fresh engine at 60 bpm the output is the same where no echo of the new song's first 50 ms (cleared with the old
-        // echoes, ruled) can be: from 0.2 s (the choke tails of the old tones, up to 0.02 at 50 ms, have died by then) to the first echo at
-        // 0.75 s, exactly; and from 0.85 s to 1.4 s (the echo of what came after 50 ms, which a time still at 0.375 s would put somewhere
+        // echoes, ruled) can be: from 0.2 s (the choke tails of the old tones, up to 0.02 at 50 ms, ring until 0.24 s: measured 3.8e-7 at
+        // most) to the first echo at 0.75 s, within 1e-6; and from 0.85 s to 1.4 s (the echo of what came after 50 ms, which a time still at 0.375 s would put somewhere
         // else) within 2e-4 (the old tails' own echoes; measured 8e-5; the echo itself is 0.07).
         for (const double gap : { -1.0, 0.02 }) {
             const auto played = [&](const char* sound) {

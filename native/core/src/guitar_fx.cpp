@@ -64,7 +64,8 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * Biquad::step (sampler.h) follows platform/audio/biquad.cc (the output rounded to float and kept as the state). Its notice:
+ * The filters' coefficients (SetLowpassParams, SetHighpassParams, SetPeakingParams) follow platform/audio/biquad.cc; its filter step is
+ * Biquad::step of sampler.h, which carries the same notice at the function. Its notice:
  *
  * Copyright (C) 2010 Google Inc. All rights reserved.
  *
@@ -430,7 +431,8 @@ void GuitarFx::set(const FxChainParams& p, bool atStart) {
     to(cabWet_, p.cab);
 }
 
-// shortcut: mono, the left channel; the stereo voices of Phase 5 need a second state of every filter and shaper and the panner's stereo case.
+// shortcut: mono, the left channel; the stereo voices of Phase 5 need a second state of every filter and shaper. When the input becomes
+// stereo, Chromium's WaveShaperNode uninitialises and re-initialises itself (wave_shaper_handler.cc 400 to 420): its shapers' state is lost.
 void GuitarFx::process(float* x, int count) {
     if (!built_) return;
     for (int i = 0; i < count; ++i) {

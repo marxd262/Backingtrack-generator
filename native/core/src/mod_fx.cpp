@@ -74,8 +74,9 @@ constexpr double TC = 0.02;     // mod-fx.js: the ramps of the knobs
 constexpr double MAX_DELAY = 0.05;
 constexpr int QUANTUM = 128;    // render quantum: the ring's extra frames (delay.cc BufferLengthForDelay)
 // The phase counts entries of a table of 4096 (a power of two: the float rounding of 4096 / rate, and so of the increment, is the same for
-// 2048 to 16384: the model's error against the browser's oscillator did not change with the size, 48 kHz). Where Chromium takes its table size and RateScale from
-// (periodic_wave_handler.cc) is not among the files in the workspace (periodic_wave.cc, read, holds neither): nothing of them is taken.
+// 2048 to 16384: the model's error against the browser's oscillator did not change with the size, 48 kHz). rateScale_ = 4096 / rate in float
+// (prepare) is Chromium's RateScale, fitted to the browser's output: the file that defines it and the table size (periodic_wave_handler.cc)
+// was not read (it is not in the workspace; periodic_wave.cc, read, holds neither).
 constexpr int TABLE = 4096;
 
 // audio_utilities.cc TimeToSampleFrame(time, rate, kRoundUp): the frame at 1024 times the rate, rounded, then up

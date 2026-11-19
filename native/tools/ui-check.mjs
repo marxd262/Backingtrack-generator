@@ -171,23 +171,35 @@ try {
   if (result.dropoutsWhilePlaying > 0) problems.push(`dropouts while playing: ${result.dropoutsWhilePlaying}`);
   if (afterBand.load > 0.25) problems.push(`engine load ${(100 * afterBand.load).toFixed(1)} % (limit 25 %)`);
   // Every layer effect (Tasks 18 and 19): fuzz, overdrive, distortion, vibrato and chorus of bass, chords, pad and lead at 1, so every chain
-  // is built and computes each frame; 4 s of play: the load stays under the plan's 25 %, no dropout, the bass keeps a level. Then the page's
-  // own timbre again.
+  // is built and computes each frame; 4 s of play: the load stays under the plan's 25 %, no dropout, the bass keeps a level. That the effects
+  // reach the engine: the same 4 s from beat 64 (each pass begins with a `play` there, so both play the same notes) first with the page's
+  // own timbre, then with every effect on; the largest change of an fx layer's peak between the passes must be at least 1.5 dB (measured
+  // in two runs, whose songs differ: bass -3.5 and -2.6, chords -2.2 and +0.2, lead -2.7 and -4.6 dB; with the knobs left at the page's
+  // values every layer's change is 0.00 dB). Then the page's own timbre again.
   result.effects = await page.evaluate(async () => {
     const before = window.sent.findLast((s) => s.type === 'timbre').json, timbre = JSON.parse(before);
     for (const layer of ['bass', 'chords', 'pad', 'lead']) Object.assign(timbre[layer], { fuzz: 1, overdrive: 1, distortion: 1, vibrato: 1, chorus: 1 });
+    const bpm = window.sent.findLast((s) => s.type === 'play').bpm;
+    const pass = async (json) => { // 4 s from beat 64, the layers' peaks
+      window.bridge('timbre', { json });
+      window.bridge('play', { startBeats: 64, bpm });
+      window.engineLog.length = 0;
+      await new Promise((r) => setTimeout(r, 4000));
+      return Object.fromEntries(['bass', 'chords', 'pad', 'lead'].map((l) => [l, +Math.max(0, ...window.engineLog.map((m) => m.peaks?.[l] ?? 0)).toFixed(3)]));
+    };
+    const plain = await pass(before);
     const start = window.lastEngine();
-    window.bridge('timbre', { json: JSON.stringify(timbre) });
-    window.engineLog.length = 0;
-    await new Promise((r) => setTimeout(r, 4000));
+    const peaks = await pass(JSON.stringify(timbre));
     const end = window.lastEngine();
-    const peaks = Object.fromEntries(['bass', 'chords', 'pad', 'lead'].map((l) => [l, +Math.max(0, ...window.engineLog.map((m) => m.peaks?.[l] ?? 0)).toFixed(3)]));
     window.bridge('timbre', { json: before });
-    return { load: +end.load.toFixed(3), dropouts: end.xruns - start.xruns, peaks };
+    const gainDb = Object.fromEntries(Object.keys(peaks).map((l) => [l, plain[l] > 0 && peaks[l] > 0 ? +(20 * Math.log10(peaks[l] / plain[l])).toFixed(2) : null]));
+    return { load: +end.load.toFixed(3), dropouts: end.xruns - start.xruns, plain, peaks, gainDb };
   });
   if (result.effects.dropouts > 0) problems.push(`dropouts with every effect on: ${result.effects.dropouts}`);
   if (!(result.effects.load <= 0.25)) problems.push(`engine load with every effect on ${(100 * result.effects.load).toFixed(1)} % (limit 25 %)`);
   if (!(result.effects.peaks.bass > 0)) problems.push('bass: no level with every effect on');
+  const moved = Math.max(0, ...Object.values(result.effects.gainDb).filter((g) => g !== null).map(Math.abs));
+  if (!(moved >= 1.5)) problems.push(`effects: no layer's peak changes with every effect on (dB against the page's timbre): ${JSON.stringify(result.effects.gainDb)}`);
   result.position = await page.locator('#play-position').innerText();
   result.chord = await page.locator('#play-now').innerText();
   result.framesPerSecond = await page.evaluate(() => new Promise((done) => {

@@ -407,8 +407,7 @@
    }
   },
   "limiter": false,
-  "tail": 2.5,
-  "kind": "synth"
+  "tail": 2.5
  },
  {
   "name": "wet-dreamy",

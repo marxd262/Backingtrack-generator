@@ -136,7 +136,8 @@ const set = (sound, fields) => { const s = structuredClone(sound); for (const [p
 // What a case claims to measure: make-cases exits 1 when a claim does not hold for the case as written. Sample-voice knobs act only in
 // part of their range (the lowpass below 0.5, see brightnessHz; the time scale away from 0.5); their layer must play notes with a sample voice.
 const CLAIMS = {};
-// style: the case plays its style's own layer effects (resolveTrackTimbre); its limits are the effects' where one is on
+// style: the case plays its style's own layer effects (resolveTrackTimbre). A case of the whole band keeps the sample limits, effects on or
+// not (phase-4 ruling R); a case of fewer layers with an effect on has the effects' (kind 'synth').
 CLAIMS.style = (c) => (FX_LAYERS.every((g) => PHASE4.every((k) => c.sound[g][k] === resolveTrackTimbre(c.track)[g][k])) ? '' : "not the style's own layer effects");
 const knob = (path, layer, acts) => {
   CLAIMS[path] = (c, events) => {
@@ -159,8 +160,9 @@ CLAIMS['kit.places'] = (c, events) => {
 function claimed(c, claims) {
   const events = buildEvents(c.track);
   for (const g of FX_LAYERS) for (const k of PHASE4) if (c.sound[g][k] !== 0 && !claims.includes(claimOf(g, k)) && !claims.includes('style')) problems.push(`${c.name}: ${g}.${k} is on but not claimed`);
-  if (claims.includes('style') && effectsOn(c.sound)) c.kind = 'synth';
-  if ((c.kind === 'synth') !== effectsOn(c.sound)) problems.push(`${c.name}: kind must be 'synth' exactly where a layer effect is on`);
+  const synth = effectsOn(c.sound) && !Object.values(c.track.layers).every(Boolean);
+  if (claims.includes('style') && synth) c.kind = 'synth';
+  if ((c.kind === 'synth') !== synth) problems.push(`${c.name}: kind must be 'synth' exactly where a layer effect is on in a case of fewer layers than the whole band`);
   for (const what of claims) { const why = CLAIMS[what](c, events); if (why) problems.push(`${c.name}: ${why}`); }
   return c;
 }
@@ -307,8 +309,9 @@ for (const [layer, variant, style] of [['pad', 'strings', 'dreamy'], ['lead', 'g
 // the vibrato's rate follows the tempo (modParams: 4 Hz at 60 bpm, 5.5 Hz from 120 bpm on)
 for (const bpm of [60, 160]) modCases.push(claimed({ name: `mod-chords-both-${bpm}bpm`, dry: true, kind: 'synth', sound: set(neutralSound, { 'chords.vibrato': 0.5, 'chords.chorus': 0.5 }),
   track: track('rock', { layers: { chords: true }, voices: { chords: { id: 'sample', variant: 'guitar' } }, extra: { bpm } }) }, [claimOf('chords', 'vibrato'), claimOf('chords', 'chorus')]));
-// the plan's style: psych (fuzz on the bass, chorus on the sample twelve-string from its tags), dry, its own timbre as the page sends it
-modCases.push(claimed({ name: 'mod-psych', track: bands.psych, sound: resolveTrackTimbre(bands.psych), dry: true, kind: 'synth' }, [claimOf('bass', 'fuzz'), claimOf('chords', 'chorus')]));
+// the plan's style: psych (fuzz on the bass, chorus on the sample twelve-string from its tags), dry, its own timbre as the page sends it;
+// the whole band, so the sample limits (ruling R)
+modCases.push(claimed({ name: 'mod-psych', track: bands.psych, sound: resolveTrackTimbre(bands.psych), dry: true }, [claimOf('bass', 'fuzz'), claimOf('chords', 'chorus')]));
 write('mod.json', modCases);
 console.log(`mod.json: ${modCases.length} cases`);
 for (const p of problems) console.error(`ERROR ${p}`);

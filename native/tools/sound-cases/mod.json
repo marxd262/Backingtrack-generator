@@ -2963,7 +2963,6 @@
     "roomWet": 0.5
    }
   },
-  "dry": true,
-  "kind": "synth"
+  "dry": true
  }
 ]

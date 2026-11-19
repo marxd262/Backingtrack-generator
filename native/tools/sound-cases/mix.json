@@ -405,8 +405,7 @@
     "roomWet": 0.5
    }
   },
-  "tail": 2.5,
-  "kind": "synth"
+  "tail": 2.5
  },
  {
   "name": "mix-dreamy",
@@ -1013,8 +1012,7 @@
     "roomWet": 0.5
    }
   },
-  "tail": 2.5,
-  "kind": "synth"
+  "tail": 2.5
  },
  {
   "name": "mix-hardrock",
@@ -1218,8 +1216,7 @@
     "roomWet": 0.5
    }
   },
-  "tail": 2.5,
-  "kind": "synth"
+  "tail": 2.5
  },
  {
   "name": "mix-reggae",
@@ -2642,8 +2639,7 @@
     "on": 1
    }
   },
-  "tail": 2.5,
-  "kind": "synth"
+  "tail": 2.5
  },
  {
   "name": "mix-poppunk-glue",
@@ -3050,8 +3046,7 @@
    }
   },
   "tail": 2.5,
-  "peakBelow": 0,
-  "kind": "synth"
+  "peakBelow": 0
  },
  {
   "name": "mix-psych-400bpm",
@@ -3256,7 +3251,6 @@
    }
   },
   "tail": 2.5,
-  "peakBelow": 0,
-  "kind": "synth"
+  "peakBelow": 0
  }
 ]

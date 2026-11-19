@@ -141,7 +141,11 @@ get_filename_component(btg_samples "${PROJECT_SOURCE_DIR}/../src/assets/samples"
 
 add_executable(btg_engine_tests tests/test_engine.cpp)
 target_link_libraries(btg_engine_tests PRIVATE btg_core)
-add_test(NAME engine COMMAND btg_engine_tests ${CMAKE_CURRENT_SOURCE_DIR}/tests/track-funk.json)
+# On CI (GitHub sets CI) the engine test prints its load and does not assert it; told by an argument (std::getenv warns under MSVC).
+if(DEFINED ENV{CI})
+    set(btg_on_ci --ci)
+endif()
+add_test(NAME engine COMMAND btg_engine_tests ${CMAKE_CURRENT_SOURCE_DIR}/tests/track-funk.json ${btg_on_ci})
 
 add_executable(btg_fx_tests tests/test_fx.cpp)
 target_link_libraries(btg_fx_tests PRIVATE btg_core)

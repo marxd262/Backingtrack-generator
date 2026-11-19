@@ -45,7 +45,8 @@
 //     What the sets with the browser's own oscillators show is the browser's oscillator. A bare OscillatorNode (sine) against the core's LFO,
 //     measured over 2 to 5 s (Chromium 158, fix round 1): below an increment of 0.3 table entries per frame (48 kHz: 3.4 Hz 3.0e-7, 3.5 Hz
 //     3.0e-7) the difference is 3.0e-7 (the table's and its linear interpolation's own size, (2 pi / 4096)^2 / 8 = 2.9e-7); from 0.3 on
-//     (3.52 Hz: 3.9e-6, 3.6 Hz: 2.2e-6) it is 2e-6 to 6e-6, and the jump lies where oscillator_handler.cc 504 goes from the scalar loop to
+//     (3.52 Hz: 3.9e-6, 3.6 Hz: 2.2e-6) it is up to 6e-6 (less at some frequencies, measured by the review of the phase: 7e-7 at 44.1 kHz
+//     and 4 Hz, 5e-7 at 10 Hz and 48 kHz), and the jump lies where oscillator_handler.cc 504 goes from the scalar loop to
 //     ProcessKRateVector. The worst over 4 to 5.5 Hz in steps of 0.1 Hz (the vibrato): 5.98e-6 (44.1 kHz, at 4.3 Hz), 5.96e-6 (48 kHz, at
 //     5.0 Hz), 5.62e-6 (96 kHz, at 4.7 Hz; there the increment in 4096 entries is below 0.3, so the browser's table must be larger at that
 //     rate: inferred, not measured); the chorus's 0.6 and 0.8 Hz: 3.0e-7 at every rate. The error is the same every second and does not depend
