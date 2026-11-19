@@ -5,6 +5,7 @@
 #include "btg/generator.h"
 #include "btg/pack.h"
 #include "convolver.h"
+#include "echo.h"
 #include "sampler.h"
 #include "sound_data.h"
 #include "sound_model.h"
@@ -45,7 +46,7 @@ struct PlaySong {
 // What the audio thread plays with: the voice of every layer (nullptr = silent), its serial and the layer's place by mix/pan, and the
 // sum's values from the timbre (masterParams): gain, shelf and the width that multiplies every place; the sends (masterParams,
 // drumParams, mix/room) and their two convolvers, built on the control thread for the rate of the last prepare (none before it) and
-// used and changed only by the audio thread.
+// used and changed only by the audio thread; the echo's values (its line lives on the audio side).
 struct Setup {
     std::shared_ptr<const Voice> voice[Engine::layerCount];
     uint64_t serial[Engine::layerCount] = {};
@@ -53,6 +54,7 @@ struct Setup {
     double masterGain = 0.6, shelfDb = 0.0, shelfHz = 800.0, width = 1.0;
     double reverbWet = 0.15, roomSend = 0.0, roomWet = 1.0, roomTone = 7000.0, roomSends[Engine::layerCount] = {};
     std::shared_ptr<detail::Convolver> reverb, room;
+    double echoWet = 0.3, echoFeedback = 0.38, echoTone = 2400.0;
 };
 
 void clear(detail::Biquad& f) { f.x1 = f.x2 = f.y1 = f.y2 = 0.0; } // the filter's state, not its coefficients
@@ -85,6 +87,7 @@ struct Engine::Impl {
     std::atomic<bool> limiterOn { true };
     float trim[layerCount]; // synth.js, LAYER_AUDIO
     bool roomLayer[layerCount]; // LAYER_AUDIO room: the layer goes into the reverb through roomSend
+    bool echoLayer[layerCount]; // LAYER_AUDIO echo: the layer feeds the echo
 
     // audio side
     std::shared_ptr<const PlaySong> song;
@@ -106,6 +109,10 @@ struct Engine::Impl {
     double reverbWetNow = 0.0, roomWetNow = 0.0, roomSendNow = 0.0, roomToneSet = 7000.0;
     float roomSendsNow[layerCount] = {};
     detail::Biquad roomHp[2], roomLp[2];
+    detail::Echo echo;
+    double echoWetNow = 0.0, echoFeedbackNow = 0.0, echoToneSet = 2400.0;
+    bool echoAtOnce = true; // the next playing block with a tempo sets the echo's time at once (a start), later ones glide
+    double wetAt[CHUNK];    // the wet fade's value of each frame of the chunk, for the second pass
     int wetFadeFrames = 2400, wetFadeLeft = -1; // the wet returns' fade after a stop or a restart: frames left, -1 = none
     bool wetClosed = false;                     // a stop's fade is over: the wet returns stay at 0 until playing resumes
     bool quiet = false;                         // stopped, faded and no tone: the chain is skipped
@@ -119,6 +126,7 @@ struct Engine::Impl {
             muted[l] = false;
             trim[l] = static_cast<float>(detail::soundData().trim.at(LAYER_NAMES[l]));
             roomLayer[l] = detail::soundData().roomLayers.count(LAYER_NAMES[l]) > 0;
+            echoLayer[l] = detail::soundData().echoLayers.count(LAYER_NAMES[l]) > 0;
         }
         for (auto& p : peaks) p = 0.0f;
     }
@@ -150,6 +158,9 @@ struct Engine::Impl {
         made->roomSend = detail::drumParams(timbre.drums).roomSend;
         made->roomWet = mix.roomWet * detail::tunedValue("mix/room", "wet", tuning);
         made->roomTone = detail::tunedValue("mix/room", "tone", tuning);
+        made->echoWet = mix.echoWet;
+        made->echoFeedback = mix.echoFeedback;
+        made->echoTone = mix.echoTone;
         if (rate > 0) {
             if (!reverb) reverb = std::make_shared<detail::Convolver>(detail::normalizedNoise("reverb", 2, 3, rate));
             if (!room || roomSize != mix.roomSize) {
@@ -184,16 +195,20 @@ struct Engine::Impl {
             roomSendNow = setup->roomSend;
             for (int l = 0; l < layerCount; ++l) roomSendsNow[l] = static_cast<float>(setup->roomSends[l]);
             roomToneSet = setup->roomTone;
+            echoWetNow = setup->echoWet;
+            echoFeedbackNow = setup->echoFeedback;
+            echo.setTone(echoToneSet = setup->echoTone);
         }
         for (int c = 0; c < 2; ++c) {
             roomHp[c] = detail::highpass(120, 1, tones.sr);
             roomLp[c] = detail::lowpass(roomToneSet, 1, tones.sr);
         }
     }
-    // Audio thread: the sends empty (convolvers, room filters), as in the web's new graph at every play().
+    // Audio thread: the sends empty (convolvers, room filters, echo), as in the web's new graph at every play().
     void clearSends() {
         if (setup && setup->reverb) setup->reverb->reset();
         if (setup && setup->room) setup->room->reset();
+        echo.reset();
         for (detail::Biquad* f : { &roomHp[0], &roomHp[1], &roomLp[0], &roomLp[1] }) clear(*f);
     }
 
@@ -369,6 +384,8 @@ void Engine::prepare(double sampleRate) {
         m.panNow[l] = m.panTarget(l);
     }
     m.masterNow = m.master * m.master;
+    m.echo.prepare(sampleRate); // allocates: the line's size depends on the rate
+    m.echoAtOnce = true;
     m.settleSum();
     m.driveNow = m.drive;
     m.limiterEnv = 0.0;
@@ -403,10 +420,13 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
                 if (first) { // the places, the gain, the shelf and the sends at once, not a sweep from the middle
                     for (int l = 0; l < layerCount; ++l) m.panNow[l] = m.panTarget(l);
                     m.settleSum();
-                } else if (m.setup->roomTone != m.roomToneSet) { // new coefficients, the state stays (the web ramps the tone: design open point 9)
-                    const detail::Biquad f = detail::lowpass(m.setup->roomTone, 1, m.tones.sr);
-                    for (detail::Biquad& b : m.roomLp) { b.b0 = f.b0; b.b1 = f.b1; b.b2 = f.b2; b.a1 = f.a1; b.a2 = f.a2; }
-                    m.roomToneSet = m.setup->roomTone;
+                } else {
+                    if (m.setup->roomTone != m.roomToneSet) { // new coefficients, the state stays (the web ramps the tone: design open point 9)
+                        const detail::Biquad f = detail::lowpass(m.setup->roomTone, 1, m.tones.sr);
+                        for (detail::Biquad& b : m.roomLp) { b.b0 = f.b0; b.b1 = f.b1; b.b2 = f.b2; b.a1 = f.a1; b.a2 = f.a2; }
+                        m.roomToneSet = m.setup->roomTone;
+                    }
+                    if (m.setup->echoTone != m.echoToneSet) m.echo.setTone(m.echoToneSet = m.setup->echoTone);
                 }
             }
             m.hasPending = false;
@@ -429,7 +449,10 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
         for (Tone& t : m.tones.all) if (t.active) { if (t.delay > 0) t.active = false; else t.choke(0, 0.015, sr); }
         if (m.wetFadeLeft < 0) m.wetFadeLeft = m.wetFadeFrames;
     }
-    if (block.playing && (!m.wasPlaying || restarted)) m.restart(true); // the web builds its voices anew at every play()
+    if (block.playing && (!m.wasPlaying || restarted)) { // the web builds its voices (and its delay, with the time of the tempo) anew at every play()
+        m.restart(true);
+        m.echoAtOnce = true;
+    }
     if (block.playing && length > 0) {
         const bool jumped = m.wasPlaying && !restarted && std::fabs(block.beats - m.expected) > 1e-6;
         if (jumped) // held notes end (their release begins), hits ring out, what has not begun never will
@@ -451,6 +474,10 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
     }
     m.wasPlaying = block.playing;
     m.expected = block.beats + frames * step;
+    if (block.playing && step > 0) { // echoTime(bpm) = 60 / bpm * 0.75 with bpm = step * sr * 60; a tempo change glides (setTempo). A standing or stopped block leaves it.
+        m.echo.setTarget(0.75 / (step * sr), m.echoAtOnce);
+        m.echoAtOnce = false;
+    }
     // Stopped, the fade over and no tone left: the shelf and the limiter start empty, and the chain is skipped until playing resumes.
     if (block.playing) {
         m.quiet = false;
@@ -511,8 +538,10 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
         const Setup* s = m.setup.get();
         const double masterGainTarget = s ? s->masterGain : MASTER, shelfTarget = s ? s->shelfDb : 0.0, shelfHz = s ? s->shelfHz : 800.0;
         const double reverbWetTarget = s ? s->reverbWet : 0.0, roomWetTarget = s ? s->roomWet : 0.0, roomSendTarget = s ? s->roomSend : 0.0;
+        const double echoWetTarget = s ? s->echoWet : 0.0, echoFeedbackTarget = s ? s->echoFeedback : 0.0;
         float peak[layerCount + 1] = {};
-        // First pass: the layers into the dry sum (m = dry · master gain), the reverb's input (m and the drums' send) and the room's.
+        // First pass: the layers and the echo's return into the dry sum (m = dry · master gain), the reverb's input (m and the drums' send)
+        // and the room's. The wet fade's value of each frame is kept for the second pass.
         for (int i = 0; i < count; ++i) {
             // drive on the bass: a soft clipper, blended in so that 0 leaves the signal untouched
             m.driveNow += smoothDrive * (driveTarget - m.driveNow);
@@ -523,7 +552,7 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
                     x += amount * (std::tanh(x * push) * level - x);
                 }
             }
-            float sum[2] = { 0.0f, 0.0f }, room[2] = { 0.0f, 0.0f }, drumsSend[2] = { 0.0f, 0.0f };
+            float sum[2] = { 0.0f, 0.0f }, room[2] = { 0.0f, 0.0f }, drumsSend[2] = { 0.0f, 0.0f }, echoIn[2] = { 0.0f, 0.0f };
             for (int l = 0; l < layerCount; ++l) {
                 const float target = m.muted[l] ? 0.0f : m.fader[l] * m.fader[l];
                 m.gainNow[l] += smoothLevel * (target - m.gainNow[l]);
@@ -538,12 +567,23 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
                 room[0] += m.roomSendsNow[l] * x;
                 room[1] += m.roomSendsNow[l] * y;
                 if (m.roomLayer[l]) { drumsSend[0] += tl; drumsSend[1] += tr; }
+                if (m.echoLayer[l]) { echoIn[0] += tl; echoIn[1] += tr; }
             }
-            // The sum (synth.js 64, 91, 102): the master gain; the reverb hears it and the drums' send.
+            double wet = m.wetClosed ? 0.0 : 1.0;
+            if (m.wetFadeLeft >= 0) { // at 0 it stays 0 to the end of the chunk; after it the sends are emptied
+                wet = static_cast<double>(m.wetFadeLeft) / m.wetFadeFrames;
+                if (m.wetFadeLeft > 0) --m.wetFadeLeft;
+            }
+            m.wetAt[i] = wet;
+            m.echoWetNow += smoothLevel * (echoWetTarget - m.echoWetNow);
+            m.echoFeedbackNow += smoothLevel * (echoFeedbackTarget - m.echoFeedbackNow);
+            float echoOut[2];
+            m.echo.process(echoIn[0], echoIn[1], m.echoFeedbackNow, echoOut[0], echoOut[1]);
+            // The sum (synth.js 64, 91, 100, 102): the master gain; the echo's return is in it, so the reverb hears it and the drums' send.
             m.masterGainNow += smoothLevel * (masterGainTarget - m.masterGainNow);
             m.roomSendNow += smoothLevel * (roomSendTarget - m.roomSendNow);
             for (int c = 0; c < 2; ++c) {
-                const double dry = sum[c] * m.masterGainNow;
+                const double dry = (sum[c] + wet * m.echoWetNow * echoOut[c]) * m.masterGainNow;
                 m.mixed[c][i] = static_cast<float>(dry);
                 m.reverbIn[c][i] = static_cast<float>(dry + m.roomSendNow * drumsSend[c]);
                 m.roomIn[c][i] = room[c];
@@ -558,11 +598,7 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
         for (int i = 0; i < count; ++i) {
             m.reverbWetNow += smoothLevel * (reverbWetTarget - m.reverbWetNow);
             m.roomWetNow += smoothLevel * (roomWetTarget - m.roomWetNow);
-            double wet = m.wetClosed ? 0.0 : 1.0;
-            if (m.wetFadeLeft >= 0) { // at 0 it stays 0 to the end of the chunk; after it the sends are emptied
-                wet = static_cast<double>(m.wetFadeLeft) / m.wetFadeFrames;
-                if (m.wetFadeLeft > 0) --m.wetFadeLeft;
-            }
+            const double wet = m.wetAt[i];
             double bus[2];
             for (int c = 0; c < 2; ++c) {
                 const double room = m.roomLp[c].process(m.roomHp[c].process(m.roomOut[c][i])) * m.roomWetNow;

@@ -1,0 +1,596 @@
+[
+ {
+  "name": "echo-chords",
+  "track": {
+   "key": {
+    "root": "A",
+    "mode": "minor"
+   },
+   "bpm": 124,
+   "seed": 2,
+   "meter": [
+    4,
+    4
+   ],
+   "bars": [
+    {
+     "chord": {
+      "root": "A",
+      "quality": "min"
+     },
+     "beats": 4
+    },
+    {
+     "chord": {
+      "root": "G",
+      "quality": "maj"
+     },
+     "beats": 4
+    },
+    {
+     "chord": {
+      "root": "F",
+      "quality": "maj"
+     },
+     "beats": 4
+    },
+    {
+     "chord": {
+      "root": "G",
+      "quality": "maj"
+     },
+     "beats": 4
+    }
+   ],
+   "tags": {
+    "drums": [
+     "driving",
+     "heavy"
+    ],
+    "bass": [
+     "gritty"
+    ],
+    "synths": [],
+    "rhythm": [
+     "straight"
+    ],
+    "mood": [
+     "bright"
+    ],
+    "development": [
+     "fullFromStart"
+    ],
+    "drumSound": [
+     "punchy",
+     "snappy"
+    ],
+    "bassSound": [
+     "resonant"
+    ],
+    "chordSound": [
+     "biting"
+    ],
+    "padSound": [
+     "thick"
+    ]
+   },
+   "voices": {
+    "drums": {
+     "id": "sample",
+     "variant": "standard"
+    },
+    "bass": {
+     "id": "sample",
+     "variant": "pick"
+    },
+    "chords": {
+     "id": "sample",
+     "variant": "guitar"
+    },
+    "pad": {
+     "id": "sample",
+     "variant": "strings"
+    },
+    "lead": {
+     "id": "sample",
+     "variant": "flute"
+    },
+    "percussion": {
+     "id": "sample",
+     "variant": "studio"
+    }
+   },
+   "layers": {
+    "drums": false,
+    "bass": false,
+    "chords": true,
+    "pad": false,
+    "lead": false,
+    "percussion": false
+   },
+   "jobs": {
+    "lead": "melody",
+    "percussion": "mixed"
+   },
+   "length": 8,
+   "variety": true,
+   "form": {
+    "sections": [
+     {
+      "type": "verse",
+      "bars": 4
+     },
+     {
+      "type": "chorus",
+      "bars": 4
+     }
+    ],
+    "feel": {
+     "structure": 0.6,
+     "dynamics": 0.6,
+     "pauses": 0.4,
+     "randomness": 0.5
+    }
+   }
+  },
+  "sound": {
+   "drums": {
+    "kickPunch": 0.5,
+    "kickLength": 0.5,
+    "snareTone": 0.5,
+    "snareSnap": 0.5,
+    "hatBright": 0.5,
+    "hatLength": 0.5,
+    "room": 0
+   },
+   "bass": {
+    "sub": 0,
+    "fuzz": 0,
+    "overdrive": 0,
+    "distortion": 0,
+    "pluck": 0.5,
+    "cutoff": 0.5,
+    "resonance": 0.5,
+    "roundness": 0,
+    "vibrato": 0,
+    "chorus": 0
+   },
+   "chords": {
+    "brightness": 0.5,
+    "length": 0.5,
+    "vibrato": 0,
+    "chorus": 0,
+    "tremolo": 0,
+    "fuzz": 0,
+    "overdrive": 0,
+    "distortion": 0
+   },
+   "pad": {
+    "attack": 0.5,
+    "cutoff": 0.5,
+    "lfoSpeed": 0.5,
+    "lfoDepth": 0.5,
+    "shimmer": 0,
+    "thickness": 0.5,
+    "fuzz": 0,
+    "overdrive": 0,
+    "distortion": 0,
+    "vibrato": 0,
+    "chorus": 0
+   },
+   "lead": {
+    "fuzz": 0,
+    "overdrive": 0,
+    "distortion": 0,
+    "vibrato": 0,
+    "chorus": 0
+   },
+   "master": {
+    "brightness": 0.5,
+    "echo": 1,
+    "reverb": 0,
+    "width": 0.5,
+    "roomSize": 0.5,
+    "roomWet": 0
+   }
+  },
+  "limiter": false,
+  "tail": 2.5
+ },
+ {
+  "name": "echo-pad-slow",
+  "track": {
+   "key": {
+    "root": "A",
+    "mode": "minor"
+   },
+   "bpm": 45,
+   "seed": 2,
+   "meter": [
+    4,
+    4
+   ],
+   "bars": [
+    {
+     "chord": {
+      "root": "A",
+      "quality": "min"
+     },
+     "beats": 4
+    },
+    {
+     "chord": {
+      "root": "G",
+      "quality": "maj"
+     },
+     "beats": 4
+    },
+    {
+     "chord": {
+      "root": "F",
+      "quality": "maj"
+     },
+     "beats": 4
+    },
+    {
+     "chord": {
+      "root": "G",
+      "quality": "maj"
+     },
+     "beats": 4
+    }
+   ],
+   "tags": {
+    "drums": [
+     "halftime",
+     "loose"
+    ],
+    "bass": [
+     "calm"
+    ],
+    "synths": [
+     "widePad",
+     "warm"
+    ],
+    "rhythm": [],
+    "mood": [
+     "dreamy"
+    ],
+    "development": [
+     "buildsSlowly"
+    ],
+    "drumSound": [
+     "roomy"
+    ],
+    "bassSound": [
+     "round"
+    ],
+    "chordSound": [
+     "mellow"
+    ],
+    "padSound": [
+     "airy",
+     "swelling"
+    ]
+   },
+   "voices": {
+    "drums": {
+     "id": "sample",
+     "variant": "brushes"
+    },
+    "bass": {
+     "id": "sample",
+     "variant": "finger"
+    },
+    "chords": {
+     "id": "sample",
+     "variant": "epiano"
+    },
+    "pad": {
+     "id": "sample",
+     "variant": "strings"
+    },
+    "lead": {
+     "id": "sample",
+     "variant": "flute"
+    },
+    "percussion": {
+     "id": "sample",
+     "variant": "studio"
+    }
+   },
+   "layers": {
+    "drums": false,
+    "bass": false,
+    "chords": false,
+    "pad": true,
+    "lead": false,
+    "percussion": false
+   },
+   "jobs": {
+    "lead": "melody",
+    "percussion": "mixed"
+   },
+   "length": 8,
+   "variety": true,
+   "form": {
+    "sections": [
+     {
+      "type": "verse",
+      "bars": 4
+     },
+     {
+      "type": "chorus",
+      "bars": 4
+     }
+    ],
+    "feel": {
+     "structure": 0.6,
+     "dynamics": 0.6,
+     "pauses": 0.4,
+     "randomness": 0.5
+    }
+   }
+  },
+  "sound": {
+   "drums": {
+    "kickPunch": 0.5,
+    "kickLength": 0.5,
+    "snareTone": 0.5,
+    "snareSnap": 0.5,
+    "hatBright": 0.5,
+    "hatLength": 0.5,
+    "room": 0
+   },
+   "bass": {
+    "sub": 0,
+    "fuzz": 0,
+    "overdrive": 0,
+    "distortion": 0,
+    "pluck": 0.5,
+    "cutoff": 0.5,
+    "resonance": 0.5,
+    "roundness": 0,
+    "vibrato": 0,
+    "chorus": 0
+   },
+   "chords": {
+    "brightness": 0.5,
+    "length": 0.5,
+    "vibrato": 0,
+    "chorus": 0,
+    "tremolo": 0,
+    "fuzz": 0,
+    "overdrive": 0,
+    "distortion": 0
+   },
+   "pad": {
+    "attack": 0.5,
+    "cutoff": 0.5,
+    "lfoSpeed": 0.5,
+    "lfoDepth": 0.5,
+    "shimmer": 0,
+    "thickness": 0.5,
+    "fuzz": 0,
+    "overdrive": 0,
+    "distortion": 0,
+    "vibrato": 0,
+    "chorus": 0
+   },
+   "lead": {
+    "fuzz": 0,
+    "overdrive": 0,
+    "distortion": 0,
+    "vibrato": 0,
+    "chorus": 0
+   },
+   "master": {
+    "brightness": 0.5,
+    "echo": 1,
+    "reverb": 0,
+    "width": 0.5,
+    "roomSize": 0.5,
+    "roomWet": 0
+   }
+  },
+  "limiter": false,
+  "tail": 2.5
+ },
+ {
+  "name": "echo-lead",
+  "track": {
+   "key": {
+    "root": "A",
+    "mode": "minor"
+   },
+   "bpm": 76,
+   "seed": 2,
+   "meter": [
+    4,
+    4
+   ],
+   "bars": [
+    {
+     "chord": {
+      "root": "A",
+      "quality": "min"
+     },
+     "beats": 4
+    },
+    {
+     "chord": {
+      "root": "G",
+      "quality": "maj"
+     },
+     "beats": 4
+    },
+    {
+     "chord": {
+      "root": "F",
+      "quality": "maj"
+     },
+     "beats": 4
+    },
+    {
+     "chord": {
+      "root": "G",
+      "quality": "maj"
+     },
+     "beats": 4
+    }
+   ],
+   "tags": {
+    "drums": [
+     "halftime",
+     "loose"
+    ],
+    "bass": [
+     "calm",
+     "deepFat"
+    ],
+    "synths": [
+     "warm"
+    ],
+    "rhythm": [
+     "syncopated"
+    ],
+    "mood": [],
+    "development": [
+     "fullFromStart"
+    ],
+    "drumSound": [
+     "roomy"
+    ],
+    "bassSound": [
+     "sub",
+     "round"
+    ],
+    "chordSound": [
+     "biting"
+    ],
+    "padSound": []
+   },
+   "voices": {
+    "drums": {
+     "id": "sample",
+     "variant": "rimshot"
+    },
+    "bass": {
+     "id": "sample",
+     "variant": "finger"
+    },
+    "chords": {
+     "id": "sample",
+     "variant": "muted"
+    },
+    "pad": {
+     "id": "sample",
+     "variant": "strings"
+    },
+    "lead": {
+     "id": "sample",
+     "variant": "flute"
+    },
+    "percussion": {
+     "id": "sample",
+     "variant": "studio"
+    }
+   },
+   "layers": {
+    "drums": false,
+    "bass": false,
+    "chords": false,
+    "pad": false,
+    "lead": true,
+    "percussion": false
+   },
+   "jobs": {
+    "lead": "callResponse",
+    "percussion": "mixed"
+   },
+   "length": 8,
+   "variety": true,
+   "form": {
+    "sections": [
+     {
+      "type": "verse",
+      "bars": 4
+     },
+     {
+      "type": "chorus",
+      "bars": 4
+     }
+    ],
+    "feel": {
+     "structure": 0.6,
+     "dynamics": 0.6,
+     "pauses": 0.4,
+     "randomness": 0.5
+    }
+   }
+  },
+  "sound": {
+   "drums": {
+    "kickPunch": 0.5,
+    "kickLength": 0.5,
+    "snareTone": 0.5,
+    "snareSnap": 0.5,
+    "hatBright": 0.5,
+    "hatLength": 0.5,
+    "room": 0
+   },
+   "bass": {
+    "sub": 0,
+    "fuzz": 0,
+    "overdrive": 0,
+    "distortion": 0,
+    "pluck": 0.5,
+    "cutoff": 0.5,
+    "resonance": 0.5,
+    "roundness": 0,
+    "vibrato": 0,
+    "chorus": 0
+   },
+   "chords": {
+    "brightness": 0.5,
+    "length": 0.5,
+    "vibrato": 0,
+    "chorus": 0,
+    "tremolo": 0,
+    "fuzz": 0,
+    "overdrive": 0,
+    "distortion": 0
+   },
+   "pad": {
+    "attack": 0.5,
+    "cutoff": 0.5,
+    "lfoSpeed": 0.5,
+    "lfoDepth": 0.5,
+    "shimmer": 0,
+    "thickness": 0.5,
+    "fuzz": 0,
+    "overdrive": 0,
+    "distortion": 0,
+    "vibrato": 0,
+    "chorus": 0
+   },
+   "lead": {
+    "fuzz": 0,
+    "overdrive": 0,
+    "distortion": 0,
+    "vibrato": 0,
+    "chorus": 0
+   },
+   "master": {
+    "brightness": 0.5,
+    "echo": 0.75,
+    "reverb": 0,
+    "width": 0.5,
+    "roomSize": 0.5,
+    "roomWet": 0
+   }
+  },
+  "limiter": false,
+  "tail": 2.5
+ }
+]

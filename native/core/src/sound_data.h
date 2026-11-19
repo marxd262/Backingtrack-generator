@@ -16,7 +16,8 @@ struct SoundData {
     std::map<std::string, std::map<std::string, int>> hitKeys;    // "drums", "percussion", "drums/sample/rimshot" -> hit name -> key
     std::map<std::string, double> trim;                           // layerAudio: layer -> trim
     std::set<std::string> roomLayers;                             // layerAudio: the layers with room: true (their sum goes into the reverb)
-    std::map<std::string, double> kitPan;                         // synth.js KIT_PAN: hit name -> place in the kit (a hit not named stays in the middle)
+    std::set<std::string> echoLayers;                             // layerAudio: the layers with echo: true (chords, pad, lead: their trim output feeds the echo)
+    std::map<std::string, double> kitPan;                        // synth.js KIT_PAN: hit name -> place in the kit (a hit not named stays in the middle)
 };
 const SoundData& soundData(); // parsed on first use
 using Tuning = std::map<std::string, std::map<std::string, double>>;

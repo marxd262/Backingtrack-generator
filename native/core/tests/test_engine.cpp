@@ -4,9 +4,11 @@
 #include "btg/transport.h"
 
 #include "../src/convolver.h"
+#include "../src/echo.h"
 #include "../src/sampler.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <complex>
 #include <cstdio>
@@ -99,6 +101,20 @@ static std::shared_ptr<const btg::Pack> tonePack(int rootKey, float amplitude, d
     pack->zones.push_back(zone);
     return pack;
 }
+// A format-1 hit pack whose one zone answers every key (the percussion of the tempo test): decaying noise, mono.
+static std::shared_ptr<const btg::Pack> anyKey() {
+    auto pack = std::make_shared<btg::Pack>();
+    pack->samples.push_back({ 0, 8000, 22050.0, 0, 0 });
+    unsigned int noise = 11;
+    for (int i = 0; i < 8000; ++i) {
+        noise = noise * 1664525u + 1013904223u;
+        pack->audio.push_back((static_cast<float>(noise >> 8) / 8388608.0f - 1.0f) * std::exp(-i / 1500.0f));
+    }
+    btg::Pack::Zone zone; // keys 0 to 127
+    zone.release = 0.04;
+    pack->zones.push_back(zone);
+    return pack;
+}
 // The packs of the tests by id; any other id is missing, as the shell's source would say.
 static std::shared_ptr<const btg::Pack> source(const std::string& id) {
     if (id == "drums-naked") return kit();
@@ -106,6 +122,9 @@ static std::shared_ptr<const btg::Pack> source(const std::string& id) {
     if (id == "bass-finger" || id == "bass-upright") return tonePack(45, 0.5f, 0.2);
     if (id == "bass-pick") return tonePack(45, 0.25f, 0.2);
     if (id == "pad-strings") return tonePack(57, 0.5f, 4.0); // the engine caps the release at 2 s
+    if (id == "chords-funk") return tonePack(57, 0.3f, 0.3);
+    if (id == "lead-flute") return tonePack(69, 0.3f, 0.2);
+    if (id == "percussion-studio") return anyKey();
     throw std::runtime_error("not in the test: " + id);
 }
 
@@ -115,7 +134,7 @@ static double gainDb(const btg::detail::Biquad& f, double hz, double sr) {
     return 20 * std::log10(std::abs((f.b0 + f.b1 * z + f.b2 * z * z) / (1.0 + f.a1 * z + f.a2 * z * z)));
 }
 
-struct Result { std::vector<float> left; double rms = 0.0, peak = 0.0, rmsRight = 0.0; };
+struct Result { std::vector<float> left; double rms = 0.0, peak = 0.0, rmsRight = 0.0; bool finite = true; };
 
 static double rmsOf(const std::vector<float>& x, size_t from, size_t to) {
     double squares = 0.0;
@@ -169,7 +188,8 @@ static Result render(btg::Engine& engine, btg::Transport& transport, double seco
             r.left.push_back(l[i]);
             r.rms += l[i] * l[i];
             r.rmsRight += rr[i] * rr[i];
-            r.peak = std::max(r.peak, static_cast<double>(std::fabs(l[i])));
+            r.peak = std::max(r.peak, static_cast<double>(std::max(std::fabs(l[i]), std::fabs(rr[i]))));
+            r.finite = r.finite && std::isfinite(l[i]) && std::isfinite(rr[i]);
         }
         done += block.frames;
     }
@@ -279,6 +299,57 @@ int main(int argc, char** argv) {
         const double perChannel = (energy(reverb[0], 0.0, 2.0) + energy(reverb[1], 0.0, 2.0)) / 2;
         CHECK(std::fabs(10 * std::log10(perChannel / (std::pow(10.0, -5.8) * 44100.0 * 44100.0 * 2.0 / sr))) < 0.01);
     }
+    // echo.h: at 20 bpm the echo comes 2.25 s late (synth.js echoTime: 60 / bpm * 0.75) and fits its 3 s line, also at 96 kHz; with
+    // feedback 0.5 it comes again after twice the time and the browser's 128 frames in the loop (inside the 10 ms looked at), nothing
+    // between; a longer time stops at 3 s (createDelay(3)); a new time glides
+    // with the time constant 0.05 s: 63.2 % of the way after 0.05 s, within 1e-4 s after 0.5 s.
+    for (const double sr : { 48000.0, 96000.0 }) {
+        btg::detail::Echo echo;
+        echo.prepare(sr);
+        echo.setTone(2400);
+        echo.setTarget(60.0 / 20 * 0.75, true);
+        CHECK(echo.delay() == 2.25);
+        std::vector<float> out(static_cast<size_t>(4.7 * sr));
+        for (size_t i = 0; i < out.size(); ++i) { float right = 0.0f; echo.process(i == 0 ? 1.0f : 0.0f, 0.0f, 0.5, out[i], right); }
+        size_t once = 0;
+        while (once < out.size() && std::fabs(out[once]) <= 1e-3) ++once;
+        CHECK(once == static_cast<size_t>(std::llround(2.25 * sr)));
+        double between = 0.0, again = 0.0;
+        for (size_t i = once + static_cast<size_t>(0.1 * sr); i < 2 * once; ++i) between = std::max(between, std::fabs(static_cast<double>(out[i])));
+        for (size_t i = 2 * once; i < 2 * once + static_cast<size_t>(0.01 * sr); ++i) again = std::max(again, std::fabs(static_cast<double>(out[i])));
+        CHECK(between < 1e-6 && again > 1e-3);
+        size_t second = once + static_cast<size_t>(0.1 * sr); // the second echo's first frame: exactly 128 frames late (the browser's cycle)
+        while (second < out.size() && std::fabs(out[second]) <= 1e-9) ++second;
+        CHECK(second == 2 * once + 128);
+        echo.setTarget(4.0, true);
+        CHECK(echo.delay() == 3.0);
+        echo.setTarget(0.45, true);
+        echo.setTarget(0.3, false);
+        float l = 0.0f, r = 0.0f;
+        for (int i = 0; i < static_cast<int>(0.05 * sr); ++i) echo.process(0.0f, 0.0f, 0.0, l, r);
+        CHECK(std::fabs(echo.delay() - (0.3 + 0.15 * std::exp(-1.0))) < 1e-4);
+        for (int i = 0; i < static_cast<int>(0.45 * sr); ++i) echo.process(0.0f, 0.0f, 0.0, l, r);
+        CHECK(std::fabs(echo.delay() - 0.3) < 1e-4);
+        // A time of 1000.25 frames reads linearly between two frames (Chromium delay.cc): an impulse comes out as its neighbours 1000 and
+        // 1001 frames later weighted 0.75 and 0.25, before the tone filter; the filter sits behind that and is linear, so the output is
+        // 0.75 r[n] + 0.25 r[n - 1] for r = the same filter's answer to an impulse at exactly 1000 frames (whole frames: no interpolation).
+        {
+            btg::detail::Echo whole, fraction;
+            for (btg::detail::Echo* e : { &whole, &fraction }) { e->prepare(sr); e->setTone(2400); }
+            whole.setTarget(1000.0 / sr, true);
+            fraction.setTarget(1000.25 / sr, true);
+            std::vector<float> r(1200), x(1200);
+            double worst = 0.0, level = 0.0;
+            for (size_t i = 0; i < r.size(); ++i) {
+                float unused = 0.0f, outFraction = 0.0f;
+                whole.process(i == 0 ? 1.0f : 0.0f, 0.0f, 0.0, r[i], unused);
+                fraction.process(i == 0 ? 1.0f : 0.0f, 0.0f, 0.0, outFraction, unused);
+                x[i] = outFraction;
+                if (i >= 1000) { worst = std::max(worst, std::fabs(static_cast<double>(outFraction) - (0.75 * r[i] + 0.25 * r[i - 1]))); level = std::max(level, std::fabs(static_cast<double>(r[i]))); }
+            }
+            CHECK(level > 1e-3 && worst < 1e-7 && x[999] == 0.0f);
+        }
+    }
 
     // Engine with the fixture track.
     if (argc < 2) { std::printf("usage: btg_engine_tests <track.json>\n"); return 2; }
@@ -306,6 +377,104 @@ int main(int argc, char** argv) {
     CHECK(play(480, 0.0f, true, 0.0).peak == 0.0);          // muted layers are silent
     CHECK(play(480, 0.8f, false, 0.0).left != a.left);      // the drive is audible
     CHECK(play(480, 0.0f, false, 64.0).rms > 0.01);         // starting inside the song plays
+
+    // Tempo extremes: all six layers (test packs), reverb, room (1 s) and echo up, the limiter on; at 20 and at 400 bpm, 20 s each: every
+    // sample finite, the peak below 1.0, and the render takes less than a quarter of the time it plays (the load limit of the plan).
+    // Both start at beat 64, where all six layers play (20 bpm for 20 s covers only 6.7 beats), and every layer has a peak after the render
+    // (this also catches a pack that did not load).
+    {
+        std::string band = track;
+        for (const char* layer : { "chords", "pad", "lead", "percussion" }) {
+            const std::string off = std::string("\"") + layer + "\":false";
+            band.replace(band.find(off), off.size(), std::string("\"") + layer + "\":true");
+        }
+        band.replace(band.find("\"lead\":\"off\""), 12, "\"lead\":\"melody\""); // the lead layer plays only with a job
+        const std::vector<btg::Event> events = btg::buildEvents(band);
+        int layers = 0;
+        for (const char* name : { "drums", "bass", "chords", "pad", "lead", "percussion" })
+            layers += std::any_of(events.begin(), events.end(), [&](const btg::Event& e) { return e.layer == name; });
+        CHECK(layers == 6);
+        for (const double bpm : { 20.0, 400.0 }) {
+            btg::Engine engine;
+            engine.setPackSource(source);
+            engine.setSound(R"({"master":{"reverb":1,"echo":1,"roomWet":1,"roomSize":1}})");
+            engine.setTrack(band);
+            engine.setMaster(0.7f); // the test packs are loud: with all six layers playing the output reaches the clamp at the fader's 1 (peak 1.000)
+            engine.prepare(rate);
+            btg::Transport t;
+            t.play(64.0, bpm);
+            const auto began = std::chrono::steady_clock::now();
+            const Result r = render(engine, t, 20.0, 480);
+            const double load = std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count() / 20.0;
+            std::printf("tempo %.0f bpm: peak %.3f, load %.1f %%\n", bpm, r.peak, 100 * load);
+            CHECK(r.finite && r.peak < 1.0 && r.rms > 0.001);
+            for (int l = 0; l < btg::Engine::layerCount; ++l) {
+                const bool sounded = engine.takePeak(l) > 0.0f;
+                if (!sounded) std::printf("tempo %.0f bpm: the layer %s is silent\n", bpm, btg::detail::LAYER_NAMES[l]);
+                CHECK(sounded);
+            }
+            CHECK(load < 0.25);
+        }
+        // The echo's time in the engine, with the pad alone (sustained sines, echo 1, reverb and room 0, no limiter).
+        std::string pad = band;
+        for (const char* layer : { "drums", "bass", "chords", "lead", "percussion" }) {
+            const std::string on = std::string("\"") + layer + "\":true";
+            pad.replace(pad.find(on), on.size(), std::string("\"") + layer + "\":false");
+        }
+        const auto engineWith = [&](const char* sound) {
+            auto e = std::make_unique<btg::Engine>();
+            e->setPackSource(source);
+            e->setSound(sound);
+            e->setTrack(pad);
+            e->setLimiter(false);
+            e->prepare(rate);
+            return e;
+        };
+        const char* ECHO = R"({"master":{"reverb":0,"echo":0.25,"roomWet":0}})"; // feedback 0.24: the repeats die within a second
+        const char* NO_ECHO = R"({"master":{"reverb":0,"echo":0,"roomWet":0}})";
+        // A start sets the time at once, never glides from the old tempo: an engine that played at 120 bpm, stopped and starts at 60 bpm
+        // sounds exactly as a fresh one started at 60 bpm (a glide from 0.375 s to 0.75 s would show for the first 0.3 s).
+        {
+            auto used = engineWith(ECHO), fresh = engineWith(ECHO);
+            btg::Transport t, t2;
+            t.play(0.0, 120.0);
+            render(*used, t, 2.0, 480);
+            t.stop();
+            render(*used, t, 0.3, 480);
+            t.play(0.0, 60.0);
+            t2.play(0.0, 60.0);
+            const Result a = render(*used, t, 3.0, 480), b = render(*fresh, t2, 3.0, 480);
+            double most = 0.0;
+            for (size_t i = 0; i < a.left.size(); ++i) most = std::max(most, static_cast<double>(std::fabs(a.left[i] - b.left[i])));
+            CHECK(b.peak > 0.01 && most == 0.0);
+        }
+        // A tempo change while playing glides: the wet part (echo minus its dry twin) of a pad that plays at 60 bpm and goes to 70 bpm at
+        // 1.5 s has no jump (its largest step from one frame to the next stays below 0.08 of its level over the next 0.2 s; a jump of the
+        // echo's time from 0.75 s to 0.643 s breaks the sines by a good part of their level), and the glide arrives: from 2.6 s (the repeats
+        // of the glide have died) the wet part equals that of an engine that played at 70 bpm from the start (the pad's sine starts with its note).
+        {
+            const auto wetPart = [&](double startBpm, double changeAt, double toBpm) {
+                auto e = engineWith(ECHO), dry = engineWith(NO_ECHO);
+                btg::Transport t[2];
+                std::vector<double> out[2];
+                std::unique_ptr<btg::Engine>* both[2] = { &e, &dry };
+                for (int k = 0; k < 2; ++k) t[k].play(0.0, startBpm);
+                const auto run = [&](double seconds) { for (int k = 0; k < 2; ++k) for (const float x : render(**both[k], t[k], seconds, 480).left) out[k].push_back(x); };
+                if (changeAt > 0) { run(changeAt); for (btg::Transport& x : t) x.setTempo(toBpm); run(3.4 - changeAt); } else run(3.4);
+                for (size_t i = 0; i < out[0].size(); ++i) out[0][i] -= out[1][i];
+                return out[0];
+            };
+            const std::vector<double> changed = wetPart(60.0, 1.5, 70.0), steady = wetPart(70.0, 0.0, 0.0);
+            const size_t from = static_cast<size_t>(1.5 * rate), to = from + rate / 5;
+            double level = 0.0, step = 0.0;
+            for (size_t i = from; i < to; ++i) { level = std::max(level, std::fabs(changed[i])); step = std::max(step, std::fabs(changed[i] - changed[i - 1])); }
+            double gap = 0.0, rms = 0.0;
+            for (size_t i = static_cast<size_t>(2.6 * rate); i < static_cast<size_t>(3.3 * rate); ++i) { gap += (changed[i] - steady[i]) * (changed[i] - steady[i]); rms += steady[i] * steady[i]; }
+            std::printf("echo glide: step %.3f of level %.4f, settled gap %.4f of rms\n", step / level, level, std::sqrt(gap / rms));
+            CHECK(level > 0.005 && step < 0.08 * level); // measured 0.030; a jump of the time: 0.137
+            CHECK(std::sqrt(gap / rms) < 0.15); // measured 0.068 (the note's length in seconds is fixed when it starts); a time that never arrives: 1.74
+        }
+    }
 
     // Live: a new track, a jump and a loop while playing do not break the stream.
     btg::Engine engine;

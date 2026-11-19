@@ -222,5 +222,27 @@ const sendCases = [
 ];
 write('sends.json', sendCases);
 console.log(`sends.json: ${sendCases.length} cases`);
+
+// Task 15: the echo (dotted eighths on chords, pad and lead, taken behind the trim), wet: no reverb, no room, no limiter, 2.5 s past the
+// song. At the neutral sound (wet 0.3, feedback 0.38) it lies about 10 dB under its layer and could hardly be seen: the solo cases turn it up.
+CLAIMS.echo = (c, events) => (sendsOf(c).echo > 0 && ['chords', 'pad', 'lead'].some((l) => plays(events, l)) ? '' : 'no echo on chords, pad or lead');
+CLAIMS.noReverb = (c) => (sendsOf(c).reverb === 0 && sendsOf(c).room === 0 ? '' : 'the reverb or the room is on');
+const ECHO_ONLY = { 'master.reverb': 0, 'master.roomWet': 0 };
+const echoCases = [
+  claimed({ name: 'echo-chords', track: samples.find((c) => c.name === 'chords-guitar').track, sound: set(neutralSound, { ...ECHO_ONLY, 'master.echo': 1 }), ...WET }, ['echo', 'noReverb']),
+  claimed({ name: 'echo-pad-slow', track: track('dreamy', { layers: { pad: true }, voices: { pad: { id: 'sample', variant: 'strings' } }, extra: { bpm: 45 } }),
+    sound: set(neutralSound, { ...ECHO_ONLY, 'master.echo': 1 }), ...WET }, ['echo', 'noReverb']),
+  claimed({ name: 'echo-lead', track: samples.find((c) => c.name === 'lead-flute').track, sound: set(neutralSound, { ...ECHO_ONLY, 'master.echo': 0.75 }), ...WET }, ['echo', 'noReverb']),
+];
+write('echo.json', echoCases);
+// Task 15, and Task 16's three timbres with their sends: the whole band, every send on, at the neutral sound and in the styles psych and dreamy.
+// Their claims only say that a send is on; the solo cases (sends.json, echo.json) prove the sends.
+const wetCases = [
+  claimed({ name: 'wet-neutral', track: funk, sound: neutralSound, ...WET }, ['reverb', 'room', 'echo']),
+  claimed({ name: 'wet-psych', track: bands.psych, sound: styleSound(bands.psych), ...WET }, ['reverb', 'room', 'echo']),
+  claimed({ name: 'wet-dreamy', track: bands.dreamy, sound: styleSound(bands.dreamy), ...WET }, ['reverb', 'roomSend', 'room', 'echo']),
+];
+write('wet.json', wetCases);
+console.log(`echo.json: ${echoCases.length} cases, wet.json: ${wetCases.length} cases`);
 for (const p of problems) console.error(`ERROR ${p}`);
 process.exit(problems.length ? 1 : 0);

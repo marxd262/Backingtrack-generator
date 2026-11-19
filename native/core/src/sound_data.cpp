@@ -25,6 +25,7 @@ const SoundData& soundData() {
         for (const auto& [layer, audio] : j.at("layerAudio").items()) {
             out.trim[layer] = audio.at("trim").get<double>();
             if (audio.value("room", false)) out.roomLayers.insert(layer);
+            if (audio.value("echo", false)) out.echoLayers.insert(layer);
         }
         out.kitPan = j.at("kitPan").get<std::map<std::string, double>>();
         return out;
