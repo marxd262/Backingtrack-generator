@@ -253,7 +253,7 @@ const mixCases = STYLE_PRESETS.map((s) => claimed({ name: `mix-${s.id}`, track: 
 const SIX = { drums: true, bass: true, chords: true, pad: true, lead: true, percussion: true };
 const funkAt = (bpm, form) => track('funk', { layers: SIX, extra: { bpm, form } });
 const slow = funkAt(20, { sections: [{ type: 'verse', bars: 2 }, { type: 'chorus', bars: 2 }] }), fast = funkAt(400, bands.funk.form);
-for (const [name, t] of [['mix-funk-20bpm', slow], ['mix-funk-400bpm', fast]]) mixCases.push(claimed({ name, track: t, sound: styleSound(t), tail: 2.5 }, ['reverb', 'room', 'echo']));
+for (const [name, t] of [['mix-funk-20bpm', slow], ['mix-funk-400bpm', fast]]) mixCases.push(claimed({ name, track: t, sound: styleSound(t), tail: 2.5, peakBelow: 0 }, ['reverb', 'room', 'echo'])); // peakBelow 0: the plan's "below full scale", asserted on the native peak
 // The fine value mix/bus on is 0 by default (tunables.js): the nine cases above run the old limiter alone, shelf -> limiter at -10 dB.
 // The glue compressor (on 1: glue, its gain, limiter at -2 dBFS) is the user's to switch on; three styles measure it, the loudest ones and one
 // with a dense envelope.

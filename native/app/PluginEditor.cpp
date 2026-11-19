@@ -53,36 +53,36 @@ Done control (BackingtrackProcessor& p, const juce::var& message) {
     Done done;
     const auto started = juce::Time::getMillisecondCounterHiRes();
     const auto type = message["type"].toString();
-    if (type == "track") {
-        try {
-            p.engine.setTrack (message["json"].toString().toStdString());
-        } catch (const std::exception& e) {
-            done.failed = e.what();
+    // An exception must not leave this job (the thread pool would end the process): every message's call is inside the try, and
+    // what it says goes back as the failure (makeVoice and a convolver's constructor can throw, in tuning and timbre as in track and pack).
+    try {
+        if (type == "track") p.engine.setTrack (message["json"].toString().toStdString());
+        else if (type == "voices") p.engine.setVoices (message["json"].toString().toStdString());
+        else if (type == "tuning") p.engine.setTuning (message["json"].toString().toStdString());
+        else if (type == "timbre") p.engine.setSound (message["json"].toString().toStdString());
+        else if (type == "pack") p.pack (message["id"].toString().toStdString());
+        else if (type == "play") {
+            p.playsFile = false;
+            p.transport.setLoop (0.0, 0.0);
+            // shortcut: every start of the generator is delayed by the web app's 0.15 s (play.js LEAD), during which the clock stands and the
+            // sum's compressors settle on silence; starting at once would need the chain's state aged by that time instead (a loaded file has none).
+            p.transport.play ((double) message["startBeats"], (double) message["bpm"], 0.15);
+        } else if (type == "stop") p.transport.stop();
+        else if (type == "tempo") p.transport.setTempo ((double) message["bpm"]);
+        else if (type == "seek") p.transport.seek ((double) message["beats"]);
+        else if (type == "loop") p.transport.setLoop ((double) message["start"], (double) message["end"]);
+        else if (type == "playFile") {
+            p.playsFile = true; // the page sets and clears the loop itself
+            if (message.hasProperty ("rate")) p.fileRate = juce::jlimit (0.25, 2.0, (double) message["rate"]);
+            p.transport.play ((double) message["from"], 60.0 * p.fileRate); // one beat = one second of the track
+        } else if (type == "fileRate") { // speed of the loaded track, 1 = as recorded
+            p.fileRate = juce::jlimit (0.25, 2.0, (double) message["rate"]);
+            if (p.playsFile) p.transport.setTempo (60.0 * p.fileRate);
         }
-        done.status = p.engine.voiceStatus();
-    } else if (type == "voices") {
-        p.engine.setVoices (message["json"].toString().toStdString());
-        done.status = p.engine.voiceStatus();
-    } else if (type == "tuning") p.engine.setTuning (message["json"].toString().toStdString());
-    else if (type == "timbre") p.engine.setSound (message["json"].toString().toStdString());
-    else if (type == "pack") {
-        try { p.pack (message["id"].toString().toStdString()); } catch (const std::exception& e) { done.failed = e.what(); }
-    } else if (type == "play") {
-        p.playsFile = false;
-        p.transport.setLoop (0.0, 0.0);
-        p.transport.play ((double) message["startBeats"], (double) message["bpm"]);
-    } else if (type == "stop") p.transport.stop();
-    else if (type == "tempo") p.transport.setTempo ((double) message["bpm"]);
-    else if (type == "seek") p.transport.seek ((double) message["beats"]);
-    else if (type == "loop") p.transport.setLoop ((double) message["start"], (double) message["end"]);
-    else if (type == "playFile") {
-        p.playsFile = true; // the page sets and clears the loop itself
-        if (message.hasProperty ("rate")) p.fileRate = juce::jlimit (0.25, 2.0, (double) message["rate"]);
-        p.transport.play ((double) message["from"], 60.0 * p.fileRate); // one beat = one second of the track
-    } else if (type == "fileRate") { // speed of the loaded track, 1 = as recorded
-        p.fileRate = juce::jlimit (0.25, 2.0, (double) message["rate"]);
-        if (p.playsFile) p.transport.setTempo (60.0 * p.fileRate);
+    } catch (const std::exception& e) {
+        done.failed = e.what();
     }
+    if (type == "track" || type == "voices") done.status = p.engine.voiceStatus(); // also after a failure: which voices are there
     done.ms = juce::Time::getMillisecondCounterHiRes() - started;
     return done;
 }
@@ -243,6 +243,7 @@ private:
         auto* state = new juce::DynamicObject();
         state->setProperty ("run", run);
         state->setProperty ("playing", processor.transport.playing());
+        state->setProperty ("standing", processor.transport.standing()); // the lead: playing, but the clock stands (the page must not run on)
         state->setProperty ("beats", processor.transport.beats());
         state->setProperty ("bpm", processor.transport.bpm());
         auto* peaks = new juce::DynamicObject();

@@ -2016,7 +2016,8 @@
     "roomWet": 0.5
    }
   },
-  "tail": 2.5
+  "tail": 2.5,
+  "peakBelow": 0
  },
  {
   "name": "mix-funk-400bpm",
@@ -2220,7 +2221,8 @@
     "roomWet": 0.5
    }
   },
-  "tail": 2.5
+  "tail": 2.5,
+  "peakBelow": 0
  },
  {
   "name": "mix-funk-glue",

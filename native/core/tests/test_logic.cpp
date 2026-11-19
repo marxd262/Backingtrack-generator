@@ -1,7 +1,8 @@
 // Compares the core's logic function by function with the web app in the working tree.
 // Usage: btg_logic_tests <logic.json>   (written by native/tools/export-logic.mjs)
 // Every case is { fn, in, out }: the core's function of that name gets `in` and must give `out`, compared as the parity test compares
-// events (json_compare.h): numbers bit for bit ("identical") or within 1.5e-6 ("close"); anything else fails, also an unknown fn.
+// events (json_compare.h): numbers bit for bit ("identical") or within 1.5e-6 ("close", which fails too: a difference in the last bits,
+// possibly another platform's math library; an exception has to be ruled and named here); anything else fails, also an unknown fn.
 #include "../src/convolver.h"
 #include "../src/sound_model.h"
 #include "json_compare.h"
@@ -102,5 +103,8 @@ int main(int argc, char** argv) {
     int untested = 0; // a function of the table that the file brings no case for was not checked
     for (const auto& entry : FUNCTIONS) if (!seen.count(entry.first)) { std::printf("no case for %s in %s\n", entry.first.c_str(), argv[1]); ++untested; }
     std::printf("logic: functions %zu, cases %zu, identical %lld, close %lld, different %lld\n", FUNCTIONS.size(), cases.size(), identical, close, different);
-    return different || untested ? 1 : 0;
+    // A close is a difference in the last bits (possibly another platform's math library): it fails too. An exception has to be ruled
+    // by the owner and named here (function and field, from the line above), not passed.
+    if (close) std::printf("FAIL: %lld case(s) are only close, not bit for bit: a difference in the last bits, possibly another platform's math library; ruled exceptions are named in this test\n", close);
+    return different || untested || close ? 1 : 0;
 }

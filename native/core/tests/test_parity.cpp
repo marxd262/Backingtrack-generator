@@ -3,7 +3,8 @@
 // Every event of the core is written the way the web app writes it (only the fields that are set) and compared
 // key by key, both ways: a field that only one side has is a difference.
 // "identical": every field equal, numbers bit for bit. "close": numbers within 1.5e-6 (one step of the
-// rounding to six places). Anything else is a difference and fails the test.
+// rounding to six places). A close and anything else fail the test (a close is a difference in the last bits, possibly another
+// platform's math library: an exception has to be ruled and named here).
 #include "btg/generator.h"
 #include "json_compare.h"
 
@@ -109,5 +110,8 @@ int main(int argc, char** argv) {
         for (const auto& [field, n] : differentFields) std::printf(" %s %lld", field.c_str(), n);
         std::printf("\n");
     }
-    return different ? 1 : 0;
+    // A close is a difference in the last bits (possibly another platform's math library): it fails too. An exception has to be ruled by
+    // the owner and named here (the fields are listed above), not passed.
+    if (close) std::printf("FAIL: %lld event field(s) are only close, not bit for bit: a difference in the last bits, possibly another platform's math library; ruled exceptions are named in this test\n", close);
+    return different || close ? 1 : 0;
 }

@@ -99,8 +99,24 @@ try {
     job.value = 'melody';
     job.dispatchEvent(new Event('change', { bubbles: true }));
   });
+  // The lead: the engine's clock stands for 0.15 s after a start, and the page must not show a position (a bar) before the clock moves.
+  // The first text the page's position field shows after the click, against the first engine report whose beats have left the start.
+  await page.evaluate(() => {
+    window.posShown = [];
+    const field = document.getElementById('play-position');
+    new MutationObserver(() => window.posShown.push({ at: performance.now(), text: field.textContent })).observe(field, { subtree: true, childList: true, characterData: true, attributes: true });
+  });
+  const clickedAt = await page.evaluate(() => performance.now());
   await page.locator('#go').click();
   await sleep(1500);
+  result.lead = await page.evaluate((from) => {
+    const start = window.sent.findLast((s) => s.type === 'play')?.startBeats;
+    const shown = window.posShown.find((m) => m.at > from && /\d/.test(m.text));
+    const moved = window.engineLog.find((m) => m.at > from && m.playing && m.beats > start + 1e-6);
+    return { startBeats: start, shownAt: shown && +shown.at.toFixed(1), clockMovedAt: moved && +moved.at.toFixed(1), shownBeforeClockMovedMs: shown && moved ? +(moved.at - shown.at).toFixed(1) : null, standingReports: window.engineLog.filter((m) => m.at > from && m.playing && m.beats <= start + 1e-6).length };
+  }, clickedAt);
+  if (result.lead.shownBeforeClockMovedMs === null) problems.push(`lead: the position never showed or the clock never moved: ${JSON.stringify(result.lead)}`);
+  else if (result.lead.shownBeforeClockMovedMs > 10) problems.push(`lead: the page showed its position ${result.lead.shownBeforeClockMovedMs} ms before the engine's clock moved (it runs on during the lead)`);
   result.voices = await page.evaluate(() => window.voiceLog.at(-1) ?? null);
   if (result.voices?.drums !== 'ready' || result.voices?.bass !== 'ready') problems.push(`voices after the start: ${JSON.stringify(result.voices)}`);
   await page.evaluate(() => window.bridge('seek', { beats: 24 })); // past the intro of a rolled form: drums and bass play
@@ -206,6 +222,32 @@ try {
     return { lowest: +Math.min(...beats).toFixed(2), highest: +Math.max(...beats).toFixed(2), wraps: beats.filter((b, i) => i > 0 && b < beats[i - 1]).length };
   });
   await page.evaluate(() => window.bridge('loop', { start: 0, end: 0 }));
+
+  // The sound reaches the engine: the song from the same beat at master.width 0 and at 1 (each pass begins with a `play` at that beat: a
+  // start resets the voices' random draws, so both passes play the same notes), through the page's own width knob (the page sends
+  // `timbre`, the shell queues it, control() calls setSound). The layers' levels the engine reports come from behind the balance, whose
+  // places the width multiplies (masterParams.width = 2 * knob, so knob 1 doubles the places): the peak of a mono layer at place p is
+  // 1 + |p| times its level, so a layer away from the middle is louder at knob 1 by 20 log10 (1 + 2 |p|) dB than at 0 (chords p 0.3:
+  // 4.1 dB, pad -0.2: 2.9 dB, percussion -0.4: 5.1 dB; the places are the fine values of 'mix/pan'). Every layer that sounds in both
+  // passes must reach at least half of its predicted gain, and at least one must sound. The figures (predicted beside measured) are in
+  // the output; with the `timbre` case of control() taken out the gains are about 0 dB.
+  const PLACES = { chords: 0.3, pad: -0.2, percussion: -0.4 };
+  const widthLevels = async (value) => {
+    await setRange('timbre-master-width', value);
+    await page.evaluate(() => { const play = window.sent.findLast((s) => s.type === 'play'); window.bridge('play', { startBeats: 64, bpm: play.bpm }); window.engineLog.length = 0; });
+    await sleep(3200);
+    return page.evaluate((layers) => Object.fromEntries(layers.map((l) => [l, Math.max(0, ...window.engineLog.map((m) => m.peaks?.[l] ?? 0))])), Object.keys(PLACES));
+  };
+  if (await page.evaluate(() => !document.getElementById('timbre-master-width'))) problems.push('timbre: the width knob is not on the page');
+  else {
+    const narrow = await widthLevels(0), wide = await widthLevels(100);
+    await setRange('timbre-master-width', 50);
+    const predicted = Object.fromEntries(Object.entries(PLACES).map(([l, p]) => [l, +(20 * Math.log10(1 + 2 * Math.abs(p))).toFixed(2)]));
+    const gainDb = Object.fromEntries(Object.keys(PLACES).map((l) => [l, narrow[l] > 0 && wide[l] > 0 ? +(20 * Math.log10(wide[l] / narrow[l])).toFixed(2) : null]));
+    result.timbreReachesEngine = { width0: Object.fromEntries(Object.entries(narrow).map(([l, v]) => [l, +v.toFixed(3)])), width1: Object.fromEntries(Object.entries(wide).map(([l, v]) => [l, +v.toFixed(3)])), predictedDb: predicted, gainDb };
+    const sounding = Object.keys(PLACES).filter((l) => gainDb[l] !== null), short = sounding.filter((l) => !(gainDb[l] >= predicted[l] / 2));
+    if (!sounding.length || short.length) problems.push(`timbre: the engine did not hear the width (gain at width 1 against 0 in dB, measured against predicted: ${JSON.stringify(Object.fromEntries(Object.keys(PLACES).map((l) => [l, [gainDb[l], predicted[l]]])))}${sounding.length ? '' : '; no layer sounded'})`);
+  }
 
   // Reaction time. One way UI -> app is half a ping round trip; then the control waits for the next audio block
   // (reactionMs, measured in the app); then the audio needs the limiter's 6 ms and the output latency of the device.

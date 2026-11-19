@@ -102,6 +102,7 @@ struct Engine::Impl {
     size_t next = 0;
     double expected = 0.0;
     bool wasPlaying = false, reseek = true;
+    bool startPending = false; // a play began and the clock has not moved yet (a lead): the song's place is taken at its first moving block
     unsigned starts = 0; // Transport::Block::starts of the last block
     double skipBefore = -INFINITY; // song beat of the last jump less a frame: events triggered before it do not play (but see render)
     float gainNow[layerCount] = {}, panNow[layerCount] = {}, masterNow = 1.0f, driveNow = 0.0f;
@@ -468,37 +469,49 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
         for (Tone& t : m.tones.all) if (t.active) { if (t.delay > 0) t.active = false; else t.choke(0, 0.015, sr); }
         if (m.wetFadeLeft < 0) m.wetFadeLeft = m.wetFadeFrames;
     }
+    // The start logic fires once, at the first block of a play (the first block of its lead, when it has one); the song's place is taken at
+    // the first block that is not a lead's (startPending), which is no jump: the place is the one the lead stood on. A lead's blocks
+    // schedule nothing (other standing blocks, as a render's tail or a test's, are handled as before).
     if (block.playing && (!m.wasPlaying || restarted)) { // the web builds its voices (and its delay, with the time of the tempo) anew at every play()
         m.restart(true);
         m.echoAtOnce = true;
+        m.startPending = true;
     }
-    if (block.playing && length > 0) {
-        const bool jumped = m.wasPlaying && !restarted && std::fabs(block.beats - m.expected) > 1e-6;
+    if (block.playing && length > 0 && !block.lead) {
+        const bool jumped = m.wasPlaying && !m.startPending && std::fabs(block.beats - m.expected) > 1e-6;
         if (jumped) // held notes end (their release begins), hits ring out, what has not begun never will
             for (Tone& t : m.tones.all) {
                 if (!t.active) continue;
                 if (t.delay > 0) t.active = false;
                 else if (t.layer != drums && t.layer != percussion) t.toNoteEnd = 0;
             }
-        if (jumped || restarted || !m.wasPlaying || m.reseek) {
+        if (jumped || m.startPending || m.reseek) {
             // After a jump or a start, what lies less than a frame before the new place belongs to its first frame (a loop wraps up
             // to a frame after its start), and the cursor goes back to the earliest trigger whose note may still lie ahead (a glide
             // begins its lead earlier). A new song while playing goes on from the place itself: what lies before it has been played.
-            const bool jump = jumped || restarted || !m.wasPlaying;
+            const bool jump = jumped || m.startPending;
             m.skipBefore = std::fmod(block.beats, length) - (jump ? step : 0.0);
             m.next = static_cast<size_t>(std::lower_bound(m.song->events.begin(), m.song->events.end(), m.skipBefore - (jump ? m.song->maxLeadBeats : 0.0),
                                                           [](const PlayEvent& e, double b) { return e.beat < b; }) - m.song->events.begin());
             m.reseek = false;
         }
     }
+    if (!block.lead) m.startPending = false;
     m.wasPlaying = block.playing;
     m.expected = block.beats + frames * step;
-    if (block.playing && step > 0) { // echoTime(bpm) = 60 / bpm * 0.75 with bpm = step * sr * 60; a tempo change glides (setTempo). A standing or stopped block leaves it.
+    // echoTime(bpm) = 60 / bpm * 0.75 with bpm = step * sr * 60; a tempo change glides (setTempo). A standing or stopped block leaves it.
+    // A start inside the wet fade (a restart, or a start before a stop's 50 ms are over) finds the old song's echoes in the line: the time
+    // stays where it is, not even gliding, until the fade is over and the line is cleared (the end of the chunk loop sets it then).
+    if (block.playing && step > 0 && !(m.echoAtOnce && m.wetFadeLeft >= 0)) {
         m.echo.setTarget(0.75 / (step * sr), m.echoAtOnce);
         m.echoAtOnce = false;
     }
     // Stopped, the fade over and no tone left: the shelf and the compressors start empty, and the chain is skipped until playing resumes.
     if (block.playing) {
+        if (m.quiet) { // a new song's sound is there from its first frame, not gliding in from the last song's (every state it touches is empty)
+            for (int l = 0; l < layerCount; ++l) m.panNow[l] = m.panTarget(l);
+            m.settleSum();
+        }
         m.quiet = false;
         if (m.wetClosed) {
             m.clearSends();
@@ -518,7 +531,7 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
 
     for (int done = 0; done < frames; done += CHUNK) {
         const int count = std::min(CHUNK, frames - done);
-        if (block.playing && length > 0) {
+        if (block.playing && length > 0 && !block.lead) {
             // events of this chunk start `delay` frames in; past the end the song begins again
             const double from = std::fmod(block.beats + done * step, length), to = from + count * step;
             double lap = 0.0;
@@ -664,6 +677,10 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
             m.clearSends();
             m.wetFadeLeft = -1;
             m.wetClosed = !block.playing;
+            if (block.playing && step > 0 && m.echoAtOnce) { // the start's time, held back while the old echoes faded
+                m.echo.setTarget(0.75 / (step * sr), true);
+                m.echoAtOnce = false;
+            }
         }
         for (int c = 0; c <= layerCount; ++c) if (peak[c] > m.peaks[c].load()) m.peaks[c].store(peak[c]);
     }

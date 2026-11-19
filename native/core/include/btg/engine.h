@@ -30,8 +30,8 @@ public:
     // validates here). Throws like buildSong when the JSON is not a track at all (then nothing changes); an inconsistent track is not checked. Then setVoices with the track's "voices"
     void setTrack(const std::string& trackJson);
     void setVoices(const std::string& voicesJson); // {"bass":{"id":"sample","variant":"pick"},...}; a layer not named keeps its voice. Reads the packs it does not have yet, here; until then the old voice plays. Never throws
-    void setTuning(const std::string& tuningJson); // overrides of the fine values as setTuning of the web app ({"bass/sample/finger":{"level":3}}); replaces the earlier ones. Never throws
-    void setSound(const std::string& timbreJson);  // the timbre of the web app's resolveTrackTimbre(track); what is missing or invalid counts as DEFAULT_TIMBRE; replaces the earlier one. Never throws
+    void setTuning(const std::string& tuningJson); // overrides of the fine values as setTuning of the web app ({"bass/sample/finger":{"level":3}}); replaces the earlier ones. Text that is no valid JSON or holds invalid values never throws and counts as the default; building a voice (or a convolver) can still throw (out of memory, a pack that fails to read): the caller catches it (the shell's control())
+    void setSound(const std::string& timbreJson);  // the timbre of the web app's resolveTrackTimbre(track); what is missing or invalid counts as DEFAULT_TIMBRE; replaces the earlier one. Text that is no valid JSON or holds invalid values never throws and counts as DEFAULT_TIMBRE; building a voice (or a convolver) can still throw (out of memory, a pack that fails to read): the caller catches it (the shell's control())
     std::string voiceStatus() const;              // {"drums":"ready","bass":"error: bass-pick: <reason>","chords":"silent",...}, layers in enum order
     double lengthBeats() const;
     double bpm() const;      // of the track last set

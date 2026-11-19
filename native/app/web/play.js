@@ -23,7 +23,8 @@ if (document.querySelector('[data-lang]')) {
   backend.addEventListener('language', (lang) => document.querySelector(`[data-lang="${lang}"]`)?.click());
   addEventListener('load', () => send('language', { lang: document.documentElement.lang })); // by then the page has drawn itself in its language
 }
-const engineBeats = () => engine.beats + (engine.playing ? ((performance.now() - engine.at) / 1000) * (engine.bpm / 60) : 0);
+// (`standing`: the lead after a start, the clock stands at the start place and the page must not run on.)
+const engineBeats = () => engine.beats + (engine.playing && !engine.standing ? ((performance.now() - engine.at) / 1000) * (engine.bpm / 60) : 0);
 
 // The engine takes the track as normalizeTrack writes it, with the voices filled in.
 const sendTrack = (track) => send('track', { json: JSON.stringify({ ...normalizeTrack(track), voices: resolveVoices(track) }) });
@@ -84,6 +85,8 @@ export function play(ctx, trackInput, { loops = 1, startBar = 0, levels, master,
     if (chord) onBar?.({ bar: chord.bar + loop * loopBars, chord: chord.chord });
   }
   function tick() {
+    // before the engine reports this play, and in its lead (the clock stands): nothing fires, the events at the start fire when the clock moves
+    if (frozen === null && (engine.run !== run || engine.standing)) return;
     const now = songTime();
     if (now < last - 0.05 || now > last + 0.5) resync(now);
     last = now;

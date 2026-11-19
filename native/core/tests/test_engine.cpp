@@ -222,6 +222,68 @@ int main(int argc, char** argv) {
     transport.seek(32.0);
     CHECK(std::fabs(transport.advance(480, rate).beats - 32.0) < 1e-12);
 
+    // The lead (the web app starts its song 0.15 s after play()): 7200 standing frames at 48 kHz (playing blocks at the start place,
+    // beatsPerFrame 0), the block that holds the end cut there, then the clock moves from the start place; one start in all. A seek during
+    // the lead moves the place it stands on and the lead goes on; a stop stops it; a second play starts a new lead; lead 0 moves at once.
+    {
+        const auto standing = [&](btg::Transport& t, int block) { // frames of standing blocks until the clock moves; the first moving block
+            int total = 0;
+            btg::Transport::Block b = t.advance(block, rate);
+            while (b.playing && b.lead && b.beatsPerFrame == 0.0) { total += b.frames; b = t.advance(block, rate); }
+            return std::make_pair(total, b);
+        };
+        btg::Transport t;
+        t.play(8.0, 120.0, 0.15);
+        CHECK(t.standing() && t.beats() == 8.0); // what the shell reports before the audio thread has taken the play
+        const auto first = t.advance(1000, rate);
+        CHECK(first.playing && first.beats == 8.0 && first.beatsPerFrame == 0.0 && first.frames == 1000 && first.starts == 1 && first.lead);
+        const auto [rest, moving] = standing(t, 1000);
+        CHECK(rest == 6200 && moving.beats == 8.0 && moving.beatsPerFrame == 120.0 / 60.0 / rate && moving.frames == 1000 && moving.starts == 1 && !moving.lead); // the cut block held 200
+        CHECK(t.advance(1000, rate).starts == 1 && std::fabs(t.beats() - (8.0 + 2000 * 120.0 / 60.0 / rate)) < 1e-9 && !t.standing());
+
+        btg::Transport s; // a seek during the lead, a tempo change (takes effect when the clock moves)
+        s.play(8.0, 120.0, 0.15);
+        s.advance(1000, rate);
+        s.seek(12.0);
+        s.setTempo(60.0);
+        const auto moved = standing(s, 1000);
+        CHECK(moved.first == 6200 && moved.second.beats == 12.0 && moved.second.beatsPerFrame == 60.0 / 60.0 / rate);
+
+        btg::Transport u; // a stop in the lead: stopped blocks, no lead left; a new play: a new lead and a second start
+        u.play(8.0, 120.0, 0.15);
+        u.advance(1000, rate);
+        u.stop();
+        CHECK(!u.advance(1000, rate).playing);
+        u.play(4.0, 120.0, 0.15);
+        const auto again = standing(u, 480);
+        CHECK(again.first == 7200 && again.second.beats == 4.0 && again.second.starts == 2);
+
+        btg::Transport w; // a second play during the lead (no stop between): a new lead from the new place, a second start, no block of the song before it
+        w.play(8.0, 120.0, 0.15);
+        w.advance(1000, rate);
+        w.play(4.0, 90.0, 0.15);
+        const auto replayed = standing(w, 480);
+        CHECK(replayed.first == 7200 && replayed.second.beats == 4.0 && replayed.second.starts == 2 && replayed.second.beatsPerFrame == 90.0 / 60.0 / rate);
+
+        btg::Transport v; // a play and a seek before the audio thread looks: the seek is the later control and wins, the lead stands there
+        v.play(8.0, 120.0, 0.15);
+        v.seek(20.0);
+        const auto sought = standing(v, 1000);
+        CHECK(sought.first == 7200 && sought.second.beats == 20.0 && sought.second.starts == 1);
+        v.seek(30.0); // a seek while moving is a jump of the clock, as before
+        CHECK(v.advance(480, rate).beats == 30.0);
+
+        btg::Transport y; // a seek before a play does not survive it: the play's place wins
+        y.seek(50.0);
+        y.play(8.0, 120.0);
+        CHECK(y.advance(480, rate).beats == 8.0);
+
+        btg::Transport z; // lead 0: as before
+        z.play(8.0, 120.0);
+        const auto now = z.advance(480, rate);
+        CHECK(now.playing && now.beatsPerFrame > 0.0 && now.frames == 480 && now.starts == 1);
+    }
+
     // A pack that points outside its audio file is refused.
     bool refused = false;
     const unsigned char pcm[8] = {};
@@ -445,6 +507,124 @@ int main(int argc, char** argv) {
         CHECK(bus("{}").left == old.left);
     }
 
+    // The lead (design: the web app starts its song 0.15 s after play(); the limiter settles while its input is silent). The limiter's gain
+    // (limited render over the same render without the limiter, rms over windows; the limiter delays by its 288 frames of pre-delay) in
+    // the first 20 ms of the song against its gain from 0.3 to 0.5 s: with the lead within 0.5 dB; without it the first 20 ms are ducked.
+    {
+        const auto gainsAt = [&](double lead) {
+            const auto played = [&](bool limiter) {
+                btg::Engine engine;
+                engine.setPackSource(source);
+                engine.setTrack(track);
+                engine.setLimiter(limiter);
+                engine.prepare(rate);
+                btg::Transport t;
+                t.play(0.0, engine.bpm(), lead);
+                return render(engine, t, lead + 0.6, 480).left;
+            };
+            const std::vector<float> on = played(true), off = played(false);
+            const size_t from = static_cast<size_t>(std::lround(lead * rate)), delay = 288;
+            const auto gain = [&](size_t at, size_t length) { return 20 * std::log10(rmsOf(on, from + at + delay, from + at + delay + length) / rmsOf(off, from + at, from + at + length)); };
+            return std::make_pair(gain(0, 960), gain(14400, 9600));
+        };
+        const auto [startedLead, steadyLead] = gainsAt(0.15);
+        const auto [startedNone, steadyNone] = gainsAt(0.0);
+        std::printf("limiter gain, first 20 ms against 0.3 to 0.5 s: with the lead %.2f against %.2f dB, without %.2f against %.2f dB\n", startedLead, steadyLead, startedNone, steadyNone);
+        CHECK(std::fabs(startedLead - steadyLead) < 0.5);
+        CHECK(steadyNone - startedNone > 3.0); // the documented red: several dB lower without the lead
+    }
+
+    // The lead delays the song and changes nothing else: from the beat 64 (inside the song, with held notes and glides that begin before
+    // it) a start with the lead plays, after its 7200 frames, exactly what a start without the lead plays (no limiter: the compressors
+    // would see the lead's silence; the sends begin empty in both), within 1e-6 (the convolvers' FFT blocks begin 7200 frames earlier).
+    {
+        const auto played = [&](double lead) {
+            btg::Engine engine;
+            engine.setPackSource(source);
+            engine.setTrack(track);
+            engine.setLimiter(false);
+            engine.prepare(rate);
+            btg::Transport t;
+            t.play(64.0, engine.bpm(), lead);
+            return render(engine, t, lead + 2.0, 480).left;
+        };
+        const std::vector<float> plain = played(0.0), led = played(0.15);
+        double most = 0.0, level = 0.0;
+        for (size_t i = 0; i < plain.size(); ++i) { most = std::max(most, static_cast<double>(std::fabs(led[i + 7200] - plain[i]))); level = std::max(level, static_cast<double>(std::fabs(plain[i]))); }
+        std::printf("start at beat 64 with the lead against without: largest difference %.2e (peak %.3f)\n", most, level);
+        CHECK(led.size() == plain.size() + 7200 && level > 0.05 && most < 1e-6); // measured 1.2e-7: the convolvers' blocks of 512 begin 7200 frames earlier, other float rounding of the FFT
+        double silent = 0.0;
+        for (size_t i = 0; i < 7200; ++i) silent = std::max(silent, static_cast<double>(std::fabs(led[i])));
+        CHECK(silent == 0.0); // nothing plays during the lead
+    }
+
+    // A stop and a play back to back (the web UI's restart) with the lead: the old song's sends are cleared within the lead (the wet fade
+    // takes 50 ms) and open again before the song, so from the first moving frame on the output is a fresh engine's started with the same
+    // lead, apart from what the engine remembers of the old music: the old tones' choke tails (gone within about 0.2 s of the restart,
+    // that is before the song) and the compressors' state, which has the lead's silence to recover. The bound: the largest absolute
+    // difference to that fresh engine over the whole song stretch (1 s, peak 0.26) stays below 1e-6 (measured 3e-8, a few float
+    // roundings); the first 50 ms are looked at apart, because there the compressors would show it first. The lead
+    // itself is not compared. (The same check with lead 0 gives 0.22 in the first 50 ms and 0.066 after: the old song's
+    // fade and tails and the cleared sends.)
+    {
+        const double lead = 0.15;
+        const auto played = [&](bool restart) {
+            btg::Engine engine;
+            engine.setPackSource(source);
+            engine.setTrack(track);
+            engine.prepare(rate);
+            btg::Transport t;
+            t.play(0.0, engine.bpm(), lead);
+            if (restart) {
+                render(engine, t, lead + 2.0, 480);
+                t.stop();
+                t.play(0.0, engine.bpm(), lead);
+            }
+            return render(engine, t, lead + 1.0, 480).left;
+        };
+        const std::vector<float> again = played(true), fresh = played(false);
+        const size_t from = static_cast<size_t>(std::lround(lead * rate));
+        double first = 0.0, later = 0.0, level = 0.0;
+        for (size_t i = from; i < again.size(); ++i) {
+            const double d = std::fabs(again[i] - fresh[i]);
+            (i < from + 2400 ? first : later) = std::max(i < from + 2400 ? first : later, d);
+            level = std::max(level, static_cast<double>(std::fabs(fresh[i])));
+        }
+        std::printf("restart with the lead: against a fresh engine, largest difference %.2e in the first 50 ms of the song, %.2e after (song peak %.3f)\n", first, later, level);
+        CHECK(level > 0.05 && first < 1e-6 && later < 1e-6);
+    }
+
+    // A new song's sound is there from the first frame: an engine that played one timbre, was stopped until it fell quiet (the chain is
+    // skipped then, so nothing moves) and was given another timbre (brightness, reverb, echo, width, room), starts exactly as a fresh engine
+    // with that timbre does. The smoothed values of the sum (master gain, shelf, sends, bus gains) must not glide in from the old song's.
+    // The limiter stays on: the compressors are reset when the engine falls quiet, so their state is a fresh one's too.
+    {
+        const char* OLD = R"({"master":{"brightness":0.1,"reverb":0.2,"echo":0.1,"width":0.1,"roomWet":0.1,"roomSize":0.1}})";
+        const char* NEW = R"({"master":{"brightness":0.9,"reverb":0.9,"echo":0.6,"width":0.9,"roomWet":0.8,"roomSize":0.7}})";
+        const auto started = [&](bool played) {
+            btg::Engine engine;
+            engine.setPackSource(source);
+            engine.setSound(played ? OLD : NEW);
+            engine.setTrack(track);
+            engine.prepare(rate);
+            btg::Transport t;
+            if (played) {
+                t.play(0.0, engine.bpm());
+                render(engine, t, 1.0, 480);
+                t.stop();
+                render(engine, t, 6.0, 480); // the tones, the wet fade and the room's and echo's tails are over: quiet
+                engine.setSound(NEW);
+            }
+            t.play(0.0, engine.bpm());
+            return render(engine, t, 0.5, 480);
+        };
+        const Result again = started(true), fresh = started(false);
+        double most = 0.0;
+        for (size_t i = 0; i < fresh.left.size(); ++i) most = std::max(most, static_cast<double>(std::fabs(again.left[i] - fresh.left[i])));
+        std::printf("new sound after a quiet stop: largest difference to a fresh engine %.3e\n", most);
+        CHECK(fresh.peak > 0.01 && most == 0.0);
+    }
+
     // A compressor that was left out of the chain starts empty when it comes back: its pre-delay ring would otherwise play up to 1024
     // frames of what went in before the switch (and the detector and gain would be stale). Play 2 s, switch off, play 1 s, switch on:
     // the compressor that comes back delivers exactly 0 for its first 288 frames (its pre-delay), not old audio. The limiter's switch
@@ -548,6 +728,45 @@ int main(int argc, char** argv) {
             double most = 0.0;
             for (size_t i = 0; i < a.left.size(); ++i) most = std::max(most, static_cast<double>(std::fabs(a.left[i] - b.left[i])));
             CHECK(b.peak > 0.01 && most == 0.0);
+        }
+        // A start inside the wet fade does not click: a restart from 120 to 60 bpm with no stopped block between (the web UI's stop and play
+        // back to back), and a start 20 ms after a stop (30 ms of the fade left). The old song's echoes are still in the line and fade out
+        // over the 50 ms; the echo's time must not jump under them (a jump from 0.375 s to 0.75 s steps the sines): the wet part (echo minus
+        // its dry twin, which restarts the same way) has no step over the 50 ms from the start above 0.08 of its level (the bound of the glide
+        // check below; 0.03 is a clean 240 Hz sine; measured 0.013). From the end of the fade the sends are empty and the time is the new
+        // tempo's: against a fresh engine at 60 bpm the output is the same where no echo of the new song's first 50 ms (cleared with the old
+        // echoes, ruled) can be: from 0.2 s (the choke tails of the old tones, up to 0.02 at 50 ms, have died by then) to the first echo at
+        // 0.75 s, exactly; and from 0.85 s to 1.4 s (the echo of what came after 50 ms, which a time still at 0.375 s would put somewhere
+        // else) within 2e-4 (the old tails' own echoes; measured 8e-5; the echo itself is 0.07).
+        for (const double gap : { -1.0, 0.02 }) {
+            const auto played = [&](const char* sound) {
+                auto e = engineWith(sound);
+                btg::Transport t;
+                t.play(0.0, 120.0);
+                render(*e, t, 2.0, 480);
+                if (gap >= 0) {
+                    t.stop();
+                    render(*e, t, gap, 480);
+                }
+                t.play(0.0, 60.0);
+                return render(*e, t, 1.5, 480).left;
+            };
+            const std::vector<float> echoed = played(ECHO), dry = played(NO_ECHO);
+            double level = 0.0, step = 0.0;
+            for (size_t i = 1; i < 2400; ++i) {
+                level = std::max(level, static_cast<double>(std::fabs(echoed[i] - dry[i])));
+                step = std::max(step, static_cast<double>(std::fabs((echoed[i] - dry[i]) - (echoed[i - 1] - dry[i - 1]))));
+            }
+            auto fresh = engineWith(ECHO);
+            btg::Transport t2;
+            t2.play(0.0, 60.0);
+            const std::vector<float> reference = render(*fresh, t2, 1.5, 480).left;
+            double early = 0.0, late = 0.0, heard = 0.0;
+            for (size_t i = 9600; i < 36000; ++i) early = std::max(early, static_cast<double>(std::fabs(echoed[i] - reference[i])));
+            for (size_t i = 40800; i < 67200; ++i) { late = std::max(late, static_cast<double>(std::fabs(echoed[i] - reference[i]))); heard = std::max(heard, static_cast<double>(std::fabs(reference[i] - dry[i]))); }
+            std::printf("echo start (gap %.2f): step %.3f of level %.4f, same as fresh: %.2e (0.2 to 0.75 s), %.2e (0.85 to 1.4 s, echo level %.4f)\n", gap, level > 0 ? step / level : 0.0, level, early, late, heard);
+            CHECK(level > 0.005 && step < 0.08 * level);
+            CHECK(early < 1e-6 && late < 2e-4 && heard > 0.005);
         }
         // A tempo change while playing glides: the wet part (echo minus its dry twin) of a pad that plays at 60 bpm and goes to 70 bpm at
         // 1.5 s has no jump (its largest step from one frame to the next stays below 0.08 of its level over the next 0.2 s; a jump of the
