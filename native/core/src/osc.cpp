@@ -47,6 +47,7 @@
 #include <algorithm>
 #include <cmath>
 #include <complex>
+#include <cstring>
 #include <list>
 #include <mutex>
 #include <numbers>
@@ -59,32 +60,47 @@ constexpr float CENTS_PER_RANGE = 1200.0f / 3;                          // kCent
 
 int waveSize(float rate) { return rate <= 24000 ? 2048 : rate <= 88200 ? 4096 : 16384; } // GetPeriodicWaveSize
 
-// CreateBandLimitedTables. The table is sum over the kept k of 2 (a_k cos + b_k sin)(2 pi k n / size) (Chromium's inverse transform of
-// the bins size a_k, -size b_k), here the forward transform of a_k + i b_k and its mirror, then normalised.
-WaveTables build(const float* real, const float* imag, int count, double sampleRate, bool disableNormalization) {
+WaveTables layoutOf(double sampleRate) { // the size, the ranges and the rates of the tables at `sampleRate`, no data
     WaveTables w;
     w.rate = static_cast<float>(sampleRate);
     w.size = waveSize(w.rate);
     w.ranges = static_cast<int>(std::lround(3 * std::log2(static_cast<float>(w.size))));
     w.lowest = w.rate / static_cast<float>(w.size);
     w.rateScale = static_cast<float>(w.size) / w.rate;
+    return w;
+}
+
+// CreateBandLimitedTables for the ranges from..to (every range for the basic and the custom waves). The table is sum over the kept k of
+// 2 (a_k cos + b_k sin)(2 pi k n / size) (Chromium's inverse transform of the bins size a_k, -size b_k), here the forward transform of
+// a_k + i b_k and its mirror, then normalised. share (rawWave): ranges that keep the same partials play one table, which is the table each
+// of them would get (the same bins give the same floats). The normalisation by the first range's peak needs from 0.
+WaveTables build(const float* real, const float* imag, int count, double sampleRate, bool disableNormalization, int from, int to, bool share) {
+    WaveTables w = layoutOf(sampleRate);
     const int size = w.size, half = size / 2, components = std::min(count, half);
-    w.data.resize(static_cast<size_t>(w.ranges) * static_cast<size_t>(size));
-    std::vector<std::complex<double>> bins(static_cast<size_t>(size));
-    float normalization = 0.5f;
-    for (int r = 0; r < w.ranges; ++r) {
+    std::vector<int> kept; // per table: the partials it keeps
+    w.place.assign(static_cast<size_t>(w.ranges), 0);
+    for (int r = from; r <= to; ++r) {
         // range r keeps the partials up to 2^(-r/3) of half the size; bin 0 (the DC and the packed Nyquist) is cleared
         const float culling = static_cast<float>(std::pow(2.0, static_cast<double>(-(static_cast<float>(r) * CENTS_PER_RANGE) / 1200.0f)));
         const int keep = std::min(components, static_cast<int>(static_cast<unsigned>(culling * static_cast<float>(half))) + 1);
+        const auto same = share ? std::find(kept.begin(), kept.end(), keep) : kept.end();
+        w.place[static_cast<size_t>(r)] = static_cast<int>(same - kept.begin());
+        if (same == kept.end()) kept.push_back(keep);
+    }
+    for (int r = 0; r < w.ranges; ++r) w.place[static_cast<size_t>(r)] = w.place[static_cast<size_t>(std::clamp(r, from, to))];
+    w.data.resize(kept.size() * static_cast<size_t>(size));
+    std::vector<std::complex<double>> bins(static_cast<size_t>(size));
+    float normalization = 0.5f;
+    for (size_t table = 0; table < kept.size(); ++table) {
         std::fill(bins.begin(), bins.end(), std::complex<double>());
-        for (int k = 1; k < keep; ++k) {
+        for (int k = 1; k < kept[table]; ++k) {
             bins[static_cast<size_t>(k)] = { real[k], imag[k] };
             bins[static_cast<size_t>(size - k)] = { real[k], -imag[k] };
         }
         fft(bins);
-        float* t = w.data.data() + static_cast<size_t>(r) * static_cast<size_t>(size);
+        float* t = w.data.data() + table * static_cast<size_t>(size);
         for (int n = 0; n < size; ++n) t[n] = static_cast<float>(bins[static_cast<size_t>(n)].real());
-        if (!disableNormalization && r == 0) { // the first range has the most power: its peak scales every range
+        if (!disableNormalization && table == 0) { // the first range has the most power: its peak scales every range
             float peak = 0.0f;
             for (int n = 0; n < size; ++n) peak = std::max(peak, std::fabs(t[n]));
             if (peak != 0.0f) normalization = 1.0f / peak;
@@ -109,10 +125,18 @@ WaveTables basic(Wave shape, double sampleRate) {
         }
         imag[static_cast<size_t>(n)] = b;
     }
-    return build(real.data(), imag.data(), half, sampleRate, false);
+    return build(real.data(), imag.data(), half, sampleRate, false, 0, layoutOf(sampleRate).ranges - 1, false);
 }
 
 float clampToNyquist(float hz, float nyquist) { return std::isnan(hz) ? nyquist : std::clamp(hz, -nyquist, nyquist); } // ClampFrequency
+// The frequency of the k-rate path: frequency times DetuneToFrequencyMultiplier in float, clamped (ProcessKRate)
+float frequencyOf(float hz, float cents, float rate) { return clampToNyquist(hz * std::exp2(cents / 1200), rate / 2); }
+// WaveDataForFundamentalFrequency's pitch range, as a float: the range of the table with more partials and the crossfade
+float pitchOf(const WaveTables& w, float hz) {
+    hz = std::fabs(hz); // a negative frequency plays the positive one's tables
+    const float ratio = hz > 0 ? hz / w.lowest : 0.5f;
+    return std::clamp(1 + std::log2(ratio) * 1200.0f / CENTS_PER_RANGE, 0.0f, static_cast<float>(w.ranges - 1));
+}
 
 // DoInterpolation: linear (in double) from kInterpolate2Point on, 3-point Lagrange from kInterpolate3Point, 5-point below; then the two tables
 float interpolate(double index, float increment, unsigned mask, float tableFactor, const float* lower, const float* higher) {
@@ -154,9 +178,7 @@ float linear(double index, unsigned mask, float tableFactor, const float* lower,
 } // namespace
 
 void WaveTables::pair(float hz, const float*& lower, const float*& higher, float& factor) const {
-    hz = std::fabs(hz); // a negative frequency plays the positive one's tables
-    const float ratio = hz > 0 ? hz / lowest : 0.5f;
-    const float pitch = std::clamp(1 + std::log2(ratio) * 1200.0f / CENTS_PER_RANGE, 0.0f, static_cast<float>(ranges - 1));
+    const float pitch = pitchOf(*this, hz);
     const int r = static_cast<int>(pitch);
     higher = table(r);
     lower = table(r < ranges - 1 ? r + 1 : r);
@@ -178,7 +200,54 @@ const BasicWaves& basicWaves(double sampleRate) {
 }
 
 std::shared_ptr<const WaveTables> customWave(const float* real, const float* imag, int count, double sampleRate, bool disableNormalization) {
-    return std::make_shared<const WaveTables>(build(real, imag, count, sampleRate, disableNormalization));
+    return std::make_shared<const WaveTables>(build(real, imag, count, sampleRate, disableNormalization, 0, layoutOf(sampleRate).ranges - 1, false));
+}
+
+namespace {
+// shortcut: kept for the process and never freed (tones and organ chains point into them), and it grows with every partial set and every
+// range ever asked for (an organ preset: Task 20's report has the figures); free them through a keeper (Task 24) when memory matters.
+struct Cached { double rate; std::vector<float> real, imag; int from, to; WaveTables tables; };
+std::mutex cacheLock;
+std::list<Cached> cache; // a list: what was built keeps its address
+} // namespace
+
+size_t rawWaveBytes() {
+    const std::lock_guard<std::mutex> hold(cacheLock);
+    size_t bytes = 0;
+    for (const Cached& c : cache) bytes += c.tables.data.size() * sizeof(float);
+    return bytes;
+}
+
+const WaveTables& rawWave(const float* real, const float* imag, int count, double sampleRate, const float* hz, const float* cents, int oscillators) {
+    const WaveTables s = layoutOf(sampleRate);
+    int from = s.ranges - 1, to = 0;
+    for (int i = 0; i < oscillators; ++i) { // the pair of each frequency: its range and the next
+        const int r = static_cast<int>(pitchOf(s, frequencyOf(hz[i], cents[i], s.rate)));
+        from = std::min(from, r);
+        to = std::max(to, std::min(r + 1, s.ranges - 1));
+    }
+    from = std::min(from, to);
+    const std::lock_guard<std::mutex> hold(cacheLock);
+    const auto same = [&](const Cached& c) {
+        return c.rate == sampleRate && c.real.size() == static_cast<size_t>(count) && std::memcmp(c.real.data(), real, c.real.size() * sizeof(float)) == 0
+            && std::memcmp(c.imag.data(), imag, c.imag.size() * sizeof(float)) == 0;
+    };
+    for (const Cached& c : cache) { // the newest first
+        if (!same(c)) continue;
+        if (c.from <= from && c.to >= to) return c.tables;
+        from = std::min(from, c.from); // a wider one replaces it for later callers; it stays for those that hold it
+        to = std::max(to, c.to);
+    }
+    Cached& made = cache.emplace_front(Cached { sampleRate, std::vector<float>(real, real + count), std::vector<float>(imag, imag + count), from, to, {} });
+    made.tables = build(real, imag, count, sampleRate, true, from, to, true);
+    return made.tables;
+}
+
+void Oscillator::sync() {
+    if (at_ == block_) return;
+    index += static_cast<double>(static_cast<float>(at_) * blockIncrement_);
+    index -= std::floor(index * (1.0 / wave->size)) * wave->size;
+    at_ = block_ = 0;
 }
 
 // ProcessKRate. Below kInterpolate2Point: DoInterpolation frame by frame, the index in double. From it on Chromium renders each quantum by
@@ -198,7 +267,7 @@ std::shared_ptr<const WaveTables> customWave(const float* real, const float* ima
 // a pitch drop would sit near the double index's figures (-93.1 dB, the square at 55 Hz).
 void Oscillator::constant(float hz, float cents, float* out, int count, long long left) {
     const WaveTables& w = *wave;
-    const float frequency = clampToNyquist(hz * std::exp2(cents / 1200), w.rate / 2); // DetuneToFrequencyMultiplier
+    const float frequency = frequencyOf(hz, cents, w.rate);
     const float* lower;
     const float* higher;
     float factor;
@@ -226,6 +295,7 @@ void Oscillator::constant(float hz, float cents, float* out, int count, long lon
             block_ = static_cast<int>(std::min<long long>(128 - offset, left - i));
             offset = 0;
             at_ = 0;
+            blockIncrement_ = increment;
             for (int m = 0; m < 4; ++m) lanes_[m] = wrap(static_cast<float>(index + static_cast<double>(static_cast<float>(m) * increment)));
         }
         const int groups = block_ / 4 * 4;

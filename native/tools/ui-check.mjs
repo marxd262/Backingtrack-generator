@@ -4,7 +4,7 @@
 // Usage: node native/tools/ui-check.mjs [app.exe] [output folder]
 // The app runs muted (BTG_MUTE): levels are measured, nothing is heard.
 import { spawn } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
@@ -219,6 +219,63 @@ try {
     return { status, peak, load, restored: await reported(() => window.bridge('voices', { json: own })) };
   });
   if (result.epiano.status !== 'ready' || !(result.epiano.peak > 0) || result.epiano.restored !== 'ready') problems.push(`e-piano: ${JSON.stringify(result.epiano)}`);
+  // The organ (Task 20): a track of the step's own, sent through the bridge as the page sends `track` (with its voices), so that both passes
+  // play the same known notes: the track of organ.json's case organ-rock-drive-0 (the chords alone on chords/organ/rock, a verse with the
+  // swell pedal at -3 dB and a chorus at 0 dB, 8 bars at 124 bpm), with that case's sound. Why it shows the drive: the tube's curve keeps a
+  // chord at the pre-drive level 0.4 (organ.js DRIVE_REF) and flattens what lies above it, and the chorus's chords reach above it. The
+  // engine's `voices` event reports the chords ready. The drive as the page's organ panel sends it (src/ui/organ-tuning.js organTuning: the
+  // same override for all four presets): two passes of the whole song from beat 0, drive 0, then drive 1, each closed by the engine's first
+  // report of beat 32 (the song's end: a report a hair past it adds nothing, the song's first 0.1 s are silent) and leaving out the reports
+  // before beat 0.2 (the lead, and the tail of what played before the `play`). Predicted offline with the core before measuring (btg_render,
+  // dry, this track, sound and drive; t20-r1-predict.mjs of Task 20's fix round 1): the chords' peak 0.6536 at beat 29.78 with drive 0,
+  // 0.4710 at beat 17.07 with drive 1: -2.84 dB. The app measures -3.61 dB (1.1663 and 0.7701, the same in every run): its `play` has the
+  // lead of 0.15 s, so the song begins 32 frames into a render quantum, not on its first frame as in btg_render, which moves the Leslie
+  // LFOs' first quantum; the core played as the app plays it (the lead, blocks of 480, takePeak: t20-r1-lead-probe.cpp) gives these figures
+  // to four digits. The measure, fixed before measuring: the chords' largest reported peak with drive 1
+  // against drive 0 differs by at least 1.5 dB, both have a level, the drums none (the track has no drums). Red when the core ignores the
+  // drive (both passes play the preset's 0.5). Then the page's own track, voices, tuning and sound again, shown by a play from beat 64 in
+  // which the page's drums have a level.
+  const organCase = JSON.parse(readFileSync(join(repo, 'native/tools/sound-cases/organ.json'), 'utf8')).find((c) => c.name === 'organ-rock-drive-0');
+  result.organ = await page.evaluate(async ([track, sound]) => {
+    const last = (type) => window.sent.findLast((s) => s.type === type)?.json;
+    const own = { track: last('track'), tuning: last('tuning') ?? '{}', timbre: last('timbre') };
+    own.voices = last('voices') ?? JSON.stringify(JSON.parse(own.track).voices);
+    const reported = async (send) => { // the chords' status in the engine's next `voices` event
+      const before = window.voiceLog.length;
+      send();
+      for (let i = 0; i < 30 && window.voiceLog.length === before; i++) await new Promise((r) => setTimeout(r, 100));
+      return window.voiceLog.length > before ? window.voiceLog.at(-1).chords : 'no voices event';
+    };
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const peak = (log, layer) => +Math.max(0, ...log.map((m) => m.peaks?.[layer] ?? 0)).toFixed(4);
+    window.bridge('timbre', { json: JSON.stringify(sound) });
+    const status = await reported(() => window.bridge('track', { json: JSON.stringify(track) }));
+    const pass = async (drive) => { // the reports from beat 0.2 to the first of beat 32, of a play from beat 0
+      window.bridge('tuning', { json: JSON.stringify(Object.fromEntries(['jazz', 'rock', 'gospel', 'ballad'].map((v) => [`chords/organ/${v}`, { drive }]))) });
+      window.engineLog.length = 0;
+      window.bridge('play', { startBeats: 0, bpm: track.bpm });
+      const span = () => { const from = window.engineLog.findIndex((m) => m.playing && m.beats < 0.2); return from < 0 ? [] : window.engineLog.slice(from); };
+      for (let i = 0; i < 250 && !span().some((m) => m.beats >= 32); i++) await wait(100);
+      const log = span(), end = log.findIndex((m) => m.beats >= 32);
+      return end < 0 ? null : log.slice(0, end + 1).filter((m) => m.beats >= 0.2);
+    };
+    const passes = [await pass(0), await pass(1)];
+    const [drive0, drive1] = passes.map((log) => (log ? peak(log, 'chords') : null)), drums = Math.max(...passes.map((log) => (log ? peak(log, 'drums') : 0)));
+    const load = +window.lastEngine().load.toFixed(3);
+    window.bridge('track', { json: own.track });
+    const restored = await reported(() => window.bridge('voices', { json: own.voices }));
+    window.bridge('tuning', { json: own.tuning });
+    window.bridge('timbre', { json: own.timbre });
+    window.bridge('play', { startBeats: 64, bpm: window.sent.findLast((s) => s.type === 'play').bpm });
+    await wait(500);
+    window.engineLog.length = 0;
+    await wait(2000);
+    const drumsBack = peak(window.engineLog, 'drums');
+    return { status, drive0, drive1, gainDb: drive0 > 0 && drive1 > 0 ? +(20 * Math.log10(drive1 / drive0)).toFixed(2) : null, drums, load, restored, drumsBack };
+  }, [organCase.track, organCase.sound]);
+  if (result.organ.status !== 'ready' || !(result.organ.drive0 > 0) || !(result.organ.drive1 > 0) || !(Math.abs(result.organ.gainDb) >= 1.5) || result.organ.drums !== 0
+    || result.organ.restored !== 'ready' || !(result.organ.drumsBack > 0))
+    problems.push(`organ: ${JSON.stringify(result.organ)}`);
   result.position = await page.locator('#play-position').innerText();
   result.chord = await page.locator('#play-now').innerText();
   result.framesPerSecond = await page.evaluate(() => new Promise((done) => {

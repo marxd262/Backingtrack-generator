@@ -11,7 +11,7 @@ namespace btg {
 struct Pack;
 
 // Plays the generator's events of all six layers with the voices chosen for them (sample voices and the synth voices ported so far, the
-// e-piano; the others stay silent), the distortion chain, vibrato and chorus of bass, chords, pad and lead, a mixer, the web app's sends (reverb, shared room, echo) and its sum (brightness shelf,
+// e-piano and the organ; the others stay silent), the distortion chain, vibrato and chorus of bass, chords, pad and lead, a mixer, the web app's sends (reverb, shared room, echo) and its sum (brightness shelf,
 // bus compressor and limiter, both after Chromium's DynamicsCompressor, no clamp at the output). The position comes in from outside
 // (Transport::Block), so the same engine runs under the app's own transport, in an offline render and later under a host's play head.
 class Engine {
@@ -45,9 +45,12 @@ public:
     void setLimiter(bool on);                // default on; off (for measuring): no bus compressor, no limiter (so no delay and no make-up), the sum only gets the master gain, the sends and the shelf
     float takePeak(int channel);             // a Layer, or layerCount for the output: peak since the last call
     int activeSynthTones() const;            // tests only, never while render runs (it reads the audio side): the synth tones that sound
+    int busyOrganChains() const;             // tests only, as activeSynthTones: the organ chains with a tone or a tail to process
 
-    // Before rendering and never during it (JUCE prepareToPlay): builds what depends on the rate (the reverb's and the room's responses),
-    // so it allocates, and it takes the control calls' lock: it waits for a running one (up to about 1 s while a pack loads).
+    // Before rendering and never during it (JUCE prepareToPlay): builds what depends on the rate (the reverb's and the room's responses, the
+    // synth voices' noise and the organ chains' delays, and at a new rate every voice again, with the same serials: the organ's waves are
+    // per rate, up to about 5 ms per organ voice the first time at 96 kHz, 0.1 ms once its waves are cached), so it allocates, and it takes
+    // the control calls' lock: it waits for a running one (up to about 1 s while a pack loads).
     void prepare(double sampleRate);
     // Audio thread: no lock that waits, no allocation.
     void render(float* left, float* right, int frames, const Transport::Block& block);

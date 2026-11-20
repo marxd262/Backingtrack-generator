@@ -73,6 +73,7 @@
 #include <cmath>
 #include <limits>
 #include <numbers>
+#include <utility>
 
 namespace btg::detail {
 namespace {
@@ -177,6 +178,7 @@ Param& SynthTone::param(int node, int which) {
     const int slot = paramCount_++;
     params_[slot] = Param {};
     params_[slot].value = n.constant[which];
+    params_[slot].quantum = quantum; // its frame 0 is the tone's time 0
     n.slot[which] = slot;
     ordered_ = false;
     return params_[slot];
@@ -348,7 +350,7 @@ void SynthTone::process(int n, int count, Scratch& s) {
 }
 
 void SynthTone::render(float* left, float* right, int count, Scratch& s) {
-    for (; count > SYNTH_FRAMES; count -= SYNTH_FRAMES, left += SYNTH_FRAMES, right += SYNTH_FRAMES) render(left, right, SYNTH_FRAMES, s); // the scratch's length
+    for (; count > SYNTH_FRAMES; count -= SYNTH_FRAMES, left += SYNTH_FRAMES, right += right ? SYNTH_FRAMES : 0) render(left, right, SYNTH_FRAMES, s); // the scratch's length
     if (!active) return;
     if (!ordered_ && !overflow_) { ordered_ = true; overflow_ = !order(); }
     if (overflow()) { active = false; return; }
@@ -366,7 +368,7 @@ void SynthTone::render(float* left, float* right, int count, Scratch& s) {
         else if (chokeIn > 0) --chokeIn;
         const double g = chokeGain * releaseGain_;
         left[skip + i] += static_cast<float>(l[i] * g) * panLeft;
-        right[skip + i] += static_cast<float>(r[i] * g) * panRight;
+        if (right) right[skip + i] += static_cast<float>(r[i] * g) * panRight;
     }
     age += n;
     if (delay == 0 && age >= end + SYNTH_FRAMES) active = false;
@@ -389,6 +391,19 @@ SynthTone& Tones::startSynth(Engine::Layer layer, int delay, uint64_t voice, dou
     tone->basic = basic;
     tone->quantum = static_cast<int>((quantum + delay) % 128);
     return *tone;
+}
+
+int Tones::takeChain() {
+    if (!chains[0].prepared()) return -1;
+    int taken = -1;
+    for (int i = 0; i < CHAINS && taken < 0; ++i) if (!chains[i].live || (chains[i].orphan && !chains[i].busy())) taken = i;
+    if (taken < 0) { // all four busy: the oldest orphan goes (with one voice instance holding one, three are orphans)
+        const auto rank = [&](int k) { return std::pair(!chains[k].orphan, chains[k].serial); };
+        for (int i = 0; i < CHAINS; ++i) if (taken < 0 || rank(i) < rank(taken)) taken = i;
+        for (SynthTone& t : synth) if (t.active && t.bus >= 0 && t.bus / 3 == taken) t.active = false; // they would play into the new chain: cut
+    }
+    chains[static_cast<size_t>(taken)].live = false;
+    return taken;
 }
 
 } // namespace btg::detail

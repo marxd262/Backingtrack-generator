@@ -121,6 +121,46 @@ int main() {
         CHECK(v[10] == 1.0f && near(v[30], 0.75, 1e-7) && v[50] == 0.5f);
     }
     {
+        // HasSetTargetConverged where Chromium tests it (Task 20): at the event's first frame and at each render quantum's first frame. A
+        // setTarget from 0.01 to 0 over 20 frames falls below kSetTargetThreshold (4.54e-5) at frame 108, inside the quantum: with the
+        // param's frame 0 on a quantum's first frame (quantum 0) its recursion goes on to frame 127 and it is the target from 128 on; the
+        // control, a param without a grid (quantum -1), is the target from the crossing on.
+        const auto fall = [](int quantum) {
+            Param p;
+            p.value = 0.01f;
+            p.quantum = quantum;
+            p.setTargetAtTime(0.0f, 0, 20);
+            return paramValues(p, 200);
+        };
+        const std::vector<float> grid = fall(0), every = fall(-1);
+        int crossed = -1; // the control's first frame at the target
+        for (int i = 0; i < 200 && crossed < 0; ++i) if (every[i] == 0.0f) crossed = i;
+        std::printf("setTarget per quantum: the control at the target from frame %d, the grid from frame %d (%.3g at 127)\n", crossed,
+                    static_cast<int>(std::find(grid.begin(), grid.end(), 0.0f) - grid.begin()), grid[127]);
+        CHECK(crossed > 100 && crossed < 127 && grid[crossed] > 0.0f && grid[127] > 0.0f && grid[127] < 4.54e-5f && grid[128] == 0.0f);
+        for (int i = 0; i < crossed; ++i) CHECK(grid[i] == every[i]); // the same recursion up to the crossing
+    }
+    {
+        // The same through a SynthTone 64 frames into its quantum (Tones::startSynth gives a tone its place; SynthTone::param hands it to
+        // the param): a buffer of ones through a gain whose setTarget falls from 0.01 as above; the quanta begin at the tone's frames 64
+        // and 192, so the gain is above 0 at frame 150 and 0 from frame 192 on.
+        const std::vector<float> ones(400, 1.0f);
+        SynthTone t;
+        t.active = true;
+        t.basic = &basicWaves(48000.0);
+        t.quantum = 64;
+        const int source = t.buffer(ones.data(), 400, 0, false, 0, 400), g = t.gain(1.0f);
+        Param& p = t.param(g);
+        p.setValueAtTime(0.01f, 0);
+        p.setTargetAtTime(0.0f, 0, 20);
+        t.connect(source, g);
+        t.output(g);
+        std::vector<float> l(256), r(256);
+        const auto scratch = std::make_unique<SynthTone::Scratch>();
+        t.render(l.data(), r.data(), 256, *scratch);
+        CHECK(!t.overflow() && l[150] > 0.0f && l[191] > 0.0f && l[192] == 0.0f && l[255] == 0.0f);
+    }
+    {
         Param p; // a ramp as the first event starts from the intrinsic value at the tone's time 0; more than EVENTS events: the flag
         p.value = 2.0f;
         p.linearRampToValueAtTime(0.0f, 100);

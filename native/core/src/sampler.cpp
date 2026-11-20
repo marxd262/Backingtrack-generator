@@ -425,14 +425,16 @@ public:
 
 } // namespace
 
-std::shared_ptr<const Voice> makeVoice(Engine::Layer layer, const std::string& key, std::shared_ptr<const Pack> pack, const Tuning& tuning, const Timbre& timbre) {
+std::shared_ptr<const Voice> makeVoice(Engine::Layer layer, const std::string& key, std::shared_ptr<const Pack> pack, const Tuning& tuning, const Timbre& timbre,
+                                       double sampleRate) {
     const auto v = [&](const char* name) { return tunedValue(key, name, tuning); };
     const Tuned tuned { v("level"), v("decay"), v("velExp"), v("softHz"), v("oneShot"), v("humanCents"), v("humanDb"), v("strum"), v("strumUp"), v("strumTilt"),
                         v("lowDb"), v("midDb"), v("midHz"), v("highDb"), v("highHz"), v("layerSpread"), v("choke"), v("roomMic"), v("velCurve"), v("kitPan") };
     std::shared_ptr<Voice> voice;
     if (!pack) { // a synth voice (src/audio/voices/index.js, IMPLS)
-        if (key != "chords/epiano/rhodes") return nullptr;
-        voice = epianoVoice(tuning, timbre);
+        if (key == "chords/epiano/rhodes") voice = epianoVoice(tuning, timbre);
+        else if (key.rfind("chords/organ/", 0) == 0 && soundData().tunables.count(key)) voice = organVoice(key, tuning, sampleRate);
+        else return nullptr;
     } else if (layer == Engine::drums || layer == Engine::percussion) {
         // synth.js 198: a drums voice places its hits unless its kitPan is 0 (NaN counts as not 0: every format-1 kit)
         const double kit = layer == Engine::drums && !(tuned.kitPan == 0) ? masterParams(timbre.master).width * tunedValue("mix/pan", "kit", tuning) : 0.0;

@@ -296,7 +296,7 @@ console.log(`mix.json: ${mixCases.length} cases (nine styles, funk at 20 and 400
 for (const layer of FX_LAYERS) for (const k of PHASE4) CLAIMS[claimOf(layer, k)] = (c, events) => {
   const v = c.sound[layer][k];
   if (!(v > 0 && v <= 1)) return `${layer}.${k} = ${v} does nothing`;
-  return c.track.voices[layer]?.id === 'sample' && events.some((e) => e.layer === layer && e.type === 'note') ? '' : `no ${layer} notes with a sample voice`;
+  return events.some((e) => e.layer === layer && e.type === 'note') ? '' : `no ${layer} notes`; // with a sample voice or (Task 20 on) a synth voice
 };
 CLAIMS.blend = (c) => (FX_LAYERS.some((g) => FX.some((k) => c.sound[g][k] > 0 && 8 * c.sound[g][k] < 1)) ? '' : 'no stage between bypass and full');
 const effectSolo = (name, layer, variant, style, fields, claims) => claimed({ name, dry: true, kind: 'synth', sound: set(neutralSound, fields),
@@ -339,5 +339,54 @@ for (const [k, values] of [['brightness', [0, 1]], ['length', [0, 1]], ['tremolo
   for (const v of values) epianoCases.push(synthSolo(`epiano-${k}-${v}`, 'chords', EPIANO, 'dreamy', { [`chords.${k}`]: v }, ['voice:chords', `synth:chords.${k}`]));
 write('epiano.json', epianoCases);
 console.log(`epiano.json: ${epianoCases.length} cases`);
+
+// Task 20: the tonewheel organ on the chords, in the default form (a verse, then a chorus: src/core/organ.js turns the Leslie fast and opens
+// the swell pedal into the chorus). leslie:<mode>: the organ's fine value leslie is that mode (the tuning's, else the preset's 1); for mode 1
+// the chord notes carry leslie 1 and also none, so the Leslie changes its speed. swell: the swell knob is on, the chord notes carry two pedal
+// values (swell in dB, none for 0 dB) and an art 'swell'. perc: the preset's perc is on and a note other than the first starts when every
+// earlier note has ended (organ.js percussionGate, HELD_EPS 0.005 s): the single trigger fires again.
+const organKey = (c) => `chords/organ/${c.track.voices.chords?.variant}`;
+const chordNotes = (events) => events.filter((e) => e.layer === 'chords' && e.type === 'note');
+for (const mode of [0, 1, 2, 3]) CLAIMS[`leslie:${mode}`] = (c, events) => {
+  if (c.track.voices.chords?.id !== 'organ') return 'the chords do not play the organ';
+  if (tunedValue(organKey(c), 'leslie', c.tuning ?? {}) !== mode) return `leslie is not ${mode}`;
+  const notes = chordNotes(events);
+  return mode !== 1 || (notes.some((e) => e.leslie === 1) && notes.some((e) => e.leslie === undefined)) ? '' : 'the chord notes do not switch the Leslie';
+};
+CLAIMS.swell = (c, events) => {
+  if (!(tunedValue(organKey(c), 'swell', c.tuning ?? {}) > 0)) return 'the swell is off';
+  const notes = chordNotes(events);
+  return new Set(notes.map((e) => e.swell ?? 0)).size >= 2 && notes.some((e) => e.art === 'swell') ? '' : 'the chord notes do not move the pedal with an art swell';
+};
+CLAIMS.perc = (c, events) => {
+  if (!(tunedValue(organKey(c), 'perc', c.tuning ?? {}) > 0)) return 'the percussion is off';
+  let held = -Infinity, again = false;
+  for (const e of chordNotes(events).sort((a, b) => a.t - b.t)) {
+    again ||= held > -Infinity && e.t >= held - 0.005;
+    held = Math.max(held, e.t + Math.max(0.03, e.dur));
+  }
+  return again ? '' : 'no note starts after every earlier one has ended';
+};
+// The four presets in the styles scripts/render-organ.mjs and tunables.js measured them in (gospel in the rock case); jazz with the Leslie
+// off, always slow, always fast; rock with drive 0 and 1; ballad with the swell off; rock with no click; jazz with no percussion; and jazz
+// behind the layer chains, which the organ's two channels run in two (chorus, distortion, vibrato at 1). Each fails when the core ignores its
+// knob (Task 20's mutation runs), except two kinds that cannot fail red: the three Leslie modes (with the preset's mode 1 instead they stay
+// within the synth limits, envelope 0.962 at worst; voice-compare's sets "organ jazz leslie 0, 2, 3" fail then, +3.6 to -8.3 dB) and the
+// vibrato (as every vibrato case, mod.json; fx-compare's stereo vibrato set proves the chain).
+const ORGAN_STYLE = { jazz: 'blues', rock: 'rock', gospel: 'rock', ballad: 'dreamy' };
+const organSolo = (name, variant, tuning, claims, fields = {}) => synthSolo(name, 'chords', { id: 'organ', variant }, ORGAN_STYLE[variant], fields,
+  ['voice:chords', ...claims], {}, tuning && { [`chords/organ/${variant}`]: tuning });
+const organCases = [
+  organSolo('organ-jazz', 'jazz', undefined, ['leslie:1', 'swell', 'perc']),
+  ...['rock', 'gospel', 'ballad'].map((v) => organSolo(`organ-${v}`, v, undefined, ['leslie:1', 'swell'])),
+  ...[0, 2, 3].map((mode) => organSolo(`organ-jazz-leslie-${mode}`, 'jazz', { leslie: mode }, [`leslie:${mode}`, 'swell', 'perc'])),
+  ...[0, 1].map((drive) => organSolo(`organ-rock-drive-${drive}`, 'rock', { drive }, ['leslie:1', 'swell'])),
+  organSolo('organ-ballad-swell-0', 'ballad', { swell: 0 }, ['leslie:1']),
+  organSolo('organ-rock-click-0', 'rock', { click: 0 }, ['leslie:1', 'swell']),
+  organSolo('organ-jazz-perc-0', 'jazz', { perc: 0 }, ['leslie:1', 'swell']),
+  ...['chorus', 'distortion', 'vibrato'].map((k) => organSolo(`organ-jazz-${k}-1`, 'jazz', undefined, ['leslie:1', 'swell', 'perc', claimOf('chords', k)], { [`chords.${k}`]: 1 })),
+];
+write('organ.json', organCases);
+console.log(`organ.json: ${organCases.length} cases`);
 for (const p of problems) console.error(`ERROR ${p}`);
 process.exit(problems.length ? 1 : 0);

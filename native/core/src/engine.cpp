@@ -218,10 +218,10 @@ struct Engine::Impl {
         return made;
     }
     void publishSetup() { publish<Setup>(buildSetup(), pendingSetup, retiredSetup); }
-    // Control thread: the built voices again from the current tuning and timbre, with the same serial (the layer's state goes on, as in the web).
+    // Control thread: the built voices again from the current tuning, timbre and rate, with the same serial (the layer's state goes on, as in the web).
     void rebuildVoices() {
         for (int l = 0; l < layerCount; ++l)
-            if (chosen[l].voice) chosen[l].voice = makeVoice(static_cast<Layer>(l), chosen[l].key, chosen[l].voice->pack, tuning, timbre);
+            if (chosen[l].voice) chosen[l].voice = makeVoice(static_cast<Layer>(l), chosen[l].key, chosen[l].voice->pack, tuning, timbre, rate);
     }
     // Audio thread: where the layer goes, the mixer's pan or else the place mix/pan gives it, times the timbre's width (synth.js 173).
     float panTarget(int l) const {
@@ -282,9 +282,11 @@ struct Engine::Impl {
             const double v = setup->vibrato[l], c = setup->chorus[l];
             const bool twoChannels = setup->voice[l] && setup->voice[l]->stereo();
             int g = tones.gen[l];
-            if (atStart) {
+            if (atStart) { // an organ chain counts as long as it is busy (its tones or its tail)
                 const auto sounds = [l, g](const auto& t) { return t.active && t.layer == l && t.gen == g; };
-                if (std::any_of(tones.all.begin(), tones.all.end(), sounds) || std::any_of(tones.synth.begin(), tones.synth.end(), sounds))
+                const auto rings = [l, g](const detail::OrganChain& chain) { return chain.busy() && chain.layer == l && chain.gen == g; };
+                if (std::any_of(tones.all.begin(), tones.all.end(), sounds) || std::any_of(tones.synth.begin(), tones.synth.end(), sounds)
+                    || std::any_of(tones.chains.begin(), tones.chains.end(), rings))
                     tones.gen[l] = static_cast<uint8_t>(g = 1 - g);
                 guitar[g][l].reset();
                 guitar[g][l].set(setup->fx[l], true);
@@ -309,12 +311,14 @@ struct Engine::Impl {
         return true;
     }
 
-    // Audio thread: layers whose voice changed (all: when playing starts) begin with the state of a voice just built.
+    // Audio thread: layers whose voice changed (all: when playing starts) begin with the state of a voice just built. The organ chain the
+    // old state held rings out as an orphan (the web's old chain, on the old `out` or in the old voice's closure).
     void restart(bool all) {
         for (int l = 0; l < layerCount; ++l) {
             const uint64_t serial = setup ? setup->serial[l] : 0;
             if (!all && states[l].serial == serial) continue;
             const Voice* voice = setup ? setup->voice[l].get() : nullptr;
+            if (states[l].chain >= 0) tones.chains[static_cast<size_t>(states[l].chain)].orphan = true;
             states[l] = VoiceState {};
             states[l].rng = voice ? voice->startRng : Rng(1);
             states[l].serial = serial;
@@ -368,6 +372,8 @@ void Engine::setTrack(const std::string& trackJson) {
         p.ring = e.ring;
         p.t = e.t;
         if (e.beat) p.beatInBar = *e.beat;
+        if (e.leslie) p.leslie = *e.leslie;
+        if (e.swell) p.swell = *e.swell;
         if (p.art == Art::slideIn || p.art == Art::scoop) { // sampler.js: the glide starts early so that the note arrives on time (offline: room = t)
             const double lead = e.t > 0.02 ? std::min(std::isfinite(p.artTime) ? p.artTime : 0.08, e.t) : 0.0;
             p.leadBeats = lead * beatsPerSecond;
@@ -409,7 +415,7 @@ void Engine::setVoices(const std::string& voicesJson) {
         c.status = "silent";
         const auto id = detail::soundData().packs.find(key);
         if (id == detail::soundData().packs.end()) { // not a sample voice: a synth voice, when the core has it
-            c.voice = makeVoice(static_cast<Layer>(l), key, nullptr, m.tuning, m.timbre);
+            c.voice = makeVoice(static_cast<Layer>(l), key, nullptr, m.tuning, m.timbre, m.rate);
             if (c.voice) c.status = "ready";
             continue;
         }
@@ -421,7 +427,7 @@ void Engine::setVoices(const std::string& voicesJson) {
                 if (pack == nullptr) throw std::runtime_error("no pack");
                 m.packs[id->second] = pack;
             }
-            c.voice = makeVoice(static_cast<Layer>(l), key, std::move(pack), m.tuning, m.timbre);
+            c.voice = makeVoice(static_cast<Layer>(l), key, std::move(pack), m.tuning, m.timbre, m.rate);
             if (c.voice) c.status = "ready";
         } catch (const std::exception& error) {
             c.status = "error: " + id->second + ": " + error.what();
@@ -466,12 +472,18 @@ int Engine::activeSynthTones() const {
     const auto& synth = impl_->tones.synth;
     return static_cast<int>(std::count_if(synth.begin(), synth.end(), [](const detail::SynthTone& t) { return t.active; }));
 }
+int Engine::busyOrganChains() const {
+    const auto& chains = impl_->tones.chains;
+    return static_cast<int>(std::count_if(chains.begin(), chains.end(), [](const detail::OrganChain& c) { return c.busy(); }));
+}
 
 void Engine::prepare(double sampleRate) {
     Impl& m = *impl_;
     const std::lock_guard<std::recursive_mutex> hold(m.control);
-    if (sampleRate != m.rate) { m.reverb = nullptr; m.room = nullptr; } // responses for the new rate
+    const bool newRate = sampleRate != m.rate;
+    if (newRate) { m.reverb = nullptr; m.room = nullptr; } // responses for the new rate
     m.rate = sampleRate;
+    if (newRate) m.rebuildVoices(); // the organ's waves are built for the rate
     std::shared_ptr<const Setup> made = m.buildSetup(), old[3]; // what this replaces is freed here, at the end, never on the audio thread
     {
         const std::lock_guard<std::mutex> lock(m.swap);
@@ -485,6 +497,8 @@ void Engine::prepare(double sampleRate) {
     m.tones.quantum = 0;
     for (Tone& t : m.tones.all) t.active = false;
     for (SynthTone& t : m.tones.synth) t.active = false;
+    m.tones.noise = detail::noiseBuffer(Rng(1).fork("noise"), 1, 1, 0, sampleRate)[0]; // allocates: synth.js 60
+    for (detail::OrganChain& c : m.tones.chains) c.prepare(sampleRate); // allocates: the Leslie's delays; every chain given up
     m.restart(true);
     for (int l = 0; l < layerCount; ++l) {
         m.gainNow[l] = m.muted[l] ? 0.0f : m.fader[l] * m.fader[l];
@@ -635,7 +649,7 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
         }
     } else if (const auto active = [](const auto& t) { return t.active; };
                !m.quiet && m.wetFadeLeft < 0 && std::none_of(m.tones.all.begin(), m.tones.all.end(), active) && std::none_of(m.tones.synth.begin(), m.tones.synth.end(), active)
-               && m.drained()) {
+               && std::none_of(m.tones.chains.begin(), m.tones.chains.end(), [](const detail::OrganChain& c) { return c.busy(); }) && m.drained()) {
         for (detail::Biquad& f : m.shelf) clear(f);
         m.glue.reset();
         m.limiter.reset();
@@ -680,10 +694,28 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
             }
         }
         for (auto& gen : m.buffers) for (auto& layer : gen) for (auto& channel : layer) std::fill(channel, channel + count, 0.0f);
-        bool sounding[2][layerCount] = {}; // a tone of that generation and layer is active in this chunk
+        for (detail::OrganChain& c : m.tones.chains) if (c.live) c.clear(count);
+        bool sounding[2][layerCount] = {}; // a tone of that generation and layer is active in this chunk, or an organ chain is busy
         for (Tone& t : m.tones.all) if (t.active) { sounding[t.gen][t.layer] = true; t.render(m.buffers[t.gen][t.layer][0], m.buffers[t.gen][t.layer][1], count); }
-        for (SynthTone& t : m.tones.synth)
-            if (t.active) { sounding[t.gen][t.layer] = true; t.render(m.buffers[t.gen][t.layer][0], m.buffers[t.gen][t.layer][1], count, m.tones.scratch); }
+        for (SynthTone& t : m.tones.synth) {
+            if (!t.active) continue;
+            sounding[t.gen][t.layer] = true;
+            if (t.bus < 0) t.render(m.buffers[t.gen][t.layer][0], m.buffers[t.gen][t.layer][1], count, m.tones.scratch);
+            else { // into its organ chain's entry
+                detail::OrganChain& c = m.tones.chains[static_cast<size_t>(t.bus / 3)];
+                c.heard = true;
+                t.render(c.in[t.bus % 3], nullptr, count, m.tones.scratch);
+            }
+        }
+        // The organ chains, each into the buffer of its layer and generation: one that is busy (a tone played into it in this chunk, or its
+        // tail has not passed) and the one a voice instance holds while playing (its LFOs run on, as the web's do until its dead). An orphan
+        // that has rung out is free.
+        for (detail::OrganChain& c : m.tones.chains) {
+            if (!c.live) continue;
+            if (c.busy() || (block.playing && !c.orphan)) c.process(m.buffers[c.gen][c.layer][0], m.buffers[c.gen][c.layer][1], count, m.tones.quantum);
+            if (c.busy()) sounding[c.gen][c.layer] = true;
+            else if (c.orphan) c.live = false;
+        }
         m.tones.quantum = (m.tones.quantum + count) % 128;
         // The distortion chains hear the sum of the layer's tones, before mute, fader and trim (synth.js: voice -> fx.input), the modulation
         // chains what comes out of them: in one channel, the right one then taking the left until the chorus makes two of it, or in two where

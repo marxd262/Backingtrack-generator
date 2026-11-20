@@ -79,6 +79,11 @@ add('timbreFields', (timbre) => ({ names: Object.entries(timbre).flatMap(([group
 const { MOD } = await load('audio/mod-fx.js');
 add('MOD', () => MOD, [null]);
 
+// Task 20: the noise of the synth voices, synth.js 60 (noiseBuffer(ctx, createRng(1).fork('noise'), 1): one second, mono, no decay), the
+// buffer Engine::prepare makes for its rate as Tones::noise
+add('noiseBuffer', ({ label, seconds, channels, decay, sampleRate }) => summary(noiseBuffer(context(sampleRate), createRng(1).fork(label), seconds, channels, decay), channels),
+  [44100, 48000, 96000].map((sampleRate) => ({ label: 'noise', seconds: 1, channels: 1, decay: 0, sampleRate })));
+
 mkdirSync(outDir, { recursive: true });
 writeFileSync(join(outDir, 'logic.json'), JSON.stringify(cases));
 console.log(`logic.json: ${cases.length} cases of ${new Set(cases.map((c) => c.fn)).size} functions`);

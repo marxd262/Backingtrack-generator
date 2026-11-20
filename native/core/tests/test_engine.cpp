@@ -16,6 +16,7 @@
 #include <complex>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <iterator>
 #include <new>
@@ -231,7 +232,73 @@ static Result render(btg::Engine& engine, btg::Transport& transport, double seco
     return r;
 }
 
+// The organ outside an engine (Task 20): Tones at `sr` as Engine::prepare makes them for it (the basic waves, the noise, the chains' delays),
+// and one chunk as the engine's chunk loop plays it: the synth tones into their chains' entries (the others into slot 0's channels), then
+// every live chain into the two channels of its own slot, frames at to at + count of out[slot]; the render quantum moves on.
+using Slots = std::vector<float>[btg::detail::CHAINS][2];
+static std::unique_ptr<btg::detail::Tones> organTones(double sr) {
+    using namespace btg::detail;
+    auto tones = std::make_unique<Tones>();
+    tones->sr = sr;
+    tones->basic = &basicWaves(sr);
+    tones->noise = noiseBuffer(Rng(1).fork("noise"), 1, 1, 0, sr)[0];
+    for (OrganChain& c : tones->chains) c.prepare(sr);
+    return tones;
+}
+static void organChunk(btg::detail::Tones& tones, size_t at, int count, Slots& out) {
+    using namespace btg::detail;
+    for (OrganChain& c : tones.chains) if (c.live) c.clear(count);
+    for (SynthTone& t : tones.synth) {
+        if (!t.active) continue;
+        if (t.bus < 0) { t.render(&out[0][0][at], &out[0][1][at], count, tones.scratch); continue; }
+        OrganChain& c = tones.chains[static_cast<size_t>(t.bus / 3)];
+        c.heard = true;
+        t.render(c.in[t.bus % 3], nullptr, count, tones.scratch);
+    }
+    for (int s = 0; s < CHAINS; ++s) if (tones.chains[s].live) tones.chains[s].process(&out[s][0][at], &out[s][1][at], count, tones.quantum);
+    tones.quantum = (tones.quantum + count) % 128;
+}
+
 int main(int argc, char** argv) {
+    // The organ's waves (Task 20; organ.js waveFor, built at makeVoice for every key, rawWave keeping only the ranges a key's tone reads),
+    // first, so that the cache is cold: every key 0 to 127 of the four presets reads at its wheels' frequency (as Oscillator::constant
+    // computes it) the same pair of tables and the same crossfade as from a full build of its partials (customWave: every range), bit for
+    // bit, at 48, 96 and 44.1 kHz, and a second build of the voice reads the same tables. Printed: what the cache grew by and what makeVoice
+    // took, cold (the preset's first voice at the rate; the first at a rate also builds the Leslie's LFO waves) and warm.
+    {
+        using namespace btg::detail;
+        for (const double sr : { 48000.0, 96000.0, 44100.0 }) {
+            for (const char* preset : { "jazz", "rock", "gospel", "ballad" }) {
+                const std::string key = std::string("chords/organ/") + preset;
+                const size_t before = rawWaveBytes();
+                auto began = std::chrono::steady_clock::now();
+                const auto voice = makeVoice(btg::Engine::chords, key, nullptr, {}, Timbre {}, sr);
+                const double cold = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count();
+                const size_t grew = rawWaveBytes() - before;
+                began = std::chrono::steady_clock::now();
+                const auto again = makeVoice(btg::Engine::chords, key, nullptr, {}, Timbre {}, sr);
+                const double warm = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count();
+                int same = 0;
+                for (int midi = 0; midi < 128; ++midi) {
+                    const OrganKey k = organKey(*voice, midi);
+                    if (!k.wave || organKey(*again, midi).wave != k.wave) continue;
+                    const auto full = customWave(k.real.data(), k.imag.data(), 17, sr, true);
+                    const float f = std::clamp(k.hz * std::exp2(k.cents / 1200), -full->rate / 2, full->rate / 2);
+                    const float* lower[2];
+                    const float* higher[2];
+                    float factor[2];
+                    k.wave->pair(f, lower[0], higher[0], factor[0]);
+                    full->pair(f, lower[1], higher[1], factor[1]);
+                    const size_t bytes = static_cast<size_t>(full->size) * sizeof(float);
+                    same += factor[0] == factor[1] && std::memcmp(lower[0], lower[1], bytes) == 0 && std::memcmp(higher[0], higher[1], bytes) == 0;
+                }
+                std::printf("organ %s at %.0f Hz: the wave cache grew by %.2f MB, makeVoice %.1f ms cold, %.1f ms warm; %d of 128 keys read a full build's tables\n",
+                            preset, sr, static_cast<double>(grew) / 1048576.0, cold, warm, same);
+                CHECK(same == 128);
+            }
+        }
+    }
+
     // Transport: loop and jump.
     btg::Transport transport;
     transport.setLoop(4.0, 8.0);
@@ -1036,13 +1103,17 @@ int main(int argc, char** argv) {
         const char* EVERY = R"({"master":{"reverb":1,"echo":1,"roomWet":1,"roomSize":1},"bass":{"fuzz":1,"overdrive":1,"distortion":1,"vibrato":1,"chorus":1},
                 "chords":{"fuzz":1,"overdrive":1,"distortion":1,"vibrato":1,"chorus":1},"pad":{"fuzz":1,"overdrive":1,"distortion":1,"vibrato":1,"chorus":1},
                 "lead":{"fuzz":1,"overdrive":1,"distortion":1,"vibrato":1,"chorus":1}})";
-        for (const auto& [bpm, sr, epiano] : { std::tuple { 20.0, rate, false }, std::tuple { 400.0, rate, false }, std::tuple { 400.0, 96000, false },
-                                               std::tuple { 400.0, rate, true }, std::tuple { 400.0, 96000, true } }) {
+        // And (Task 20) with the organ on the chords, the Leslie fast and the drive at 1, printed only.
+        const char* CHORDS[3] = { "", R"({"chords":{"id":"epiano","variant":"rhodes"}})", R"({"chords":{"id":"organ","variant":"jazz"}})" };
+        const char* NAMES[3] = { "", " with the e-piano on the chords", " with the organ on the chords (Leslie fast, drive 1)" };
+        for (const auto& [bpm, sr, chordsVoice] : { std::tuple { 20.0, rate, 0 }, std::tuple { 400.0, rate, 0 }, std::tuple { 400.0, 96000, 0 },
+                                                    std::tuple { 400.0, rate, 1 }, std::tuple { 400.0, 96000, 1 }, std::tuple { 400.0, rate, 2 }, std::tuple { 400.0, 96000, 2 } }) {
             btg::Engine engine;
             engine.setPackSource(source);
+            if (chordsVoice == 2) engine.setTuning(R"({"chords/organ/jazz":{"leslie":3,"drive":1}})");
             engine.setSound(EVERY);
             engine.setTrack(band);
-            if (epiano) engine.setVoices(R"({"chords":{"id":"epiano","variant":"rhodes"}})");
+            if (chordsVoice > 0) engine.setVoices(CHORDS[chordsVoice]);
             engine.setMaster(0.7f); // fader 0.7 = gain 0.49 (see above)
             engine.prepare(sr);
             btg::Transport t;
@@ -1050,8 +1121,8 @@ int main(int argc, char** argv) {
             const auto began = std::chrono::steady_clock::now();
             const Result r = render(engine, t, 20.0, 480, sr);
             const double load = std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count() / 20.0;
-            const bool asserted = sr == rate && !onCi && !epiano;
-            std::printf("tempo %.0f bpm at %d Hz%s: peak %.3f, load %.1f %%%s\n", bpm, sr, epiano ? " with the e-piano on the chords" : "", r.peak, 100 * load, asserted ? "" : " (not asserted)");
+            const bool asserted = sr == rate && !onCi && chordsVoice == 0;
+            std::printf("tempo %.0f bpm at %d Hz%s: peak %.3f, load %.1f %%%s\n", bpm, sr, NAMES[chordsVoice], r.peak, 100 * load, asserted ? "" : " (not asserted)");
             CHECK(r.finite && r.peak < 1.0 && r.rms > 0.001);
             for (int l = 0; l < btg::Engine::layerCount; ++l) {
                 const bool sounded = engine.takePeak(l) > 0.0f;
@@ -2178,9 +2249,10 @@ int main(int argc, char** argv) {
             CHECK(active == TONES && lowest == 11 && fresh == 10 && kept == TONES - 10);
             CHECK(std::none_of(tones->all.begin(), tones->all.end(), [](const Tone& t) { return t.active; }));
         }
-        // No allocation and no free in render (ruling 14): one run with sample voices (drums, bass, the chords' guitar) and the e-piano, a
-        // voice change while playing (both ways), a restart (play again, no stop between), a jump and a stop, the counts armed around the
-        // render calls only (the control calls allocate). Red with an allocation in the audio path.
+        // No allocation and no free in render (ruling 14): one run with sample voices (drums, bass, the chords' guitar), the e-piano and (Task
+        // 20) the organ, voice changes while playing (guitar, e-piano, organ, each way), a restart (play again, no stop between), a jump and a
+        // stop under the organ, the counts armed around the render calls only (the control calls allocate). Red with an allocation in the
+        // audio path.
         {
             std::string chorded = track;
             chorded.replace(chorded.find("\"chords\":false"), 14, "\"chords\":true");
@@ -2196,11 +2268,18 @@ int main(int argc, char** argv) {
                 }
                 counting = false;
             };
+            const char* ORGAN = R"({"chords":{"id":"organ","variant":"jazz"}})";
             t.play(64.0, e->bpm());
             counted(1.0);
             e->setVoices(R"({"chords":{"id":"sample","variant":"funk"}})");
             counted(0.5);
             e->setVoices(EPIANO);
+            counted(0.5);
+            e->setVoices(ORGAN);
+            counted(0.5);
+            e->setVoices(R"({"chords":{"id":"sample","variant":"funk"}})");
+            counted(0.5);
+            e->setVoices(ORGAN);
             counted(0.5);
             t.play(64.0, e->bpm());
             counted(1.0);
@@ -2208,8 +2287,411 @@ int main(int argc, char** argv) {
             counted(0.5);
             t.stop();
             counted(0.5);
-            std::printf("render: %ld allocations, %ld frees (%s)\n", allocations, frees, e->voiceStatus().c_str());
+            std::printf("render: %ld allocations, %ld frees (%s), %d organ chains busy at the end\n", allocations, frees, e->voiceStatus().c_str(), e->busyOrganChains());
             CHECK(allocations == 0 && frees == 0 && e->voiceStatus().find(R"("chords":"ready")") != std::string::npos);
+        }
+
+        // The tonewheel organ (Task 20): its voice (voices/organ.cpp) and the chain slots of its voice instances (organ_chain.h), on the
+        // tracks above, dry, no limiter. NOCLICK: no key click, whose levels come from the voice instance's rng.
+        const char* ORGAN = R"({"chords":{"id":"organ","variant":"jazz"}})";
+        const char* FUNK = R"({"chords":{"id":"sample","variant":"funk"}})";
+        const char* NOCLICK = R"({"chords/organ/jazz":{"click":0}})";
+        const auto organ = [&](const std::string& song, const char* voices, const char* tuning = "{}", const char* sound = DRY) {
+            auto e = std::make_unique<btg::Engine>();
+            e->setPackSource(source);
+            e->setTuning(tuning);
+            e->setSound(sound);
+            e->setTrack(song);
+            e->setVoices(voices);
+            e->setLimiter(false);
+            e->prepare(rate);
+            return e;
+        };
+        const auto both = [](const Result& r) { std::vector<float> x(r.left); x.insert(x.end(), r.right.begin(), r.right.end()); return x; };
+        // It plays in two channels: the chords with chords/organ/jazz are ready and have a level; with the Leslie on (always fast) the two
+        // channels are no longer one signal (their correlation below 0.99; the layer's balance alone scales them), with it off they are (0.9999).
+        for (const int leslie : { 3, 0 }) {
+            const std::string tuning = R"({"chords/organ/jazz":{"leslie":)" + std::to_string(leslie) + "}}";
+            auto e = organ(keys, ORGAN, tuning.c_str());
+            btg::Transport t;
+            t.play(64.0, e->bpm());
+            const Result r = render(*e, t, 2.0, 480);
+            const float level = e->takePeak(btg::Engine::chords);
+            double lr = 0.0, ll = 0.0, rr = 0.0;
+            for (size_t i = 0; i < r.left.size(); ++i) { lr += static_cast<double>(r.left[i]) * r.right[i]; ll += static_cast<double>(r.left[i]) * r.left[i]; rr += static_cast<double>(r.right[i]) * r.right[i]; }
+            const double correlation = lr / std::sqrt(ll * rr);
+            std::printf("organ, leslie %d: chords peak %.3f, rms %.4f, left and right correlate %.5f\n", leslie, level, r.rms, correlation);
+            CHECK(e->voiceStatus().find(R"("chords":"ready")") != std::string::npos && r.finite && level > 0.01f && r.rms > 1e-3);
+            CHECK(leslie == 3 ? correlation < 0.99 : correlation > 0.9999);
+        }
+        // Review Focus 5, pitch: one tone through the voice and its chain with only the 8' drawbar (a pure partial: a sine at the key), no
+        // Leslie, no click, no percussion, no drive: C4 at 44.1 and 96 kHz within 0.05 cents of 261.63 Hz detuned by its wheels (GEARS of C,
+        // 85 / 104: -0.58 cents), between the first and the last upward zero crossing from 0.2 s on.
+        for (const double sr : { 44100.0, 96000.0 }) {
+            const char* PURE = R"({"chords/organ/jazz":{"d16":0,"d513":0,"leslie":0,"click":0,"perc":0,"drive":0}})";
+            const auto voice = makeVoice(btg::Engine::chords, "chords/organ/jazz", nullptr, parseTuning(PURE), Timbre {}, sr);
+            auto tones = organTones(sr);
+            VoiceState state;
+            state.rng = voice->startRng;
+            PlayEvent e;
+            e.layer = btg::Engine::chords;
+            e.midi = 60;
+            e.vel = 0.8;
+            e.durBeats = 1.5;
+            const size_t frames = static_cast<size_t>(1.2 * sr);
+            Slots out;
+            for (auto& slot : out) for (auto& channel : slot) channel.assign(frames, 0.0f);
+            for (size_t at = 0; at < frames; at += SYNTH_FRAMES) {
+                if (at == 0) voice->play(e, 0, 1.0, state, *tones);
+                organChunk(*tones, at, static_cast<int>(std::min<size_t>(SYNTH_FRAMES, frames - at)), out);
+            }
+            const std::vector<float>& l = out[0][0];
+            double first = -1.0, last = -1.0;
+            int crossings = 0;
+            for (size_t i = static_cast<size_t>(0.2 * sr); i + 1 < l.size(); ++i)
+                if (l[i] <= 0 && l[i + 1] > 0) {
+                    last = (static_cast<double>(i) + l[i] / (l[i] - l[i + 1])) / sr;
+                    if (first < 0) first = last;
+                    ++crossings;
+                }
+            const double wheel = 1200 * std::log2(40.0 * 85 / 104 / (440 * std::pow(2.0, (24 - 69) / 12.0)));
+            const double cents = 1200 * std::log2((crossings - 1) / (last - first) / (440 * std::pow(2.0, (60 - 69) / 12.0))) - wheel;
+            std::printf("organ at %.0f Hz: C4 %+.4f cents off 261.63 Hz detuned by %.3f cents, over %d periods\n", sr, cents, wheel, crossings - 1);
+            CHECK(crossings > 200 && std::fabs(cents) < 0.05);
+        }
+        // A voice change under a ringing organ (the stab of 0.9 s): the chords go to a sample guitar 0.3 s in, and a control call after it
+        // frees the setup that held the organ. Its chain, now an orphan, rings out with its tones: the render equals the one without the
+        // change, exactly, until a tone's end (the stab and its release); from there to the next stab (3.3 s later) only the chain's own
+        // ringing differs (the orphan is given up after its tail, the kept chain rings on: below 1e-6); from the next stab on the guitar plays.
+        {
+            double gappedDur = 0.0;
+            for (const btg::Event& ev : btg::buildEvents(held))
+                if (ev.type == btg::Event::Type::note && ev.layer == "chords" && std::fabs(ev.t * (100.0 / 60.0) - gapped) < 1e-6) gappedDur = std::max(gappedDur, ev.dur);
+            const auto run = [&](bool change) {
+                auto e = organ(held, ORGAN);
+                btg::Transport t;
+                t.play(gapped, e->bpm());
+                Result r = render(*e, t, 0.3, 480);
+                if (change) e->setVoices(FUNK);
+                const Result taken = render(*e, t, 0.01, 480);
+                e->setSound(DRY);
+                const Result rest = render(*e, t, 4.0, 480);
+                for (const Result* more : { &taken, &rest }) {
+                    r.left.insert(r.left.end(), more->left.begin(), more->left.end());
+                    r.right.insert(r.right.end(), more->right.begin(), more->right.end());
+                }
+                return r;
+            };
+            const Result changed = run(true), kept = run(false);
+            const size_t ends = static_cast<size_t>((gappedDur + 0.012 + 0.01) * rate), next = static_cast<size_t>((nextStab - gapped) * 0.6 * rate) - SYNTH_FRAMES;
+            bool same = changed.left.size() == kept.left.size();
+            double ringing = 0.0;
+            for (size_t i = 0; same && i < next; ++i) {
+                const double d = std::max(std::fabs(changed.left[i] - kept.left[i]), std::fabs(changed.right[i] - kept.right[i]));
+                if (i < ends) same = d == 0.0;
+                else ringing = std::max(ringing, d);
+            }
+            bool differs = false;
+            for (size_t i = next; same && i < changed.left.size(); ++i) differs = differs || std::fabs(changed.left[i] - kept.left[i]) > 1e-3f;
+            std::printf("organ voice change: equal until the tones' end (%.3f s); then the chain's ringing differs by %.2e; tail peak %.3f\n",
+                        static_cast<double>(ends) / rate, ringing, peakIn(changed.left, 0.31, 0.9));
+            CHECK(same && ringing < 1e-6 && peakIn(changed.left, 0.31, 0.9) > 0.01f && differs);
+        }
+        // A restart while organ tones ring (the held stab, 0.5 s in), with the chords' distortion at 1 so that the layer chains matter: the old
+        // tones keep their chain slot and their layer chains, the new song's first tone takes a fresh slot. The restarted render less a
+        // stop alone at that moment (the old tail) equals a fresh engine started at the new place, within 1e-6, over 1.5 s.
+        {
+            const char* DIST = R"({"master":{"reverb":0,"echo":0,"roomWet":0},"chords":{"distortion":1}})";
+            const auto run = [&](int how) { // 0: play again under the ringing organ; 1: a stop at that moment; 2: a fresh engine started there
+                auto e = organ(held, ORGAN, "{}", DIST);
+                btg::Transport t;
+                if (how < 2) {
+                    t.play(longest, e->bpm());
+                    render(*e, t, 0.5, 480);
+                }
+                if (how == 1) t.stop();
+                else t.play(gapped, e->bpm());
+                return render(*e, t, 1.5, 480);
+            };
+            const Result restarted = run(0), stopped = run(1), fresh = run(2);
+            double most = 0.0;
+            for (size_t i = 0; i < restarted.left.size(); ++i)
+                most = std::max({ most, std::fabs(static_cast<double>(restarted.left[i]) - stopped.left[i] - fresh.left[i]),
+                                  std::fabs(static_cast<double>(restarted.right[i]) - stopped.right[i] - fresh.right[i]) });
+            std::printf("organ restart: restarted less the stop alone against a fresh engine, largest difference %.2e (old tail peak %.3f, new song peak %.3f)\n",
+                        most, peakIn(stopped.left, 0.0, 0.2), peakIn(fresh.left, 0.0, 1.5));
+            CHECK(peakIn(stopped.left, 0.0, 0.2) > 0.01f && peakIn(fresh.left, 0.0, 1.5) > 0.01f && most < 1e-6);
+        }
+        // A restart inside a chain's tail (Task 20's fix round 1): the stab of 0.9 s, the chords' distortion at 1, played until a whole block
+        // after its last organ tone ended, when no tone is active and the chain is still busy (its 0.3 s tail). The chain alone keeps its
+        // generation from counting as drained and makes applyFx flip, so that its tail rings out on the old layer chains while the new song
+        // (the same stab again) meets fresh ones: the restarted render less a stop alone at that block equals a fresh engine within 1e-6.
+        {
+            const char* DIST = R"({"master":{"reverb":0,"echo":0,"roomWet":0},"chords":{"distortion":1}})";
+            std::vector<float> l(480), r(480);
+            const auto blocks = [&](btg::Engine& e, btg::Transport& t, int n, std::vector<float>* out) {
+                for (int k = 0; k < n; ++k) {
+                    const auto b = t.advance(480, rate);
+                    e.render(l.data(), r.data(), b.frames, b);
+                    if (out) for (int i = 0; i < b.frames; ++i) { out[0].push_back(l[i]); out[1].push_back(r[i]); }
+                }
+            };
+            int before = 0, busy = 0; // blocks from the play to the one after the last tone ended; the chains busy there
+            {
+                auto e = organ(held, ORGAN, "{}", DIST);
+                btg::Transport t;
+                t.play(gapped, e->bpm());
+                for (bool gone = false; before < 1000 && !gone; ++before) {
+                    blocks(*e, t, 1, nullptr);
+                    gone = before > 10 && e->activeSynthTones() == 0;
+                }
+                blocks(*e, t, 1, nullptr);
+                ++before;
+                busy = e->busyOrganChains();
+            }
+            const auto run = [&](int how) { // 0: play again there; 1: a stop there; 2: a fresh engine started there
+                auto e = organ(held, ORGAN, "{}", DIST);
+                btg::Transport t;
+                if (how < 2) {
+                    t.play(gapped, e->bpm());
+                    blocks(*e, t, before, nullptr);
+                }
+                if (how == 1) t.stop();
+                else t.play(gapped, e->bpm());
+                std::vector<float> out[2];
+                blocks(*e, t, 150, out);
+                return std::array<std::vector<float>, 2> { out[0], out[1] };
+            };
+            const auto restarted = run(0), stopped = run(1), fresh = run(2);
+            double most = 0.0, tail = 0.0;
+            for (int c = 0; c < 2; ++c)
+                for (size_t i = 0; i < restarted[c].size(); ++i) {
+                    most = std::max(most, std::fabs(static_cast<double>(restarted[c][i]) - stopped[c][i] - fresh[c][i]));
+                    tail = std::max(tail, static_cast<double>(std::fabs(stopped[c][i])));
+                }
+            std::printf("organ restart in a chain's tail (%.3f s after the play, %d chain busy, no tone): restarted less the stop alone against a fresh engine, largest difference %.2e (the tail alone peaks at %.2e)\n",
+                        before * 480.0 / rate, busy, most, tail);
+            CHECK(busy == 1 && tail > 0.0 && peakIn(fresh[0], 0.0, 1.5) > 0.01f && most < 1e-6);
+        }
+        // setTuning with leslie 3 (always fast) between two stabs acts from the next tone (the web reads it there: organ.js 104), not before:
+        // the render equals the one without it up to the next stab, then the rotors speed up and it differs.
+        {
+            const auto run = [&](bool change) {
+                auto e = organ(held, ORGAN);
+                btg::Transport t;
+                t.play(gapped, e->bpm());
+                Result r = render(*e, t, 1.2, 480);
+                if (change) e->setTuning(R"({"chords/organ/jazz":{"leslie":3}})");
+                const Result rest = render(*e, t, 3.5, 480);
+                r.left.insert(r.left.end(), rest.left.begin(), rest.left.end());
+                r.right.insert(r.right.end(), rest.right.begin(), rest.right.end());
+                return r;
+            };
+            const Result changed = run(true), kept = run(false);
+            const size_t next = static_cast<size_t>((nextStab - gapped) * 0.6 * rate) - 2;
+            bool same = changed.left.size() == kept.left.size();
+            for (size_t i = 0; same && i < next; ++i) same = changed.left[i] == kept.left[i] && changed.right[i] == kept.right[i];
+            double after = 0.0;
+            for (size_t i = next; same && i < changed.left.size(); ++i) after = std::max(after, static_cast<double>(std::fabs(changed.left[i] - kept.left[i])));
+            std::printf("organ setTuning leslie 3: equal until the next stab (%.3f s), then up to %.3f apart\n", static_cast<double>(next) / rate, after);
+            CHECK(same && after > 1e-3);
+        }
+        // TAIL (organ.js 30, 98): a tone more than 10 s after the last one's end builds the chain anew: from its frame on it equals the same
+        // tone of a fresh voice instance at the same place in the render quantum, bit for bit; one inside the 10 s plays on the old chain (its
+        // LFOs have turned on): it differs. One voice instance through Tones; the tones on a chunk's and a quantum's first frame. Red when the
+        // chain is never built anew (the first half fails) or always (the second).
+        {
+            const auto voice = makeVoice(btg::Engine::chords, "chords/organ/jazz", nullptr, parseTuning(NOCLICK), Timbre {}, rate);
+            const auto play = [&](std::vector<std::pair<size_t, int>> notes, size_t frames) { // frame and key, 0.5 s each; both channels summed over the slots
+                auto tones = organTones(rate);
+                VoiceState state;
+                state.rng = voice->startRng;
+                Slots out;
+                for (auto& slot : out) for (auto& channel : slot) channel.assign(frames, 0.0f);
+                for (size_t at = 0; at < frames; at += SYNTH_FRAMES) {
+                    const int count = static_cast<int>(std::min<size_t>(SYNTH_FRAMES, frames - at));
+                    for (const auto& [frame, midi] : notes) {
+                        if (frame < at || frame >= at + count) continue;
+                        PlayEvent e;
+                        e.layer = btg::Engine::chords;
+                        e.midi = midi;
+                        e.vel = 0.8;
+                        e.durBeats = 0.5;
+                        voice->play(e, static_cast<int>(frame - at), 1.0, state, *tones);
+                    }
+                    organChunk(*tones, at, count, out);
+                }
+                std::vector<float> sum(2 * frames, 0.0f);
+                for (auto& slot : out) for (size_t i = 0; i < frames; ++i) { sum[i] += slot[0][i]; sum[frames + i] += slot[1][i]; }
+                return sum;
+            };
+            // 10.6 s and 9.6 s after the first tone's start (its end 0.5 s), on chunk boundaries (1988 and 1800 chunks); not at 10 s, where the
+            // slow rotors (0.8 and 0.7 Hz) have turned a whole number of times and the old chain sounds as a fresh one
+            const size_t after = 508928, inside = 460800;
+            const std::vector<float> fresh = play({ { 0, 60 } }, 48000);
+            const std::vector<float> anew = play({ { 0, 57 }, { after, 60 } }, after + 48000), on = play({ { 0, 57 }, { inside, 60 } }, inside + 48000);
+            bool same = true;
+            double apart = 0.0;
+            for (size_t c = 0; c < 2; ++c)
+                for (size_t i = 0; i < 48000; ++i) {
+                    same = same && anew[c * (after + 48000) + after + i] == fresh[c * 48000 + i];
+                    apart = std::max(apart, static_cast<double>(std::fabs(on[c * (inside + 48000) + inside + i] - fresh[c * 48000 + i])));
+                }
+            std::printf("organ TAIL: a tone 10.1 s after the last one's end %s a fresh instance's; one 9.1 s after it differs by up to %.3f\n", same ? "equals" : "DIFFERS FROM", apart);
+            CHECK(same && apart > 1e-3);
+        }
+        // Quick voice changes (Review Focus 2): the chords switch between the organ, the sample guitar and the e-piano every 0.25 s for 10 s.
+        // Old tones ring out on their chains and nothing clicks, measured as Phase 2's test does: the second difference stays below 0.01
+        // (-40 dBFS), with the organ's preset drive (0.25) in (measured 0.0022; 0.0035 with the drive off). Click, percussion and the
+        // e-piano's bell are off: with them on the same run measures 0.5942 without any cut (Task 20's fix round 1), their own high partials.
+        {
+            const char* SMOOTH = R"({"chords/organ/jazz":{"click":0,"perc":0},"chords/epiano/rhodes":{"bell":0}})";
+            auto e = organ(keys, ORGAN, SMOOTH);
+            btg::Transport t;
+            t.play(64.0, e->bpm());
+            std::vector<float> l(480), r(480), out;
+            const char* cycle[3] = { ORGAN, FUNK, EPIANO };
+            int most = 0;
+            for (int block = 0; block < 1000; ++block) {
+                if (block % 25 == 0) e->setVoices(cycle[block / 25 % 3]);
+                const auto b = t.advance(480, rate);
+                e->render(l.data(), r.data(), b.frames, b);
+                for (int i = 0; i < b.frames; ++i) { out.push_back(l[i]); out.push_back(r[i]); }
+                most = std::max(most, e->busyOrganChains());
+            }
+            bool finite = true;
+            double jump = 0.0, squares = 0.0;
+            for (size_t i = 4; i < out.size(); ++i) {
+                finite = finite && std::isfinite(out[i]);
+                jump = std::max(jump, static_cast<double>(std::fabs(out[i] - 2.0f * out[i - 2] + out[i - 4]))); // per channel (interleaved)
+                squares += static_cast<double>(out[i]) * out[i];
+            }
+            std::printf("organ, guitar and e-piano every 0.25 s: largest second difference %.4f, rms %.4f, at most %d organ chains busy\n", jump,
+                        std::sqrt(squares / static_cast<double>(out.size())), most);
+            CHECK(finite && jump < 0.01 && squares > 0.0 && most >= 1 && most <= CHAINS);
+        }
+        // A jump under the held organ chord, the chords switched to a silent voice with it: the organ's tones fall over its RELEASE (12 ms)
+        // and none is active two chunks after it; the chain, an orphan now, rings out and is given up after its tail (0.3 s): no chain is
+        // busy 0.5 s after the jump and the output stays below 1e-6 (playing, the sum's filters are not cleared).
+        {
+            auto e = organ(held, ORGAN);
+            btg::Transport t;
+            t.play(longest, e->bpm());
+            render(*e, t, 1.0, 480);
+            e->setVoices(SILENT);
+            t.seek(longest + 8.0);
+            render(*e, t, 0.012 + 2.0 * SYNTH_FRAMES / rate, 480);
+            const int tonesLeft = e->activeSynthTones();
+            render(*e, t, 0.5, 480);
+            const int chainsLeft = e->busyOrganChains();
+            const Result rest = render(*e, t, 0.3, 480);
+            std::printf("organ jump: %d synth tones active after the release, %d organ chains busy 0.5 s later, then peak %.2e\n", tonesLeft, chainsLeft, rest.peak);
+            CHECK(tonesLeft == 0 && chainsLeft == 0 && rest.peak < 1e-6);
+        }
+        // A loop of one beat over the held organ chord: every lap starts its three keys again (wheels, click and percussion: nine tones) and the
+        // wrap lets the last lap's fall over 12 ms, so at most eighteen are active; the voice instance keeps its one chain (a loop gives up
+        // nothing). Red when a jump leaves the organ's tones ringing (they pile up: each rings 2.1 s) or a lap takes a new chain.
+        {
+            auto e = organ(held, ORGAN);
+            btg::Transport t;
+            t.setLoop(longest, longest + 1.0);
+            t.play(longest, e->bpm());
+            std::vector<float> l(480), r(480);
+            int most = 0, chains = 0;
+            for (int block = 0; block < 600; ++block) { // 6 s, ten laps
+                const auto b = t.advance(480, rate);
+                e->render(l.data(), r.data(), b.frames, b);
+                most = std::max(most, e->activeSynthTones());
+                chains = std::max(chains, e->busyOrganChains());
+            }
+            std::printf("organ loop: at most %d synth tones active and %d organ chain busy over ten laps\n", most, chains);
+            CHECK(most >= 9 && most <= 18 && chains == 1);
+        }
+        // Stop and silence: the stop chokes the organ's tones (15 ms, ended at 1e-7); while its chain's tail still sounds after them (its
+        // delays, the preamp's shaper and highpass) the engine is not quiet, and then the output is exactly 0. Red when quiet does not look at
+        // the chain slots (the engine falls silent with the last tone).
+        {
+            auto e = organ(held, ORGAN);
+            btg::Transport t;
+            t.play(longest, e->bpm());
+            render(*e, t, 0.5, 480);
+            t.stop();
+            std::vector<float> l(480), r(480);
+            bool tailSounds = false, tonesGone = false;
+            float lastPeak = 0.0f;
+            for (int block = 0; block < 200; ++block) { // 2 s
+                const auto b = t.advance(480, rate);
+                e->render(l.data(), r.data(), b.frames, b);
+                float peak = 0.0f;
+                for (int i = 0; i < b.frames; ++i) peak = std::max({ peak, std::fabs(l[i]), std::fabs(r[i]) });
+                tailSounds = tailSounds || (tonesGone && e->busyOrganChains() > 0 && peak > 0.0f); // a whole block after the last tone ended
+                tonesGone = e->activeSynthTones() == 0;
+                if (block >= 180) lastPeak = std::max(lastPeak, peak);
+            }
+            std::printf("organ stop: the chain's tail sounds after the last tone: %s; the last 0.2 s peak %.1e, %d chains busy\n", tailSounds ? "yes" : "no", lastPeak,
+                        e->busyOrganChains());
+            CHECK(tailSounds && lastPeak == 0.0f && e->busyOrganChains() == 0);
+        }
+        // All four slots busy (Tones::takeChain): four voice instances one after the other (10 chunks apart), each holding a long note, each
+        // given up when the next comes as a restart gives it up (orphan); a fifth then takes the oldest orphan's slot: that one's tones are cut
+        // and from the fifth's start the slot plays it alone (as a fresh instance's tone there, bit for bit), while the other three slots play
+        // as they do without the fifth, bit for bit.
+        {
+            const auto voice = makeVoice(btg::Engine::chords, "chords/organ/jazz", nullptr, parseTuning(NOCLICK), Timbre {}, rate);
+            const size_t apart = 10 * SYNTH_FRAMES, frames = 4 * apart + 192 * SYNTH_FRAMES; // whole chunks
+            const auto run = [&](int instances, Slots& out, int (&slot)[5]) {
+                auto tones = organTones(rate);
+                VoiceState states[5];
+                for (VoiceState& s : states) s.rng = voice->startRng;
+                for (auto& s : out) for (auto& channel : s) channel.assign(frames, 0.0f);
+                for (size_t at = 0; at < frames; at += SYNTH_FRAMES) {
+                    for (int k = 0; k < instances; ++k) {
+                        if (at != static_cast<size_t>(k) * apart) continue;
+                        if (k > 0 && states[k - 1].chain >= 0) tones->chains[static_cast<size_t>(states[k - 1].chain)].orphan = true; // given up (Engine::restart)
+                        PlayEvent e;
+                        e.layer = btg::Engine::chords;
+                        e.midi = 57 + 2 * k;
+                        e.vel = 0.8;
+                        e.durBeats = 2.0;
+                        voice->play(e, 0, 1.0, states[k], *tones);
+                    }
+                    organChunk(*tones, at, SYNTH_FRAMES, out);
+                }
+                for (int k = 0; k < 5; ++k) slot[k] = states[k].chain;
+            };
+            Slots four, five, single;
+            int fourSlots[5], fiveSlots[5], singleSlots[5];
+            run(4, four, fourSlots);
+            run(5, five, fiveSlots);
+            {
+                auto tones = organTones(rate); // a fresh instance's tone of key 65
+                VoiceState state;
+                state.rng = voice->startRng;
+                PlayEvent e;
+                e.layer = btg::Engine::chords;
+                e.midi = 65;
+                e.vel = 0.8;
+                e.durBeats = 2.0;
+                for (auto& s : single) for (auto& channel : s) channel.assign(frames, 0.0f);
+                for (size_t at = 0; at < frames; at += SYNTH_FRAMES) {
+                    if (at == 0) voice->play(e, 0, 1.0, state, *tones);
+                    organChunk(*tones, at, SYNTH_FRAMES, single);
+                }
+                singleSlots[0] = state.chain;
+            }
+            bool chained = singleSlots[0] >= 0; // every instance holds a chain (a silent organ has none: the check fails)
+            for (int k = 0; k < 5; ++k) chained = chained && fiveSlots[k] >= 0 && (k == 4 || fourSlots[k] >= 0);
+            const int taken = chained ? fiveSlots[4] : -1;
+            bool others = chained, before = chained, alone = chained;
+            for (int k = 1; k < 4 && chained; ++k) others = others && fiveSlots[k] == fourSlots[k] && five[fiveSlots[k]][0] == four[fourSlots[k]][0] && five[fiveSlots[k]][1] == four[fourSlots[k]][1];
+            for (int c = 0; c < 2 && chained; ++c)
+                for (size_t i = 0; i < frames; ++i) {
+                    if (i < 4 * apart) before = before && five[taken][c][i] == four[taken][c][i];
+                    else alone = alone && five[taken][c][i] == single[singleSlots[0]][c][i - 4 * apart];
+                }
+            std::printf("organ, four chains busy: the fifth instance took slot %d (the first instance's: %d); the other three %s, the taken slot %s before and %s after\n",
+                        taken, fourSlots[0], others ? "unchanged" : "CHANGED", before ? "unchanged" : "CHANGED", alone ? "plays the fifth alone" : "DOES NOT play the fifth alone");
+            CHECK(taken == fourSlots[0] && others && before && alone);
         }
     }
 

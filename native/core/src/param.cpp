@@ -147,12 +147,15 @@ void Param::values(int n, const float* added, float* out) {
             case exponent: v = last_ = static_cast<float>(acc_); acc_ *= mul_; break;
             case approach: {
                 if (!converged_) {
-                    if (static_cast<double>(frame_) > std::ceil(start_)) last_ += (to_ - last_) * step_; // the first frame has its closed form
+                    const bool first = static_cast<double>(frame_) <= std::ceil(start_);
+                    if (!first) last_ += (to_ - last_) * step_; // the first frame has its closed form
                     // HasSetTargetConverged: ten time constants past the start, or within kSetTargetThreshold (relative unless the target is 0)
                     constexpr float THRESHOLD = 4.539992976248485e-05f;
-                    converged_ = static_cast<double>(frame_) > start_ + 10 * tc_
-                        || (to_ == 0 ? std::fabs(last_) < THRESHOLD : std::fabs(to_ - last_) < THRESHOLD * std::fabs(last_));
-                    if (converged_) last_ = to_;
+                    if (quantum < 0 || first || (quantum + frame_) % 128 == 0) {
+                        converged_ = static_cast<double>(frame_) > start_ + 10 * tc_
+                            || (to_ == 0 ? std::fabs(last_) < THRESHOLD : std::fabs(to_ - last_) < THRESHOLD * std::fabs(last_));
+                        if (converged_) last_ = to_;
+                    }
                 }
                 v = last_;
                 break;

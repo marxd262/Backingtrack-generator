@@ -44,6 +44,7 @@ struct PlayEvent {
     bool ring = false;
     double t = 0.0;                    // the event's time in the stream (s): the strum compares it
     double beatInBar = NAN;            // Event::beat
+    double leslie = NAN, swell = NAN;  // Event::leslie, ::swell (the organ's rules, organ.cpp); NaN: the field is absent
 };
 
 struct Biquad { // Web Audio BiquadFilterNode, coefficients divided by a0; process() is direct form 1
@@ -213,6 +214,7 @@ struct VoiceState {
     const Pack::Zone* lastNoteZone[128][23] = {}; // round robin of format-2 notes by key and art: 0 = none, 1 + ART_NAMES index
     int openHat = -1;                     // format-1 kits: index in Tones::all of the last open hat's tone, and that tone's serial
     uint64_t openHatSerial = 0;           // (a reused tone is not choked)
+    int chain = -1;                       // the organ: its chain's slot in Tones::chains (organ.js `let chain`), -1 none yet
 };
 
 // One layer's chosen voice: built on the control thread, immutable afterwards.
@@ -231,8 +233,16 @@ public:
 
 // The voice for the sample voice `key` ("bass/sample/finger") with its pack, or with pack nullptr for the synth voice `key`
 // ("chords/epiano/rhodes"); nullptr for a voice the core cannot play (the layer is silent). `timbre` is the sound model's (sound_model.h):
-// the lowpass and time scale of the note voices, the width of the kit's pan, what the synth voices read of it.
-std::shared_ptr<const Voice> makeVoice(Engine::Layer layer, const std::string& key, std::shared_ptr<const Pack> pack, const Tuning& tuning, const Timbre& timbre);
-std::shared_ptr<Voice> epianoVoice(const Tuning& tuning, const Timbre& timbre); // voices/epiano.cpp
+// the lowpass and time scale of the note voices, the width of the kit's pan, what the synth voices read of it. `sampleRate`: the rate the
+// organ builds its wave tables for (0: none yet, the organ is silent; the engine builds its voices again when prepare sets the rate).
+std::shared_ptr<const Voice> makeVoice(Engine::Layer layer, const std::string& key, std::shared_ptr<const Pack> pack, const Tuning& tuning, const Timbre& timbre,
+                                       double sampleRate = 0.0);
+std::shared_ptr<Voice> epianoVoice(const Tuning& tuning, const Timbre& timbre);                      // voices/epiano.cpp
+std::shared_ptr<Voice> organVoice(const std::string& key, const Tuning& tuning, double sampleRate); // voices/organ.cpp
+struct WaveTables;
+// Tests only: what an organ voice plays key `midi` with: its wave (nullptr for another voice or none yet), the wheels' frequency and detune,
+// and the coefficients the wave was built from (a full build of them is the wave every range of it must equal)
+struct OrganKey { const WaveTables* wave = nullptr; float hz = 0.0f, cents = 0.0f; std::array<float, 17> real {}, imag {}; };
+OrganKey organKey(const Voice& voice, int midi);
 
 } // namespace btg::detail

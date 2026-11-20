@@ -34,6 +34,20 @@
 //     the velocity's part of the index (-16.3 to -0.0 dB), the tremolo (tremolo 1, -0.9 dB), the amplitude's last exponential (the release,
 //     -7.2 to +5.1 dB), the brightness knob (brightness 0 and 1, +3.4 and +4.9 dB), the length knob (length 0 and 1, -12.8 and -22.7 dB).
 //     Two sets start inside a render quantum: a tone, and the same pitch struck twice (Chromium's first quantum, below).
+//     The organ (src/audio/voices/organ.js, organ-leslie.js; Task 20), through its chain slot, with a tuning as the page's setTuning sends
+//     it and the events' leslie and swell fields: the four presets (a chord struck over 5 ms, then a single note after a gap), jazz with the
+//     Leslie off, always slow, always fast and following the events (slow to fast), rock with drive 0 and 1, ballad's swell from -3 dB
+//     with an art swell, micAngle 30, gospel's low and high key (the fold-back), a set inside a quantum (the LFOs' first quantum), 44.1 and
+//     96 kHz. Each of these makes a set fail when it is taken out (Task 20's mutation runs): the click at the note's end (every set, -45.7 to
+//     -30.6 dB), the percussion's single trigger (the eight jazz sets with a chord struck over 5 ms, -45.2 to -18.5 dB), the fold-back (the
+//     low and high key, -5.4 and -2.2 dB), the wheels' cents (16 sets; the 17th plays only A, whose wheels are exact: -27.9 to -5.8 dB),
+//     the Doppler, the amplitude modulation and the drum turning the way of the horn (every set with the Leslie on: -18.4 to +2.8, -16.1 to
+//     -10.2, -18.1 to -7.5 dB), the preamp's 20 Hz highpass (every set with the drive on, -24.3 to -10.1 dB), the swell's glide (the swell
+//     set, -24.8 dB), the Leslie's speed change (the slow-to-fast set, -9.9 dB), the Leslie knob (leslie 0, 2 and 3: +3.6, -8.3, -7.9 dB;
+//     each against the events under which the preset's mode 1 plays otherwise), the drive knob (drive 0 and 1, +4.0 and -12.7 dB).
+//     Events and their ends lie exactly on frames (renderWeb): with frame / rate the param events of a tone at 1632 / 48000 come a frame
+//     after its sources' start in Chromium (ceil(t * rate) against TimeToSampleFrame) and its first frame plays the gains' default 1 (the
+//     chord sets measured -48.4 to -45.2 dB, the 44.1 kHz set -39.8 dB, before the placement; the e-piano's frames were exact already).
 //
 // Measured (Chromium 158, Task 20a round 1; 48 kHz unless said), diff and largest sample difference:
 //   osc at a constant frequency (every type at 55, 440 and 3 520 Hz, the square at 8 300 Hz, detune +12 and -12 ct, 44.1 and 96 kHz): -139.5
@@ -72,6 +86,18 @@
 //     Inside a quantum: the tone 92 frames in -125.2 dB (1.1e-7), the same pitch twice (92 and 58 frames in) -127.5 dB (1.1e-7). With
 //     Chromium's first quantum taken out: +3.5 and +2.7 dB (the carrier runs behind its modulation in its first quantum and keeps the phase
 //     it loses there for the whole tone); with the k-rate blocks counted from each oscillator's start: -106.0 and -104.7 dB.
+//   voice (Task 20): the organ's seventeen sets -75.5 (96 kHz) to -115.6 dB (rock drive 0), at most 1.1e-4; from run to run of the whole
+//     tool they move by about 1 dB (the browser sums `pre`'s connections in the order of a hash set). Every set with the preamp on lies at
+//     -76.8 to -84.3 dB: its 20 Hz highpass keeps its state in float with poles near 1 (as Chromium's), so a last-bit difference at its input
+//     (the wave tables, the core's transform in double against Chromium's in float; that order of the sum) makes the two rounding
+//     sequences drift apart: the core against itself with its preamp's input scaled by 1 + 1e-7 measured -84.4 dB (largest 3.2e-5). After
+//     the notes Chromium stops a node whose inputs are silent once its tail has passed (a biquad's impulse response below 1/32768,
+//     biquad.cc TailFrame; audio_handler.cc PropagatesSilence) and plays exact zeros, the core rings on: -88 to -98 dB in those windows,
+//     not rebuilt. A setTarget is tested for convergence where Chromium tests it, at its first frame and each quantum's (param.h; at every
+//     frame before: the click's gain, rock drive 0 -102.3 dB then). Not rebuilt either, rounding only (the float lanes against a double
+//     index): the LFOs' path before a speed change the browser already knows of (this page schedules every event before the render, so
+//     from the chain's first setValue on its LFOs run a-rate while a later change is listed; the core sees an event in its own chunk), and
+//     the rest of a quantum begun on the k-rate path when an event of the next chunk switches it (never here: chunks end on quanta).
 //   --none: every set at 0.0 dB.
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -157,6 +183,31 @@ const VOICE = [
   voice('epiano started 92 frames into a quantum (frame 1500)', RHODES, [[1500, 57, 0.8, 0.5]]),
   voice('epiano the same pitch twice, 92 and 58 frames into a quantum (frames 1500, 10554)', RHODES, [[1500, 57, 0.6, 1.5], [10554, 57, 0.6, 1.3]], { seconds: 2 }),
 ];
+// Task 20, the organ: events [frame, midi, vel, seconds, fields of the event]; tuning: the organ's fine values as the page's setTuning sends
+// them. A chord (A3 C4 E4, its keys struck 2 and 5 ms apart as a played chord's are), held 0.5 s, then after a gap of 0.25 s a single note
+// (A4): the percussion's single trigger fires at the chord's first key and again at the single note, not at the chord's other keys.
+const organ = (variant, name, events, extra = {}) => voice(`organ ${variant} ${name}`, `chords/organ/${variant}`, events, { seconds: 1.5, ...extra });
+const chordThenNote = (from = 1536) => [[from, 57, 0.8, 0.5], [from + 96, 60, 0.8, 0.5], [from + 240, 64, 0.8, 0.5], [from + 36000, 69, 0.8, 0.4]];
+const tuned = (variant, values) => ({ tuning: { [`chords/organ/${variant}`]: values } });
+VOICE.push(
+  ...['jazz', 'rock', 'gospel', 'ballad'].map((v) => organ(v, 'a chord, then a single note after a gap', chordThenNote())),
+  // each against the events under which mode 1 (the preset's) would play otherwise: 2 (always slow) against events that ask for fast
+  // (leslie 1, a chorus), 3 (always fast) and 0 against events that do not
+  ...[0, 2, 3].map((mode) => organ('jazz', `leslie ${mode}`, chordThenNote().map((e) => (mode === 2 ? [...e, { leslie: 1 }] : e)), tuned('jazz', { leslie: mode }))),
+  // leslie 1: the second chord's notes carry leslie 1, the rotors speed up over the inertia (hornUp 1 s, drumUp 3.5 s: setTargetAtTime)
+  organ('jazz', 'leslie 1, the events go from slow to fast', [[1536, 57, 0.8, 0.4], [1536, 64, 0.8, 0.4], [24000, 57, 0.8, 1.4, { leslie: 1 }], [24000, 64, 0.8, 1.4, { leslie: 1 }]], { seconds: 2 }),
+  ...[0, 1].map((drive) => organ('rock', `drive ${drive}`, chordThenNote(), tuned('rock', { drive }))),
+  // the pedal at -3 dB (a verse), then an art swell that opens it over 0.4 s (a note into the chorus: no swell field, 0 dB)
+  organ('ballad', 'swell: -3 dB, then an art swell to 0 dB', [[1536, 57, 0.8, 0.5, { swell: -3 }], [28800, 57, 0.8, 0.8, { art: 'swell', artTime: 0.4 }]]),
+  organ('jazz', 'micAngle 30', chordThenNote(), tuned('jazz', { micAngle: 30 })),
+  // the fold-back: below C2 the 16' plays an octave up, high up the 1' and 1 1/3' fold down (every drawbar out)
+  organ('gospel', 'low key (E2, 40)', [[1536, 40, 0.8, 0.5]], { seconds: 1 }),
+  organ('gospel', 'high key (E6, 88)', [[1536, 88, 0.8, 0.5]], { seconds: 1 }),
+  // started 92 frames into a render quantum: the LFOs' first quantum (Chromium runs it on the default 440 Hz before the start)
+  organ('jazz', 'a chord, then a single note after a gap, 92 frames into a quantum', chordThenNote(1500)),
+  organ('jazz', 'a chord, then a single note after a gap at 44.1 kHz', chordThenNote(), { rate: 44100 }),
+  organ('jazz', 'a chord, then a single note after a gap at 96 kHz (tables of 16384)', chordThenNote(), { rate: 96000 }),
+);
 const SETS = [...OSC, ...PARAM, ...GRAPH, ...VOICE];
 
 function noise(rate) { // 1 s, mono, in [-0.5, 0.5)
@@ -248,10 +299,21 @@ async function renderWeb(page, set, samples) {
       const [layer, id, variant] = set.key.split('/'), sound = completeTimbre(set.sound), rng = createRng(1);
       const params = { drums: p.drumParams(sound.drums), bass: p.bassParams(sound.bass), chords: p.chordParams(sound.chords), pad: p.padParams(sound.pad), lead: {} }[layer];
       const play = createVoice(layer, { id, variant }, ctx, { params, getTimbre: () => sound[layer], rng: rng.fork(`voice-${layer}`),
-        noise: noiseBuffer(ctx, rng.fork('noise'), 1), getTuning: () => ({}), setStatus: () => {}, track: () => {} });
+        noise: noiseBuffer(ctx, rng.fork('noise'), 1), getTuning: () => set.tuning ?? {}, setStatus: () => {}, track: () => {} });
       const sum = gain(1);
       sum.connect(out);
-      for (const [frame, midi, vel, dur] of set.events) play(sum, frame / r, { type: 'note', layer, midi, vel, dur });
+      // An event and its end exactly on their frames (Task 20): frame / r times r can come out a hair above the frame (1632 / 48000 *
+      // 48000 = 1632.0000000000002), and so can t + dur (1536 / 44100 + 0.5 at 44.1 kHz). Chromium then starts a source on the frame
+      // (TimeToSampleFrame rounds through 1/1024 frame) but an AudioParam event one frame later (ceil(t * rate)): the source's first frame
+      // plays the param's default (the organ's key gain and click gain: 1). The core places events on frames (ruling 9), its ends a whole
+      // number of frames later: the time, then the duration, steps down by a double's last bit until it is not above its frame.
+      const below = (x) => { const f = new Float64Array([x]); new BigInt64Array(f.buffer)[0] -= 1n; return f[0]; };
+      for (const [frame, midi, vel, dur, fields] of set.events) {
+        let t = frame / r, d = dur;
+        while (t * r > frame) t = below(t);
+        while ((t + d) * r > frame + Math.round(dur * r)) d = below(d);
+        play(sum, t, { type: 'note', layer, midi, vel, dur: d, ...fields });
+      }
     }
     const rendered = await ctx.startRendering();
     return [toB64(rendered.getChannelData(0)), toB64(rendered.getChannelData(1))];
@@ -271,7 +333,11 @@ function coreArgs(set) {
     return ['param', frames, String(set.value), ...events.flatMap(([kind, v, t, tc]) => [kind, String(v), String(t * r), ...(kind === 'target' ? [String(tc * r)] : [])]),
       ...(set.input ? ['--input'] : [])];
   }
-  if (set.kind === 'voice') return ['voice', frames, set.key, JSON.stringify(set.sound), ...set.events.flat().map(String)];
+  if (set.kind === 'voice') { // an event's fields as name=value (art 'swell' goes with its artTime)
+    const fields = (f = {}) => Object.entries(f).filter(([k]) => k !== 'art').map(([k, v]) => `${k}=${v}`);
+    return ['voice', frames, set.key, JSON.stringify(set.sound), ...(set.tuning ? ['--tuning', JSON.stringify(set.tuning)] : []),
+      ...set.events.flatMap(([frame, midi, vel, dur, f]) => [...[frame, midi, vel, dur].map(String), ...fields(f)])];
+  }
   return ['graph', frames, String(set.graph)];
 }
 

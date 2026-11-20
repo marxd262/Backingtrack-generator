@@ -26,10 +26,14 @@
 //       Param::values (L = R) with that intrinsic value and those events; --input: in added at audio rate
 //   btg_fx <in.f32> <out.f32> <rate> graph <frames> <1|2|3|4|5>
 //       the fixed graphs of voice-compare.mjs, built with SynthTone's calls (the numbers stand in both files)
-//   btg_fx <in.f32> <out.f32> <rate> voice <frames> <key> <timbre> [<frame> <midi> <vel> <seconds>]...  (Task 21)
-//       the synth voice `key` ("chords/epiano/rhodes") as setVoices builds it (makeVoice, no pack) with the timbre as setSound takes it (JSON),
-//       its notes each from its frame on, through Tones as the engine plays them; no layer chain, no mixer
+//   btg_fx <in.f32> <out.f32> <rate> voice <frames> <key> <timbre> [--tuning <json>] [<frame> <midi> <vel> <seconds> [leslie=<v>] [swell=<dB>]
+//                                                                    [artTime=<s>]]...  (Task 21; the tuning and the organ's fields Task 20)
+//       the synth voice `key` ("chords/epiano/rhodes", "chords/organ/jazz") as setVoices builds it (makeVoice, no pack, the rate) with the
+//       timbre as setSound takes it (JSON) and the tuning as setTuning takes it, its notes each from its frame on, through Tones and its organ
+//       chains as the engine plays them (the noise of Engine::prepare); no layer chain, no mixer. A note's leslie and swell are the event's
+//       fields, artTime gives it the art swell with that time.
 // The tones render in calls of SYNTH_FRAMES (256) frames, the engine's chunk.
+#include "../src/convolver.h"
 #include "../src/guitar_fx.h"
 #include "../src/mod_fx.h"
 #include "../src/patch.h"
@@ -139,7 +143,7 @@ int main(int argc, char** argv) {
                               "                                                                        [--custom <real> <imag> <normalized|raw>]\n"
                               "                                       | param <frames> <value> [set|linear|exp <v> <frame> | target <v> <frame> <tc>]... [--input]\n"
                               "                                       | graph <frames> <1..5>\n"
-                              "                                       | voice <frames> <key> <timbre> [<frame> <midi> <vel> <seconds>]...\n"
+                              "                                       | voice <frames> <key> <timbre> [--tuning <json>] [<frame> <midi> <vel> <seconds> [leslie=<v>] [swell=<dB>] [artTime=<s>]]...\n"
                               "       btg_fx curves <out.f32>\n";
     try {
         if (argc == 3 && std::string(argv[1]) == "curves") {
@@ -222,33 +226,68 @@ int main(int argc, char** argv) {
                 }
                 right = left;
             } else if (mode == "voice") {
-                if (argc < 8 || (argc - 8) % 4 != 0) { std::printf("%s", usage.c_str()); return 2; }
+                if (argc < 8) { std::printf("%s", usage.c_str()); return 2; }
                 const std::string key = argv[6];
                 const auto layer = std::find_if(std::begin(LAYER_NAMES), std::end(LAYER_NAMES), [&](const char* n) { return key.rfind(std::string(n) + "/", 0) == 0; });
                 if (layer == std::end(LAYER_NAMES)) throw std::runtime_error("no layer in " + key);
-                const auto voice = makeVoice(static_cast<btg::Engine::Layer>(layer - std::begin(LAYER_NAMES)), key, nullptr, {}, completeTimbre(argv[7]));
+                struct Note { size_t frame; PlayEvent e; };
+                std::vector<Note> notes;
+                std::string tuning = "{}";
+                for (int i = 8; i < argc;) {
+                    const std::string token = argv[i];
+                    if (token == "--tuning" && i + 1 < argc) { tuning = argv[i + 1]; i += 2; continue; }
+                    if (const size_t eq = token.find('='); eq != std::string::npos) { // a field of the note before
+                        if (notes.empty()) throw std::runtime_error(token + " before any note");
+                        const std::string name = token.substr(0, eq);
+                        const double v = std::atof(token.substr(eq + 1).c_str());
+                        PlayEvent& e = notes.back().e;
+                        if (name == "leslie") e.leslie = v;
+                        else if (name == "swell") e.swell = v;
+                        else if (name == "artTime") { e.art = Art::swell; e.artTime = v; }
+                        else throw std::runtime_error("unknown field " + name);
+                        ++i;
+                        continue;
+                    }
+                    if (i + 3 >= argc) { std::printf("%s", usage.c_str()); return 2; }
+                    Note n { static_cast<size_t>(std::atoll(argv[i])), {} };
+                    n.e.midi = std::atoi(argv[i + 1]);
+                    n.e.vel = std::atof(argv[i + 2]);
+                    n.e.durBeats = std::atof(argv[i + 3]); // one beat a second
+                    notes.push_back(n);
+                    i += 4;
+                }
+                const auto voice = makeVoice(static_cast<btg::Engine::Layer>(layer - std::begin(LAYER_NAMES)), key, nullptr, parseTuning(tuning), completeTimbre(argv[7]), rate);
                 if (!voice) throw std::runtime_error("the core has no synth voice " + key);
                 const auto tones = std::make_unique<Tones>();
                 tones->sr = rate;
                 tones->basic = &basicWaves(rate);
+                tones->noise = noiseBuffer(Rng(1).fork("noise"), 1, 1, 0, rate)[0]; // as Engine::prepare
+                for (OrganChain& c : tones->chains) c.prepare(rate);
                 VoiceState state;
                 state.rng = voice->startRng;
                 for (size_t at = 0; at < frames; at += SYNTH_FRAMES) {
                     const int count = static_cast<int>(std::min<size_t>(SYNTH_FRAMES, frames - at));
                     tones->quantum = static_cast<int>(at % 128); // the render's frame 0 is the play's first frame, as the context's
-                    for (int i = 8; i < argc; i += 4) { // the notes that begin in this chunk, as the engine hands them to the voice
-                        const size_t frame = static_cast<size_t>(std::atoll(argv[i]));
-                        if (frame < at || frame >= at + count) continue;
-                        PlayEvent e;
-                        e.layer = voice->layer;
-                        e.midi = std::atoi(argv[i + 1]);
-                        e.vel = std::atof(argv[i + 2]);
-                        e.durBeats = std::atof(argv[i + 3]); // one beat a second
-                        voice->play(e, static_cast<int>(frame - at), 1.0, state, *tones);
+                    for (Note& n : notes) { // the notes that begin in this chunk, as the engine hands them to the voice
+                        if (n.frame < at || n.frame >= at + count) continue;
+                        n.e.layer = voice->layer;
+                        voice->play(n.e, static_cast<int>(n.frame - at), 1.0, state, *tones);
                     }
-                    for (SynthTone& t : tones->synth) if (t.active) t.render(&left[at], &right[at], count, tones->scratch);
+                    // as the engine's chunk: a tone into its organ chain's entry or out; then the chains, playing (engine.cpp)
+                    for (OrganChain& c : tones->chains) if (c.live) c.clear(count);
+                    for (SynthTone& t : tones->synth) {
+                        if (!t.active) continue;
+                        if (t.bus < 0) t.render(&left[at], &right[at], count, tones->scratch);
+                        else {
+                            OrganChain& c = tones->chains[static_cast<size_t>(t.bus / 3)];
+                            c.heard = true;
+                            t.render(c.in[t.bus % 3], nullptr, count, tones->scratch);
+                        }
+                    }
+                    for (OrganChain& c : tones->chains) if (c.live) c.process(&left[at], &right[at], count, tones->quantum);
                 }
                 for (const SynthTone& t : tones->synth) if (t.overflow()) throw std::runtime_error("the voice's graph does not fit a SynthTone");
+                for (const OrganChain& c : tones->chains) if (c.overflow()) throw std::runtime_error("an organ chain's param had more events waiting than it holds");
             } else {
                 buildGraph(std::atoi(argv[6]), tone, x);
                 renderTone(tone, left, right);

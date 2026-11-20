@@ -20,6 +20,9 @@ struct Param {
     struct Event { uint8_t kind; double frame; float value; double tc; } events[EVENTS] = {};
     int count = 0, input = -1; // input: the node whose output SynthTone adds at audio rate, -1 none
     bool overflow = false;     // an event beyond EVENTS was asked for and not taken
+    // The place of frame 0 in its render quantum (a SynthTone's): a setTarget is tested for convergence at its own first frame and at each
+    // quantum's first frame, as ProcessSetTarget tests it (Task 20); -1: at every frame (the param kind of voice-compare.mjs measures that).
+    int quantum = -1;
     void setValueAtTime(float v, double frame);
     void linearRampToValueAtTime(float v, double frame);
     void exponentialRampToValueAtTime(float v, double frame);
