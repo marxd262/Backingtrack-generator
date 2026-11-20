@@ -55,6 +55,9 @@ add_library(btg_core STATIC
     src/compressor.cpp
     src/guitar_fx.cpp
     src/mod_fx.cpp
+    src/osc.cpp
+    src/param.cpp
+    src/patch.cpp
     src/analysis.cpp
     src/file_player.cpp
     src/decode.cpp
@@ -150,6 +153,11 @@ add_test(NAME engine COMMAND btg_engine_tests ${CMAKE_CURRENT_SOURCE_DIR}/tests/
 add_executable(btg_fx_tests tests/test_fx.cpp)
 target_link_libraries(btg_fx_tests PRIVATE btg_core)
 add_test(NAME fx COMMAND btg_fx_tests)
+
+# The building blocks of the synth voices: wave tables and oscillator, AudioParam timeline, the synth tone.
+add_executable(btg_synth_tests tests/test_synth.cpp)
+target_link_libraries(btg_synth_tests PRIVATE btg_core)
+add_test(NAME synth COMMAND btg_synth_tests)
 
 add_executable(btg_analysis_tests tests/test_analysis.cpp)
 target_link_libraries(btg_analysis_tests PRIVATE btg_core)

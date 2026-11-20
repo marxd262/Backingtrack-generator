@@ -64,8 +64,8 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * The filters' coefficients (SetLowpassParams, SetHighpassParams, SetPeakingParams) follow platform/audio/biquad.cc; its filter step is
- * Biquad::step of sampler.h, which carries the same notice at the function. Its notice:
+ * The filters' coefficients (SetLowpassParams, SetHighpassParams, SetPeakingParams: lowpassOf, highpassOf, peakingOf) and the filter step
+ * (Biquad::step) follow platform/audio/biquad.cc; both stand in sampler.h, under the same notice at Biquad::step. Its notice:
  *
  * Copyright (C) 2010 Google Inc. All rights reserved.
  *
@@ -138,28 +138,6 @@ constexpr Fade CREATE { 0.08, 0.008 }, LAZY { 0.15, 0.02 };
 constexpr double BIAS_TC = 0.04, TC = 0.02, FUZZ_DRIVE_TC = 0.1;
 constexpr float FUZZ_BIAS = 0.06f;
 constexpr double Q_DB = 0.7; // filter(): Q 0.7 (dB for lowpass and highpass), the peaking's Q is 1.2 (linear)
-
-// The filters' coefficients as biquad.cc computes them (SetLowpassParams, SetHighpassParams, SetPeakingParams for 0 < cutoff < 1): the same
-// formulas as sampler.h's, but its pow10 is fdlibm::expf, a float, and the normalised cutoff is the float frequency over the Nyquist.
-double pow10(double x) { return static_cast<double>(static_cast<float>(std::exp(static_cast<double>(static_cast<float>(x * std::numbers::ln10))))); }
-Biquad normalized(double b0, double b1, double b2, double a0, double a1, double a2) {
-    const double inverse = 1 / a0;
-    Biquad f;
-    f.b0 = b0 * inverse; f.b1 = b1 * inverse; f.b2 = b2 * inverse; f.a1 = a1 * inverse; f.a2 = a2 * inverse;
-    return f;
-}
-Biquad lowpassOf(double hz, double qDb, double sr) {
-    const double theta = std::numbers::pi * (hz / (sr / 2)), alpha = std::sin(theta) / (2 * pow10(qDb / 20)), cosw = std::cos(theta), beta = (1 - cosw) / 2;
-    return normalized(beta, 2 * beta, beta, 1 + alpha, -2 * cosw, 1 - alpha);
-}
-Biquad highpassOf(double hz, double qDb, double sr) {
-    const double theta = std::numbers::pi * (hz / (sr / 2)), alpha = std::sin(theta) / (2 * pow10(qDb / 20)), cosw = std::cos(theta), beta = (1 + cosw) / 2;
-    return normalized(beta, -2 * beta, beta, 1 + alpha, -2 * cosw, 1 - alpha);
-}
-Biquad peakingOf(double hz, double q, double db, double sr) {
-    const double w0 = std::numbers::pi * (hz / (sr / 2)), alpha = std::sin(w0) / (2 * q), k = std::cos(w0), a = pow10(db / 40);
-    return normalized(1 + alpha * a, -2 * k, 1 - alpha * a, 1 + alpha / a, -2 * k, 1 - alpha / a);
-}
 
 struct Kernels { float up[Fir::K], down[Fir::K]; };
 

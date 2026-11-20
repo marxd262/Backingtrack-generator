@@ -11,14 +11,29 @@
 // --two: those 4x shapers run at 2x. --change: set() at that frame with new knobs while playing (the browser: ctx.suspend, set, resume), any number.
 // none copies the input (the red run of the comparison). guitar, mod and series build the chain at frame 0 as createInstruments does
 // ({ immediate: true }); series is a GuitarFx into a ModFx, set in that order (synth.js applyFx).
+//
+// The building blocks of the synth voices, for native/tools/voice-compare.mjs (Task 20a). in is the noise buffer the tool makes; out has
+// <frames> frames, stereo interleaved; times and time constants are frames:
+//   btg_fx <in.f32> <out.f32> <rate> osc <frames> <sine|square|sawtooth|triangle|custom> <hz> <cents> <start> <stop> [--exp <hz> <frame>]
+//                                                                    [--fm <hz> <depth>] [--custom <real> <imag> <normalized|raw>]
+//       one oscillator of a SynthTone; --exp: its frequency set at the start and ramped exponentially to <hz> at <frame>; --fm: a sine at <hz>
+//       through a gain of <depth> into its frequency; --custom (with the wave custom): customWave of those comma-separated coefficients,
+//       raw = disableNormalization
+//   btg_fx <in.f32> <out.f32> <rate> param <frames> <value> [set <v> <frame> | linear <v> <frame> | exp <v> <frame> | target <v> <frame> <tc>]... [--input]
+//       Param::values (L = R) with that intrinsic value and those events; --input: in added at audio rate
+//   btg_fx <in.f32> <out.f32> <rate> graph <frames> <1|2|3|4|5>
+//       the fixed graphs of voice-compare.mjs, built with SynthTone's calls (the numbers stand in both files)
+// The tones render in calls of SYNTH_FRAMES (256) frames, the engine's chunk.
 #include "../src/guitar_fx.h"
 #include "../src/mod_fx.h"
+#include "../src/patch.h"
 
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -39,11 +54,85 @@ btg::Engine::Layer layerOf(const std::string& name) {
     throw std::runtime_error("no effect chain on layer " + name);
 }
 
+std::vector<float> floatsOf(const std::string& list) { // "0,0.5,0.25"
+    std::vector<float> values;
+    for (size_t at = 0; at <= list.size();) {
+        const size_t end = std::min(list.find(',', at), list.size());
+        values.push_back(static_cast<float>(std::atof(list.substr(at, end - at).c_str())));
+        at = end + 1;
+    }
+    return values;
+}
+
+Wave waveOf(const std::string& name) {
+    const char* names[4] = { "sine", "square", "sawtooth", "triangle" };
+    for (int i = 0; i < 4; ++i)
+        if (name == names[i]) return static_cast<Wave>(i);
+    throw std::runtime_error("unknown wave " + name);
+}
+
+void renderTone(SynthTone& tone, std::vector<float>& left, std::vector<float>& right) {
+    const auto scratch = std::make_unique<SynthTone::Scratch>();
+    for (size_t at = 0; at < left.size() && tone.active; at += SYNTH_FRAMES)
+        tone.render(&left[at], &right[at], static_cast<int>(std::min<size_t>(SYNTH_FRAMES, left.size() - at)), *scratch);
+    if (tone.overflow()) throw std::runtime_error("the graph does not fit a SynthTone");
+}
+
+// voice-compare.mjs GRAPHS, the same numbers (48 kHz frames)
+void buildGraph(int which, SynthTone& t, const std::vector<float>& noise) {
+    const int frames = static_cast<int>(noise.size());
+    if (which == 1) { // noise -> lowpass, its frequency ramped exponentially -> a gain with adsr's envelope
+        const int source = t.buffer(noise.data(), frames, 0, false, 3000, 36000), lp = t.biquad(Filter::lowpass, 6000.0f, 3.0f), a = t.gain(0.0f);
+        Param& f = t.param(lp);
+        f.setValueAtTime(6000.0f, 3000);
+        f.exponentialRampToValueAtTime(200.0f, 21000);
+        Param& g = t.param(a); // adsr(g, 0.0625, 0.0078125, 0.8, 0.09375, 0.3125)
+        g.setValueAtTime(0.0001f, 3000);
+        g.linearRampToValueAtTime(0.8f, 3375);
+        g.setValueAtTime(0.8f, 7875);
+        g.exponentialRampToValueAtTime(0.0001f, 22875);
+        t.connect(source, lp);
+        t.connect(lp, a);
+        t.output(a);
+    } else if (which == 2) { // a looped buffer from a fractional offset, ended by a duration of 1.5 s
+        t.output(t.buffer(noise.data(), frames, 12345.6, true, 1500, 1500 + 72000));
+    } else if (which == 3) { // noise -> bandpass -> gain and noise -> highpass -> gain, summed
+        const int source = t.buffer(noise.data(), frames, 0, false, 0, 36000), bp = t.biquad(Filter::bandpass, 1800.0f, 0.8f), hp = t.biquad(Filter::highpass, 6000.0f, 0.7f);
+        const int a = t.gain(0.7f), b = t.gain(0.4f), sum = t.gain(1.0f);
+        t.connect(source, bp);
+        t.connect(bp, a);
+        t.connect(source, hp);
+        t.connect(hp, b);
+        t.connect(a, sum);
+        t.connect(b, sum);
+        t.output(sum);
+    } else if (which == 4) { // two oscillators, each through a stereo panner, summed
+        const int saw = t.osc(Wave::sawtooth, 330.0f, 0.0f, 0, 24000), square = t.osc(Wave::square, 495.0f, 0.0f, 0, 24000);
+        const int left = t.panner(-0.6f), right = t.panner(0.6f), sum = t.gain(1.0f);
+        t.connect(saw, left);
+        t.connect(square, right);
+        t.connect(left, sum);
+        t.connect(right, sum);
+        t.output(sum);
+    } else if (which == 5) { // a sine LFO through a gain into a lowpass's frequency, the lowpass on a sawtooth
+        const int lfo = t.osc(Wave::sine, 2.5f, 0.0f, 0, 36000), depth = t.gain(1500.0f), lp = t.biquad(Filter::lowpass, 2000.0f, 6.0f);
+        const int saw = t.osc(Wave::sawtooth, 110.0f, 0.0f, 0, 36000);
+        t.connect(lfo, depth);
+        t.modulate(depth, t.param(lp));
+        t.connect(saw, lp);
+        t.output(lp);
+    } else throw std::runtime_error("graph 1 to 5");
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
     const std::string usage = "usage: btg_fx <in.f32> <out.f32> <rate> none | shaper <soft|hard|fuzz|muff|line> <2|4> | guitar <layer> <fuzz> <overdrive> <distortion>\n"
                               "                                       | mod <vibrato> <chorus> <bpm> | series <layer> <fuzz> <overdrive> <distortion> <vibrato> <chorus> <bpm>\n"
+                              "                                       | osc <frames> <wave> <hz> <cents> <start> <stop> [--exp <hz> <frame>] [--fm <hz> <depth>]\n"
+                              "                                                                        [--custom <real> <imag> <normalized|raw>]\n"
+                              "                                       | param <frames> <value> [set|linear|exp <v> <frame> | target <v> <frame> <tc>]... [--input]\n"
+                              "                                       | graph <frames> <1..5>\n"
                               "       btg_fx curves <out.f32>\n";
     try {
         if (argc == 3 && std::string(argv[1]) == "curves") {
@@ -61,6 +150,79 @@ int main(int argc, char** argv) {
         std::copy(bytes.begin(), bytes.end(), reinterpret_cast<char*>(x.data())); // little endian hosts only
         const double rate = std::atof(argv[3]);
         const std::string mode = argv[4];
+        if (mode == "osc" || mode == "param" || mode == "graph") {
+            if (argc < 7) { std::printf("%s", usage.c_str()); return 2; }
+            const size_t frames = static_cast<size_t>(std::atoll(argv[5]));
+            std::vector<float> left(frames), right(frames);
+            SynthTone tone;
+            tone.active = true;
+            tone.basic = &basicWaves(rate);
+            if (mode == "osc") {
+                if (argc < 11) { std::printf("%s", usage.c_str()); return 2; }
+                const double start = std::atof(argv[9]), stop = std::atof(argv[10]);
+                std::shared_ptr<const WaveTables> custom; // the wave `custom`: --custom <real> <imag> <normalized|raw>, held while the tone plays
+                for (int i = 11; i + 3 < argc; ++i) {
+                    if (std::string(argv[i]) != "--custom") continue;
+                    const std::vector<float> real = floatsOf(argv[i + 1]), imag = floatsOf(argv[i + 2]);
+                    if (real.size() != imag.size()) throw std::runtime_error("--custom: as many real as imaginary coefficients");
+                    custom = customWave(real.data(), imag.data(), static_cast<int>(real.size()), rate, std::string(argv[i + 3]) == "raw");
+                }
+                if ((std::string(argv[6]) == "custom") != static_cast<bool>(custom)) throw std::runtime_error("the wave custom goes with --custom");
+                const float hz = static_cast<float>(std::atof(argv[7])), cents = static_cast<float>(std::atof(argv[8]));
+                const int o = custom ? tone.osc(*custom, hz, cents, start, stop) : tone.osc(waveOf(argv[6]), hz, cents, start, stop);
+                for (int i = 11; i < argc;) {
+                    const std::string option = argv[i];
+                    if (option == "--custom" && i + 3 < argc) {
+                        i += 4;
+                    } else if (option == "--exp" && i + 2 < argc) {
+                        Param& f = tone.param(o);
+                        f.setValueAtTime(f.value, start);
+                        f.exponentialRampToValueAtTime(static_cast<float>(std::atof(argv[i + 1])), std::atof(argv[i + 2]));
+                        i += 3;
+                    } else if (option == "--fm" && i + 2 < argc) {
+                        const int m = tone.osc(Wave::sine, static_cast<float>(std::atof(argv[i + 1])), 0.0f, start, stop), depth = tone.gain(static_cast<float>(std::atof(argv[i + 2])));
+                        tone.connect(m, depth);
+                        tone.modulate(depth, tone.param(o));
+                        i += 3;
+                    } else throw std::runtime_error("unknown option " + option);
+                }
+                tone.output(o);
+                renderTone(tone, left, right);
+            } else if (mode == "param") {
+                Param p;
+                p.value = static_cast<float>(std::atof(argv[6]));
+                bool input = false;
+                for (int i = 7; i < argc;) {
+                    const std::string kind = argv[i];
+                    if (kind == "--input") { input = true; ++i; continue; }
+                    const int width = kind == "target" ? 4 : 3;
+                    if (i + width > argc) throw std::runtime_error("event " + kind + ": too few numbers");
+                    const float v = static_cast<float>(std::atof(argv[i + 1]));
+                    const double frame = std::atof(argv[i + 2]);
+                    if (kind == "set") p.setValueAtTime(v, frame);
+                    else if (kind == "linear") p.linearRampToValueAtTime(v, frame);
+                    else if (kind == "exp") p.exponentialRampToValueAtTime(v, frame);
+                    else if (kind == "target") p.setTargetAtTime(v, frame, std::atof(argv[i + 3]));
+                    else throw std::runtime_error("unknown event " + kind);
+                    i += width;
+                }
+                if (p.overflow) throw std::runtime_error("more events than a Param holds");
+                std::vector<float> added(frames, 0.0f);
+                std::copy(x.begin(), x.begin() + static_cast<long>(std::min(frames, x.size())), added.begin());
+                for (size_t at = 0; at < frames; at += SYNTH_FRAMES) {
+                    const int count = static_cast<int>(std::min<size_t>(SYNTH_FRAMES, frames - at));
+                    p.values(count, input ? &added[at] : nullptr, &left[at]);
+                }
+                right = left;
+            } else {
+                buildGraph(std::atoi(argv[6]), tone, x);
+                renderTone(tone, left, right);
+            }
+            std::vector<float> both(frames * 2);
+            for (size_t i = 0; i < frames; ++i) { both[2 * i] = left[i]; both[2 * i + 1] = right[i]; }
+            writeFloats(argv[2], both.data(), both.size());
+            return 0;
+        }
         std::vector<float> right; // the modulation modes' second channel; the others write L = R
         if (mode == "shaper") {
             if (argc != 7) { std::printf("%s", usage.c_str()); return 2; }

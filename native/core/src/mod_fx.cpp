@@ -75,8 +75,8 @@ constexpr double MAX_DELAY = 0.05;
 constexpr int QUANTUM = 128;    // render quantum: the ring's extra frames (delay.cc BufferLengthForDelay)
 // The phase counts entries of a table of 4096 (a power of two: the float rounding of 4096 / rate, and so of the increment, is the same for
 // 2048 to 16384: the model's error against the browser's oscillator did not change with the size, 48 kHz). rateScale_ = 4096 / rate in float
-// (prepare) is Chromium's RateScale, fitted to the browser's output: the file that defines it and the table size (periodic_wave_handler.cc)
-// was not read (it is not in the workspace; periodic_wave.cc, read, holds neither).
+// (prepare) is Chromium's RateScale, size / rate in float (periodic_wave_handler.cc 87, read in Task 20a; the size is 4096 up to 88.2 kHz
+// and 16384 above, 46 to 54: at 96 kHz the browser's phase is this one times 4, the same roundings).
 constexpr int TABLE = 4096;
 
 // audio_utilities.cc TimeToSampleFrame(time, rate, kRoundUp): the frame at 1024 times the rate, rounded, then up

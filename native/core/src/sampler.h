@@ -10,10 +10,12 @@
 #include "sound_data.h"
 #include "sound_model.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
 #include <memory>
+#include <numbers>
 #include <string>
 
 namespace btg::detail {
@@ -52,8 +54,8 @@ struct Biquad { // Web Audio BiquadFilterNode, coefficients divided by a0; proce
         return y;
     }
     // BiquadFilterNode as Chromium runs it (third_party/blink/renderer/platform/audio/biquad.cc at 158.0.8127.18, Biquad::Process): the sum in
-    // double, the output rounded to float and that kept as the state. Only the layer effects' chains use it; the sampler's and the sum's
-    // filters keep double. The notice of biquad.cc:
+    // double, the output rounded to float and that kept as the state. The layer effects' chains and the synth tones (patch.h) use it; the
+    // sampler's and the sum's filters keep double. The notice of biquad.cc:
     /*
      * Copyright (C) 2010 Google Inc. All rights reserved.
      *
@@ -87,6 +89,43 @@ struct Biquad { // Web Audio BiquadFilterNode, coefficients divided by a0; proce
         return y;
     }
 };
+// The coefficients of a BiquadFilterNode as biquad.cc computes them (SetLowpassParams, SetHighpassParams, SetBandpassParams,
+// SetPeakingParams; its notice above, at Biquad::step), for the layer effects and the synth voices: the same formulas as lowpass() and the
+// others below, but their pow10 is fdlibm::expf, a float, and the normalised frequency is the float frequency over the Nyquist frequency.
+// Lowpass, highpass and bandpass take biquad.cc's limits where that frequency reaches 0 or 1; the peaking filter is used inside them only.
+inline double pow10(double x) { return static_cast<double>(static_cast<float>(std::exp(static_cast<double>(static_cast<float>(x * std::numbers::ln10))))); }
+inline Biquad normalized(double b0, double b1, double b2, double a0, double a1, double a2) {
+    const double inverse = 1 / a0;
+    Biquad f;
+    f.b0 = b0 * inverse; f.b1 = b1 * inverse; f.b2 = b2 * inverse; f.a1 = a1 * inverse; f.a2 = a2 * inverse;
+    return f;
+}
+inline Biquad lowpassOf(double hz, double qDb, double sr) {
+    const double cutoff = std::clamp(hz / (sr / 2), 0.0, 1.0);
+    if (cutoff == 1) return normalized(1, 0, 0, 1, 0, 0);
+    if (!(cutoff > 0)) return normalized(0, 0, 0, 1, 0, 0);
+    const double theta = std::numbers::pi * cutoff, alpha = std::sin(theta) / (2 * pow10(qDb / 20)), cosw = std::cos(theta), beta = (1 - cosw) / 2;
+    return normalized(beta, 2 * beta, beta, 1 + alpha, -2 * cosw, 1 - alpha);
+}
+inline Biquad highpassOf(double hz, double qDb, double sr) {
+    const double cutoff = std::clamp(hz / (sr / 2), 0.0, 1.0);
+    if (cutoff == 1) return normalized(0, 0, 0, 1, 0, 0);
+    if (!(cutoff > 0)) return normalized(1, 0, 0, 1, 0, 0);
+    const double theta = std::numbers::pi * cutoff, alpha = std::sin(theta) / (2 * pow10(qDb / 20)), cosw = std::cos(theta), beta = (1 + cosw) / 2;
+    return normalized(beta, -2 * beta, beta, 1 + alpha, -2 * cosw, 1 - alpha);
+}
+inline Biquad bandpassOf(double hz, double q, double sr) {
+    const double frequency = std::max(0.0, hz / (sr / 2));
+    q = std::max(0.0, q);
+    if (!(frequency > 0 && frequency < 1)) return normalized(0, 0, 0, 1, 0, 0);
+    if (!(q > 0)) return normalized(1, 0, 0, 1, 0, 0);
+    const double w0 = std::numbers::pi * frequency, alpha = std::sin(w0) / (2 * q), k = std::cos(w0);
+    return normalized(alpha, 0, -alpha, 1 + alpha, -2 * k, 1 - alpha);
+}
+inline Biquad peakingOf(double hz, double q, double db, double sr) {
+    const double w0 = std::numbers::pi * (hz / (sr / 2)), alpha = std::sin(w0) / (2 * q), k = std::cos(w0), a = pow10(db / 40);
+    return normalized(1 + alpha * a, -2 * k, 1 - alpha * a, 1 + alpha / a, -2 * k, 1 - alpha / a);
+}
 Biquad lowpass(double hz, double qDb, double sr);
 Biquad highpass(double hz, double qDb, double sr);
 Biquad peaking(double hz, double db, double q, double sr);

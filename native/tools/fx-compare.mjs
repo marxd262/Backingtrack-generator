@@ -48,10 +48,13 @@
 //     (3.52 Hz: 3.9e-6, 3.6 Hz: 2.2e-6) it is up to 6e-6 (less at some frequencies, measured by the review of the phase: 7e-7 at 44.1 kHz
 //     and 4 Hz, 5e-7 at 10 Hz and 48 kHz), and the jump lies where oscillator_handler.cc 504 goes from the scalar loop to
 //     ProcessKRateVector. The worst over 4 to 5.5 Hz in steps of 0.1 Hz (the vibrato): 5.98e-6 (44.1 kHz, at 4.3 Hz), 5.96e-6 (48 kHz, at
-//     5.0 Hz), 5.62e-6 (96 kHz, at 4.7 Hz; there the increment in 4096 entries is below 0.3, so the browser's table must be larger at that
-//     rate: inferred, not measured); the chorus's 0.6 and 0.8 Hz: 3.0e-7 at every rate. The error is the same every second and does not depend
-//     on the frame within a quantum. The vector kernel's x86 body is not in the workspace: that it carries the read index in float is a
-//     hypothesis, not measured. The wave table is worth the 3e-7 only; the 6e-6 are not the table's.
+//     5.0 Hz), 5.62e-6 (96 kHz, at 4.7 Hz; there the increment in 4096 entries is below 0.3, and the browser's table is larger at that rate:
+//     16384 entries above 88.2 kHz, periodic_wave_handler.cc 46 to 54, read in Task 20a); the chorus's 0.6 and 0.8 Hz: 3.0e-7 at every rate.
+//     The error is the same every second and does not depend on the frame within a quantum. The vector kernel's x86 body,
+//     cpu/x86/oscillator_kernel_sse2.cc (read in Task 20a), carries the read index in float within a render quantum: the first four frames'
+//     indices as floats (118 to 125), then 4 * increment added and wrapped in float (186 to 188), the double index recomputed only at the
+//     quantum's end (193 to 195). The wave table is worth the 3e-7 only; the 6e-6 are not the table's. Since Task 20a
+//     Oscillator::constant (native/core/src/osc.cpp) has that kernel; ModFx's LFO does not, and its 6e-6 could be removed with it.
 //     A delay time moves by depth * that (vibrato 36 to 45 frames * 6e-6 = 2.7e-4 frames; chorus 144 frames * 3e-7 = 4e-5). The delay reads in
 //     float (delay_sse2.cc), and a move this small can flip the rounding of the read position by one step now and then; the step is 2^-12 =
 //     2.4e-4 frames for the vibrato's position at 44.1 and 48 kHz (about 2336, between 2048 and 4096), 1.2e-4 for the chorus's (about 1664),

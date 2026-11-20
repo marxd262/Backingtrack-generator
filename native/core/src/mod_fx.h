@@ -46,8 +46,10 @@ private:
     // against a bare OscillatorNode: it differs from this by 3e-7 below an increment of 0.3 entries per frame (the table's and its linear
     // interpolation's own size) and by up to 6e-6 from 0.3 on (measured: 3.9e-6 at 3.52 Hz and 2.2e-6 at 3.6 Hz, 48 kHz; the worst over the
     // vibrato's 4 to 5.5 Hz 5.98e-6 at 44.1 kHz and 5.96e-6 at 48 kHz; less at some frequencies, 7e-7 at 4 Hz and 44.1 kHz, 5e-7 at 10 Hz and
-    // 48 kHz), where oscillator_handler.cc goes to ProcessKRateVector (its x86 body is not here; that it carries the read index in float is a
-    // hypothesis). Not rebuilt.
+    // 48 kHz), where oscillator_handler.cc goes to ProcessKRateVector (504 to 509). Its x86 body, cpu/x86/oscillator_kernel_sse2.cc, carries the
+    // read index in float within a render quantum: the indices of the first four frames as floats (118 to 125), then 4 * increment added and
+    // wrapped in float (186 to 188); only at the quantum's end is the double index recomputed (193 to 195). Not rebuilt here (phase 5 ruling
+    // 7); since Task 20a Oscillator::constant (osc.cpp) has that kernel, and the LFO's up to 6e-6 could be removed with it.
     struct Lfo {
         double index = 0.0;
         float next(float increment);
