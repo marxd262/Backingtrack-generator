@@ -71,7 +71,7 @@
 namespace btg::detail {
 
 void Param::insert(uint8_t kind, float v, double frame, double tc) {
-    // InsertEvent: a ramp without an event before it starts from the value at the time of the call, here the tone's time 0
+    // InsertEvent: a ramp without an event before it starts from the value at the time of the call, here frame 0 (not shifted by late)
     if (count == 0 && (kind == linear || kind == exponential)) insert(set, value, 0.0, 0.0);
     if (count == EVENTS) { overflow = true; return; }
     int i = count; // after every event of the same time (upper_bound)
@@ -80,10 +80,10 @@ void Param::insert(uint8_t kind, float v, double frame, double tc) {
     ++count;
 }
 
-void Param::setValueAtTime(float v, double frame) { insert(set, v, frame, 0.0); }
-void Param::linearRampToValueAtTime(float v, double frame) { insert(linear, v, frame, 0.0); }
-void Param::exponentialRampToValueAtTime(float v, double frame) { insert(exponential, v, frame, 0.0); }
-void Param::setTargetAtTime(float v, double frame, double tc) { insert(tc == 0 ? set : target, v, frame, tc); } // tc 0: a setValue
+void Param::setValueAtTime(float v, double frame) { insert(set, v, frame + late, 0.0); }
+void Param::linearRampToValueAtTime(float v, double frame) { insert(linear, v, frame + late, 0.0); }
+void Param::exponentialRampToValueAtTime(float v, double frame) { insert(exponential, v, frame + late, 0.0); }
+void Param::setTargetAtTime(float v, double frame, double tc) { insert(tc == 0 ? set : target, v, frame + late, tc); } // tc 0: a setValue
 
 // The part of the timeline from event i on begins at `frame`: what it computes depends on its own kind and on the next event's.
 void Param::enter(int i, long long frame) {

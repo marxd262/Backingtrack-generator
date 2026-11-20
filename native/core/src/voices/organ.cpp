@@ -3,6 +3,9 @@
 // tunedValue; the engine builds the voice again on every setTuning and setSound with the same serial (its voice instance and chain go on),
 // so reading them here, when the voice is built, is the same. Here too, on the control thread, the waves of every key at the engine's rate.
 // Times are frames from the tone's time 0 (the web's t), or frames of the chain's clock where the chain is set.
+// The chain's frame of a tone (play) follows Chromium 158.0.8127.18, modules/webaudio/oscillator_handler.cc 739 to 746 (an oscillator's
+// start rounded up) and audio_param_handler.cc 1404 to 1421 and 1516 to 1540 (an event's time rounded up); their notices (Copyright 2022
+// The Chromium Authors, BSD-style, with the text of Chromium's LICENSE) stand in organ_chain.cpp's head.
 #include "../sound_data.h"
 #include "nodes.h"
 
@@ -77,8 +80,10 @@ public:
     void play(const PlayEvent& e, int delay, double secondsPerBeat, VoiceState& state, Tones& tones) const override {
         if (e.hit || tones.sr != rate || tones.noise.empty()) return; // 97: notes only; the waves are for the engine's rate
         // the web plays at the note's time: the engine triggers a glide (slideIn, scoop; only the sampler glides) its lead earlier
-        const double lead = e.leadBeats * secondsPerBeat, sr = tones.sr;
-        delay += static_cast<int>(lead * sr);
+        const double lead = e.leadBeats * secondsPerBeat, sr = tones.sr, time = delay + lead * sr; // its tones' time 0 (Tones::startSynth)
+        // the chain's frame of the tone: the frame at or after its time (Tones::late), where Chromium's AudioParams take its events (ceil)
+        // and its LFOs start (oscillator_handler.cc 739 to 746, as SynthTone::osc)
+        delay = static_cast<int>(std::ceil(time + tones.late));
         // 98: the voice instance's chain, built at its first tone, and anew for a tone after its dead
         OrganChain* chain = state.chain >= 0 ? &tones.chains[static_cast<size_t>(state.chain)] : nullptr;
         if (!chain || static_cast<double>(chain->age + delay) > chain->dead) {
@@ -121,7 +126,7 @@ public:
             tone.bus = bus + entry;
         };
         // 127 to 129: the wheels, one oscillator on the sub-octave with the key's wave
-        SynthTone& wheels = tones.startSynth(layer, delay, state.serial, RELEASE);
+        SynthTone& wheels = tones.startSynth(layer, time, state.serial, RELEASE);
         key(wheels, wheels.osc(*waves[midi], static_cast<float>(f / 2), cents, 0, stop), NOTE, OrganChain::wheels);
 
         // 131 to 140: the key click, a burst of the noise at the key's start and, softer, at its end, each with its level and its place in
@@ -133,7 +138,7 @@ public:
             if (!(amount[k] > 0)) continue;
             const double level = amount[k] * (0.7 + 0.6 * state.rng.next()), offset = 0.9 * state.rng.next();
             if (!clicks) {
-                clicks = &tones.startSynth(layer, delay, state.serial, RELEASE);
+                clicks = &tones.startSynth(layer, time, state.serial, RELEASE);
                 clicks->bus = bus + OrganChain::clicks;
             }
             // start(at, offset, 0.03): the grain plays ceil(0.03 s) of frames from the offset
@@ -160,7 +165,7 @@ public:
                 chain->percEnv.setTargetAtTime(0.0f, t, fine.percDecay / std::numbers::ln10, sr); // percDecay: the time to -20 dB
             }
             chain->held = std::max(chain->held, static_cast<double>(t) + end);
-            SynthTone& perc = tones.startSynth(layer, delay, state.serial, RELEASE);
+            SynthTone& perc = tones.startSynth(layer, time, state.serial, RELEASE);
             key(perc, perc.osc(Wave::sine, static_cast<float>(f * fine.percHarm), cents, 0, stop), NOTE * fine.perc, OrganChain::percussion);
         } else chain->held = std::max(chain->held, static_cast<double>(t) + end);
     }

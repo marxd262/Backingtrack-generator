@@ -23,6 +23,7 @@ struct Param {
     // The place of frame 0 in its render quantum (a SynthTone's): a setTarget is tested for convergence at its own first frame and at each
     // quantum's first frame, as ProcessSetTarget tests it (Task 20); -1: at every frame (the param kind of voice-compare.mjs measures that).
     int quantum = -1;
+    double late = 0.0; // the events' frames are this much later than given (a SynthTone's late: its time 0 lies between two frames)
     void setValueAtTime(float v, double frame);
     void linearRampToValueAtTime(float v, double frame);
     void exponentialRampToValueAtTime(float v, double frame);

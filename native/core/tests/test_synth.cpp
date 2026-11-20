@@ -161,6 +161,54 @@ int main() {
         CHECK(!t.overflow() && l[150] > 0.0f && l[191] > 0.0f && l[192] == 0.0f && l[255] == 0.0f);
     }
     {
+        // A tone whose time 0 lies a quarter frame after its frame 0 (Task 23a, SynthTone::late): a buffer started at time 0 plays from frame
+        // 1, read from 0.75 on (RenderFromBuffer: the part of a frame since its start time), between its samples (ProcessInterpolatedPath):
+        // (1 - f) x[k] + f x[k + 1]. At its last frame without a loop extrapolated from the two last, x[7] + (x[7] - x[6]) f, then silent;
+        // with the loop the second sample there is the first frame and the index wraps keeping its part. A gain's event at 2 takes effect at
+        // frame 3 (ceil(2.25)), its intrinsic 2 before. Each value is exact in float.
+        const float squares[8] = { 0, 1, 4, 9, 16, 25, 36, 49 };
+        for (const bool loop : { false, true }) {
+            SynthTone t;
+            t.active = true;
+            t.basic = &basicWaves(48000.0);
+            t.late = 0.25;
+            const int source = t.buffer(squares, 8, 0, loop, 0, 12), g = t.gain(2.0f);
+            t.param(g).setValueAtTime(1.0f, 2);
+            t.connect(source, g);
+            t.output(g);
+            std::vector<float> l(16), r(16);
+            t.render(l.data(), r.data(), 16, *scratch);
+            std::printf("a buffer a quarter frame late%s: %g %g %g %g ... frame 8 %g, frame 9 %g\n", loop ? ", looped" : "", l[0], l[1], l[2], l[3], l[8], l[9]);
+            CHECK(!t.overflow() && l[0] == 0.0f && l[1] == 1.5f && l[2] == 6.5f && l[3] == 7.75f && l[7] == 45.75f
+                  && l[8] == (loop ? 12.25f : 58.75f) && l[9] == (loop ? 0.75f : 0.0f) && l[12] == (loop ? 14.25f : 0.0f) && l[13] == 0.0f);
+        }
+    }
+    {
+        // An oscillator whose start lies within 1/2048 frame after a frame (Task 23a): TimeToSampleFrame rounds it down to the frame, and
+        // Chromium leaves that frame unwritten and plays from the next with 1 - start_frame_offset (oscillator_handler.cc 739 to 743), as a
+        // start rounded up. A cosine (a custom wave: the basic waves are sums of sines, 0 at phase 0) 1/4096 of a frame late: frame 0 is
+        // exactly 0, and from frame 1 on it is, bit for bit, the oscillator of a tone that starts it at 1 + 1/4096 (its frame 2, the same
+        // part 1 - 1/4096, its quantum one frame earlier so that its render quanta fall on the same frames), one frame later.
+        const float real[2] = { 0.0f, 1.0f }, imag[2] = { 0.0f, 0.0f };
+        const auto cosine = customWave(real, imag, 2, sr, false);
+        const auto play = [&](double late, int quantum, double start) {
+            SynthTone t;
+            t.active = true;
+            t.basic = &basicWaves(sr);
+            t.late = late;
+            t.quantum = quantum;
+            t.output(t.osc(*cosine, 440.0f, 0.0f, start, 1000));
+            std::vector<float> l(256), r(256);
+            t.render(l.data(), r.data(), 256, *scratch);
+            return l;
+        };
+        const std::vector<float> late = play(1.0 / 4096, 0, 0), later = play(0.0, 127, 1 + 1.0 / 4096);
+        bool shifted = true;
+        for (int i = 0; i + 1 < 256; ++i) shifted = shifted && late[i] == later[i + 1];
+        std::printf("a cosine 1/4096 of a frame late: frame 0 %g, frame 1 %.6f, one frame later's %s\n", late[0], late[1], shifted ? "the same" : "NOT THE SAME");
+        CHECK(late[0] == 0.0f && late[1] > 0.9f && shifted);
+    }
+    {
         Param p; // a ramp as the first event starts from the intrinsic value at the tone's time 0; more than EVENTS events: the flag
         p.value = 2.0f;
         p.linearRampToValueAtTime(0.0f, 100);

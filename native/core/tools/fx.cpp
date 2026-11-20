@@ -26,12 +26,15 @@
 //       Param::values (L = R) with that intrinsic value and those events; --input: in added at audio rate
 //   btg_fx <in.f32> <out.f32> <rate> graph <frames> <1|2|3|4|5>
 //       the fixed graphs of voice-compare.mjs, built with SynthTone's calls (the numbers stand in both files)
-//   btg_fx <in.f32> <out.f32> <rate> voice <frames> <key> <timbre> [--tuning <json>] [<frame> <midi> <vel> <seconds> [leslie=<v>] [swell=<dB>]
-//                                                                    [artTime=<s>]]...  (Task 21; the tuning and the organ's fields Task 20)
+//   btg_fx <in.f32> <out.f32> <rate> voice <frames> <key> <timbre> [--tuning <json>] [<time> <midi> <vel> <seconds> [leslie=<v>] [swell=<dB>]
+//                                                                    [artTime=<s>] [glide=<s>]]...  (Task 21; the tuning and the organ's fields Task 20)
 //       the synth voice `key` ("chords/epiano/rhodes", "chords/organ/jazz") as setVoices builds it (makeVoice, no pack, the rate) with the
-//       timbre as setSound takes it (JSON) and the tuning as setTuning takes it, its notes each from its frame on, through Tones and its organ
-//       chains as the engine plays them (the noise of Engine::prepare); no layer chain, no mixer. A note's leslie and swell are the event's
-//       fields, artTime gives it the art swell with that time. A name of HIT_NAMES in the place of <midi> is a hit of that name (Task 23).
+//       timbre as setSound takes it (JSON) and the tuning as setTuning takes it, its notes each at its time (frames, a real number: the voice
+//       gets its frame and Tones::late the part of a frame after it, as the engine hands them but raw: the engine counts a part below 1/2048
+//       as 0; Task 23a), through Tones and its organ chains as
+//       the engine plays them (the noise of Engine::prepare); no layer chain, no mixer. A note's leslie and swell are the event's fields,
+//       artTime gives it the art swell with that time, glide the art scoop with that artTime, triggered that many seconds early with that lead
+//       (the engine's slideIn and scoop). A name of HIT_NAMES in the place of <midi> is a hit of that name (Task 23).
 // The tones render in calls of SYNTH_FRAMES (256) frames, the engine's chunk.
 #include "../src/convolver.h"
 #include "../src/guitar_fx.h"
@@ -143,7 +146,7 @@ int main(int argc, char** argv) {
                               "                                                                        [--custom <real> <imag> <normalized|raw>]\n"
                               "                                       | param <frames> <value> [set|linear|exp <v> <frame> | target <v> <frame> <tc>]... [--input]\n"
                               "                                       | graph <frames> <1..5>\n"
-                              "                                       | voice <frames> <key> <timbre> [--tuning <json>] [<frame> <midi> <vel> <seconds> [leslie=<v>] [swell=<dB>] [artTime=<s>]]...\n"
+                              "                                       | voice <frames> <key> <timbre> [--tuning <json>] [<time> <midi> <vel> <seconds> [leslie=<v>] [swell=<dB>] [artTime=<s>] [glide=<s>]]...\n"
                               "       btg_fx curves <out.f32>\n";
     try {
         if (argc == 3 && std::string(argv[1]) == "curves") {
@@ -230,7 +233,7 @@ int main(int argc, char** argv) {
                 const std::string key = argv[6];
                 const auto layer = std::find_if(std::begin(LAYER_NAMES), std::end(LAYER_NAMES), [&](const char* n) { return key.rfind(std::string(n) + "/", 0) == 0; });
                 if (layer == std::end(LAYER_NAMES)) throw std::runtime_error("no layer in " + key);
-                struct Note { size_t frame; PlayEvent e; };
+                struct Note { double time; PlayEvent e; }; // time: frames from the render's frame 0, a real number
                 std::vector<Note> notes;
                 std::string tuning = "{}";
                 for (int i = 8; i < argc;) {
@@ -244,12 +247,17 @@ int main(int argc, char** argv) {
                         if (name == "leslie") e.leslie = v;
                         else if (name == "swell") e.swell = v;
                         else if (name == "artTime") { e.art = Art::swell; e.artTime = v; }
-                        else throw std::runtime_error("unknown field " + name);
+                        else if (name == "glide") { // a scoop with that artTime, triggered its lead early as the engine's setTrack makes it
+                            e.art = Art::scoop;
+                            e.artTime = e.leadBeats = v;
+                            e.durBeats += v;
+                            notes.back().time -= v * rate;
+                        } else throw std::runtime_error("unknown field " + name);
                         ++i;
                         continue;
                     }
                     if (i + 3 >= argc) { std::printf("%s", usage.c_str()); return 2; }
-                    Note n { static_cast<size_t>(std::atoll(argv[i])), {} };
+                    Note n { std::atof(argv[i]), {} };
                     const auto name = std::find_if(std::begin(HIT_NAMES), std::end(HIT_NAMES), [&](const char* h) { return std::string(h) == argv[i + 1]; });
                     n.e.hit = name != std::end(HIT_NAMES); // a hit of that name (Task 23), else a note of that midi
                     if (n.e.hit) n.e.name = static_cast<int>(name - std::begin(HIT_NAMES));
@@ -271,10 +279,12 @@ int main(int argc, char** argv) {
                 for (size_t at = 0; at < frames; at += SYNTH_FRAMES) {
                     const int count = static_cast<int>(std::min<size_t>(SYNTH_FRAMES, frames - at));
                     tones->quantum = static_cast<int>(at % 128); // the render's frame 0 is the play's first frame, as the context's
-                    for (Note& n : notes) { // the notes that begin in this chunk, as the engine hands them to the voice
-                        if (n.frame < at || n.frame >= at + count) continue;
+                    for (Note& n : notes) { // the notes that begin in this chunk, as the engine hands them to the voice: the frame and the part (raw)
+                        const double x = n.time - static_cast<double>(at);
+                        if (x < 0 || x >= count) continue;
                         n.e.layer = voice->layer;
-                        voice->play(n.e, static_cast<int>(n.frame - at), 1.0, state, *tones);
+                        tones->late = x - static_cast<int>(x);
+                        voice->play(n.e, static_cast<int>(x), 1.0, state, *tones);
                     }
                     // as the engine's chunk: a tone into its organ chain's entry or out; then the chains, playing (engine.cpp)
                     for (OrganChain& c : tones->chains) if (c.live) c.clear(count);

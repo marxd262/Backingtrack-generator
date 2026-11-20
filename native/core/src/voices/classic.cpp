@@ -122,7 +122,7 @@ public:
         // the web plays at the note's time: the engine triggers a glide (slideIn, scoop; only the sampler glides) its lead earlier
         const double lead = e.leadBeats * secondsPerBeat, dur = e.durBeats * secondsPerBeat - lead, sr = tones.sr;
         const double release = layer == Engine::bass ? bass.release : layer == Engine::chords ? chords.release : layer == Engine::pad ? pad.release : LEAD_RELEASE;
-        SynthTone& tone = tones.startSynth(layer, delay + static_cast<int>(lead * sr), state.serial, release);
+        SynthTone& tone = tones.startSynth(layer, delay + lead * sr, state.serial, release);
         if (layer == Engine::bass) bassNote(tone, e, dur, sr, bass);
         else if (layer == Engine::chords) chordNote(tone, e, dur, sr, chords);
         else if (layer == Engine::pad) padNote(tone, e, dur, sr, pad);

@@ -3118,6 +3118,93 @@ int main(int argc, char** argv) {
                             e->activeSynthTones());
                 CHECK(peakIn(after.left, 0.06, 0.15) > 1e-6 && late == 0.0f && e->activeSynthTones() == 0);
             }
+            // A hit between frames (Task 23a): the engine hands the voice the event's frame and Tones::late the part of a frame after it, from
+            // its own expression ((beat - from) / step). The fixture's drums alone on the synth kit, played from a closed hat (then a kick) that
+            // no other drum event lies within 5 ms before or 0.1 s after: the play starts at the hit's beat as the engine computes it (t times
+            // bpm / 60) less part * step (step = bpm / 60 / rate, the transport's), so the hit lies `part` after the play's first frame: 0.5
+            // (to about 1e-11), or exactly 0; 96 ms rendered in blocks of 256 (one chunk each). The hat half a frame late is quieter by at least
+            // 3 dB (the bar from Task 23's 4.40 dB, Chromium's linear interpolation of the noise): red when the engine hands no part (0 dB).
+            {
+                const auto events = btg::buildEvents(kitOnly);
+                const auto alone = [&](const char* name) { // the first such hit (none: an event that is not a hit)
+                    for (const btg::Event& ev : events) {
+                        if (ev.type != btg::Event::Type::hit || ev.name != name) continue;
+                        bool clear = true;
+                        for (const btg::Event& o : events) clear = clear && (&o == &ev || o.type != btg::Event::Type::hit || o.t < ev.t - 0.005 || o.t > ev.t + 0.1);
+                        if (clear) return ev;
+                    }
+                    return btg::Event {};
+                };
+                const auto at = [&](const btg::Event& hit, double part, const char* sound) {
+                    auto e = std::make_unique<btg::Engine>();
+                    e->setPackSource(source);
+                    e->setSound(sound);
+                    e->setTrack(kitOnly);
+                    e->setVoices(SYNTH_KIT);
+                    e->setLimiter(false);
+                    e->prepare(rate);
+                    btg::Transport t;
+                    t.play(hit.t * (e->bpm() / 60) - part * (e->bpm() / 60 / rate), e->bpm());
+                    return render(*e, t, (18 * 256 - 0.5) / rate, 256); // 18 blocks
+                };
+                const btg::Event hat = alone("hat");
+                const double half = at(hat, 0.5, DRY).rms, on = at(hat, 0.0, DRY).rms, db = 20 * std::log10(half / on);
+                std::printf("synth kit, a closed hat half a frame late against one on a frame (beat %.4f): %+.2f dB (rms %.3e, %.3e)\n", hat.t * 100 / 60, db, half, on);
+                CHECK(hat.type == btg::Event::Type::hit && on > 1e-4 && db <= -3);
+                // The kick with its click (kickPunch 1): half a frame late it differs from the one on a frame, and it is what the voice alone
+                // renders with the same frame and part (btg_fx voice's way: makeVoice, Tones::late 0.5, the hit at frame 0 in quantum 0, chunks
+                // of 256), up to one gain (the layer's fader, trim and the master gain; the shelf at 0 dB, limiter off): within 1e-5 of the peak,
+                // and not so with part 0 (the control).
+                const char* PUNCH = R"({"master":{"reverb":0,"echo":0,"roomWet":0},"drums":{"kickPunch":1}})";
+                const btg::Event kick = alone("kick");
+                const Result late = at(kick, 0.5, PUNCH), onFrame = at(kick, 0.0, PUNCH);
+                const auto voiceAlone = [&](const btg::Event& hit, double part, bool punch) { // its left channel, as long as a render of `at`
+                    Timbre timbre;
+                    if (punch) timbre.drums.kickPunch = 1;
+                    const auto voice = makeVoice(btg::Engine::drums, "drums/synth/classic", nullptr, {}, timbre, rate);
+                    const auto tones = organTones(rate);
+                    VoiceState state;
+                    PlayEvent e;
+                    e.layer = btg::Engine::drums;
+                    e.hit = true;
+                    e.name = nameIndex(hit.name);
+                    e.vel = hit.vel;
+                    tones->late = part;
+                    voice->play(e, 0, 1.0, state, *tones);
+                    std::vector<float> out(late.left.size()), right(out.size());
+                    for (size_t a = 0; a < out.size(); a += SYNTH_FRAMES) for (SynthTone& s : tones->synth) if (s.active) s.render(&out[a], &right[a], SYNTH_FRAMES, tones->scratch);
+                    return out;
+                };
+                // the largest difference of the engine's render and the voice alone times one gain (from the engine's peak frame), over the peak
+                const auto off = [](const std::vector<float>& engine, const std::vector<float>& solo) {
+                    const size_t top = static_cast<size_t>(std::max_element(engine.begin(), engine.end(), [](float a, float b) { return std::fabs(a) < std::fabs(b); }) - engine.begin());
+                    const double gain = engine[top] / solo[top];
+                    double most = 0.0;
+                    for (size_t i = 0; i < solo.size(); ++i) most = std::max(most, std::fabs(engine[i] - gain * solo[i]));
+                    return most / std::fabs(engine[top]);
+                };
+                const double same = off(late.left, voiceAlone(kick, 0.5, true)), control = off(late.left, voiceAlone(kick, 0.0, true));
+                std::printf("synth kit, a kick half a frame late: %s the one on a frame; against the voice alone half a frame late %.2e of its peak, on a frame %.2e\n",
+                            late.left == onFrame.left ? "the same as" : "differs from", same, control);
+                CHECK(kick.type == btg::Event::Type::hit && late.left != onFrame.left && same < 1e-5 && control > 1e-3);
+                // Less than 1/2048 frame after a frame (fix round 0): the engine counts the hit as on that frame (Tones::late 0), so its noise
+                // does not start on the frame while its gain's events wait for the next one (Chromium's window: the first frame at the gain's
+                // default 1, a one-sample click). The hat 1/4096 of a frame late, placed as above, is the voice alone on a frame, within 1e-5
+                // of the peak (red without the rule). 1/1024 late, outside the window, it is the voice alone 1/1024 late within 1e-5 and not
+                // the one on a frame: those two differ by at least 1e-4 of the peak, ten times the bar (red with the window widened to 1/512).
+                const std::vector<float> hatOn = voiceAlone(hat, 0.0, false), hatLate = voiceAlone(hat, 1.0 / 1024, false);
+                double apart = 0.0, top = 0.0;
+                for (size_t i = 0; i < hatOn.size(); ++i) {
+                    apart = std::max(apart, static_cast<double>(std::fabs(hatLate[i] - hatOn[i])));
+                    top = std::max(top, static_cast<double>(std::fabs(hatOn[i])));
+                }
+                const std::vector<float> inWindow = at(hat, 1.0 / 4096, DRY).left, outside = at(hat, 1.0 / 1024, DRY).left;
+                const double windowOff = off(inWindow, hatOn), outsideOff = off(outside, hatLate), outsideOnFrame = off(outside, hatOn);
+                std::printf("synth kit, a closed hat 1/4096 of a frame late: against the voice alone on a frame %.2e of the peak (first frame %.3e, the voice's %.3e);"
+                            " 1/1024 late: against the voice alone 1/1024 late %.2e, on a frame %.2e (the two voices apart by %.2e of the peak)\n",
+                            windowOff, inWindow[0], hatOn[0], outsideOff, outsideOnFrame, apart / top);
+                CHECK(windowOff <= 1e-5 && apart / top >= 1e-4 && outsideOff <= 1e-5 && outsideOnFrame > 1e-5);
+            }
             // No allocation and no free in render (ruling 14) with the synth kit and percussion: the band's sample voices, then every layer on
             // its synth voice, the kit and percussion back to their sample voices and to the synth ones again while playing, a restart, a
             // jump and a stop, the counts armed around the render calls only.

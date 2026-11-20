@@ -29,7 +29,7 @@ public:
         const double vel = std::min(1.0, std::max(0.0, e.vel));
         const double index = fine.index * bright * (0.4 + 0.9 * vel);
         const double sr = tones.sr, end = (dur + REL + 0.05) * sr;
-        SynthTone& tone = tones.startSynth(layer, delay + static_cast<int>(lead * sr), state.serial, REL);
+        SynthTone& tone = tones.startSynth(layer, delay + lead * sr, state.serial, REL);
 
         // 23 to 28: a short attack, an exponential decay over the note's length, then the fade
         const int amp = tone.gain(1.0f);

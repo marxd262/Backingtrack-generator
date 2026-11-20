@@ -30,12 +30,14 @@ struct SynthTone {
     bool active = false; uint64_t serial = 0, voice = 0; Engine::Layer layer = Engine::drums;
     uint8_t gen = 0;                                    // its layer's chain generation at its start, as Tone::gen
     int bus = -1;                                       // -1: the layer's buffer; else the entry bus % 3 of Tones::chains[bus / 3] (the organ)
-    int delay = 0;                                      // frames until its time 0 (the event's place in the chunk), as Tone::delay
+    int delay = 0;                                      // frames until its frame 0 (the event's frame in the chunk), as Tone::delay
     float panLeft = 1, panRight = 1;                    // the kit's balance (drums synth), as Tone
     double chokeGain = 1, chokeMul = 1, releaseSeconds = 0; long long chokeIn = -1; // stop; a jump falls over releaseSeconds
-    long long age = 0, end = 0; // frames since time 0; the last source's stop: inactive one chunk (SYNTH_FRAMES) after it
+    long long age = 0, end = 0; // frames since frame 0; the last source's stop: inactive one chunk (SYNTH_FRAMES) after it
     const BasicWaves* basic = nullptr; // the basic waves at the engine's rate, for osc(Wave, ...)
-    int quantum = 0;            // the place of time 0 in its render quantum (Tones::startSynth); set before the graph is built
+    int quantum = 0;            // the place of frame 0 in its render quantum (Tones::startSynth); set before the graph is built
+    double late = 0.0;          // [0, 1): the tone's time 0 lies this part of a frame after frame 0 (Tones::startSynth); set before the graph is
+                                // built, every time the calls below take (sources' starts and stops, every param's events) is that much later
 
     // Each returns the node (-1 when the graph is full). Times are frames from the tone's time 0 (a stop of infinity: no stop); hz, cents,
     // value, q, pan the params' values before any event. An oscillator's hz is the node's frequency value, not its first event's: where the
@@ -72,7 +74,7 @@ private:
         Oscillator oscillator;
         const float* data = nullptr;   // buffer
         int frames = 0;
-        long long read = 0;
+        double read = 0.0;             // the read index: a whole frame, or between two after a start between frames
         bool loop = false;
         Biquad state[2];               // biquad: coefficients and the state per channel
         float hz = 0.0f, q = 0.0f;     // the values the coefficients are for (NaN: none yet)
@@ -104,15 +106,17 @@ struct Tones {
     double sr = 48000.0;
     const BasicWaves* basic = nullptr; // the basic waves at sr (Engine::prepare); every synth tone gets them
     int quantum = 0;                   // the place of the chunk's first frame in its render quantum: frames since the play began, mod 128
+    double late = 0.0;                 // the part of a frame from the frame a voice's play() gets to the event's time (the engine sets it,
+                                       // a part below 1/2048 as 0: engine.cpp lateOf)
     uint8_t gen[Engine::layerCount] = {}; // per layer, the generation of its chains (0 or 1) a tone started now rings through (engine.cpp)
     std::array<OrganChain, CHAINS> chains; // the organ chains of the voice instances (VoiceState::chain) and of those that ring out
     std::vector<float> noise;          // synthNoise(sr) (Engine::prepare)
 
     Tone* start(const Note& n);
-    // A free synth tone, else the oldest (as start), emptied and active, its time 0 `delay` frames into the chunk (and its place in the
-    // quantum from there); a jump lets it fall over releaseSeconds (every voice gives its own: 0 would cut it in one frame). The voice then
-    // builds its graph.
-    SynthTone& startSynth(Engine::Layer layer, int delay, uint64_t voice, double releaseSeconds);
+    // A free synth tone, else the oldest (as start), emptied and active, its time 0 `delay` + `late` frames into the chunk (`delay`: the
+    // frame play() got, plus a glide's lead): its frame 0 on the whole frame (and its place in the quantum from there), the rest its late; a
+    // jump lets it fall over releaseSeconds (every voice gives its own: 0 would cut it in one frame). The voice then builds its graph.
+    SynthTone& startSynth(Engine::Layer layer, double delay, uint64_t voice, double releaseSeconds);
     // A chain slot for a new organ chain, which the voice then starts: one that is not live, else one whose orphan has rung out, else the
     // oldest orphan, whose tones are cut (all four busy: a voice instance and three that ring out, which takes four voice changes or starts
     // within about 0.3 s after the old tones' ends; with one organ layer every other busy chain is an orphan then, without one the oldest

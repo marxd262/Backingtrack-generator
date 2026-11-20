@@ -73,6 +73,12 @@ struct Setup {
 
 void clear(detail::Biquad& f) { f.x1 = f.x2 = f.y1 = f.y2 = 0.0; } // the filter's state, not its coefficients
 
+// Tones::late for an event `at` frames into the chunk on `frame`: less than 1/2048 frame after the frame counts as the frame, where
+// Chromium starts a buffer (TimeToSampleFrame rounds through 1/1024 frame) while its params' events wait for the next frame, so that no
+// tone's start plays its first frame at the gains' defaults (the beat arithmetic puts events on the grid a hair after their frame; a source
+// a voice starts at a time it derives, such as the organ's click at a note's end, still can)
+double lateOf(double at, int frame) { return at - frame < 1.0 / 2048 ? 0.0 : at - frame; }
+
 } // namespace
 
 struct Engine::Impl {
@@ -682,10 +688,15 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
                         PlayEvent late = e;
                         late.leadBeats = ahead * secondsPerBeat > 0.02 ? ahead : 0.0;
                         late.durBeats -= e.leadBeats - late.leadBeats;
-                        voice->play(late, step > 0 ? static_cast<int>((ahead - late.leadBeats) / step) : 0, secondsPerBeat, m.states[e.layer], m.tones);
+                        const double at = step > 0 ? (ahead - late.leadBeats) / step : 0.0;
+                        m.tones.late = lateOf(at, static_cast<int>(at));
+                        voice->play(late, static_cast<int>(at), secondsPerBeat, m.states[e.layer], m.tones);
                         continue;
                     }
-                    const int delay = step > 0 ? std::clamp(static_cast<int>((e.beat + lap - from) / step), 0, count - 1) : 0;
+                    // the event's frame in the chunk, and the part of a frame after it, which the synth tones start at (Tones::late)
+                    const double at = step > 0 ? (e.beat + lap - from) / step : 0.0;
+                    const int delay = std::clamp(static_cast<int>(at), 0, count - 1);
+                    m.tones.late = lateOf(at, delay);
                     if (voice) voice->play(e, delay, secondsPerBeat, m.states[e.layer], m.tones);
                 } else if (m.next >= events.size() && to >= length + lap) {
                     m.next = 0;

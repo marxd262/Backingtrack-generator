@@ -2,15 +2,18 @@
  * The nodes of a synth tone follow Chromium, third_party/blink/renderer/ at 158.0.8127.18 (audio_utilities.cc: at main, as for mod_fx.cpp):
  *   modules/webaudio/audio_scheduled_source_handler.cc (Copyright 2022 The Chromium Authors): a source's start and end frame, its time
  *                                                       rounded up, the end exclusive; the start time's offset from its frame
- *                                                       (start_frame_offset, Task 22)
+ *                                                       (start_frame_offset, Task 22; UpdateSchedulingInfo, Task 23a)
  *   modules/webaudio/audio_buffer_source_handler.cc    (Copyright 2022 The Chromium Authors): at rate 1 the offset rounded to a frame and the
  *                                                       frames copied (ClampGrainParameters, ProcessFastPath), the loop over the whole
- *                                                       buffer, silence after the end without a loop
+ *                                                       buffer, silence after the end without a loop; a start between frames (Task 23a):
+ *                                                       the read index moved by the part of a frame since the start time (RenderFromBuffer)
+ *                                                       and the buffer read between its samples (ProcessInterpolatedPath)
  *   modules/webaudio/biquad_filter_handler.cc          (Copyright 2022 The Chromium Authors): the coefficients per frame while a param moves,
  *                                                       once otherwise; the frequency over the Nyquist frequency
  *   platform/audio/stereo_panner.cc                    (Copyright 2014 The Chromium Authors): the gains of a mono input, as float
  *   modules/webaudio/oscillator_handler.cc             (Copyright 2022 The Chromium Authors): the first render quantum of an a-rate
- *                                                       oscillator, the increments from the quantum's first frame (Process)
+ *                                                       oscillator, the increments from the quantum's first frame (Process); the start
+ *                                                       frame and read index of a start between frames (Process, Task 23a)
  * Each file's head: "Use of this source code is governed by a BSD-style license that can be found in the LICENSE file." That file's text:
  *
  * Redistribution and use in source and binary forms, with or without
@@ -116,16 +119,19 @@ int SynthTone::osc(Wave wave, float hz, float cents, double start, double stop) 
 int SynthTone::osc(const WaveTables& wave, float hz, float cents, double start, double stop) {
     const int n = add(source);
     if (n < 0) return n;
+    start += late;
+    stop += late;
     Node& node = nodes_[n];
     node.oscillator.wave = &wave;
     node.constant[0] = hz;
     node.constant[1] = cents;
-    node.start = framesUp(start);
+    // The start frame and the part of a frame from the start time to it: -start_frame_offset of UpdateSchedulingInfo for a start before its
+    // frame; a start within 1/2048 frame after a frame, which TimeToSampleFrame rounds down to it, leaves that frame unwritten (0) and plays
+    // from the next with 1 - start_frame_offset (oscillator_handler.cc 739 to 743). Both are the start rounded up.
+    node.start = frameOf(std::ceil(start));
     node.stop = framesUp(stop);
     node.oscillator.offset = static_cast<int>((quantum + node.start) % 128);
-    // -start_frame_offset of UpdateSchedulingInfo for a start before its frame; a start within 1/2048 frame after one (rounded down to it)
-    // gets 0: Chromium leaves that frame unwritten and goes on as from the frame, not rebuilt
-    node.oscillator.lead = std::max(0.0, static_cast<double>(node.start) - start);
+    node.oscillator.lead = std::max(0.0, static_cast<double>(node.start) - start); // (a NaN start: 0)
     end = std::max(end, node.stop);
     return n;
 }
@@ -134,14 +140,18 @@ int SynthTone::buffer(const float* data, int frames, double offset, bool loop, d
     if (!data || frames <= 0) { overflow_ = true; return -1; }
     const int n = add(buffered);
     if (n < 0) return n;
+    start += late;
+    stop += late;
     Node& node = nodes_[n];
     node.data = data;
     node.frames = frames;
-    node.read = std::min<long long>(framesNearest(offset), frames); // the offset clamped to the buffer, then to a frame (rate 1)
+    node.read = static_cast<double>(std::min<long long>(framesNearest(offset), frames)); // the offset clamped to the buffer, then to a frame (rate 1)
     if (loop && node.read >= frames) node.read = 0;
     node.loop = loop;
     node.start = framesUp(start);
     node.stop = framesUp(stop);
+    // RenderFromBuffer: a start before its frame reads from that much further on (-start_frame_offset); one rounded down to it does not
+    node.read += std::max(0.0, static_cast<double>(node.start) - start);
     end = std::max(end, node.stop);
     return n;
 }
@@ -184,7 +194,8 @@ Param& SynthTone::param(int node, int which) {
     const int slot = paramCount_++;
     params_[slot] = Param {};
     params_[slot].value = n.constant[which];
-    params_[slot].quantum = quantum; // its frame 0 is the tone's time 0
+    params_[slot].quantum = quantum; // its frame 0 is the tone's frame 0
+    params_[slot].late = late;
     n.slot[which] = slot;
     ordered_ = false;
     return params_[slot];
@@ -311,10 +322,21 @@ void SynthTone::process(int n, int count, Scratch& s) {
             if (!moving[0] && !moving[1]) node.oscillator.constant(*values[0], *values[1], out[0] + from, to - from, node.stop - (age + from));
             else node.oscillator.moving(moving[0] ? values[0] + from : values[0], moving[1] ? values[1] + from : values[1], moving[0], moving[1], out[0] + from, to - from);
         }
-        for (int i = from; node.kind == buffered && i < to; ++i) { // rate 1: the buffer's frames, from the rounded offset on
+        // rate 1: on a whole read index the buffer's frames (ProcessFastPath), between two ProcessInterpolatedPath's linear interpolation in
+        // double, the second sample across the loop's end its first frame, at the end without a loop the last one (extrapolated from the two
+        // last); the index moves on by 1.0 and keeps its part of a frame (a quantum takes the fast path exactly when that part is 0)
+        for (int i = from; node.kind == buffered && i < to; ++i) {
             if (node.read >= node.frames) { out[0][i] = 0.0f; continue; } // the end without a loop
-            out[0][i] = node.data[node.read];
-            if (++node.read >= node.frames && node.loop) node.read = 0;
+            const auto k = static_cast<long long>(node.read);
+            const double f = node.read - static_cast<double>(k);
+            if (f == 0) out[0][i] = node.data[k];
+            else {
+                const long long k2 = k + 1 < node.frames ? k + 1 : node.loop ? static_cast<long long>(node.read + 1.0 - node.frames) : k;
+                const double s1 = node.data[k == k2 && k >= 1 ? k - 1 : k], s2 = node.data[k2];
+                out[0][i] = static_cast<float>(k == k2 && k >= 1 ? s2 + (s2 - s1) * f : (1.0 - f) * s1 + f * s2);
+            }
+            node.read += 1.0;
+            if (node.read >= node.frames && node.loop) node.read -= node.frames;
         }
         return;
     }
@@ -380,7 +402,7 @@ void SynthTone::render(float* left, float* right, int count, Scratch& s) {
     if (delay == 0 && age >= end + SYNTH_FRAMES) active = false;
 }
 
-SynthTone& Tones::startSynth(Engine::Layer layer, int delay, uint64_t voice, double releaseSeconds) {
+SynthTone& Tones::startSynth(Engine::Layer layer, double delay, uint64_t voice, double releaseSeconds) {
     SynthTone* tone = &synth[0];
     for (SynthTone& t : synth) {
         if (!t.active) { tone = &t; break; }
@@ -392,10 +414,12 @@ SynthTone& Tones::startSynth(Engine::Layer layer, int delay, uint64_t voice, dou
     tone->voice = voice;
     tone->layer = layer;
     tone->gen = gen[layer];
-    tone->delay = delay;
+    const double at = delay + late;
+    tone->delay = static_cast<int>(at);
+    tone->late = at - tone->delay;
     tone->releaseSeconds = releaseSeconds;
     tone->basic = basic;
-    tone->quantum = static_cast<int>((quantum + delay) % 128);
+    tone->quantum = (quantum + tone->delay) % 128;
     return *tone;
 }
 
