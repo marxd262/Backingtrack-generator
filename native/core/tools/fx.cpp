@@ -34,7 +34,9 @@
 //       as 0; Task 23a), through Tones and its organ chains as
 //       the engine plays them (the noise of Engine::prepare); no layer chain, no mixer. A note's leslie and swell are the event's fields,
 //       artTime gives it the art swell with that time, glide the art scoop with that artTime, triggered that many seconds early with that lead
-//       (the engine's slideIn and scoop). A name of HIT_NAMES in the place of <midi> is a hit of that name (Task 23).
+//       (the engine's slideIn and scoop). A name of HIT_NAMES in the place of <midi> is a hit of that name (Task 23). The voice is prepared
+//       (Voice::prepare) for the notes in the given order as a song of one beat a second, each note's stream time its time over the rate
+//       (the string voices' buffers, Task 24).
 // The tones render in calls of SYNTH_FRAMES (256) frames, the engine's chunk.
 #include "../src/convolver.h"
 #include "../src/guitar_fx.h"
@@ -263,12 +265,21 @@ int main(int argc, char** argv) {
                     if (n.e.hit) n.e.name = static_cast<int>(name - std::begin(HIT_NAMES));
                     else n.e.midi = std::atoi(argv[i + 1]);
                     n.e.vel = std::atof(argv[i + 2]);
-                    n.e.durBeats = std::atof(argv[i + 3]); // one beat a second
+                    n.e.durBeats = n.e.dur = std::atof(argv[i + 3]); // one beat a second
+                    n.e.t = n.time / rate;                            // the stream time the strum compares
                     notes.push_back(n);
                     i += 4;
                 }
-                const auto voice = makeVoice(static_cast<btg::Engine::Layer>(layer - std::begin(LAYER_NAMES)), key, nullptr, parseTuning(tuning), completeTimbre(argv[7]), rate);
+                std::shared_ptr<const Voice> voice = makeVoice(static_cast<btg::Engine::Layer>(layer - std::begin(LAYER_NAMES)), key, nullptr, parseTuning(tuning), completeTimbre(argv[7]), rate);
                 if (!voice) throw std::runtime_error("the core has no synth voice " + key);
+                // what the voice computes ahead for these notes as the engine's song (the string voices' buffers), in the given order
+                PlaySong song;
+                for (const Note& n : notes) {
+                    song.events.push_back(n.e);
+                    song.events.back().layer = voice->layer;
+                    song.events.back().beat = n.time / rate;
+                }
+                if (const auto prepared = voice->prepare(song, rate, nullptr)) voice = prepared;
                 const auto tones = std::make_unique<Tones>();
                 tones->sr = rate;
                 tones->basic = &basicWaves(rate);

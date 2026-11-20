@@ -61,7 +61,8 @@ try {
     backend.addEventListener('engine', (m) => window.engineLog.push({ ...m, at: performance.now() }));
     backend.addEventListener('pong', (m) => window.pongs.get(m.id)?.(performance.now()));
     window.voiceLog = [];
-    backend.addEventListener('voices', (m) => window.voiceLog.push(m));
+    window.voiceAt = []; // the arrival time of each entry of voiceLog
+    backend.addEventListener('voices', (m) => { window.voiceLog.push(m); window.voiceAt.push(performance.now()); });
     backend.addEventListener('pack', (m) => (window.packLog ??= []).push(m));
     const emit = backend.emitEvent.bind(backend);
     backend.emitEvent = (name, data) => { window.sent.push({ ...data, at: performance.now() }); emit(name, data); };
@@ -227,6 +228,17 @@ try {
       const log = span(), end = log.findIndex((m) => m.beats >= until);
       return end < 0 ? null : log.slice(0, end + 1).filter((m) => m.beats >= 0.2);
     };
+    // playUntil with the timbre `json` sent before it: the layers' peaks, the load at its end, the dropouts during it
+    window.passWith = async (json, bpm, until, tries, layers) => {
+      window.bridge('timbre', { json });
+      const xruns = window.lastEngine().xruns, log = await window.playUntil(bpm, until, tries), end = window.lastEngine();
+      return { peaks: Object.fromEntries(layers.map((l) => [l, log ? window.peakOf(log, l) : null])), load: +end.load.toFixed(3), dropouts: end.xruns - xruns };
+    };
+    window.everyEffect = (sound) => { // the sound with every layer effect on, as the effects phase sets them
+      const every = structuredClone(sound);
+      for (const l of ['bass', 'chords', 'pad', 'lead']) Object.assign(every[l], { fuzz: 1, overdrive: 1, distortion: 1, vibrato: 1, chorus: 1 });
+      return every;
+    };
     // the page's own track, voices, tuning and sound again (`own` from pageOwn), shown by a play from beat 64: the `voices` event of the
     // page's voices and the page's drums' peak over 2 s of it
     window.restorePage = async (own) => {
@@ -338,14 +350,8 @@ try {
     const shown = kind(), sent = voicesSent();
     window.bridge('timbre', { json: JSON.stringify(sound) });
     await window.voicesReported(() => window.bridge('track', { json: JSON.stringify(track) }));
-    const pass = async (json) => { // from beat 0.2 to the first report of beat 20: the layers' peaks, the load at its end, the dropouts
-      window.bridge('timbre', { json });
-      const xruns = window.lastEngine().xruns, log = await window.playUntil(track.bpm, 20, 200), end = window.lastEngine();
-      return { peaks: Object.fromEntries(layers.map((l) => [l, log ? window.peakOf(log, l) : null])), load: +end.load.toFixed(3), dropouts: end.xruns - xruns };
-    };
-    const every = structuredClone(sound);
-    for (const l of ['bass', 'chords', 'pad', 'lead']) Object.assign(every[l], { fuzz: 1, overdrive: 1, distortion: 1, vibrato: 1, chorus: 1 });
-    const plain = await pass(JSON.stringify(sound)), effects = await pass(JSON.stringify(every));
+    const pass = (json) => window.passWith(json, track.bpm, 20, 200, layers); // from beat 0.2 to the first report of beat 20
+    const plain = await pass(JSON.stringify(sound)), effects = await pass(JSON.stringify(window.everyEffect(sound)));
     for (const l of layers) { // the page's own voices again, as the user chooses them
       const select = document.getElementById(`voice-${l}`), value = `${before[l]?.id}/${before[l]?.variant}`;
       if (!select || ![...select.options].some((o) => o.value === value)) continue;
@@ -362,6 +368,78 @@ try {
   if (!SIX.every((l) => back(l) && allSynth.restored?.[l] === 'ready') || !(allSynth.drumsBack > 0))
     problems.push(`all synth: the page's own voices are not back: ${JSON.stringify({ before: allSynth.before, after: allSynth.after, restored: allSynth.restored, drumsBack: allSynth.drumsBack })}`);
   if (allSynth.effects.dropouts > 0 || !(allSynth.effects.load <= 0.25)) problems.push(`all synth with every effect on: load ${allSynth.effects.load} (limit 0.25), dropouts ${allSynth.effects.dropouts}`);
+  // The string voices (Task 24): the page's voice selects do not offer them (hidden, src/core/voices.js 23 and 28), so a track of the step's
+  // own goes through the bridge as the organ's step sends one: band.json's case band-funk with the bass on bass/string/finger and the chords
+  // on chords/string/electric (the track's voices), with that case's sound. The engine's `voices` event after the track reports both ready;
+  // a play from beat 0 to the engine's first report of beat 20 (from beat 0.2 on, as the organ's) gives both a level; the same span with
+  // every layer effect on: the load at its end at most 0.25 and no dropout during it, read as the all-synth step reads them. Printed: the
+  // time the `track` message took (the engine's buildMs: setTrack on the processor's loader thread, PluginEditor.cpp control(), the string
+  // voices' prepare in it) and the page's wait from sending it to its `voices` event. Red when makeVoice has no voice for bass/string/finger
+  // (the bass is reported silent and has no level). Then the page's own track, voices, tuning and sound again (restorePage), checked as
+  // the all-synth step checks it: every layer reported ready and the page's drums with a level.
+  const stringTrack = { ...bandCase.track, voices: { ...bandCase.track.voices, bass: { id: 'string', variant: 'finger' }, chords: { id: 'string', variant: 'electric' } } };
+  result.strings = await page.evaluate(async ([track, sound, layers]) => {
+    const own = window.pageOwn();
+    window.bridge('timbre', { json: JSON.stringify(sound) });
+    const sentAt = performance.now();
+    const status = await window.voicesReported(() => window.bridge('track', { json: JSON.stringify(track) }));
+    const waitMs = Math.round(performance.now() - sentAt);
+    await window.wait(200); // the engine's next reports carry the track's buildMs
+    const buildMs = +window.lastEngine().buildMs.toFixed(1);
+    const pass = (json) => window.passWith(json, track.bpm, 20, 200, layers);
+    const plain = await pass(JSON.stringify(sound)), effects = await pass(JSON.stringify(window.everyEffect(sound)));
+    const { restored, drumsBack } = await window.restorePage(own);
+    return { status: status && { bass: status.bass, chords: status.chords }, buildMs, waitMs, plain, effects, restored, drumsBack };
+  }, [stringTrack, bandCase.sound, SIX]);
+  const strings = result.strings;
+  if (strings.status?.bass !== 'ready' || strings.status?.chords !== 'ready' || !(strings.plain.peaks.bass > 0) || !(strings.plain.peaks.chords > 0))
+    problems.push(`string voices: ${JSON.stringify({ status: strings.status, peaks: strings.plain.peaks })}`);
+  if (strings.effects.dropouts > 0 || !(strings.effects.load <= 0.25)) problems.push(`string voices with every effect on: load ${strings.effects.load} (limit 0.25), dropouts ${strings.effects.dropouts}`);
+  if (!SIX.every((l) => strings.restored?.[l] === 'ready') || !(strings.drumsBack > 0))
+    problems.push(`string voices: the page's own state is not back: ${JSON.stringify({ restored: strings.restored, drumsBack: strings.drumsBack })}`);
+  // Bursts of timbre and of tuning messages (Task 24, fix round 1): each such message carries the whole state, and a queued one whose job
+  // finds that a newer one of its type has arrived does not run (PluginEditor.cpp handle()). The string track of the step above with its
+  // case's sound, and a play from beat 0 to the engine's first report of beat 8: the chords' plain peak. Then one timbre message with the
+  // chords' brightness moved (a string knob: the chords' set computed anew) and a `voices` message: the time from that send to the
+  // `voices` event (one knob, printed). Then 30 timbre messages in one burst, the chords' brightness another value in each (each one that
+  // runs computes the chords' set anew), the last one also with every layer effect on, then one `voices` message: its `voices` event at
+  // most 1.0 s after the first send (the bar, set before any measurement). A play to beat 8 then gives the chords at most half the plain
+  // peak (every effect on: about -9 dB in the step above): the burst's last message is what the engine plays (the 29th would leave the
+  // plain peak). Then the case's sound again (its `voices` event awaited), and the same with 30 tuning messages: chords/string/electric's
+  // decay another value in each (its buffers depend on it), the last one also with its level at the fine value's minimum 0.2 (-12.6 dB
+  // against 0.85). Red without the dropping (both bursts later than 1.0 s); every time is printed. Then the page's own state again,
+  // checked as the step above checks it.
+  result.bursts = await page.evaluate(async ([track, sound]) => {
+    const own = window.pageOwn(), voicesJson = JSON.stringify(track.voices);
+    const timed = async (send) => { // ms from send() (the first message sent) to the `voices` event of a `voices` message sent after it
+      const before = window.voiceAt.length, sentAt = performance.now();
+      send();
+      window.bridge('voices', { json: voicesJson });
+      for (let i = 0; i < 300 && window.voiceAt.length === before; i++) await window.wait(50);
+      return window.voiceAt.length > before ? Math.round(window.voiceAt[before] - sentAt) : null;
+    };
+    const chordsPeak = async () => { const log = await window.playUntil(track.bpm, 8, 100); return log ? window.peakOf(log, 'chords') : null; };
+    const brightness = (b, every) => { const s = every ? window.everyEffect(sound) : structuredClone(sound); s.chords.brightness = b; return JSON.stringify(s); };
+    const tuning = (decay, last) => JSON.stringify({ ...JSON.parse(own.tuning), 'chords/string/electric': { decay, ...(last ? { level: 0.2 } : {}) } });
+    window.bridge('timbre', { json: JSON.stringify(sound) });
+    await window.voicesReported(() => window.bridge('track', { json: JSON.stringify(track) }));
+    const plain = await chordsPeak();
+    const oneKnobMs = await timed(() => window.bridge('timbre', { json: brightness(0.3, false) }));
+    const timbreMs = await timed(() => { for (let i = 0; i < 30; i++) window.bridge('timbre', { json: brightness(0.2 + i / 50, i === 29) }); });
+    const timbrePeak = await chordsPeak();
+    const plainAgainMs = await timed(() => window.bridge('timbre', { json: JSON.stringify(sound) }));
+    const tuningMs = await timed(() => { for (let i = 0; i < 30; i++) window.bridge('tuning', { json: tuning(0.5 + i / 10, i === 29) }); });
+    const tuningPeak = await chordsPeak();
+    const { restored, drumsBack } = await window.restorePage(own);
+    return { plain, oneKnobMs, timbreMs, timbrePeak, plainAgainMs, tuningMs, tuningPeak, restored, drumsBack };
+  }, [stringTrack, bandCase.sound]);
+  const bursts = result.bursts;
+  for (const [what, ms] of [['timbre', bursts.timbreMs], ['tuning', bursts.tuningMs]])
+    if (!(ms !== null && ms <= 1000)) problems.push(`30 ${what} messages: the voices event ${ms} ms after the first send (at most 1000)`);
+  for (const [what, peak] of [['timbre', bursts.timbrePeak], ['tuning', bursts.tuningPeak]])
+    if (!(bursts.plain > 0 && peak > 0 && peak <= 0.5 * bursts.plain)) problems.push(`30 ${what} messages: the last one is not what plays (chords peak ${peak} against ${bursts.plain} without it)`);
+  if (!SIX.every((l) => bursts.restored?.[l] === 'ready') || !(bursts.drumsBack > 0))
+    problems.push(`bursts: the page's own state is not back: ${JSON.stringify({ restored: bursts.restored, drumsBack: bursts.drumsBack })}`);
   result.position = await page.locator('#play-position').innerText();
   result.chord = await page.locator('#play-now').innerText();
   result.framesPerSecond = await page.evaluate(() => new Promise((done) => {

@@ -10,18 +10,23 @@
 #include "../src/patch.h"
 #include "../src/sampler.h"
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <complex>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <new>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -1109,18 +1114,25 @@ int main(int argc, char** argv) {
         const char* CLASSIC4 = R"({"bass":{"id":"synth","variant":"classic"},"chords":{"id":"synth","variant":"classic"},"pad":{"id":"synth","variant":"classic"},"lead":{"id":"synth","variant":"classic"}})";
         const char* SYNTH6 = R"({"drums":{"id":"synth","variant":"classic"},"bass":{"id":"synth","variant":"classic"},"chords":{"id":"synth","variant":"classic"},)"
                              R"("pad":{"id":"synth","variant":"classic"},"lead":{"id":"synth","variant":"classic"},"percussion":{"id":"synth","variant":"classic"}})";
-        const char* CHORDS[7] = { "", R"({"chords":{"id":"epiano","variant":"rhodes"}})", R"({"chords":{"id":"organ","variant":"jazz"}})", CLASSIC4, CLASSIC4, SYNTH6, SYNTH6 };
-        const char* NAMES[7] = { "", " with the e-piano on the chords", " with the organ on the chords (Leslie fast, drive 1)",
+        // And (Task 24) with every layer on a synth voice, bass and chords on the string voices (the buffers prepared for the song's 100 bpm:
+        // at 400 bpm every note plays the nearest dur), the same two ways.
+        const char* STRINGS6 = R"({"drums":{"id":"synth","variant":"classic"},"bass":{"id":"string","variant":"finger"},"chords":{"id":"string","variant":"electric"},)"
+                               R"("pad":{"id":"synth","variant":"classic"},"lead":{"id":"synth","variant":"classic"},"percussion":{"id":"synth","variant":"classic"}})";
+        const char* CHORDS[9] = { "", R"({"chords":{"id":"epiano","variant":"rhodes"}})", R"({"chords":{"id":"organ","variant":"jazz"}})", CLASSIC4, CLASSIC4, SYNTH6, SYNTH6, STRINGS6, STRINGS6 };
+        const char* NAMES[9] = { "", " with the e-piano on the chords", " with the organ on the chords (Leslie fast, drive 1)",
                                  " with the classic synth on bass, chords, pad and lead, every effect on", " with the classic synth on bass, chords, pad and lead, dry",
-                                 " with every layer on its synth voice, every effect on", " with every layer on its synth voice, dry" };
+                                 " with every layer on its synth voice, every effect on", " with every layer on its synth voice, dry",
+                                 " with every layer on a synth voice, bass and chords on the string voices, every effect on",
+                                 " with every layer on a synth voice, bass and chords on the string voices, dry" };
         for (const auto& [bpm, sr, chordsVoice] : { std::tuple { 20.0, rate, 0 }, std::tuple { 400.0, rate, 0 }, std::tuple { 400.0, 96000, 0 },
                                                     std::tuple { 400.0, rate, 1 }, std::tuple { 400.0, 96000, 1 }, std::tuple { 400.0, rate, 2 }, std::tuple { 400.0, 96000, 2 },
                                                     std::tuple { 400.0, rate, 3 }, std::tuple { 400.0, 96000, 3 }, std::tuple { 400.0, rate, 4 }, std::tuple { 400.0, 96000, 4 },
-                                                    std::tuple { 400.0, rate, 5 }, std::tuple { 400.0, 96000, 5 }, std::tuple { 400.0, rate, 6 }, std::tuple { 400.0, 96000, 6 } }) {
+                                                    std::tuple { 400.0, rate, 5 }, std::tuple { 400.0, 96000, 5 }, std::tuple { 400.0, rate, 6 }, std::tuple { 400.0, 96000, 6 },
+                                                    std::tuple { 400.0, rate, 7 }, std::tuple { 400.0, 96000, 7 }, std::tuple { 400.0, rate, 8 }, std::tuple { 400.0, 96000, 8 } }) {
             btg::Engine engine;
             engine.setPackSource(source);
             if (chordsVoice == 2) engine.setTuning(R"({"chords/organ/jazz":{"leslie":3,"drive":1}})");
-            engine.setSound(chordsVoice == 4 || chordsVoice == 6 ? DRY : EVERY);
+            engine.setSound(chordsVoice == 4 || chordsVoice == 6 || chordsVoice == 8 ? DRY : EVERY);
             engine.setTrack(band);
             if (chordsVoice > 0) engine.setVoices(CHORDS[chordsVoice]);
             engine.setMaster(0.7f); // fader 0.7 = gain 0.49 (see above)
@@ -3238,6 +3250,394 @@ int main(int argc, char** argv) {
                 counted(0.5);
                 std::printf("synth kit and percussion render: %ld allocations, %ld frees (%s)\n", allocations, frees, e->voiceStatus().c_str());
                 CHECK(allocations == 0 && frees == 0 && e->voiceStatus() == R"({"drums":"ready","bass":"ready","chords":"ready","pad":"ready","lead":"ready","percussion":"ready"})");
+            }
+        }
+    }
+
+    // The string voices (Task 24; voices/string.cpp, string_model.cpp): bass/string/finger and chords/string/electric, their buffers computed
+    // on the control thread (Voice::prepare), the keeper (engine.cpp, Impl::keep), the song and its setup in one swap. The tracks carry their
+    // voices (setTrack takes them; the generator plays other chords for the string voice than for a sample voice): `strings` the fixture with
+    // the drums off, the chords on and both on the string voices; `held` the chords alone of band.json's dreamy band (native/tools/
+    // sound-cases) at 20 bpm on the string voice (a chord of three tones of 3.0 s at beat 21.4989, the next at beat 22.5016, 3.0 s later),
+    // played with the chords' length knob at 1 (LONG: the model's decay three times, so the chord still rings at its end), `heldSample` the
+    // same on the chords' sample voice. Dry, no limiter (make). stringLookups() counts how play() found its buffers.
+    {
+        using namespace btg::detail;
+        using json = nlohmann::json;
+        const json fixture = json::parse(track);
+        const auto bandFile = std::filesystem::path(argv[1]).parent_path().parent_path().parent_path() / "tools" / "sound-cases" / "band.json";
+        std::ifstream bandIn(bandFile, std::ios::binary);
+        const json bands = json::parse(bandIn, nullptr, false);
+        CHECK(bands.is_array() && bands.size() == 9);
+        const json BASS = { { "id", "string" }, { "variant", "finger" } }, CHORDS = { { "id", "string" }, { "variant", "electric" } };
+        const json SAMPLE_CHORDS = { { "id", "sample" }, { "variant", "funk" } };
+        const char* LONG = R"({"master":{"reverb":0,"echo":0,"roomWet":0},"chords":{"length":1}})";
+        json s = fixture, h = json::object();
+        s["layers"]["drums"] = false;
+        s["layers"]["chords"] = true;
+        s["voices"]["bass"] = BASS;
+        s["voices"]["chords"] = CHORDS;
+        for (const json& c : bands.is_array() ? bands : json::array()) if (c.at("name") == "band-dreamy") h = c.at("track");
+        for (const char* off : { "drums", "bass", "pad", "lead", "percussion" }) h["layers"][off] = false;
+        h["bpm"] = 20;
+        h["voices"]["chords"] = CHORDS;
+        const std::string strings = s.dump(), held = h.dump();
+        h["voices"]["chords"] = SAMPLE_CHORDS;
+        const std::string heldSample = h.dump();
+        const double heldBpm = 20, heldFrom = 21.4, heldAt = 21.4989, heldNext = 22.5016; // beats (t * 20 / 60, from buildEvents; checked below)
+        const auto make = [&](const std::string& song, const char* sound = DRY) {
+            auto e = std::make_unique<btg::Engine>();
+            e->setPackSource(source);
+            e->setSound(sound);
+            e->setTrack(song);
+            e->setLimiter(false);
+            e->prepare(rate);
+            return e;
+        };
+        const auto seconds = [](double beats, double bpm) { return beats * 60 / bpm; };
+        const auto blocks = [](btg::Engine& e, btg::Transport& t, int n) { return render(e, t, (n * 480 - 0.5) / rate, 480); }; // n blocks of 480
+        const auto peakOf = [](const std::vector<float>& x, size_t from, size_t to) {
+            float p = 0.0f;
+            for (size_t i = from; i < std::min(to, x.size()); ++i) p = std::max(p, std::fabs(x[i]));
+            return p;
+        };
+        const auto notes = [](const std::string& song, const char* layer, double fromBeat, double toBeat) { // the layer's notes with t in [from, to) beats
+            const double bps = json::parse(song).at("bpm").get<double>() / 60;
+            int n = 0;
+            for (const btg::Event& ev : btg::buildEvents(song)) n += ev.type == btg::Event::Type::note && ev.layer == layer && ev.t * bps >= fromBeat - 1e-9 && ev.t * bps < toBeat - 1e-9;
+            return n;
+        };
+        const auto found = [](const StringLookups& a, const StringLookups& b) { return (b.exact - a.exact) + (b.otherTurn - a.otherTurn) + (b.otherDur - a.otherDur); };
+        {
+            int heldChord = 0;
+            for (const btg::Event& ev : btg::buildEvents(held)) heldChord += ev.type == btg::Event::Type::note && std::fabs(ev.t * heldBpm / 60 - heldAt) < 1e-3 && ev.dur > 2.9;
+            CHECK(heldChord == 3 && notes(held, "chords", heldFrom, heldNext - 0.001) == 3 && notes(held, "chords", heldNext - 0.001, heldNext + 0.001) > 0);
+        }
+
+        // Both keys are ready and give their layer a level on a track of their own. With them on bass and chords, those two muted, the other
+        // four layers of the whole band are what they are with the fixture's sample voices there, bit for bit (dry: no send carries a muted layer).
+        {
+            auto e = make(strings);
+            btg::Transport t;
+            t.play(0.0, e->bpm());
+            const Result r = render(*e, t, 4.0, 480);
+            const float bass = e->takePeak(btg::Engine::bass), chords = e->takePeak(btg::Engine::chords);
+            const std::string status = e->voiceStatus();
+            const auto bandOf = [&](bool withStrings) {
+                json b = fixture;
+                for (const char* on : { "chords", "pad", "lead", "percussion" }) b["layers"][on] = true;
+                b["jobs"]["lead"] = "melody"; // the lead layer plays only with a job
+                if (withStrings) { b["voices"]["bass"] = BASS; b["voices"]["chords"] = CHORDS; }
+                btg::Engine engine;
+                engine.setPackSource(source);
+                engine.setSound(DRY);
+                engine.setTrack(b.dump());
+                engine.setLimiter(false);
+                engine.setMuted(btg::Engine::bass, true);
+                engine.setMuted(btg::Engine::chords, true);
+                engine.prepare(rate);
+                btg::Transport tb;
+                tb.play(0.0, engine.bpm());
+                return render(engine, tb, 4.0, 480);
+            };
+            const Result with = bandOf(true), without = bandOf(false);
+            std::printf("string voices: %s; bass peak %.3f, chords peak %.3f; the other four layers with them %s as without (rms %.4f)\n", status.c_str(), bass, chords,
+                        with.left == without.left && with.right == without.right ? "the same" : "NOT THE SAME", without.rms);
+            CHECK(r.finite && bass > 0.01f && chords > 0.01f && status.find(R"("bass":"ready","chords":"ready")") != std::string::npos);
+            CHECK(with.left == without.left && with.right == without.right && without.rms > 1e-3);
+        }
+
+        // The keeper: from beat 21.4 of `held`, the chord of 3.0 s strikes 0.30 s in (strummed over 24 ms); 0.4 s in, the chords change to
+        // their sample voice and the song is set again twice (heldSample, a block between each, so that the audio thread takes every setup and
+        // hands the old one back): until the next note (3.3 s in) the render equals the render without the changes, bit for bit, while the
+        // control side keeps the replaced voice's set of buffers (one set) and the chord rings in its last 0.3 s there. Once the chord has
+        // ended (its buffers last 3.3 s: about 3.62 s in), the next publish frees the set.
+        {
+            const auto run = [&](bool change, int* kept, int* tones) {
+                auto e = make(held, LONG);
+                btg::Transport t;
+                t.play(heldFrom, e->bpm());
+                Result r = blocks(*e, t, 40);
+                const auto more = [&](int n) { const Result m = blocks(*e, t, n); r.left.insert(r.left.end(), m.left.begin(), m.left.end()); r.right.insert(r.right.end(), m.right.begin(), m.right.end()); };
+                if (change) e->setVoices(json { { "chords", SAMPLE_CHORDS } }.dump());
+                more(1);
+                if (change) e->setTrack(heldSample);
+                more(1);
+                if (change) e->setTrack(heldSample);
+                more(1);
+                kept[0] = e->keptBuffers();
+                more(300 - 43); // to 3.0 s
+                *tones = e->activeSynthTones();
+                kept[1] = e->keptBuffers();
+                more(400 - 300); // to 4.0 s
+                kept[2] = e->keptBuffers();
+                e->setSound(LONG); // a publish
+                kept[3] = e->keptBuffers();
+                return r;
+            };
+            int kept[4], keptStays[4], tones = 0, tonesStays = 0;
+            const Result changed = run(true, kept, &tones), stays = run(false, keptStays, &tonesStays);
+            const size_t next = static_cast<size_t>(seconds(heldNext - heldFrom, heldBpm) * rate) - 1;
+            bool same = true;
+            for (size_t i = 0; i < next; ++i) same = same && changed.left[i] == stays.left[i] && changed.right[i] == stays.right[i];
+            const float ringing = peakOf(changed.left, next - static_cast<size_t>(0.3 * rate), next);
+            std::printf("string keeper: the chord's voice replaced under it, the song set twice: %s as without until the next note (peak in its last 0.3 s %.4f, "
+                        "%d synth tones 3.0 s in); sets kept while it rings %d and %d, after its end %d, after the next publish %d (without the change %d, %d, %d, %d)\n",
+                        same ? "the same" : "NOT THE SAME", ringing, tones, kept[0], kept[1], kept[2], kept[3], keptStays[0], keptStays[1], keptStays[2], keptStays[3]);
+            CHECK(same && ringing > 1e-3f && tones == 3 && kept[0] == 1 && kept[1] == 1 && kept[2] == 1 && kept[3] == 0 && keptStays[3] == 1);
+        }
+
+        // No prepare where nothing the buffers depend on changes: under the ringing chord of `held` (0.4 s in), another layer's voice, a mix
+        // value of the sound (the master's brightness) and another voice's tuning leave the chords' voice with its set (one kept); a string
+        // knob of the chords (brightness) makes a new one (two kept: the old one is also held by the setup the audio thread has handed back,
+        // freed at the next publish), and a new song a third: setTrack's publish frees that setup, and the first set stays kept because the
+        // ringing chord holds it (three kept).
+        {
+            auto e = make(held, LONG);
+            btg::Transport t;
+            t.play(heldFrom, e->bpm());
+            blocks(*e, t, 40);
+            int kept[5];
+            e->setVoices(R"({"drums":{"id":"synth","variant":"classic"}})");
+            blocks(*e, t, 1);
+            kept[0] = e->keptBuffers();
+            e->setSound(R"({"master":{"reverb":0,"echo":0,"roomWet":0,"brightness":0.7},"chords":{"length":1}})");
+            blocks(*e, t, 1);
+            kept[1] = e->keptBuffers();
+            e->setTuning(R"({"chords/organ/jazz":{"leslie":3}})");
+            blocks(*e, t, 1);
+            kept[2] = e->keptBuffers();
+            e->setSound(R"({"master":{"reverb":0,"echo":0,"roomWet":0,"brightness":0.7},"chords":{"length":1,"brightness":0.8}})");
+            blocks(*e, t, 1);
+            kept[3] = e->keptBuffers();
+            e->setTrack(held);
+            blocks(*e, t, 1);
+            kept[4] = e->keptBuffers();
+            std::printf("string sets kept under a ringing chord: after another layer's voice %d, a mix value %d, another voice's tuning %d, a string knob %d, "
+                        "a new song %d (%d synth tones)\n", kept[0], kept[1], kept[2], kept[3], kept[4], e->activeSynthTones());
+            CHECK(kept[0] == 1 && kept[1] == 1 && kept[2] == 1 && kept[3] == 2 && kept[4] == 3 && e->activeSynthTones() == 3);
+        }
+
+        // One swap: the bass alone on bass/string/finger, the song switched a thousand times between two bars of E minor and two of A minor
+        // (other pitches but 40, 45 and 50) while a second thread renders: no note finds a set that lacks its midi, velocity step and dur
+        // (stringLookups' otherDur and none stay where they were), which a song's own set never does (its prepare walked every note) and the
+        // other song's set often does; and notes were played (exact and otherTurn grow). A note of a key both songs share (40, 45, 50 with
+        // the same velocity step and dur) played with the other song's set would not be seen.
+        {
+            json two[2] = { fixture, fixture };
+            for (json& song : two) {
+                song["layers"]["drums"] = false;
+                song["voices"]["bass"] = BASS;
+                song["length"] = 2;
+                song["form"] = json::parse(R"({"sections":[{"type":"verse","bars":2}]})");
+            }
+            two[0]["bars"] = json::array({ fixture["bars"][0], fixture["bars"][1] });
+            two[1]["key"] = json::parse(R"({"root":"A","mode":"minor"})");
+            two[1]["bars"] = json::parse(R"([{"chord":{"root":"A","quality":"min"},"beats":4},{"chord":{"root":"G","quality":"maj"},"beats":4}])");
+            const std::string songs[2] = { two[0].dump(), two[1].dump() };
+            auto e = make(songs[0]);
+            std::atomic<bool> done { false };
+            std::atomic<long long> rendered { 0 };
+            const StringLookups before = stringLookups();
+            std::thread audio([&] {
+                btg::Transport t;
+                t.play(0.0, e->bpm());
+                std::vector<float> l(480), r(480);
+                while (!done) {
+                    const auto b = t.advance(480, rate);
+                    e->render(l.data(), r.data(), b.frames, b);
+                    ++rendered;
+                }
+            });
+            const auto began = std::chrono::steady_clock::now();
+            for (int i = 0; i < 1000; ++i) e->setTrack(songs[(i + 1) % 2]);
+            const double wall = std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count();
+            done = true;
+            audio.join();
+            const StringLookups after = stringLookups();
+            std::printf("string one swap: 1000 songs in %.1f s against %lld blocks rendered; notes with their own song's buffers %lld (exact %lld, another turn %lld), "
+                        "with another dur %lld, with none %lld\n", wall, rendered.load(), found(before, after) - (after.otherDur - before.otherDur),
+                        after.exact - before.exact, after.otherTurn - before.otherTurn, after.otherDur - before.otherDur, after.none - before.none);
+            CHECK(after.otherDur == before.otherDur && after.none == before.none && after.exact - before.exact > 100);
+        }
+
+        // A play from bar 0 twice (stopped, silent between): the same output bit for bit (the turns and the strum start afresh, the set stays).
+        // The whole song from bar 0: every note of bass and chords finds its own buffer (the key the prepare walked), no fallback. A start at
+        // beat 64: every note has a tone (none stays where it was), from the turns counted there some by another turn or dur (ruling 11).
+        {
+            auto e = make(strings);
+            btg::Transport t;
+            t.play(0.0, e->bpm());
+            const Result first = render(*e, t, 6.0, 480);
+            t.stop();
+            render(*e, t, 1.0, 480);
+            t.play(0.0, e->bpm());
+            const Result second = render(*e, t, 6.0, 480);
+            std::printf("string play from bar 0 twice: %s (rms %.4f)\n", first.left == second.left && first.right == second.right ? "the same" : "NOT THE SAME", first.rms);
+            CHECK(first.left == second.left && first.right == second.right && first.rms > 1e-3);
+            // the notes whose time lies inside what a render from `from` played (no lap: the whole song's render ends a frame before its end)
+            const auto inside = [&](double from, const Result& played) {
+                const double to = from + static_cast<double>(played.left.size()) / rate * e->bpm() / 60;
+                return notes(strings, "bass", from, to) + notes(strings, "chords", from, to);
+            };
+            auto whole = make(strings);
+            btg::Transport tw;
+            tw.play(0.0, whole->bpm());
+            const StringLookups a = stringLookups();
+            const Result all = render(*whole, tw, seconds(e->lengthBeats(), e->bpm()) - 0.01, 480);
+            const StringLookups b = stringLookups();
+            const int count = inside(0, all);
+            auto later = make(strings);
+            btg::Transport tl;
+            tl.play(64.0, later->bpm());
+            const Result r = render(*later, tl, 8.0, 480);
+            const StringLookups c = stringLookups();
+            const int there = inside(64, r);
+            std::printf("string from bar 0, the whole song: %lld notes of %d with their own buffer, %lld by another turn, %lld another dur, %lld none; "
+                        "from beat 64 (8 s, %d notes): %lld own, %lld another turn, %lld another dur, %lld none (peak bass %.3f, chords %.3f)\n",
+                        b.exact - a.exact, count, b.otherTurn - a.otherTurn, b.otherDur - a.otherDur, b.none - a.none, there, c.exact - b.exact, c.otherTurn - b.otherTurn,
+                        c.otherDur - b.otherDur, c.none - b.none, later->takePeak(btg::Engine::bass), later->takePeak(btg::Engine::chords));
+            CHECK(b.exact - a.exact == count && found(a, b) == count && b.none == a.none);
+            CHECK(found(b, c) == there && c.none == b.none && found(b, c) > c.exact - b.exact && r.rms > 1e-3);
+        }
+
+        // A loop of two beats (17.5 to 19.5) over the bass's five notes of E2 there (four keys: their velocity steps and durs differ) and the
+        // chords' six, ten laps: every lap has a level and every note a tone (none stays where it was). The play starts elsewhere than bar 0
+        // and the laps count their turns on, so a key whose turn the set lacks plays a buffer of another turn (the laps replay buffers of the
+        // first pass: the shortcut).
+        {
+            auto e = make(strings);
+            btg::Transport t;
+            t.setLoop(17.5, 19.5);
+            t.play(17.5, e->bpm());
+            const StringLookups a = stringLookups();
+            const Result r = render(*e, t, 12.0, 480);
+            const StringLookups b = stringLookups();
+            float quietest = 1.0f;
+            for (int lap = 0; lap < 10; ++lap) quietest = std::min(quietest, peakOf(r.left, static_cast<size_t>(lap * 1.2 * rate), static_cast<size_t>((lap + 1) * 1.2 * rate)));
+            const int bassLap = notes(strings, "bass", 17.5, 19.5), lap = bassLap + notes(strings, "chords", 17.5, 19.5);
+            std::printf("string loop of two beats over %d notes of E2 and %d of the chords, ten laps: the quietest lap's peak %.4f; %lld own buffers, %lld another turn, "
+                        "%lld another dur, %lld none\n", bassLap, lap - bassLap, quietest, b.exact - a.exact, b.otherTurn - a.otherTurn, b.otherDur - a.otherDur, b.none - a.none);
+            CHECK(bassLap == 5 && quietest > 1e-2f && found(a, b) == 10 * lap && b.none == a.none && b.otherTurn + b.otherDur > a.otherTurn + a.otherDur);
+        }
+
+        // A jump under the held chord, the chords switched to a silent voice with it: the chord falls over the model's own damping (0.18 s,
+        // RELEASE in voices/string.cpp) without a step (the largest difference of two successive samples from the jump on within 10 % of the
+        // chord's own in the 0.2 s before it, as the classic pad's test measures it), none of its tones is active from the fall and two chunks
+        // on, and the output then stays below -180 dBFS. A stop under it: from 0.5 s after the stop the output is exactly 0, no synth tone active.
+        {
+            auto e = make(held, LONG);
+            btg::Transport t;
+            t.play(heldFrom, e->bpm());
+            const Result before = render(*e, t, 1.0, 480);
+            e->setVoices(R"({"chords":{"id":"none","variant":"none"}})");
+            t.seek(4.0);
+            const Result falling = render(*e, t, 0.19 + 2.0 * SYNTH_FRAMES / rate, 480);
+            const int left = e->activeSynthTones();
+            const Result rest = render(*e, t, 0.3, 480);
+            double own = 0.0, jump = std::fabs(falling.left[0] - before.left.back());
+            for (size_t i = before.left.size() - rate / 5; i < before.left.size(); ++i) own = std::max(own, static_cast<double>(std::fabs(before.left[i] - before.left[i - 1])));
+            for (size_t i = 1; i < falling.left.size(); ++i) jump = std::max(jump, static_cast<double>(std::fabs(falling.left[i] - falling.left[i - 1])));
+            auto s2 = make(held, LONG);
+            btg::Transport t2;
+            t2.play(heldFrom, s2->bpm());
+            render(*s2, t2, 1.0, 480);
+            t2.stop();
+            const Result after = render(*s2, t2, 1.0, 480);
+            const float late = std::max(peakOf(after.left, rate / 2, rate), peakOf(after.right, rate / 2, rate));
+            std::printf("string jump under the held chord: largest step %.2e after it, %.2e before it; %d synth tones active %.3f s after it, then peak %.2e; "
+                        "a stop: peak from 60 to 150 ms after it %.2e, from 0.5 s %.2e, %d synth tones\n", jump, own, left, static_cast<double>(falling.left.size()) / rate,
+                        rest.peak, peakOf(after.left, rate * 6 / 100, rate * 15 / 100), late, s2->activeSynthTones());
+            CHECK(own > 1e-4 && jump < 1.1 * own && left == 0 && rest.peak < 1e-9);
+            CHECK(peakOf(after.left, rate * 6 / 100, rate * 15 / 100) > 1e-6f && late == 0.0f && s2->activeSynthTones() == 0);
+        }
+
+        // No allocation and no free in render (ruling 14) with both string voices: played from bar 0, the chords to their sample voice and
+        // back, a setSound that changes a string knob of each layer (new buffers), a new song (another seed), a restart, a jump and a stop, the
+        // counts armed around the render calls only (the control calls allocate: the prepare). A tone that drops its set there drops a copy.
+        {
+            auto e = make(strings);
+            btg::Transport t;
+            std::vector<float> l(480), r(480);
+            float peaks[2] = {};
+            const auto counted = [&](double secs) {
+                counting = true;
+                for (int done = 0; done < secs * rate;) {
+                    const auto b = t.advance(480, rate);
+                    e->render(l.data(), r.data(), b.frames, b);
+                    done += b.frames;
+                }
+                counting = false;
+                peaks[0] = std::max(peaks[0], e->takePeak(btg::Engine::bass));
+                peaks[1] = std::max(peaks[1], e->takePeak(btg::Engine::chords));
+            };
+            json other = s;
+            other["seed"] = 4;
+            allocations = frees = 0;
+            t.play(0.0, e->bpm());
+            counted(0.5);
+            e->setVoices(json { { "chords", SAMPLE_CHORDS } }.dump());
+            counted(0.5);
+            e->setVoices(json { { "chords", CHORDS } }.dump());
+            counted(0.5);
+            e->setSound(R"({"master":{"reverb":0,"echo":0,"roomWet":0},"bass":{"cutoff":0.8},"chords":{"brightness":0.8}})");
+            counted(0.5);
+            e->setTrack(other.dump());
+            counted(0.5);
+            t.play(0.0, e->bpm());
+            counted(1.0);
+            t.seek(32.0);
+            counted(0.5);
+            t.stop();
+            counted(0.5);
+            std::printf("string render: %ld allocations, %ld frees (%s; peaks bass %.3f, chords %.3f)\n", allocations, frees, e->voiceStatus().c_str(), peaks[0], peaks[1]);
+            CHECK(allocations == 0 && frees == 0 && peaks[0] > 0.01f && peaks[1] > 0.01f);
+        }
+
+        // Point 3 of Task 24, printed and not asserted (its stop lines are the controller's: 1.5 s, 64 MB): what the prepare costs for the nine
+        // tracks of band.json (native/tools/sound-cases) with the bass on bass/string/finger and the chords on chords/string/electric, at 48 kHz:
+        // per voice the buffers, their bytes and the wall time of Voice::prepare on the track's events, and the wall time of the engine's
+        // setTrack (it builds the song and prepares both voices) and of a setSound that changes a string knob of each layer while it is set.
+        {
+            const auto ms = [](auto began) { return 1000 * std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count(); };
+            for (const json& c : bands.is_array() ? bands : json::array()) {
+                json band = c.at("track");
+                band["voices"]["bass"] = BASS;
+                band["voices"]["chords"] = CHORDS;
+                const std::string song = band.dump();
+                PlaySong events; // as setTrack gives them to prepare (what it reads: layer, midi, vel, dur, t)
+                for (const btg::Event& ev : btg::buildEvents(song)) {
+                    if (ev.type != btg::Event::Type::note || (ev.layer != "bass" && ev.layer != "chords")) continue;
+                    PlayEvent p;
+                    p.layer = ev.layer == "bass" ? btg::Engine::bass : btg::Engine::chords;
+                    p.midi = ev.midi;
+                    p.vel = ev.vel;
+                    p.dur = ev.dur;
+                    p.t = ev.t;
+                    events.events.push_back(p);
+                }
+                int buffers[2] = {};
+                size_t bytes[2] = {};
+                double prepared[2] = {};
+                for (const btg::Engine::Layer l : { btg::Engine::bass, btg::Engine::chords }) {
+                    const auto voice = makeVoice(l, l == btg::Engine::bass ? "bass/string/finger" : "chords/string/electric", nullptr, {}, Timbre {}, rate);
+                    const auto began = std::chrono::steady_clock::now();
+                    const auto ready = voice ? voice->prepare(events, rate, nullptr) : nullptr;
+                    prepared[l == btg::Engine::chords] = ms(began);
+                    if (ready) std::tie(buffers[l == btg::Engine::chords], bytes[l == btg::Engine::chords]) = stringBuffers(*ready);
+                }
+                btg::Engine engine;
+                engine.setPackSource(source);
+                engine.prepare(rate);
+                auto began = std::chrono::steady_clock::now();
+                engine.setTrack(song);
+                const double setTrack = ms(began);
+                began = std::chrono::steady_clock::now();
+                engine.setSound(R"({"bass":{"cutoff":0.8},"chords":{"brightness":0.8}})");
+                const double setSound = ms(began);
+                std::printf("string prepare, %s at 48 kHz: bass %d buffers %.1f MB %.0f ms, chords %d buffers %.1f MB %.0f ms, together %.1f MB; setTrack %.0f ms, "
+                            "setSound with a string knob of each layer at once %.0f ms\n", c.at("name").get<std::string>().c_str(), buffers[0], bytes[0] / 1048576.0, prepared[0], buffers[1],
+                            bytes[1] / 1048576.0, prepared[1], (bytes[0] + bytes[1]) / 1048576.0, setTrack, setSound);
             }
         }
     }

@@ -148,8 +148,14 @@ private:
         const auto type = message["type"].toString();
         if (queued.contains (type)) {
             auto& p = processor;
-            p.loader.addJob ([&p, message, editor = juce::Component::SafePointer<Editor> (this)] {
-                const Done result = control (p, message);
+            // A timbre or tuning message carries the whole state (play.js sends one per change), and setSound and setTuning can take a
+            // tenth of a second (the string voices compute their buffers anew): a job of one of them that finds a newer one of its type has
+            // arrived is not run. It still does what every job does after its call (controlArrived; done, with no result). The newest of
+            // each type, every other message and their order stay as they are.
+            auto* newest = type == "timbre" ? &p.newestTimbre : type == "tuning" ? &p.newestTuning : nullptr;
+            const juce::uint64 number = newest != nullptr ? ++*newest : 0;
+            p.loader.addJob ([&p, message, newest, number, editor = juce::Component::SafePointer<Editor> (this)] {
+                const Done result = newest != nullptr && newest->load() != number ? Done {} : control (p, message);
                 p.controlArrived();
                 juce::MessageManager::callAsync ([editor, message, result] { if (editor != nullptr) editor->done (message, result); });
             });

@@ -78,6 +78,9 @@ private:
     std::map<std::string, std::shared_ptr<const btg::Pack>> packs;
 
 public:
+    // The number of the newest timbre and of the newest tuning message the page sent (PluginEditor.cpp handle(): a queued one of them that
+    // finds a newer number here when its job starts is not run).
+    std::atomic<juce::uint64> newestTimbre { 0 }, newestTuning { 0 };
     // Work that reads packs or builds the song, and the transport with it, in the order the page sent it (PluginEditor.cpp, `queued`).
     // The last member: destroyed first, so a job still running never touches a member that is gone.
     juce::ThreadPool loader { juce::ThreadPoolOptions{}.withThreadName ("loader").withNumberOfThreads (1) };

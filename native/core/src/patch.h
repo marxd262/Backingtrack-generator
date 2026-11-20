@@ -13,6 +13,7 @@
 
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 namespace btg::detail {
@@ -38,6 +39,8 @@ struct SynthTone {
     int quantum = 0;            // the place of frame 0 in its render quantum (Tones::startSynth); set before the graph is built
     double late = 0.0;          // [0, 1): the tone's time 0 lies this part of a frame after frame 0 (Tones::startSynth); set before the graph is
                                 // built, every time the calls below take (sources' starts and stops, every param's events) is that much later
+    std::shared_ptr<const void> hold; // what its buffer's data lives in (a string voice's buffers: Voice::held); the engine drops it once the
+                                      // tone is inactive, and its keeper makes sure that this is never the last reference
 
     // Each returns the node (-1 when the graph is full). Times are frames from the tone's time 0 (a stop of infinity: no stop); hz, cents,
     // value, q, pan the params' values before any event. An oscillator's hz is the node's frequency value, not its first event's: where the

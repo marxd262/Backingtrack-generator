@@ -90,6 +90,46 @@ const { VOICES } = await load('core/voices.js');
 add('ownsChorus', ({ layer, id }) => VOICES[layer][id].uses.includes(`${layer}.chorus`),
   Object.keys(VOICES).flatMap((layer) => Object.keys(VOICES[layer]).map((id) => ({ layer, id, variant: VOICES[layer][id].variants[0] }))));
 
+// Task 24: the string model (string-model.js renderString), summarised as noiseBuffer: length, sum of squares, samples at places that hold
+// the start, the attack noise, the body of the note, the samples around noteEnd, the release, the last sample before stop, stop and the last.
+// Both voices' fine values (their params at the neutral timbre) at midi 28 to 88, the velocity steps 0, 3/8 and 1, the durs 0.05, 0.5 and 3.5,
+// 44.1, 48 and 96 kHz, rotated so that every midi comes 6 times (once per voice and rate) and every other value 12 times, every velocity
+// with every dur (36 cases, seeds 1 to 36); then on the bass's values every param at both ends of
+// RANGES (string-model.js 25 to 27, not exported: written out here; pluckPos 0, pickupPos 0 and body 0 are the branches), every param
+// beyond both ends (the clamp: so the core's ranges are proven, not this copy), STRING_DEFAULTS with dur and vel left out, three seeds of
+// the range the voice draws from (Math.floor(rng.next() * 2 ** 31)), and a dur longer than `seconds`.
+const { renderString, STRING_DEFAULTS } = await load('audio/string-model.js');
+const { tunedValue } = await load('audio/voices/tunables.js');
+const STRING_PARAMS = ['pluckPos', 'brightness', 'decay', 'excite', 'stiffness', 'pickupPos', 'pickupLp', 'body'];
+const RANGES = { pluckPos: [0, 0.5], brightness: [0, 1], decay: [0.05, 10], excite: [0, 1], stiffness: [0, 1], pickupPos: [0, 0.5], pickupLp: [200, 20000], body: [0, 1] };
+const fineOf = (key) => Object.fromEntries(STRING_PARAMS.map((n) => [n, tunedValue(key, n, {})]));
+const placesOf = ({ seconds, dur, sampleRate }) => { // as renderString computes length, noteEnd and stop
+  const length = Math.ceil(seconds * sampleRate), noteEnd = Math.round((Number.isFinite(dur) ? dur : seconds) * sampleRate);
+  const stop = Math.min(length, noteEnd + Math.ceil(11.6 * 0.02 * sampleRate));
+  const at = [0, 1, 2, Math.round(0.002 * sampleRate), Math.round(0.03 * sampleRate), Math.floor(noteEnd / 2), noteEnd - 1, noteEnd, noteEnd + 1,
+    noteEnd + Math.round(0.05 * sampleRate), stop - 1, stop, length - 1];
+  return [...new Set(at.filter((i) => i >= 0 && i < length))].sort((a, b) => a - b);
+};
+const stringCase = (input) => ({ ...input, at: placesOf(input) });
+const MIDIS = [28, 40, 52, 64, 76, 88], VELS = [0, 0.375, 1], DURS = [0.05, 0.5, 3.5], RATES = [44100, 48000, 96000];
+const KEYS = ['bass/string/finger', 'chords/string/electric'], BASE = { midi: 40, seconds: 0.8, dur: 0.5, vel: 1, sampleRate: 48000, seed: 1 };
+const stringCases = Array.from({ length: 36 }, (_, i) => {
+  const dur = DURS[Math.floor(i / 3) % 3];
+  return stringCase({ midi: MIDIS[Math.floor(i / 2) % 6], seconds: dur + 0.3, dur, vel: VELS[i % 3], sampleRate: RATES[Math.floor(i / 12)], seed: 1 + i, params: fineOf(KEYS[i % 2]) });
+});
+for (const [name, [lo, hi]] of Object.entries(RANGES)) for (const v of [lo, hi]) stringCases.push(stringCase({ ...BASE, params: { ...fineOf(KEYS[0]), [name]: v } }));
+stringCases.push(stringCase({ ...BASE, params: Object.fromEntries(Object.entries(RANGES).map(([n, [lo]]) => [n, lo - 1])) }));
+stringCases.push(stringCase({ ...BASE, params: Object.fromEntries(Object.entries(RANGES).map(([n, [, hi]]) => [n, hi * 2])) }));
+stringCases.push(stringCase({ midi: 52, seconds: 0.6, sampleRate: 48000, seed: 1, params: { ...STRING_DEFAULTS } }));
+for (const seed of [7, 1234567890, 2147483647]) stringCases.push(stringCase({ ...BASE, seed, params: fineOf(KEYS[1]) }));
+stringCases.push(stringCase({ ...BASE, seconds: 0.4, dur: 0.9, params: fineOf(KEYS[0]) }));
+add('renderString', ({ at, ...input }) => {
+  const out = renderString(input);
+  let sumSquares = 0;
+  for (const x of out) sumSquares += x * x;
+  return { length: out.length, sumSquares, at: Object.fromEntries(at.map((i) => [i, out[i]])) };
+}, stringCases);
+
 mkdirSync(outDir, { recursive: true });
 writeFileSync(join(outDir, 'logic.json'), JSON.stringify(cases));
 console.log(`logic.json: ${cases.length} cases of ${new Set(cases.map((c) => c.fn)).size} functions`);

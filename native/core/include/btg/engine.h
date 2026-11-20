@@ -10,8 +10,8 @@ namespace btg {
 
 struct Pack;
 
-// Plays the generator's events of all six layers with the voices chosen for them (sample voices and the synth voices ported so far, the
-// e-piano and the organ; the others stay silent), the distortion chain, vibrato and chorus of bass, chords, pad and lead, a mixer, the web app's sends (reverb, shared room, echo) and its sum (brightness shelf,
+// Plays the generator's events of all six layers with the voices chosen for them (sample voices and the synth voices: the classic synth,
+// the e-piano, the organ, the synth kit and percussion, the string model), the distortion chain, vibrato and chorus of bass, chords, pad and lead, a mixer, the web app's sends (reverb, shared room, echo) and its sum (brightness shelf,
 // bus compressor and limiter, both after Chromium's DynamicsCompressor, no clamp at the output). The position comes in from outside
 // (Transport::Block), so the same engine runs under the app's own transport, in an offline render and later under a host's play head.
 class Engine {
@@ -28,8 +28,11 @@ public:
     void setPackSource(PackSource source);         // before the first setTrack or setVoices
     // plays from the next block on. The track must be one that the web app's normalizeTrack wrote and validateTrack accepted (a later task
     // validates here). Throws like buildSong when the JSON is not a track at all (then nothing changes); an inconsistent track is not checked. Then setVoices with the track's "voices"
+    // and every voice prepared for the song (the string voices compute its buffers here: about 0.1 s for a band track at 48 kHz), and the
+    // song reaches the audio thread together with them. setVoices, setTuning, setSound and prepare compute them anew where they change what
+    // a string voice's buffers depend on (its key, its params, the rate)
     void setTrack(const std::string& trackJson);
-    void setVoices(const std::string& voicesJson); // {"bass":{"id":"sample","variant":"pick"},...}; a layer not named keeps its voice. Reads the packs it does not have yet, here; until then the old voice plays. Never throws
+    void setVoices(const std::string& voicesJson); // {"bass":{"id":"sample","variant":"pick"},...}; a layer not named keeps its voice. Reads the packs it does not have yet, here; until then the old voice plays. A pack that fails to read is reported in voiceStatus, not thrown; computing a string voice's buffers can still throw (out of memory): the caller catches it (the shell's control())
     void setTuning(const std::string& tuningJson); // overrides of the fine values as setTuning of the web app ({"bass/sample/finger":{"level":3}}); replaces the earlier ones. Text that is no valid JSON or holds invalid values never throws and counts as the default; building a voice (or a convolver) can still throw (out of memory, a pack that fails to read): the caller catches it (the shell's control())
     void setSound(const std::string& timbreJson);  // the timbre of the web app's resolveTrackTimbre(track); what is missing or invalid counts as DEFAULT_TIMBRE; replaces the earlier one. Text that is no valid JSON or holds invalid values never throws and counts as DEFAULT_TIMBRE; building a voice (or a convolver) can still throw (out of memory, a pack that fails to read): the caller catches it (the shell's control())
     std::string voiceStatus() const;              // {"drums":"ready","bass":"error: bass-pick: <reason>","chords":"silent",...}, layers in enum order
@@ -46,11 +49,15 @@ public:
     float takePeak(int channel);             // a Layer, or layerCount for the output: peak since the last call
     int activeSynthTones() const;            // tests only, never while render runs (it reads the audio side): the synth tones that sound
     int busyOrganChains() const;             // tests only, as activeSynthTones: the organ chains with a tone or a tail to process
+    int keptBuffers() const;                 // tests only, a control call: the sets of buffers of the string voices the control side keeps (a
+                                             // voice or a ringing tone holds each; one that nothing holds is freed at the next publish)
 
     // Before rendering and never during it (JUCE prepareToPlay): builds what depends on the rate (the reverb's and the room's responses, the
     // synth voices' noise and the organ chains' delays, and at a new rate every voice again, with the same serials: the organ's waves are
-    // per rate, up to about 5 ms per organ voice the first time at 96 kHz, 0.1 ms once its waves are cached), so it allocates, and it takes
-    // the control calls' lock: it waits for a running one (up to about 1 s while a pack loads).
+    // per rate, up to about 5 ms per organ voice the first time at 96 kHz, 0.1 ms once its waves are cached; the string voices' buffers of
+    // the song set, about 0.05 to 0.07 s per voice for a band track at 48 kHz), so it allocates, and it takes the control calls' lock: it
+    // waits for a running one (up to about 1 s while a pack loads). A song set and not yet taken by the audio thread it hands over at once,
+    // together with the setup prepared for it.
     void prepare(double sampleRate);
     // Audio thread: no lock that waits, no allocation.
     void render(float* left, float* right, int frames, const Transport::Block& block);

@@ -19,6 +19,7 @@
 #include <numbers>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace btg::detail {
 
@@ -50,8 +51,14 @@ struct PlayEvent {
     double strumUp = NAN;
     bool ring = false;
     double t = 0.0;                    // the event's time in the stream (s): the strum compares it
+    double dur = NAN;                  // Event::dur (s): the string voices key their buffers by it at the song's tempo (voices/string.cpp)
     double beatInBar = NAN;            // Event::beat
     double leslie = NAN, swell = NAN;  // Event::leslie, ::swell (the organ's rules, organ.cpp); NaN: the field is absent
+};
+
+struct PlaySong {
+    std::vector<PlayEvent> events; // by trigger beat
+    double lengthBeats = 0.0, maxLeadBeats = 0.0;
 };
 
 struct Biquad { // Web Audio BiquadFilterNode, coefficients divided by a0; process() is direct form 1
@@ -222,6 +229,7 @@ struct VoiceState {
     int openHat = -1;                     // format-1 kits: index in Tones::all of the last open hat's tone, and that tone's serial
     uint64_t openHatSerial = 0;           // (a reused tone is not choked)
     int chain = -1;                       // the organ: its chain's slot in Tones::chains (organ.js `let chain`), -1 none yet
+    uint8_t turns[128][9] = {};           // the string voices' round robin by key and velocity step (string.js `turns`)
 };
 
 // One layer's chosen voice: built on the control thread, immutable afterwards.
@@ -232,6 +240,13 @@ public:
     virtual void play(const PlayEvent& e, int delay, double secondsPerBeat, VoiceState& state, Tones& tones) const = 0;
     // Audio thread: whether the voice feeds its layer in two channels, so that Chromium runs the layer's chains in two (phase-5-design.md 4).
     virtual bool stereo() const { return pack && pack->channels == 2; }
+    // Control thread: a copy of the voice that holds what it computes ahead for a play of `song` from bar 0 at `rate` (the string model's
+    // buffers), nullptr: nothing to compute (every other voice). `same`: this layer's voice as it was prepared for the same song at the same
+    // rate, or nullptr; the copy takes over what `same` computed when that does not depend on what changed since (the string voices: params).
+    virtual std::shared_ptr<const Voice> prepare(const PlaySong& song, double rate, const Voice* same) const { (void)song, (void)rate, (void)same; return nullptr; }
+    // Control thread: what the voice's tones hold while they play (the string model's buffers), so that the engine can keep it after the
+    // voice is gone until no tone holds it (engine.cpp, Impl::keep); nullptr: nothing.
+    virtual std::shared_ptr<const void> held() const { return nullptr; }
     Rng startRng { 1 }; // what state.rng starts from: Rng(1).fork("voice-<layer>")
     Tuned tuned {};
     std::shared_ptr<const Pack> pack;
@@ -249,6 +264,14 @@ std::shared_ptr<Voice> epianoVoice(const Tuning& tuning, const Timbre& timbre); 
 std::shared_ptr<Voice> organVoice(const std::string& key, const Tuning& tuning, double sampleRate); // voices/organ.cpp
 std::shared_ptr<Voice> drumsVoice(const Tuning& tuning, const Timbre& timbre, double kit);         // voices/drums.cpp; kit as kitBalance
 std::shared_ptr<Voice> percussionVoice();                                                          // voices/percussion.cpp
+std::shared_ptr<Voice> stringVoice(Engine::Layer layer, const std::string& key, const Tuning& tuning, const Timbre& timbre); // voices/string.cpp
+// Tests only: how the string voices' play() found the buffer of a note, counted over the whole program (on the audio thread): the exact one,
+// one of the same midi, velocity step and dur but another turn, one of another dur (the nearest), none (the set has no buffer of that midi
+// and velocity step: no tone).
+struct StringLookups { long long exact = 0, otherTurn = 0, otherDur = 0, none = 0; };
+StringLookups stringLookups();
+// Tests only: the number of buffers a prepared string voice holds and their bytes (0, 0 for another voice or one not prepared)
+std::pair<int, size_t> stringBuffers(const Voice& voice);
 struct WaveTables;
 // Tests only: what an organ voice plays key `midi` with: its wave (nullptr for another voice or none yet), the wheels' frequency and detune,
 // and the coefficients the wave was built from (a full build of them is the wave every range of it must equal)

@@ -3,9 +3,14 @@
 // Every case is { fn, in, out }: the core's function of that name gets `in` and must give `out`, compared as the parity test compares
 // events (json_compare.h): numbers bit for bit ("identical") or within 1.5e-6 ("close", which fails too: a difference in the last bits,
 // possibly another platform's math library; an exception has to be ruled and named here); anything else fails, also an unknown fn.
+// The one ruled exception (progress.md, "Task 24: Ruling", named before any run): a renderString case that is close passes, and their number
+// is printed. The string model calls sin, cos, exp, pow and sqrt per partial and per sample, the C runtime's where the web calls V8's; the
+// one case close on MSVC (task-24-report.md) differs from the web because one sin returns the other neighbour of a value that lies within
+// 1.2e-20 of the midpoint of two doubles, and with V8's results in place of the C runtime's the core's samples are the web's bit for bit.
 #include "../src/convolver.h"
 #include "../src/sound_data.h"
 #include "../src/sound_model.h"
+#include "../src/string_model.h"
 #include "json_compare.h"
 
 #include <cmath>
@@ -95,6 +100,19 @@ const std::map<std::string, std::function<json(const json&)>> FUNCTIONS {
     { "ownsChorus", [](const json& in) {
         const std::string layer = in.at("layer").get<std::string>();
         return json(ownsChorus(layer, layer + "/" + in.at("id").get<std::string>() + "/" + in.at("variant").get<std::string>())); } },
+    // the summary of export-logic.mjs: length, the sum of squares (in double, as the web sums the float32 samples), the samples at `at`
+    { "renderString", [](const json& in) {
+        const json& p = in.at("params");
+        const StringParams params { number(p, "pluckPos"), number(p, "brightness"), number(p, "decay"), number(p, "excite"), number(p, "stiffness"),
+                                    number(p, "pickupPos"), number(p, "pickupLp"), number(p, "body") };
+        const std::vector<float> out = renderString(number(in, "midi"), number(in, "seconds"), number(in, "dur"), number(in, "vel"), number(in, "sampleRate"),
+                                                    in.at("seed").get<uint32_t>(), params);
+        double sumSquares = 0;
+        for (const float x : out) sumSquares += static_cast<double>(x) * x;
+        json at = json::object();
+        for (const json& i : in.at("at")) at[std::to_string(i.get<size_t>())] = out[i.get<size_t>()];
+        return json { { "length", out.size() }, { "sumSquares", sumSquares }, { "at", at } };
+    } },
 };
 
 } // namespace
@@ -105,7 +123,7 @@ int main(int argc, char** argv) {
     if (!file) { std::printf("cannot open %s\n", argv[1]); return 2; }
     const json cases = json::parse(file);
     if (!cases.is_array() || cases.empty()) { std::printf("%s has no case: nothing was checked\n", argv[1]); return 1; } // a gate must not pass on nothing
-    long long identical = 0, close = 0, different = 0;
+    long long identical = 0, close = 0, different = 0, closeString = 0;
     std::map<std::string, int> seen; // cases per function in the file
     for (size_t i = 0; i < cases.size(); ++i) {
         const json& c = cases[i];
@@ -116,6 +134,11 @@ int main(int argc, char** argv) {
         if (fn == FUNCTIONS.end()) compare.fail("fn");
         else { got = fn->second(c.at("in")); compare.value("out", c.at("out"), got); }
         if (compare.result == btg::test::Match::identical) { ++identical; continue; }
+        if (compare.result == btg::test::Match::close && c.at("fn") == "renderString") { // the ruled exception (above): passes, counted
+            ++closeString;
+            std::printf("close (renderString, ruled): #%zu %s by %.3g\n", i, compare.field.c_str(), compare.delta);
+            continue;
+        }
         if (compare.result == btg::test::Match::close) { ++close; std::printf("close: %s #%zu %s by %.3g\n", c.at("fn").get<std::string>().c_str(), i, compare.field.c_str(), compare.delta); continue; }
         if (++different <= 20) std::printf("different: %s #%zu %s: in %s, want %s, got %s\n", c.at("fn").get<std::string>().c_str(), i, compare.field.c_str(),
                                            c.at("in").dump().c_str(), c.at("out").dump().c_str(), got.dump().c_str());
@@ -123,6 +146,7 @@ int main(int argc, char** argv) {
     int untested = 0; // a function of the table that the file brings no case for was not checked
     for (const auto& entry : FUNCTIONS) if (!seen.count(entry.first)) { std::printf("no case for %s in %s\n", entry.first.c_str(), argv[1]); ++untested; }
     std::printf("logic: functions %zu, cases %zu, identical %lld, close %lld, different %lld\n", FUNCTIONS.size(), cases.size(), identical, close, different);
+    std::printf("renderString: %lld of %d cases close, passed by the ruled exception (a C runtime function's last bit against V8's)\n", closeString, seen["renderString"]);
     // A close is a difference in the last bits (possibly another platform's math library): it fails too. An exception has to be ruled
     // by the owner and named here (function and field, from the line above), not passed.
     if (close) std::printf("FAIL: %lld case(s) are only close, not bit for bit: a difference in the last bits, possibly another platform's math library; ruled exceptions are named in this test\n", close);

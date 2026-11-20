@@ -90,6 +90,19 @@
 //     oscillators on a wave that is not 0 at phase 0): Chromium leaves an oscillator's first frame unwritten there and plays from the next,
 //     and so does the core (SynthTone::osc, the start rounded up; test_synth.cpp proves it bit for bit): -118.7 dB. With the start rounded
 //     down instead this line measured -52.0 dB, the wave at phase 0 on frame 1536, while every judged set passed.
+//     The string voices (src/audio/voices/string.js, the buffers of src/audio/string-model.js; Task 24): btg_fx prepares the voice
+//     (Voice::prepare) for the set's notes in their order, and the page's voice meets them in the same order (it draws its seeds so): the
+//     bass one note (E2), the same note four times and then another (the turns 0, 1, 2 and 0: the fourth plays the first one's buffer, the
+//     fifth is a miss after a hit), the chords' four tones at one time (the strum) and a single note after them, both at 44.1 and 96 kHz, a
+//     note of 5 s (MAX_DUR) and one of 0.02 s, each knob of the two voices' uses at its ends, and two of these 0.37 of a frame late (the
+//     buffers read between their samples). Each of these makes sets fail when it is taken out (Task 24's mutation runs): the attack
+//     noise's seed (all 23, -38.5 to -22.6 dB), the velocity step's rounding (all 23, -30.8 to -27.5 dB), the pickup's lowpass (all 23,
+//     -30.2 to -18.4 dB), the body (all 23, -37.0 to -12.5 dB), the damping after noteEnd (21, -53.7 to -1.9 dB: the 5 s note and chords
+//     length 0 have nothing left ringing at their note's end), the dur's rounding to 50 ms (the five sets off the grid, -33.4 to -30.1 dB),
+//     the strum (its four sets, -0.2 dB), the turn (the repeated note, -37.3 dB), the seed drawn on every note instead of on a miss (the
+//     repeated note, -42.2 dB), the nearest dur taken although the exact buffer exists (the repeated note, -38.9 dB), the bass's cutoff in
+//     paramsNow (its two sets, -16.9 and -13.5 dB), the chords' length there (its two sets, -8.6 and -2.9 dB), and with a knob held at its
+//     neutral value as the sound cases' runs hold it: sub (its two sets, -19.7 and -13.9 dB), roundness (-26.9 and -21.4 dB).
 //     Printed, not judged (SAMPLE_LATE, Task 23a): the sample kit's hat and crash and a note of the sample bass that the page plays a
 //     quarter, a half and three quarters of a frame late, against the page on the frame (the core's sample voices start on the frame; btg_fx
 //     has no pack): their packs (44.1 and 22.05 kHz) never play at rate 1 in a context at 48 kHz, so Chromium reads them between their
@@ -171,6 +184,11 @@
 //     +4.4 dB (the glide's could not run: btg_fx had no glide). The hat 1/4096 of a frame late (not judged): -150.3 dB, both playing its
 //     first frame at the gain's default 1 (0.193). The sample voices (SAMPLE_LATE, not judged), the page on the frame against the page
 //     between frames: level -0.01 to +0.01 dB, the 8 kHz band -0.07 to +0.02 dB, the 16 kHz band -0.23 to +0.03 dB.
+//   voice (Task 24): the string voices' 23 sets, 16 of them bit for bit; where tones overlap the repeated note -309.0 dB (5.7e-14) and the
+//     strums -149.7 to -145.8 dB over six runs (1.2e-7, one float's last bit at their peak near 1; the browser sums the tones in an order
+//     that changes from run to run: twice a strum set came out bit for bit); pluck 0 -316.5 dB (1.4e-14, one float's last bit
+//     at a sample of 2.0e-7: the core's buffer is the page's renderString bit for bit, traced in Task 24, the page's side not traced); the
+//     5 s note -759.0 dB (5.3e-38: a denormal in its tail where the browser plays 0).
 //   --none: every set at 0.0 dB.
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -334,6 +352,27 @@ VOICE.push(
   ...[44100, 96000].flatMap((rate) => ['tambourine', 'congaHigh'].map((n) => percussion(`${n} at ${rate / 1000} kHz`, [hit(n)], { rate }))),
   percussion('congaHigh, started 92 frames into a quantum (frame 1500)', [hit('congaHigh', 0.8, 1500)]),
 );
+// Task 24, the string model (src/audio/voices/string.js, the buffers of src/audio/string-model.js): the bass one note; the same note four
+// times (the turns 0, 1, 2 and 0 again: the fourth plays the first one's buffer), then another (a miss after a hit: its seed is the fourth
+// draw); the chords' four tones at one song time (the strum) and a single note after them (the run ends); both at 44.1 and 96 kHz; a note
+// longer than MAX_DUR and one shorter than 0.05 s; each knob of the two voices' uses at its ends on one note (ruling X: bass sub and
+// roundness, neutral 0, at 0.5 and 1). The repeated notes (0.37 s) and the strum's (0.43 s) lie off the 50 ms grid. The page meets the
+// notes in the order given, which is the order btg_fx's prepare walks them: the seeds are drawn in it.
+const strings = (layer, name, events, extra = {}) => voice(`string ${layer} ${name}`, `${layer}/string/${layer === 'bass' ? 'finger' : 'electric'}`, events, extra);
+const STRING_NOTE = { bass: [[1536, 40, 0.8, 0.5]], chords: [[1536, 60, 0.8, 0.5]] };
+const STRUM = [...[52, 55, 59, 64].map((m) => [1536, m, 0.8, 0.43]), [49536, 57, 0.8, 0.43]];
+VOICE.push(
+  strings('bass', 'one note (E2)', STRING_NOTE.bass),
+  strings('bass', 'the same note four times (the turns 0, 1, 2 and 0 again), then another', [...[0, 1, 2, 3].map((k) => [1536 + k * 24000, 40, 0.8, 0.37]), [97536, 43, 0.8, 0.37]],
+    { seconds: 2.5 }),
+  strings('chords', 'four tones at one song time (the strum), then a single note (the run ends)', STRUM, { seconds: 2 }),
+  ...[44100, 96000].flatMap((rate) => [strings('bass', `one note (E2) at ${rate / 1000} kHz`, STRING_NOTE.bass, { rate }),
+    strings('chords', `the strum, then a single note at ${rate / 1000} kHz`, STRUM, { rate, seconds: 2 })]),
+  strings('bass', 'a note of 5 s (longer than MAX_DUR, 3.5 s plays)', [[1536, 40, 0.8, 5]], { seconds: 4.5 }),
+  strings('bass', 'a note of 0.02 s (shorter than 0.05 s, which plays)', [[1536, 40, 0.8, 0.02]]),
+  ...[['bass', ['sub', 'pluck', 'cutoff', 'roundness']], ['chords', ['brightness', 'length']]].flatMap(([layer, names]) => names.flatMap((k) =>
+    (['sub', 'roundness'].includes(k) ? [0.5, 1] : [0, 1]).map((v) => strings(layer, `${k} ${v}`, STRING_NOTE[layer], { sound: { [layer]: { [k]: v } } })))),
+);
 // Task 23a, events between frames (`late`: the part of a frame after the event's frame; both sides play the event at that time): the
 // closed hat, the crash and the shaker a quarter, a half and three quarters of a frame late; then each voice kind 0.37 of a frame late (one
 // value, chosen before any run), the kick and the hat at 44.1 and 96 kHz, three sets 92 frames into a quantum, and the classic lead under a
@@ -361,6 +400,9 @@ const LATE = [
     { ...tuned('jazz', { drive: 0, click: 0, perc: 0 }), seconds: 1, late: 1 / 4096, judged: false }),
   // glide: a scoop's artTime, the engine's lead (btg_fx triggers the note that early, as the engine does); the page's voice ignores it
   classic('lead', `under a scoop's glide of 0.063421 s${between(LATE_BY, 4608)}`, [[4608, 69, 0.8, 0.5, { glide: 0.063421 }]], { late: LATE_BY }),
+  // Task 24: the string voices' buffers read between their samples (two of the sets above)
+  strings('bass', `one note (E2)${between(LATE_BY)}`, STRING_NOTE.bass, { late: LATE_BY }),
+  strings('chords', `the strum, then a single note${between(LATE_BY)}`, STRUM, { seconds: 2, late: LATE_BY }),
 ];
 // Printed, not judged (Task 23a, the sample voices' start between frames, which the core does not rebuild): the page plays a hit of the
 // sample kit and a note of a sample bass a quarter, a half and three quarters of a frame after frame 1536 against the page on the frame

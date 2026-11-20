@@ -443,6 +443,7 @@ std::shared_ptr<const Voice> makeVoice(Engine::Layer layer, const std::string& k
         else if (key.rfind("chords/organ/", 0) == 0 && soundData().tunables.count(key)) voice = organVoice(key, tuning, sampleRate);
         else if (key == "drums/synth/classic") voice = drumsVoice(tuning, timbre, kit);
         else if (key == "percussion/synth/classic") voice = percussionVoice();
+        else if (key == "bass/string/finger" || key == "chords/string/electric") voice = stringVoice(layer, key, tuning, timbre);
         else return nullptr;
     } else if (layer == Engine::drums || layer == Engine::percussion) {
         voice = std::make_shared<SampleHits>(layer, key, *pack, kit);

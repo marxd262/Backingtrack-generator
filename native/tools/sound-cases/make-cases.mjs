@@ -430,5 +430,23 @@ const bandSynthCases = STYLE_PRESETS.map((s) => claimed({ name: `band-synth-${s.
   Object.keys(VOICES).map((l) => `voice:${l}`)));
 write('band-synth.json', bandSynthCases);
 console.log(`kits-synth.json: ${kitsSynthCases.length} cases, band-synth.json: ${bandSynthCases.length} cases`);
+
+// Task 24: the string model on the bass and on the chords alone (both voices are hidden in the page, a track names them), neutral and each
+// knob of its voice's uses at its ends (a knob whose neutral value is 0 at 0.5 and 1, as Task 22's), in the styles of the classic synth's
+// cases (dreamy: the chords' longest notes). Each case fails when the core holds its knob at the neutral value (Task 24's mutation runs),
+// except two that cannot fail red: bass sub 0.5 and roundness 0.5 stay within the synth limits then (bands +1.86 and +2.08 dB);
+// voice-compare's sets "string bass sub 0.5" and "string bass roundness 0.5" fail then (-19.7 and -26.9 dB).
+const STRING_VOICE = { bass: { id: 'string', variant: 'finger' }, chords: { id: 'string', variant: 'electric' } }, STRING_STYLE = { bass: 'funk', chords: 'dreamy' };
+const stringCases = [];
+for (const layer of ['bass', 'chords']) {
+  stringCases.push(synthSolo(`string-${layer}-neutral`, layer, STRING_VOICE[layer], STRING_STYLE[layer], {}, [`voice:${layer}`]));
+  for (const path of VOICES[layer].string.uses) {
+    const k = path.split('.')[1];
+    for (const v of DEFAULT_TIMBRE[layer][k] === 0 ? [0.5, 1] : [0, 1])
+      stringCases.push(synthSolo(`string-${layer}-${k}-${v}`, layer, STRING_VOICE[layer], STRING_STYLE[layer], { [path]: v }, [`voice:${layer}`, `synth:${path}`]));
+  }
+}
+write('string.json', stringCases);
+console.log(`string.json: ${stringCases.length} cases`);
 for (const p of problems) console.error(`ERROR ${p}`);
 process.exit(problems.length ? 1 : 0);
