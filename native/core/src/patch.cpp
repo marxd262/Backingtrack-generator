@@ -8,6 +8,8 @@
  *   modules/webaudio/biquad_filter_handler.cc          (Copyright 2022 The Chromium Authors): the coefficients per frame while a param moves,
  *                                                       once otherwise; the frequency over the Nyquist frequency
  *   platform/audio/stereo_panner.cc                    (Copyright 2014 The Chromium Authors): the gains of a mono input, as float
+ *   modules/webaudio/oscillator_handler.cc             (Copyright 2022 The Chromium Authors): the first render quantum of an a-rate
+ *                                                       oscillator, the increments from the quantum's first frame (Process)
  * Each file's head: "Use of this source code is governed by a BSD-style license that can be found in the LICENSE file." That file's text:
  *
  * Redistribution and use in source and binary forms, with or without
@@ -82,6 +84,16 @@ long long frameOf(double frame) { return frame >= 0 ? static_cast<long long>(fra
 long long framesUp(double frames) { return frameOf(std::ceil(std::round(frames * 1024) / 1024)); }
 long long framesNearest(double frames) { return frameOf(std::round(std::round(frames * 1024) / 1024)); }
 
+// The first render quantum of an a-rate oscillator, as Chromium plays it: not the Web Audio specification, Chromium's behaviour
+// (oscillator_handler.cc 739 to 760, Process hands ProcessARate the increments of the whole quantum while the output begins at the
+// oscillator's start). An oscillator whose frequency or detune has a timeline or an input runs, from its start to the end of the quantum
+// it starts in, on the values of the quantum's first frames: `offset` frames behind its params (before the tone's time 0 their intrinsic
+// values, and no input sounds yet). An FM carrier keeps the phase it loses there for its whole tone, so the e-piano's level and colour
+// differ from tone to tone with the tone's place in the quantum (measured in Task 21: one tone's level in 50 ms windows up to 2.25 dB off,
+// two strikes of the same pitch up to 5.4 dB, a track's level 1.0 to 1.8 dB). The core follows it because the web app sounds like that.
+// false takes it out (order() then gives no oscillator the ring, process() hands on nothing).
+constexpr bool CHROMIUM_FIRST_QUANTUM = true;
+
 } // namespace
 
 int SynthTone::add(Kind kind) {
@@ -106,6 +118,7 @@ int SynthTone::osc(const WaveTables& wave, float hz, float cents, double start, 
     node.constant[1] = cents;
     node.start = framesUp(start);
     node.stop = framesUp(stop);
+    node.oscillator.offset = static_cast<int>((quantum + node.start) % 128);
     end = std::max(end, node.stop);
     return n;
 }
@@ -213,7 +226,7 @@ bool SynthTone::overflow() const {
 
 // The nodes the output pulls, inputs before the nodes they feed (a param's input before the param's node), and every node's channels: a
 // panner has two, a gain or a biquad the most of its inputs. False for a graph Chromium would not play this way: a cycle, no output, a
-// stereo input into a panner or a param.
+// stereo input into a panner or a param; and for one the core cannot: a second oscillator whose frequency or detune moves.
 bool SynthTone::order() {
     if (out_ < 0) return false;
     uint8_t state[NODES] = {}; // 0 not seen, 1 on the path, 2 done
@@ -238,7 +251,24 @@ bool SynthTone::order() {
         sequence_[sequenceCount_++] = n;
         return true;
     };
-    return visit(visit, out_);
+    if (!visit(visit, out_)) return false;
+    // Chromium's first quantum (CHROMIUM_FIRST_QUANTUM) keeps the values of one oscillator whose frequency or detune moves: a tone with a
+    // second one overflows, wherever they start. That one gets the ring when it starts inside a quantum.
+    early_ = -1;
+    int moving = 0;
+    for (int i = 0; i < sequenceCount_ && CHROMIUM_FIRST_QUANTUM; ++i) {
+        const Node& node = nodes_[sequence_[i]];
+        const auto moves = [&](int w) { return node.slot[w] >= 0 && params_[node.slot[w]].hasTimeline(); };
+        if (node.kind != source || !(moves(0) || moves(1))) continue;
+        if (++moving > 1) return false;
+        const int offset = static_cast<int>((quantum + node.start) % 128);
+        if (offset == 0) continue;
+        early_ = sequence_[i];
+        earlyOffset_ = offset;
+        for (int w = 0; w < 2; ++w) // before the tone's time 0: the timeline's value is the intrinsic one, and nothing sounds into an input
+            if (moves(w)) std::fill(earlyValues_[w], earlyValues_[w] + 128, params_[node.slot[w]].value);
+    }
+    return true;
 }
 
 void SynthTone::process(int n, int count, Scratch& s) {
@@ -254,6 +284,15 @@ void SynthTone::process(int n, int count, Scratch& s) {
         p.values(count, p.input >= 0 ? s.block[p.input][0] : nullptr, s.values[w]);
         values[w] = s.values[w];
         moving[w] = true;
+    }
+    if (n == early_ && age < node.start + 128 - earlyOffset_) { // the first quantum of an a-rate oscillator (CHROMIUM_FIRST_QUANTUM)
+        const long long first = node.start - earlyOffset_; // the quantum's first frame: its values are kept, then handed on
+        for (int w = 0; w < 2; ++w) {
+            if (!moving[w]) continue;
+            float* v = s.values[w];
+            for (int i = 0; i < count; ++i) if (age + i >= first && age + i < first + 128) earlyValues_[w][age + i - first] = v[i];
+            for (int i = 0; i < count; ++i) if (age + i >= node.start && age + i < node.start + 128 - earlyOffset_) v[i] = earlyValues_[w][age + i - node.start];
+        }
     }
     if (node.kind == source || node.kind == buffered) { // silent outside [start, stop)
         const int from = static_cast<int>(std::clamp(node.start - age, 0LL, static_cast<long long>(count)));
@@ -331,6 +370,24 @@ void SynthTone::render(float* left, float* right, int count, Scratch& s) {
     }
     age += n;
     if (delay == 0 && age >= end + SYNTH_FRAMES) active = false;
+}
+
+SynthTone& Tones::startSynth(Engine::Layer layer, int delay, uint64_t voice, double releaseSeconds) {
+    SynthTone* tone = &synth[0];
+    for (SynthTone& t : synth) {
+        if (!t.active) { tone = &t; break; }
+        if (t.serial < tone->serial) tone = &t; // all busy: the oldest goes
+    }
+    *tone = SynthTone {};
+    tone->active = true;
+    tone->serial = ++serial;
+    tone->voice = voice;
+    tone->layer = layer;
+    tone->delay = delay;
+    tone->releaseSeconds = releaseSeconds;
+    tone->basic = basic;
+    tone->quantum = static_cast<int>((quantum + delay) % 128);
+    return *tone;
 }
 
 } // namespace btg::detail

@@ -10,8 +10,8 @@ namespace btg {
 
 struct Pack;
 
-// Plays the generator's events of all six layers with the voices chosen for them (sample voices; synth voices stay silent
-// until they are ported), the distortion chain, vibrato and chorus of bass, chords, pad and lead, a mixer, the web app's sends (reverb, shared room, echo) and its sum (brightness shelf,
+// Plays the generator's events of all six layers with the voices chosen for them (sample voices and the synth voices ported so far, the
+// e-piano; the others stay silent), the distortion chain, vibrato and chorus of bass, chords, pad and lead, a mixer, the web app's sends (reverb, shared room, echo) and its sum (brightness shelf,
 // bus compressor and limiter, both after Chromium's DynamicsCompressor, no clamp at the output). The position comes in from outside
 // (Transport::Block), so the same engine runs under the app's own transport, in an offline render and later under a host's play head.
 class Engine {
@@ -44,6 +44,7 @@ public:
     void setMaster(float fader);
     void setLimiter(bool on);                // default on; off (for measuring): no bus compressor, no limiter (so no delay and no make-up), the sum only gets the master gain, the sends and the shelf
     float takePeak(int channel);             // a Layer, or layerCount for the output: peak since the last call
+    int activeSynthTones() const;            // tests only, never while render runs (it reads the audio side): the synth tones that sound
 
     // Before rendering and never during it (JUCE prepareToPlay): builds what depends on the rate (the reverb's and the room's responses),
     // so it allocates, and it takes the control calls' lock: it waits for a running one (up to about 1 s while a pack loads).

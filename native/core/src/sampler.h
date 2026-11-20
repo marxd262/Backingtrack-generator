@@ -188,14 +188,7 @@ struct Tone {
     void render(float* left, float* right, int count);
 };
 
-// The pool of tones of all layers.
-struct Tones {
-    std::array<Tone, TONES> all;
-    uint64_t serial = 0;
-    double sr = 48000.0;
-
-    Tone* start(const Note& n);
-};
+struct Tones; // the pool of tones of all layers (patch.h: its synth tones need SynthTone, which needs Biquad above)
 
 // sample-zones.js, pickZones over artZones(zones, art): the zones as good as the best (key distance, velocity distance, width),
 // in list order. Release zones never count. `own` (optional) says whether zones of this art were found.
@@ -233,8 +226,10 @@ public:
     Engine::Layer layer = Engine::drums;
 };
 
-// The voice for the sample voice `key` ("bass/sample/finger") with its pack; nullptr for a voice the core cannot play (the layer is silent).
-// `timbre` is the sound model's (sound_model.h): the lowpass and time scale of the note voices and the width of the kit's pan.
+// The voice for the sample voice `key` ("bass/sample/finger") with its pack, or with pack nullptr for the synth voice `key`
+// ("chords/epiano/rhodes"); nullptr for a voice the core cannot play (the layer is silent). `timbre` is the sound model's (sound_model.h):
+// the lowpass and time scale of the note voices, the width of the kit's pan, what the synth voices read of it.
 std::shared_ptr<const Voice> makeVoice(Engine::Layer layer, const std::string& key, std::shared_ptr<const Pack> pack, const Tuning& tuning, const Timbre& timbre);
+std::shared_ptr<Voice> epianoVoice(const Tuning& tuning, const Timbre& timbre); // voices/epiano.cpp
 
 } // namespace btg::detail

@@ -10,6 +10,7 @@
 #include "echo.h"
 #include "guitar_fx.h"
 #include "mod_fx.h"
+#include "patch.h"
 #include "sampler.h"
 #include "sound_data.h"
 #include "sound_model.h"
@@ -32,6 +33,7 @@ using detail::LAYER_NAMES;
 using detail::makeVoice;
 using detail::PlayEvent;
 using detail::Rng;
+using detail::SynthTone;
 using detail::Tone;
 using detail::Tones;
 using detail::Tuning;
@@ -40,6 +42,7 @@ using detail::VoiceState;
 using json = nlohmann::json;
 
 const int CHUNK = 256;
+static_assert(CHUNK == detail::SYNTH_FRAMES, "a synth tone renders at most SYNTH_FRAMES frames per call: the chunk");
 const double MASTER = 0.6; // synth.js: master.gain.value = MASTER * mix.level
 
 struct PlaySong {
@@ -271,7 +274,8 @@ struct Engine::Impl {
     void applyFx(bool atStart, double tempo) {
         for (const Layer l : FX_LAYERS) {
             const double v = setup->vibrato[l], c = setup->chorus[l];
-            const bool ringing = atStart && std::any_of(tones.all.begin(), tones.all.end(), [l](const Tone& t) { return t.active && t.layer == l; });
+            const auto sounds = [l](const auto& t) { return t.active && t.layer == l; };
+            const bool ringing = atStart && (std::any_of(tones.all.begin(), tones.all.end(), sounds) || std::any_of(tones.synth.begin(), tones.synth.end(), sounds));
             if (atStart && !(ringing && guitar[l].built())) {
                 guitar[l].reset();
                 guitar[l].set(setup->fx[l], true);
@@ -386,7 +390,11 @@ void Engine::setVoices(const std::string& voicesJson) {
         c.voice = nullptr;
         c.status = "silent";
         const auto id = detail::soundData().packs.find(key);
-        if (id == detail::soundData().packs.end()) continue; // not a sample voice
+        if (id == detail::soundData().packs.end()) { // not a sample voice: a synth voice, when the core has it
+            c.voice = makeVoice(static_cast<Layer>(l), key, nullptr, m.tuning, m.timbre);
+            if (c.voice) c.status = "ready";
+            continue;
+        }
         try {
             std::shared_ptr<const Pack> pack;
             if (const auto held = m.packs.find(id->second); held != m.packs.end()) pack = held->second;
@@ -436,6 +444,10 @@ void Engine::setPan(Layer layer, float pan) { impl_->pan[layer] = std::isnan(pan
 void Engine::setMaster(float fader) { impl_->master = std::clamp(fader, 0.0f, 1.0f); }
 void Engine::setLimiter(bool on) { impl_->limiterOn = on; }
 float Engine::takePeak(int channel) { return impl_->peaks[channel].exchange(0.0f); }
+int Engine::activeSynthTones() const {
+    const auto& synth = impl_->tones.synth;
+    return static_cast<int>(std::count_if(synth.begin(), synth.end(), [](const detail::SynthTone& t) { return t.active; }));
+}
 
 void Engine::prepare(double sampleRate) {
     Impl& m = *impl_;
@@ -451,7 +463,10 @@ void Engine::prepare(double sampleRate) {
     }
     old[2] = std::exchange(m.setup, std::move(made)); // the audio side's: prepare never runs during render
     m.tones.sr = sampleRate;
+    m.tones.basic = &detail::basicWaves(sampleRate); // allocates the first time at a rate
+    m.tones.quantum = 0;
     for (Tone& t : m.tones.all) t.active = false;
+    for (SynthTone& t : m.tones.synth) t.active = false;
     m.restart(true);
     for (int l = 0; l < layerCount; ++l) {
         m.gainNow[l] = m.muted[l] ? 0.0f : m.fader[l] * m.fader[l];
@@ -523,12 +538,14 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
     // playing block empties the sends again and opens them (the web builds a new graph at every play()).
     if (m.wasPlaying && (!block.playing || restarted)) {
         for (Tone& t : m.tones.all) if (t.active) { if (t.delay > 0) t.active = false; else t.choke(0, 0.015, sr); }
+        for (SynthTone& t : m.tones.synth) if (t.active) { if (t.delay > 0) t.active = false; else t.choke(0, 0.015, sr); }
         if (m.wetFadeLeft < 0) m.wetFadeLeft = m.wetFadeFrames;
     }
     // The start logic fires once, at the first block of a play (the first block of its lead, when it has one); the song's place is taken at
     // the first block that is not a lead's (startPending), which is no jump: the place is the one the lead stood on. A lead's blocks
     // schedule nothing (other standing blocks, as a render's tail or a test's, are handled as before).
     if (block.playing && (!m.wasPlaying || restarted)) { // the web builds its voices (and its delay, with the time of the tempo) anew at every play()
+        m.tones.quantum = 0; // the render quanta are counted from a play's first frame (the web's play() falls on one; a jump does not move them)
         m.restart(true);
         m.echoAtOnce = true;
         m.fxAtOnce = true;
@@ -536,12 +553,18 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
     }
     if (block.playing && length > 0 && !block.lead) {
         const bool jumped = m.wasPlaying && !m.startPending && std::fabs(block.beats - m.expected) > 1e-6;
-        if (jumped) // held notes end (their release begins), hits ring out, what has not begun never will
+        if (jumped) { // held notes end (their release begins; a synth tone falls over its voice's release), hits ring out, what has not begun never will
             for (Tone& t : m.tones.all) {
                 if (!t.active) continue;
                 if (t.delay > 0) t.active = false;
                 else if (t.layer != drums && t.layer != percussion) t.toNoteEnd = 0;
             }
+            for (SynthTone& t : m.tones.synth) {
+                if (!t.active) continue;
+                if (t.delay > 0) t.active = false;
+                else if (t.layer != drums && t.layer != percussion) t.release(sr);
+            }
+        }
         if (jumped || m.startPending || m.reseek) {
             // After a jump or a start, what lies less than a frame before the new place belongs to its first frame (a loop wraps up
             // to a frame after its start), and the cursor goes back to the earliest trigger whose note may still lie ahead (a glide
@@ -583,7 +606,8 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
             m.clearSends();
             m.wetClosed = false;
         }
-    } else if (!m.quiet && m.wetFadeLeft < 0 && std::none_of(m.tones.all.begin(), m.tones.all.end(), [](const Tone& t) { return t.active; })) {
+    } else if (const auto active = [](const auto& t) { return t.active; };
+               !m.quiet && m.wetFadeLeft < 0 && std::none_of(m.tones.all.begin(), m.tones.all.end(), active) && std::none_of(m.tones.synth.begin(), m.tones.synth.end(), active)) {
         for (detail::Biquad& f : m.shelf) clear(f);
         m.glue.reset();
         m.limiter.reset();
@@ -629,6 +653,8 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
         }
         for (auto& layer : m.buffers) for (auto& channel : layer) std::fill(channel, channel + count, 0.0f);
         for (Tone& t : m.tones.all) if (t.active) t.render(m.buffers[t.layer][0], m.buffers[t.layer][1], count);
+        for (SynthTone& t : m.tones.synth) if (t.active) t.render(m.buffers[t.layer][0], m.buffers[t.layer][1], count, m.tones.scratch);
+        m.tones.quantum = (m.tones.quantum + count) % 128;
         // The distortion chains hear the sum of the layer's tones, before mute, fader and trim (synth.js: voice -> fx.input), the modulation
         // chains what comes out of them; mono, so the right channel takes the left (the four layers' packs are mono: guitar_fx.cpp, the
         // shortcut at process) until the chorus makes two channels of it.

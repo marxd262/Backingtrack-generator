@@ -10,12 +10,13 @@
 #include "param.h"
 #include "sampler.h"
 
+#include <array>
 #include <cstdint>
 
 namespace btg::detail {
 
-constexpr int NODES = 16, PARAMS = 6; // the pad's tone has 16 nodes; the epiano's tone 4 automated params
-// The most frames one render() takes: the engine's chunk (engine.cpp CHUNK). Task 21 puts static_assert(CHUNK == SYNTH_FRAMES) there.
+constexpr int NODES = 16, PARAMS = 6; // the pad's tone has 16 nodes; the e-piano's takes 5 params (amp, carrier, depth, bell, tremolo)
+// The most frames one render() takes: the engine's chunk (engine.cpp CHUNK, which asserts that the two are equal).
 constexpr int SYNTH_FRAMES = 256;
 
 enum class Filter : uint8_t { lowpass, highpass, bandpass }; // the BiquadFilterNode types of the synth voices
@@ -28,10 +29,13 @@ struct SynthTone {
     double chokeGain = 1, chokeMul = 1, releaseSeconds = 0; long long chokeIn = -1; // stop; a jump falls over releaseSeconds
     long long age = 0, end = 0; // frames since time 0; the last source's stop: inactive one chunk (SYNTH_FRAMES) after it
     const BasicWaves* basic = nullptr; // the basic waves at the engine's rate, for osc(Wave, ...)
+    int quantum = 0;            // the place of time 0 in its render quantum (Tones::startSynth); set before the graph is built
 
     // Each returns the node (-1 when the graph is full). Times are frames from the tone's time 0 (a stop of infinity: no stop); hz, cents,
-    // value, q, pan the params' values. One input per param and one output per tone: where the web connects several nodes to a param or to
-    // `out`, a voice sums them in a gain, which costs a node (the pad's tone uses 16 of 16).
+    // value, q, pan the params' values before any event. An oscillator's hz is the node's frequency value, not its first event's: where the
+    // JavaScript sets no `.value` (drums.js, percussion.js), the AudioParam's default 440, which Chromium's first quantum plays on before
+    // the start. One input per param and one output per tone: where the web connects several nodes to a param or to `out`, a voice sums
+    // them in a gain, which costs a node (the pad's tone uses 16 of 16).
     int osc(Wave wave, float hz, float cents, double start, double stop);
     int osc(const WaveTables& wave, float hz, float cents, double start, double stop); // the caller keeps `wave` alive while the tone can play
     int buffer(const float* data, int frames, double offset, bool loop, double start, double stop); // offset in frames of the buffer, rate 1;
@@ -77,6 +81,28 @@ private:
     bool overflow_ = false, ordered_ = false;
     double releaseGain_ = 1, releaseMul_ = 1;
     long long releaseLeft_ = -1;
+    // Chromium's first quantum of an a-rate oscillator (patch.cpp, CHROMIUM_FIRST_QUANTUM): the one oscillator of the tone that needs it
+    // (-1 none), its place in that quantum, and its frequency's and detune's values from the quantum's first frame on. A second one
+    // overflows the tone.
+    int early_ = -1, earlyOffset_ = 0;
+    float earlyValues_[2][128] = {};
+};
+
+// The pool of tones of all layers: the sample tones and, as many, the synth tones (phase-5-design.md 3).
+struct Tones {
+    std::array<Tone, TONES> all;
+    std::array<SynthTone, TONES> synth;
+    SynthTone::Scratch scratch;        // shared by the synth tones: they render one after the other
+    uint64_t serial = 0;               // of the last tone started, in either pool
+    double sr = 48000.0;
+    const BasicWaves* basic = nullptr; // the basic waves at sr (Engine::prepare); every synth tone gets them
+    int quantum = 0;                   // the place of the chunk's first frame in its render quantum: frames since the play began, mod 128
+
+    Tone* start(const Note& n);
+    // A free synth tone, else the oldest (as start), emptied and active, its time 0 `delay` frames into the chunk (and its place in the
+    // quantum from there); a jump lets it fall over releaseSeconds (every voice gives its own: 0 would cut it in one frame). The voice then
+    // builds its graph.
+    SynthTone& startSynth(Engine::Layer layer, int delay, uint64_t voice, double releaseSeconds);
 };
 
 } // namespace btg::detail

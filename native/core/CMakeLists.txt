@@ -58,6 +58,7 @@ add_library(btg_core STATIC
     src/osc.cpp
     src/param.cpp
     src/patch.cpp
+    src/voices/epiano.cpp
     src/analysis.cpp
     src/file_player.cpp
     src/decode.cpp

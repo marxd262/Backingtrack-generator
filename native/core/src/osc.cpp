@@ -186,11 +186,13 @@ std::shared_ptr<const WaveTables> customWave(const float* real, const float* ima
 // group of four frames read from them (141 to 182), then 4 increments added to them and the four wrapped, in float (186 to 188); the frames
 // after the last group of four by ProcessKRateScalar from the double index moved on by k * increment (193 to 195); at the quantum's end the
 // double index moves on by n * increment (oscillator_handler.cc 518 to 522). Rebuilt here lane by lane in float, in that order: an FM
-// carrier integrates the float index's error of its modulator, -69.2 dB with an index in double (Task 20a, round 1). The blocks are 128
-// frames counted from the oscillator's own start. Chromium's quanta are the context's: the same blocks for a tone that starts on a quantum
-// boundary (voice-compare starts its sets there), and for one that starts elsewhere an alignment as valid as any other the live browser
-// gives it. Not rebuilt: the a-rate vector kernel (moving()), whose index is a double already and whose rest is not integrated by
-// anything (the kick's ramp -118.2 dB). An oscillator whose frequency or detune has a timeline or an input stays in moving() for its
+// carrier integrates the float index's error of its modulator, -69.2 dB with an index in double (Task 20a, round 1). The blocks are
+// Chromium's render quanta on the core's grid (Tones::quantum: the quanta counted from a play's first frame; the web's play() falls on one
+// of its context's, and a jump does not move them): an oscillator that starts `offset` frames into a quantum renders the 128 - offset
+// frames left of it first (Process with a quantum frame offset hands ProcessKRate that many: their groups of four by the lanes, the n mod 4
+// after them by ProcessKRateScalar), then whole quanta; test_synth.cpp holds it bit for bit. Not rebuilt: the a-rate vector kernel
+// (moving()), whose index is a double already and whose rest is not integrated by anything (the kick's ramp -118.2 dB). An oscillator
+// whose frequency or detune has a timeline or an input stays in moving() for its
 // whole tone, where Chromium goes back to the k-rate kernel once its events lie 1.5 quanta in the past (audio_param_handler.cc
 // HasSampleAccurateValues, HandleAllEventsInThePast): after its ramp the kick's sine keeps the -118.2 dB; a low square or sawtooth after
 // a pitch drop would sit near the double index's figures (-93.1 dB, the square at 55 Hz).
@@ -220,8 +222,9 @@ void Oscillator::constant(float hz, float cents, float* out, int count, long lon
         return x - static_cast<float>(f) * sizeF;
     };
     for (int i = 0; i < count; ++i) {
-        if (at_ == block_) { // a block begins: its length (less at the stop), the lanes from the double index
-            block_ = static_cast<int>(std::min<long long>(128, left - i));
+        if (at_ == block_) { // a block begins: its length (the rest of the quantum the first time, less at the stop), the lanes from the double index
+            block_ = static_cast<int>(std::min<long long>(128 - offset, left - i));
+            offset = 0;
             at_ = 0;
             for (int m = 0; m < 4; ++m) lanes_[m] = wrap(static_cast<float>(index + static_cast<double>(static_cast<float>(m) * increment)));
         }

@@ -8,7 +8,9 @@
 #include <chrono>
 #include <cmath>
 #include <complex>
+#include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <memory>
 #include <numbers>
 #include <vector>
@@ -135,14 +137,15 @@ int main() {
     std::vector<float> noise(static_cast<size_t>(sr));
     for (size_t i = 0; i < noise.size(); ++i) noise[i] = static_cast<float>(std::sin(static_cast<double>(i) * 12.9898) * 0.5);
     const int frames = 40000;
-    const auto chunked = [&](int chunk) {
+    const auto chunked = [&](int chunk, double carrierStart = 1000, int quantum = 0) {
         SynthTone t;
         t.active = true;
         t.basic = &waves;
         t.delay = 37;
+        t.quantum = quantum;
         const int o = t.osc(Wave::sawtooth, 220.0f, 7.0f, 0, 30000), lp = t.biquad(Filter::lowpass, 3000.0f, 4.0f), a = t.gain(0.0f);
         const int lfo = t.osc(Wave::sine, 3.0f, 0.0f, 0, 30000), depth = t.gain(400.0f);
-        const int carrier = t.osc(Wave::sine, 300.0f, 0.0f, 1000, 28000), modulator = t.osc(Wave::sine, 450.0f, 0.0f, 0, 28000), index = t.gain(600.0f);
+        const int carrier = t.osc(Wave::sine, 300.0f, 0.0f, carrierStart, 28000), modulator = t.osc(Wave::sine, 450.0f, 0.0f, 0, 28000), index = t.gain(600.0f);
         const int carried = t.gain(0.3f), loop = t.buffer(noise.data(), 1000, 123.4, true, 500, 29000), looped = t.gain(0.2f), pan = t.panner(0.5f);
         Param& f = t.param(lp);
         f.setValueAtTime(4000.0f, 0);
@@ -179,6 +182,66 @@ int main() {
         const bool same = chunked(chunk) == whole;
         std::printf("chunks of %d frames: %s the render in chunks of 256\n", chunk, same ? "bit-identical to" : "DIFFERENT from");
         CHECK(same);
+    }
+    // The tone's place in its render quantum (Chromium's quanta on the core's grid): at 45 every oscillator starts inside a quantum (the
+    // carrier, a-rate, at 1045: 21 frames in, its first quantum on the values of the quantum's first frames; the others at 45: their k-rate
+    // blocks of 83 frames, then 128). Cut into calls of 1, 7, 128 and 1000 frames: bit for bit the render in calls of 256, and not the
+    // render at place 0. At place 0 with the carrier at 1024 (every oscillator on a quantum's first frame) the bits are those of the code
+    // before the grid (Task 20a; the hash taken from it before the change).
+    const std::vector<float> placed = chunked(256, 1000, 45);
+    CHECK(placed != whole);
+    for (const int chunk : { 1, 7, 128, 1000 }) {
+        const bool same = chunked(chunk, 1000, 45) == placed;
+        std::printf("at place 45, chunks of %d frames: %s the render in chunks of 256\n", chunk, same ? "bit-identical to" : "DIFFERENT from");
+        CHECK(same);
+    }
+    {
+        uint32_t hash = 0x811c9dc5u; // FNV-1a over the floats' bits
+        for (const float x : chunked(256, 1024)) {
+            uint32_t bits;
+            std::memcpy(&bits, &x, 4);
+            for (int b = 0; b < 4; ++b) { hash ^= (bits >> (8 * b)) & 0xffu; hash *= 0x01000193u; }
+        }
+        std::printf("on the grid: hash %08x (before the grid: 1eaff96c)\n", hash);
+        CHECK(hash == 0x1eaff96cu);
+    }
+    // The k-rate kernel's blocks on the grid (osc.cpp, Oscillator::constant): an oscillator 45 frames into its quantum renders the 83 frames
+    // left of it as its first block, then whole quanta. So, in one call, it is bit for bit an oscillator at offset 0 whose first call ends
+    // its block after 83 frames (`left` 83, as a stop inside the quantum does), for the sine, square and sawtooth at 440 Hz. And the offset
+    // comes from the tone's place: a tone at place 45 with the oscillator at its time 0 is, 45 frames later, a tone at place 0 whose
+    // oscillator starts at 45, and not one at place 0 with the oscillator at 0. Red with the grid taken out (constant() ignoring the
+    // offset: the identity; SynthTone::osc not setting it: the tones).
+    for (const Wave w : { Wave::sine, Wave::square, Wave::sawtooth }) {
+        const int n = 2000;
+        const long long never = 1LL << 40;
+        std::vector<float> placed45(n), cut(n);
+        Oscillator a, b;
+        a.wave = b.wave = &waves.wave[static_cast<int>(w)];
+        a.offset = 45;
+        a.constant(440.0f, 0.0f, placed45.data(), n, never);
+        b.constant(440.0f, 0.0f, cut.data(), 83, 83);
+        b.constant(440.0f, 0.0f, cut.data() + 83, n - 83, never);
+        int differ = 0;
+        for (int i = 0; i < n; ++i) differ += placed45[i] != cut[i];
+        std::printf("k-rate grid, wave %d: offset 45 against a first block of 83, %d of %d frames differ\n", static_cast<int>(w), differ, n);
+        CHECK(differ == 0);
+    }
+    {
+        const auto tone = [&](int place, double start) {
+            SynthTone t;
+            t.active = true;
+            t.basic = &waves;
+            t.quantum = place;
+            t.output(t.osc(Wave::sawtooth, 440.0f, 0.0f, start, start + 2000));
+            std::vector<float> l(2304), r(2304);
+            for (int at = 0; at < 2304; at += 256) t.render(&l[at], &r[at], 256, *scratch);
+            return l;
+        };
+        const std::vector<float> atPlace = tone(45, 0), later = tone(0, 45), atZero = tone(0, 0);
+        const bool shifted = std::equal(atPlace.begin(), atPlace.begin() + 2000, later.begin() + 45);
+        const bool own = std::equal(atPlace.begin(), atPlace.begin() + 2000, atZero.begin());
+        std::printf("k-rate grid, tones: place 45 %s the oscillator at 45 of place 0, %s the one at 0\n", shifted ? "equals" : "DIFFERS FROM", own ? "EQUALS" : "differs from");
+        CHECK(shifted && !own);
     }
     // A stop of infinity (the web's "no stop"): the tone plays on and does not end by itself
     {
@@ -288,6 +351,24 @@ int main() {
         CHECK(!events.overflow());
         e.setValueAtTime(1.0f, EVENTS);
         CHECK(events.overflow());
+        // Chromium's first quantum keeps the values of one oscillator per tone whose frequency or detune moves: a tone with two overflows (it
+        // is silent, never wrong) by its shape, also with both on a quantum's first frame (where nothing is kept); one alone plays.
+        const auto ramps = [&](std::initializer_list<double> starts) {
+            SynthTone t;
+            t.active = true;
+            t.basic = &waves;
+            const int sum = t.gain(0.5f);
+            for (const double start : starts) {
+                const int o = t.osc(Wave::sine, 200.0f, 0.0f, start, 2000);
+                t.param(o).exponentialRampToValueAtTime(100.0f, 1000);
+                t.connect(o, sum);
+            }
+            t.output(sum);
+            std::vector<float> l(256), r(256);
+            t.render(l.data(), r.data(), 256, *scratch);
+            return std::make_pair(t.overflow(), std::any_of(l.begin(), l.end(), [](float x) { return x != 0.0f; }));
+        };
+        CHECK(ramps({ 0.0, 128.0 }) == std::make_pair(true, false) && ramps({ 10.0 }) == std::make_pair(false, true));
     }
 
     // Timing, not asserted: ns per frame of one tone, rendered in chunks of 256 for 10 s of audio (the tone alone, its output added)

@@ -7,6 +7,7 @@
 #include "../src/convolver.h"
 #include "../src/echo.h"
 #include "../src/mod_fx.h"
+#include "../src/patch.h"
 #include "../src/sampler.h"
 
 #include <algorithm>
@@ -14,8 +15,10 @@
 #include <cmath>
 #include <complex>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <iterator>
+#include <new>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -25,6 +28,22 @@
 static int failures = 0;
 #define CHECK(cond) \
     do { if (!(cond)) { std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); ++failures; } } while (0)
+
+// Ruling 14: the allocations and frees of the program counted while `counting` is on (the render calls of the check "no allocation in
+// render" below): the plain forms are replaced, the array and nothrow forms reach them by the standard's defaults; the aligned forms
+// (std::align_val_t) are not counted (nothing in render allocates over-aligned). One thread: the tests render on the calling thread.
+static bool counting = false;
+static long allocations = 0, frees = 0;
+void* operator new(std::size_t size) {
+    if (counting) ++allocations;
+    if (void* p = std::malloc(size ? size : 1)) return p;
+    throw std::bad_alloc();
+}
+void operator delete(void* p) noexcept {
+    if (counting && p) ++frees;
+    std::free(p);
+}
+void operator delete(void* p, std::size_t) noexcept { operator delete(p); }
 
 static const int rate = 48000;
 static const char* DRY = R"({"master":{"reverb":0,"echo":0,"roomWet":0}})";
@@ -469,6 +488,18 @@ int main(int argc, char** argv) {
     std::ifstream file(argv[1], std::ios::binary);
     const std::string track((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
     CHECK(!track.empty());
+    // Printed, not asserted (Task 21): what prepare costs the first time at a rate, when it builds the basic waves (ruling 16), against a
+    // second engine's prepare at that rate (the waves are kept). Before any other engine of this program is prepared.
+    for (const double sr : { 48000.0, 96000.0 }) {
+        double ms[2];
+        for (double& m : ms) {
+            btg::Engine e;
+            const auto began = std::chrono::steady_clock::now();
+            e.prepare(sr);
+            m = 1000 * std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count();
+        }
+        std::printf("prepare at %.0f Hz: %.0f ms the first time (it builds the basic waves), %.0f ms the second\n", sr, ms[0], ms[1]);
+    }
     const auto play = [&](int blockSize, bool muteAll, double startBeats) {
         btg::Engine engine;
         engine.setPackSource(source);
@@ -641,14 +672,16 @@ int main(int argc, char** argv) {
         // skips its chains, while the playing one runs them on; with the bass fuzz that is the chain's own residual, 3e-6 at 140 ms, after the
         // last bass tone has ended). The layer alone (sends 0, no limiter; the chords from the fixture with its chords switched on), stopped
         // 1.55 s after beat 64, inside a note of the bass (at 1 s the fixture's bass is between two notes); `peak` is what still rings from
-        // the play on.
+        // the play on. The chords also with the e-piano (Task 21): its synth tones ring through the chorus (red when the start looks only
+        // at the sample tones).
         {
             std::string chorded = track;
             chorded.replace(chorded.find("\"chords\":false"), 14, "\"chords\":true");
-            const std::tuple<const char*, const char*, btg::Engine::Layer> cases[] = {
-                { "bass fuzz 1", FUZZ, btg::Engine::bass },
-                { "bass vibrato 1", R"({"master":{"reverb":0,"echo":0,"roomWet":0},"bass":{"vibrato":1}})", btg::Engine::bass },
-                { "chords chorus 1", R"({"master":{"reverb":0,"echo":0,"roomWet":0},"chords":{"chorus":1}})", btg::Engine::chords } };
+            const std::tuple<const char*, const char*, btg::Engine::Layer, const char*> cases[] = {
+                { "bass fuzz 1", FUZZ, btg::Engine::bass, nullptr },
+                { "bass vibrato 1", R"({"master":{"reverb":0,"echo":0,"roomWet":0},"bass":{"vibrato":1}})", btg::Engine::bass, nullptr },
+                { "chords chorus 1", R"({"master":{"reverb":0,"echo":0,"roomWet":0},"chords":{"chorus":1}})", btg::Engine::chords, nullptr },
+                { "chords chorus 1, e-piano", R"({"master":{"reverb":0,"echo":0,"roomWet":0},"chords":{"chorus":1}})", btg::Engine::chords, R"({"chords":{"id":"epiano","variant":"rhodes"}})" } };
             for (const auto& c : cases)
                 for (const double gap : { 0.02, 0.0 }) {
                     const char* name = std::get<0>(c);
@@ -656,6 +689,7 @@ int main(int argc, char** argv) {
                     const auto run = [&](bool replay) {
                         auto e = make(std::get<1>(c));
                         if (alone == btg::Engine::chords) e->setTrack(chorded);
+                        if (std::get<3>(c)) e->setVoices(std::get<3>(c));
                         for (int l = 0; l < btg::Engine::layerCount; ++l) e->setMuted(static_cast<btg::Engine::Layer>(l), l != alone);
                         btg::Transport t;
                         t.play(64.0, e->bpm());
@@ -867,7 +901,7 @@ int main(int argc, char** argv) {
     // at both tempos" is proven with the real packs in mix.json (mix-funk-20bpm, mix-funk-400bpm).
     // Both start at beat 64, where all six layers play (20 bpm for 20 s covers only 6.7 beats), and every layer has a peak after the render
     // (this also catches a pack that did not load). Then 400 bpm at 96 kHz (blocks of 480 frames), its load printed only: Phase 5's design
-    // needs the figure (ruling S).
+    // needs the figure (ruling S). And 400 bpm at 48 and 96 kHz with the e-piano on the chords (Task 21, design 6), printed only.
     {
         std::string band = track;
         for (const char* layer : { "chords", "pad", "lead", "percussion" }) {
@@ -881,13 +915,15 @@ int main(int argc, char** argv) {
             layers += std::any_of(events.begin(), events.end(), [&](const btg::Event& e) { return e.layer == name; });
         CHECK(layers == 6);
         const bool onCi = argc > 2 && std::string(argv[2]) == "--ci";
-        for (const auto& [bpm, sr] : { std::pair { 20.0, rate }, std::pair { 400.0, rate }, std::pair { 400.0, 96000 } }) {
+        for (const auto& [bpm, sr, epiano] : { std::tuple { 20.0, rate, false }, std::tuple { 400.0, rate, false }, std::tuple { 400.0, 96000, false },
+                                               std::tuple { 400.0, rate, true }, std::tuple { 400.0, 96000, true } }) {
             btg::Engine engine;
             engine.setPackSource(source);
             engine.setSound(R"({"master":{"reverb":1,"echo":1,"roomWet":1,"roomSize":1},"bass":{"fuzz":1,"overdrive":1,"distortion":1,"vibrato":1,"chorus":1},
                 "chords":{"fuzz":1,"overdrive":1,"distortion":1,"vibrato":1,"chorus":1},"pad":{"fuzz":1,"overdrive":1,"distortion":1,"vibrato":1,"chorus":1},
                 "lead":{"fuzz":1,"overdrive":1,"distortion":1,"vibrato":1,"chorus":1}})");
             engine.setTrack(band);
+            if (epiano) engine.setVoices(R"({"chords":{"id":"epiano","variant":"rhodes"}})");
             engine.setMaster(0.7f); // fader 0.7 = gain 0.49 (see above)
             engine.prepare(sr);
             btg::Transport t;
@@ -895,8 +931,8 @@ int main(int argc, char** argv) {
             const auto began = std::chrono::steady_clock::now();
             const Result r = render(engine, t, 20.0, 480, sr);
             const double load = std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count() / 20.0;
-            const bool asserted = sr == rate && !onCi;
-            std::printf("tempo %.0f bpm at %d Hz: peak %.3f, load %.1f %%%s\n", bpm, sr, r.peak, 100 * load, asserted ? "" : " (not asserted)");
+            const bool asserted = sr == rate && !onCi && !epiano;
+            std::printf("tempo %.0f bpm at %d Hz%s: peak %.3f, load %.1f %%%s\n", bpm, sr, epiano ? " with the e-piano on the chords" : "", r.peak, 100 * load, asserted ? "" : " (not asserted)");
             CHECK(r.finite && r.peak < 1.0 && r.rms > 0.001);
             for (int l = 0; l < btg::Engine::layerCount; ++l) {
                 const bool sounded = engine.takePeak(l) > 0.0f;
@@ -1725,6 +1761,272 @@ int main(int argc, char** argv) {
         for (const double width : { 0.0, 0.25, 0.5, 1.0 }) {
             const double pan = std::min(1.0, 2 * width * place); // mix.width = 2 * master.width
             CHECK(place > 0.0 && std::fabs(hatSides(width) - (1 + pan) / (1 - pan)) < 1e-4);
+        }
+    }
+
+    // The FM e-piano (Task 21) and with it the engine's synth tones. `keys`: the fixture with the chords alone (drums and bass off), dry, no
+    // limiter, so that what sounds is the e-piano and nothing behind it keeps a tail of its own (stopped, the engine gives exactly 0).
+    // `held`: the same without the rhythm tags, so that the stab at 12.52 beats is held 2.09 s and the one at 26.5 beats (0.9 s) is
+    // followed by 3.3 s of nothing.
+    {
+        using namespace btg::detail;
+        std::printf("sizeof(SynthTone) %zu bytes, the pool of %d synth tones %.2f MB\n", sizeof(SynthTone), TONES, TONES * sizeof(SynthTone) / 1048576.0);
+        const char* EPIANO = R"({"chords":{"id":"epiano","variant":"rhodes"}})";
+        const char* SILENT = R"({"chords":{"id":"none","variant":"none"}})"; // a key no voice has: silent through the synth voices' path
+        std::string keys = track;
+        keys.replace(keys.find("\"drums\":true"), 12, "\"drums\":false");
+        keys.replace(keys.find("\"bass\":true"), 11, "\"bass\":false");
+        keys.replace(keys.find("\"chords\":false"), 14, "\"chords\":true");
+        std::string held = keys;
+        const std::string rhythm = R"("rhythm":["funky","syncopated"])";
+        held.replace(held.find(rhythm), rhythm.size(), R"("rhythm":[])");
+        double longest = -1.0, gapped = -1.0, nextStab = -1.0; // beats: the held stab, the one of 0.9 s and the next stab after it
+        for (const btg::Event& e : btg::buildEvents(held)) {
+            if (e.type != btg::Event::Type::note || e.layer != "chords") continue;
+            const double beat = e.t * (100.0 / 60.0);
+            if (longest < 0 && e.dur >= 2.0) longest = beat;
+            if (gapped >= 0 && nextStab < 0 && beat > gapped + 1e-6) nextStab = beat;
+            if (gapped < 0 && e.dur > 0.8 && e.dur < 1.5) gapped = beat;
+        }
+        CHECK(longest > 0 && gapped > 0 && nextStab > gapped);
+        const auto make = [&](const std::string& song, const char* voices) {
+            auto e = std::make_unique<btg::Engine>();
+            e->setPackSource(source);
+            e->setSound(DRY);
+            e->setTrack(song);
+            if (voices) e->setVoices(voices);
+            e->setLimiter(false);
+            e->prepare(rate);
+            return e;
+        };
+        const auto peakIn = [](const std::vector<float>& x, double from, double to) {
+            float p = 0.0f;
+            for (size_t i = static_cast<size_t>(from * rate); i < std::min(x.size(), static_cast<size_t>(to * rate)); ++i) p = std::max(p, std::fabs(x[i]));
+            return p;
+        };
+        // It plays: the chords with chords/epiano/rhodes are ready and have a level.
+        {
+            auto e = make(keys, EPIANO);
+            CHECK(e->voiceStatus().find(R"("chords":"ready")") != std::string::npos);
+            btg::Transport t;
+            t.play(64.0, e->bpm());
+            const Result r = render(*e, t, 2.0, 480);
+            const float level = e->takePeak(btg::Engine::chords);
+            std::printf("e-piano: chords peak %.3f, rms %.4f\n", level, r.rms);
+            CHECK(r.finite && level > 0.01f && r.rms > 1e-3);
+        }
+        // Review Focus 5, pitch: one tone (A3, 220 Hz, velocity 0.5) at 44.1 and 96 kHz within 2 cents, between the first and the last upward
+        // zero crossing from 0.4 s on: the bell has ended (0.15 s) and the index has fallen to a third (0.35 s), 0.62, so the carrier's
+        // frequency f (1 + 0.62 sin) stays above 0 and its phase rises: one upward crossing per period.
+        for (const double sr : { 44100.0, 96000.0 }) {
+            const auto voice = makeVoice(btg::Engine::chords, "chords/epiano/rhodes", nullptr, {}, Timbre {});
+            auto tones = std::make_unique<Tones>();
+            tones->sr = sr;
+            tones->basic = &basicWaves(sr);
+            VoiceState state;
+            PlayEvent e;
+            e.layer = btg::Engine::chords;
+            e.midi = 57;
+            e.vel = 0.5;
+            e.durBeats = 2.0;
+            voice->play(e, 0, 1.0, state, *tones);
+            std::vector<float> l(static_cast<size_t>(1.2 * sr)), r(l.size());
+            for (size_t at = 0; at < l.size(); at += SYNTH_FRAMES)
+                for (SynthTone& t : tones->synth) if (t.active) t.render(&l[at], &r[at], static_cast<int>(std::min<size_t>(SYNTH_FRAMES, l.size() - at)), tones->scratch);
+            double first = -1.0, last = -1.0;
+            int crossings = 0;
+            for (size_t i = static_cast<size_t>(0.4 * sr); i + 1 < l.size(); ++i)
+                if (l[i] <= 0 && l[i + 1] > 0) {
+                    last = (static_cast<double>(i) + l[i] / (l[i] - l[i + 1])) / sr;
+                    if (first < 0) first = last;
+                    ++crossings;
+                }
+            const double cents = 1200 * std::log2((crossings - 1) / (last - first) / 220.0);
+            std::printf("e-piano at %.0f Hz: A3 %+.3f cents off 220 Hz over %d periods\n", sr, cents, crossings - 1);
+            CHECK(crossings > 100 && std::fabs(cents) < 2);
+        }
+        // A glide's note (slideIn, scoop: the guitars' arts, kept by a live voice change) is triggered its lead early for the sampler; the
+        // e-piano ignores the art and plays at the note, as the web: a lead of 0.05 s, the first 2400 frames silent (and the next: its sines
+        // start at 0), then the note's 0.5 s, its fade (0.18 s) and silence once its sources stop (0.05 s later).
+        {
+            const auto voice = makeVoice(btg::Engine::chords, "chords/epiano/rhodes", nullptr, {}, Timbre {});
+            auto tones = std::make_unique<Tones>();
+            tones->sr = rate;
+            tones->basic = &basicWaves(rate);
+            VoiceState state;
+            PlayEvent e;
+            e.layer = btg::Engine::chords;
+            e.midi = 57;
+            e.vel = 0.8;
+            e.art = Art::slideIn;
+            e.leadBeats = 0.05;
+            e.durBeats = 0.55;
+            voice->play(e, 0, 1.0, state, *tones);
+            std::vector<float> l(rate), r(rate);
+            for (size_t at = 0; at < l.size(); at += SYNTH_FRAMES)
+                for (SynthTone& t : tones->synth) if (t.active) t.render(&l[at], &r[at], SYNTH_FRAMES, tones->scratch);
+            const auto first = static_cast<size_t>(std::find_if(l.begin(), l.end(), [](float x) { return x != 0.0f; }) - l.begin());
+            std::printf("e-piano under a glide's lead: first sound at frame %zu\n", first);
+            CHECK(first == 2401 && peakIn(l, 0.55, 0.73) > 1e-3 && peakIn(l, 0.8, 1.0) == 0.0f);
+        }
+        // Stop and silence: the stop chokes the synth tones (15 ms, ended at 1e-7: 0.24 s); while they still ring after the wet fade (50 ms)
+        // the engine is not quiet, and then the output is exactly 0. Red when quiet looks at the sample tones only (silent from 50 ms).
+        {
+            auto e = make(held, EPIANO);
+            btg::Transport t;
+            t.play(longest, e->bpm());
+            render(*e, t, 0.5, 480);
+            t.stop();
+            const Result after = render(*e, t, 0.5, 480);
+            std::printf("e-piano stop: peak from 60 to 150 ms after it %.2e, from 0.3 s %.2e\n", peakIn(after.left, 0.06, 0.15), peakIn(after.left, 0.3, 0.5));
+            CHECK(peakIn(after.left, 0.06, 0.15) > 1e-6 && peakIn(after.left, 0.3, 0.5) == 0.0f && e->activeSynthTones() == 0);
+        }
+        // A jump under the held chord, the chords switched to a silent voice with it (so only what rang can sound): the old tones fall over
+        // the e-piano's REL (0.18 s) without a step (the largest difference of two successive samples from the jump on stays within 10 % of
+        // the tone's own in its last 0.2 s before it; a cut is a step of its level: red with releaseSeconds 0), and are gone after it: none
+        // is active from REL and two chunks on, and the output stays below -180 dBFS (playing, the sum's filters are not cleared).
+        {
+            auto e = make(held, EPIANO);
+            btg::Transport t;
+            t.play(longest, e->bpm());
+            const Result before = render(*e, t, 1.0, 480);
+            e->setVoices(SILENT);
+            t.seek(longest + 8.0);
+            const Result falling = render(*e, t, 0.18 + 2.0 * SYNTH_FRAMES / rate, 480);
+            const int left = e->activeSynthTones();
+            const Result rest = render(*e, t, 0.3, 480);
+            double own = 0.0, jump = std::fabs(falling.left[0] - before.left.back());
+            for (size_t i = before.left.size() - rate / 5; i < before.left.size(); ++i) own = std::max(own, static_cast<double>(std::fabs(before.left[i] - before.left[i - 1])));
+            for (size_t i = 1; i < falling.left.size(); ++i) jump = std::max(jump, static_cast<double>(std::fabs(falling.left[i] - falling.left[i - 1])));
+            std::printf("e-piano jump: largest step %.2e after it, %.2e before it; %d synth tones active %.3f s after it, then peak %.2e\n", jump, own, left,
+                        static_cast<double>(falling.left.size()) / rate, peakIn(rest.left, 0.0, 0.3));
+            CHECK(own > 1e-3 && jump < 1.1 * own && left == 0 && peakIn(rest.left, 0.0, 0.3) < 1e-9f);
+        }
+        // A loop of one beat over the held chord: every lap starts its three tones again and the wrap lets the last lap's fall (0.18 s of the
+        // 0.6 s lap), so at most six are active; red when a jump leaves the synth tones ringing (they pile up: each rings 2.3 s).
+        {
+            auto e = make(held, EPIANO);
+            btg::Transport t;
+            t.setLoop(longest, longest + 1.0);
+            t.play(longest, e->bpm());
+            std::vector<float> l(480), r(480);
+            int most = 0;
+            for (int block = 0; block < 600; ++block) { // 6 s, ten laps
+                const auto b = t.advance(480, rate);
+                e->render(l.data(), r.data(), b.frames, b);
+                most = std::max(most, e->activeSynthTones());
+            }
+            std::printf("e-piano loop: at most %d synth tones active over ten laps\n", most);
+            CHECK(most >= 3 && most <= 6);
+        }
+        // A voice change under a ringing tone (the stab of 0.9 s, its tone 1.13 s): the chords go to a sample guitar 0.3 s in, and a control
+        // call after it frees the setup that held the e-piano while its tone rings. The tail equals the render without the change, exactly,
+        // until the next stab (3.3 s later); from it on the guitar plays.
+        {
+            const auto run = [&](bool change) {
+                auto e = make(held, EPIANO);
+                btg::Transport t;
+                t.play(gapped, e->bpm());
+                Result r = render(*e, t, 0.3, 480);
+                if (change) e->setVoices(R"({"chords":{"id":"sample","variant":"funk"}})");
+                const Result taken = render(*e, t, 0.01, 480); // the block that takes the new setup
+                e->setSound(DRY); // a publish: it frees the setup the audio side retired (with the e-piano, when changed)
+                const Result rest = render(*e, t, 4.0, 480);
+                for (const Result* more : { &taken, &rest }) r.left.insert(r.left.end(), more->left.begin(), more->left.end());
+                return r;
+            };
+            const Result changed = run(true), kept = run(false);
+            const size_t next = static_cast<size_t>((nextStab - gapped) * 0.6 * rate) - SYNTH_FRAMES;
+            bool same = changed.left.size() == kept.left.size();
+            for (size_t i = 0; same && i < next; ++i) same = changed.left[i] == kept.left[i];
+            bool differs = false;
+            for (size_t i = next; i < changed.left.size(); ++i) differs = differs || std::fabs(changed.left[i] - kept.left[i]) > 1e-3f;
+            std::printf("e-piano voice change: tail peak %.3f from the change to 1.2 s\n", peakIn(changed.left, 0.31, 1.2));
+            CHECK(same && peakIn(changed.left, 0.31, 1.2) > 0.01f && differs);
+        }
+        // A restart with the app's lead (stop and play back to back) under the e-piano equals a fresh engine started the same way, within 1e-6,
+        // from the song's first frame on: the render quanta are counted from the play's first frame, so the new song's tones get the places
+        // in the quantum (and so the sound) a fresh engine gives them. 2.15 s before the restart (806.25 quanta, the stab of 0.9 s rung out,
+        // the next 3.3 s after it): red when a start does not reset the count (every place 32 frames off).
+        {
+            const double lead = 0.15;
+            const auto played = [&](bool restart) {
+                auto e = make(held, EPIANO);
+                btg::Transport t;
+                t.play(gapped, e->bpm(), lead);
+                if (restart) {
+                    render(*e, t, lead + 2.0, 480);
+                    t.stop();
+                    t.play(gapped, e->bpm(), lead);
+                }
+                return render(*e, t, lead + 1.5, 480).left;
+            };
+            const std::vector<float> again = played(true), fresh = played(false);
+            double most = 0.0;
+            for (size_t i = static_cast<size_t>(std::lround(lead * rate)); i < again.size(); ++i) most = std::max(most, static_cast<double>(std::fabs(again[i] - fresh[i])));
+            std::printf("e-piano restart with the lead: against a fresh engine, largest difference %.2e (song peak %.3f)\n", most, peakIn(fresh, lead, lead + 1.5));
+            CHECK(peakIn(fresh, lead, lead + 1.5) > 0.01f && most < 1e-6);
+        }
+        // The pool is full: 266 tones started into 256: the ten oldest are taken (serials 1 to 10 gone), the new ones begin at age 0, the
+        // others go on where they were (one chunk rendered before), the sample pool is not touched.
+        {
+            const auto voice = makeVoice(btg::Engine::chords, "chords/epiano/rhodes", nullptr, {}, Timbre {});
+            auto tones = std::make_unique<Tones>();
+            tones->sr = rate;
+            tones->basic = &basicWaves(rate);
+            VoiceState state;
+            PlayEvent e;
+            e.layer = btg::Engine::chords;
+            e.midi = 60;
+            e.vel = 0.8;
+            e.durBeats = 1.0;
+            for (int i = 0; i < TONES; ++i) voice->play(e, 0, 1.0, state, *tones);
+            std::vector<float> l(SYNTH_FRAMES), r(SYNTH_FRAMES);
+            for (SynthTone& t : tones->synth) t.render(l.data(), r.data(), SYNTH_FRAMES, tones->scratch);
+            for (int i = 0; i < 10; ++i) voice->play(e, 0, 1.0, state, *tones);
+            int active = 0, fresh = 0, kept = 0;
+            uint64_t lowest = UINT64_MAX;
+            for (const SynthTone& t : tones->synth) {
+                active += t.active;
+                lowest = std::min(lowest, t.serial);
+                if (t.serial > static_cast<uint64_t>(TONES)) fresh += t.age == 0;
+                else kept += t.age == SYNTH_FRAMES;
+            }
+            CHECK(active == TONES && lowest == 11 && fresh == 10 && kept == TONES - 10);
+            CHECK(std::none_of(tones->all.begin(), tones->all.end(), [](const Tone& t) { return t.active; }));
+        }
+        // No allocation and no free in render (ruling 14): one run with sample voices (drums, bass, the chords' guitar) and the e-piano, a
+        // voice change while playing (both ways), a restart (play again, no stop between), a jump and a stop, the counts armed around the
+        // render calls only (the control calls allocate). Red with an allocation in the audio path.
+        {
+            std::string chorded = track;
+            chorded.replace(chorded.find("\"chords\":false"), 14, "\"chords\":true");
+            auto e = make(chorded, EPIANO);
+            btg::Transport t;
+            std::vector<float> l(480), r(480);
+            const auto counted = [&](double seconds) {
+                counting = true;
+                for (int done = 0; done < seconds * rate;) {
+                    const auto b = t.advance(480, rate);
+                    e->render(l.data(), r.data(), b.frames, b);
+                    done += b.frames;
+                }
+                counting = false;
+            };
+            t.play(64.0, e->bpm());
+            counted(1.0);
+            e->setVoices(R"({"chords":{"id":"sample","variant":"funk"}})");
+            counted(0.5);
+            e->setVoices(EPIANO);
+            counted(0.5);
+            t.play(64.0, e->bpm());
+            counted(1.0);
+            t.seek(32.0);
+            counted(0.5);
+            t.stop();
+            counted(0.5);
+            std::printf("render: %ld allocations, %ld frees (%s)\n", allocations, frees, e->voiceStatus().c_str());
+            CHECK(allocations == 0 && frees == 0 && e->voiceStatus().find(R"("chords":"ready")") != std::string::npos);
         }
     }
 

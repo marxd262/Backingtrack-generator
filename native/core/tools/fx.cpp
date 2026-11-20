@@ -14,15 +14,19 @@
 //
 // The building blocks of the synth voices, for native/tools/voice-compare.mjs (Task 20a). in is the noise buffer the tool makes; out has
 // <frames> frames, stereo interleaved; times and time constants are frames:
-//   btg_fx <in.f32> <out.f32> <rate> osc <frames> <sine|square|sawtooth|triangle|custom> <hz> <cents> <start> <stop> [--exp <hz> <frame>]
+//   btg_fx <in.f32> <out.f32> <rate> osc <frames> <sine|square|sawtooth|triangle|custom> <hz> <cents> <start> <stop> [--exp <from> <hz> <frame>]
 //                                                                    [--fm <hz> <depth>] [--custom <real> <imag> <normalized|raw>]
-//       one oscillator of a SynthTone; --exp: its frequency set at the start and ramped exponentially to <hz> at <frame>; --fm: a sine at <hz>
+//       one oscillator of a SynthTone (<hz> its frequency's value before any event); --exp: its frequency set to <from> at the start and
+//       ramped exponentially to <hz> at <frame>; --fm: a sine at <hz>
 //       through a gain of <depth> into its frequency; --custom (with the wave custom): customWave of those comma-separated coefficients,
 //       raw = disableNormalization
 //   btg_fx <in.f32> <out.f32> <rate> param <frames> <value> [set <v> <frame> | linear <v> <frame> | exp <v> <frame> | target <v> <frame> <tc>]... [--input]
 //       Param::values (L = R) with that intrinsic value and those events; --input: in added at audio rate
 //   btg_fx <in.f32> <out.f32> <rate> graph <frames> <1|2|3|4|5>
 //       the fixed graphs of voice-compare.mjs, built with SynthTone's calls (the numbers stand in both files)
+//   btg_fx <in.f32> <out.f32> <rate> voice <frames> <key> <timbre> [<frame> <midi> <vel> <seconds>]...  (Task 21)
+//       the synth voice `key` ("chords/epiano/rhodes") as setVoices builds it (makeVoice, no pack) with the timbre as setSound takes it (JSON),
+//       its notes each from its frame on, through Tones as the engine plays them; no layer chain, no mixer
 // The tones render in calls of SYNTH_FRAMES (256) frames, the engine's chunk.
 #include "../src/guitar_fx.h"
 #include "../src/mod_fx.h"
@@ -129,10 +133,11 @@ void buildGraph(int which, SynthTone& t, const std::vector<float>& noise) {
 int main(int argc, char** argv) {
     const std::string usage = "usage: btg_fx <in.f32> <out.f32> <rate> none | shaper <soft|hard|fuzz|muff|line> <2|4> | guitar <layer> <fuzz> <overdrive> <distortion>\n"
                               "                                       | mod <vibrato> <chorus> <bpm> | series <layer> <fuzz> <overdrive> <distortion> <vibrato> <chorus> <bpm>\n"
-                              "                                       | osc <frames> <wave> <hz> <cents> <start> <stop> [--exp <hz> <frame>] [--fm <hz> <depth>]\n"
+                              "                                       | osc <frames> <wave> <hz> <cents> <start> <stop> [--exp <from> <hz> <frame>] [--fm <hz> <depth>]\n"
                               "                                                                        [--custom <real> <imag> <normalized|raw>]\n"
                               "                                       | param <frames> <value> [set|linear|exp <v> <frame> | target <v> <frame> <tc>]... [--input]\n"
                               "                                       | graph <frames> <1..5>\n"
+                              "                                       | voice <frames> <key> <timbre> [<frame> <midi> <vel> <seconds>]...\n"
                               "       btg_fx curves <out.f32>\n";
     try {
         if (argc == 3 && std::string(argv[1]) == "curves") {
@@ -150,7 +155,7 @@ int main(int argc, char** argv) {
         std::copy(bytes.begin(), bytes.end(), reinterpret_cast<char*>(x.data())); // little endian hosts only
         const double rate = std::atof(argv[3]);
         const std::string mode = argv[4];
-        if (mode == "osc" || mode == "param" || mode == "graph") {
+        if (mode == "osc" || mode == "param" || mode == "graph" || mode == "voice") {
             if (argc < 7) { std::printf("%s", usage.c_str()); return 2; }
             const size_t frames = static_cast<size_t>(std::atoll(argv[5]));
             std::vector<float> left(frames), right(frames);
@@ -174,11 +179,11 @@ int main(int argc, char** argv) {
                     const std::string option = argv[i];
                     if (option == "--custom" && i + 3 < argc) {
                         i += 4;
-                    } else if (option == "--exp" && i + 2 < argc) {
+                    } else if (option == "--exp" && i + 3 < argc) {
                         Param& f = tone.param(o);
-                        f.setValueAtTime(f.value, start);
-                        f.exponentialRampToValueAtTime(static_cast<float>(std::atof(argv[i + 1])), std::atof(argv[i + 2]));
-                        i += 3;
+                        f.setValueAtTime(static_cast<float>(std::atof(argv[i + 1])), start);
+                        f.exponentialRampToValueAtTime(static_cast<float>(std::atof(argv[i + 2])), std::atof(argv[i + 3]));
+                        i += 4;
                     } else if (option == "--fm" && i + 2 < argc) {
                         const int m = tone.osc(Wave::sine, static_cast<float>(std::atof(argv[i + 1])), 0.0f, start, stop), depth = tone.gain(static_cast<float>(std::atof(argv[i + 2])));
                         tone.connect(m, depth);
@@ -214,6 +219,34 @@ int main(int argc, char** argv) {
                     p.values(count, input ? &added[at] : nullptr, &left[at]);
                 }
                 right = left;
+            } else if (mode == "voice") {
+                if (argc < 8 || (argc - 8) % 4 != 0) { std::printf("%s", usage.c_str()); return 2; }
+                const std::string key = argv[6];
+                const auto layer = std::find_if(std::begin(LAYER_NAMES), std::end(LAYER_NAMES), [&](const char* n) { return key.rfind(std::string(n) + "/", 0) == 0; });
+                if (layer == std::end(LAYER_NAMES)) throw std::runtime_error("no layer in " + key);
+                const auto voice = makeVoice(static_cast<btg::Engine::Layer>(layer - std::begin(LAYER_NAMES)), key, nullptr, {}, completeTimbre(argv[7]));
+                if (!voice) throw std::runtime_error("the core has no synth voice " + key);
+                const auto tones = std::make_unique<Tones>();
+                tones->sr = rate;
+                tones->basic = &basicWaves(rate);
+                VoiceState state;
+                state.rng = voice->startRng;
+                for (size_t at = 0; at < frames; at += SYNTH_FRAMES) {
+                    const int count = static_cast<int>(std::min<size_t>(SYNTH_FRAMES, frames - at));
+                    tones->quantum = static_cast<int>(at % 128); // the render's frame 0 is the play's first frame, as the context's
+                    for (int i = 8; i < argc; i += 4) { // the notes that begin in this chunk, as the engine hands them to the voice
+                        const size_t frame = static_cast<size_t>(std::atoll(argv[i]));
+                        if (frame < at || frame >= at + count) continue;
+                        PlayEvent e;
+                        e.layer = voice->layer;
+                        e.midi = std::atoi(argv[i + 1]);
+                        e.vel = std::atof(argv[i + 2]);
+                        e.durBeats = std::atof(argv[i + 3]); // one beat a second
+                        voice->play(e, static_cast<int>(frame - at), 1.0, state, *tones);
+                    }
+                    for (SynthTone& t : tones->synth) if (t.active) t.render(&left[at], &right[at], count, tones->scratch);
+                }
+                for (const SynthTone& t : tones->synth) if (t.overflow()) throw std::runtime_error("the voice's graph does not fit a SynthTone");
             } else {
                 buildGraph(std::atoi(argv[6]), tone, x);
                 renderTone(tone, left, right);

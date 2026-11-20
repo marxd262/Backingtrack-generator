@@ -10,7 +10,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const load = (file) => import(pathToFileURL(join(resolve(here, '../../..'), 'src', file)).href);
 const { STYLE_PRESETS, buildEvents } = await load('index.js');
 const { normalizeTrack } = await load('core/track.js');
-const { resolveVoices } = await load('core/voices.js');
+const { resolveVoices, usesTimbreField, VOICES } = await load('core/voices.js');
 const { progressionFor } = await load('core/progressions.js');
 const { DEFAULT_TIMBRE, resolveTrackTimbre } = await load('core/timbre.js');
 const { tunedValue } = await load('audio/voices/tunables.js');
@@ -157,12 +157,26 @@ CLAIMS['kit.places'] = (c, events) => {
   if (voice?.id !== 'sample' || tunedValue(`drums/sample/${voice.variant}`, 'kitPan', {}) === 0) return 'the kit does not place its hits';
   return events.some((e) => e.layer === 'drums' && e.type === 'hit' && KIT_PLACES.includes(e.name)) ? '' : 'no hit with a place in the kit';
 };
+// Phase 5: the layers that are on, play notes or hits and have a voice whose registry kind is not 'sample' (src/core/voices.js).
+// voice:<layer>: the layer is one of them; synth:<layer>.<knob>: also the knob is away from its neutral value (DEFAULT_TIMBRE) and the
+// layer's voice uses it (usesTimbreField).
+const synthLayers = (c, events) => Object.keys(c.track.layers).filter((l) => c.track.layers[l] && VOICES[l][c.track.voices[l].id].kind !== 'sample'
+  && events.some((e) => e.layer === l && (e.type === 'note' || e.type === 'hit')));
+for (const layer of Object.keys(VOICES)) {
+  CLAIMS[`voice:${layer}`] = (c, events) => (synthLayers(c, events).includes(layer) ? '' : `no ${layer} notes or hits with a voice that is not a sample voice`);
+  for (const k of Object.keys(DEFAULT_TIMBRE[layer] ?? {})) CLAIMS[`synth:${layer}.${k}`] = (c, events) => {
+    if (c.sound[layer][k] === DEFAULT_TIMBRE[layer][k]) return `${layer}.${k} = ${c.sound[layer][k]} is its neutral value`;
+    if (!usesTimbreField(c.track.voices, `${layer}.${k}`)) return `the voice of ${layer} does not use ${layer}.${k}`;
+    return CLAIMS[`voice:${layer}`](c, events);
+  };
+}
 function claimed(c, claims) {
   const events = buildEvents(c.track);
   for (const g of FX_LAYERS) for (const k of PHASE4) if (c.sound[g][k] !== 0 && !claims.includes(claimOf(g, k)) && !claims.includes('style')) problems.push(`${c.name}: ${g}.${k} is on but not claimed`);
-  const synth = effectsOn(c.sound) && !Object.values(c.track.layers).every(Boolean);
+  // ruling 10: the synth limits wherever a layer plays a voice that is not a sample voice, also in a whole band
+  const synth = (effectsOn(c.sound) && !Object.values(c.track.layers).every(Boolean)) || synthLayers(c, events).length > 0;
   if (claims.includes('style') && synth) c.kind = 'synth';
-  if ((c.kind === 'synth') !== synth) problems.push(`${c.name}: kind must be 'synth' exactly where a layer effect is on in a case of fewer layers than the whole band`);
+  if ((c.kind === 'synth') !== synth) problems.push(`${c.name}: kind must be 'synth' exactly where a layer plays a voice that is not a sample voice, or a layer effect is on in a case of fewer layers than the whole band`);
   for (const what of claims) { const why = CLAIMS[what](c, events); if (why) problems.push(`${c.name}: ${why}`); }
   return c;
 }
@@ -314,5 +328,16 @@ for (const bpm of [60, 160]) modCases.push(claimed({ name: `mod-chords-both-${bp
 modCases.push(claimed({ name: 'mod-psych', track: bands.psych, sound: resolveTrackTimbre(bands.psych), dry: true }, [claimOf('bass', 'fuzz'), claimOf('chords', 'chorus')]));
 write('mod.json', modCases);
 console.log(`mod.json: ${modCases.length} cases`);
+
+// --- Phase 5: the synth voices. One layer alone with a synth voice, dry, the limits of synth voices (kind 'synth', ruling 10). ---
+const synthSolo = (name, layer, voice, style, fields, claims, extra = {}, tuning = undefined) => claimed({ name, dry: true, kind: 'synth', sound: set(neutralSound, fields), tuning,
+  track: track(style, { layers: { [layer]: true }, voices: { [layer]: voice }, extra }) }, claims);
+// Task 21: the FM e-piano on the chords, neutral and each of its knobs at its ends (dreamy: long chords, so that length shows)
+const EPIANO = { id: 'epiano', variant: 'rhodes' };
+const epianoCases = [synthSolo('epiano-neutral', 'chords', EPIANO, 'dreamy', {}, ['voice:chords'])];
+for (const [k, values] of [['brightness', [0, 1]], ['length', [0, 1]], ['tremolo', [0.5, 1]]])
+  for (const v of values) epianoCases.push(synthSolo(`epiano-${k}-${v}`, 'chords', EPIANO, 'dreamy', { [`chords.${k}`]: v }, ['voice:chords', `synth:chords.${k}`]));
+write('epiano.json', epianoCases);
+console.log(`epiano.json: ${epianoCases.length} cases`);
 for (const p of problems) console.error(`ERROR ${p}`);
 process.exit(problems.length ? 1 : 0);

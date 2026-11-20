@@ -34,6 +34,7 @@ std::shared_ptr<const WaveTables> customWave(const float* real, const float* ima
 struct Oscillator {
     const WaveTables* wave = nullptr;
     double index = 0.0; // virtual_read_index (in constant(), from kInterpolate2Point on: at the start of the current block)
+    int offset = 0;     // the place of its first frame in its render quantum: constant()'s first block is the rest of that quantum
     // Frequency and detune constant over the frames (Chromium's k-rate path); `left`: the frames from the first of these to the stop.
     void constant(float hz, float cents, float* out, int count, long long left);
     // Per frame: hz[i] and cents[i] where that param has a timeline or an input (hzMoving, centsMoving), else hz[0] or cents[0] for every frame.

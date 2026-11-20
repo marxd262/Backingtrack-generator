@@ -200,6 +200,25 @@ try {
   if (!(result.effects.peaks.bass > 0)) problems.push('bass: no level with every effect on');
   const moved = Math.max(0, ...Object.values(result.effects.gainDb).filter((g) => g !== null).map(Math.abs));
   if (!(moved >= 1.5)) problems.push(`effects: no layer's peak changes with every effect on (dB against the page's timbre): ${JSON.stringify(result.effects.gainDb)}`);
+  // The e-piano (Task 21): the page's chords voice set to chords/epiano/rhodes through the bridge, as the page sends `voices` (the voices it
+  // sent last, the chords changed); the engine's `voices` event reports the chords ready, 4 s of play from beat 64 give them a level; then
+  // the page's own voices again. Red when the core has no voice for the key (the chords stay silent).
+  result.epiano = await page.evaluate(async () => {
+    const own = window.sent.findLast((s) => s.type === 'voices')?.json ?? JSON.stringify(JSON.parse(window.sent.findLast((s) => s.type === 'track').json).voices);
+    const reported = async (send) => { // the chords' status in the engine's next `voices` event
+      const before = window.voiceLog.length;
+      send();
+      for (let i = 0; i < 30 && window.voiceLog.length === before; i++) await new Promise((r) => setTimeout(r, 100));
+      return window.voiceLog.length > before ? window.voiceLog.at(-1).chords : 'no voices event';
+    };
+    const status = await reported(() => window.bridge('voices', { json: JSON.stringify({ ...JSON.parse(own), chords: { id: 'epiano', variant: 'rhodes' } }) }));
+    window.bridge('play', { startBeats: 64, bpm: window.sent.findLast((s) => s.type === 'play').bpm });
+    window.engineLog.length = 0;
+    await new Promise((r) => setTimeout(r, 4000));
+    const peak = +Math.max(0, ...window.engineLog.map((m) => m.peaks?.chords ?? 0)).toFixed(3), load = +window.lastEngine().load.toFixed(3);
+    return { status, peak, load, restored: await reported(() => window.bridge('voices', { json: own })) };
+  });
+  if (result.epiano.status !== 'ready' || !(result.epiano.peak > 0) || result.epiano.restored !== 'ready') problems.push(`e-piano: ${JSON.stringify(result.epiano)}`);
   result.position = await page.locator('#play-position').innerText();
   result.chord = await page.locator('#play-now').innerText();
   result.framesPerSecond = await page.evaluate(() => new Promise((done) => {
