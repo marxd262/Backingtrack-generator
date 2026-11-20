@@ -62,6 +62,29 @@ export async function renderWeb(repo, tracks, rate, warps = [], options = []) {
   }
 }
 
+// in place, radix 2 (sound-compare.mjs's bands, voice-compare.mjs's unjudged bands)
+export function fft(re, im) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) { [re[i], re[j]] = [re[j], re[i]]; [im[i], im[j]] = [im[j], im[i]]; }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const wr = Math.cos(-2 * Math.PI / len), wi = Math.sin(-2 * Math.PI / len), half = len / 2;
+    for (let i = 0; i < n; i += len) {
+      let cr = 1, ci = 0;
+      for (let k = 0; k < half; k++) {
+        const a = i + k, b = a + half;
+        const tr = re[b] * cr - im[b] * ci, ti = re[b] * ci + im[b] * cr;
+        re[b] = re[a] - tr; im[b] = im[a] - ti; re[a] += tr; im[a] += ti;
+        [cr, ci] = [cr * wr - ci * wi, cr * wi + ci * wr];
+      }
+    }
+  }
+}
+
 // 16-bit stereo WAV
 export function wavBytes(samples, rate, gain = 1) {
   const data = Buffer.alloc(44 + samples.length * 2);

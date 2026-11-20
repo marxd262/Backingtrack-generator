@@ -9,6 +9,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 import { buildEvents } from '../../src/index.js';
+import { VOICES } from '../../src/core/voices.js';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const exe = process.argv[2] ?? join(repo, 'native/build/app/BackingtrackApp_artefacts/Release/Standalone/Backingtrack Generator.exe');
@@ -314,6 +315,53 @@ try {
   if (!['bass', 'chords', 'pad', 'lead'].every((l) => result.classic.status?.[l] === 'ready' && result.classic.peaks[l] > 0 && result.classic.restored?.[l] === 'ready')
     || !(result.classic.drumsBack > 0))
     problems.push(`classic: ${JSON.stringify(result.classic)}`);
+  // Every layer on its synth voice ("alle Synth", Task 23): the page's own key #all-voices (src/ui/mixer.js 72 to 81, setAllVoices) pressed
+  // until the page shows the synth kind (from 'mixed' the first press chooses the samples): the `voices` message the page sends then names
+  // a voice whose registry kind is not 'sample' on all six layers, and the engine's `voices` event reports all six ready. Then a track of
+  // the step's own, sent through the bridge as the organ's step does: band-synth.json's case band-synth-funk (every layer on synth/classic,
+  // 100 bpm; drums and percussion from beat 16), with that case's sound, played from beat 0 to the engine's first report of beat 20 (the
+  // reports from beat 0.2 on, as the organ's): each of the six layers has a level. The same span again with every layer effect on (as the
+  // effects phase sets them): the load the engine reports (the slowly falling peak of the audio callback's share of its block) is at most
+  // 0.25 and no dropout comes (phase 5 ruling 12). Red when makeVoice has no voice for drums/synth/classic (the drums are reported silent and
+  // have no level). Then the page's voices of before the step chosen again through its voice selects (#voice-<layer>, a change event each,
+  // as the user chooses a voice; the key would choose DEFAULT_VOICES): the `voices` message the page sends last must name them on all six
+  // layers, a problem line of its own when it does not (a voice the selects do not offer cannot be chosen back). Then the page's own track,
+  // voices, tuning and sound of before the step (restorePage), shown by a play from beat 64 in which the page's drums have a level.
+  const SIX = ['drums', 'bass', 'chords', 'pad', 'lead', 'percussion'];
+  const synthCase = JSON.parse(readFileSync(join(repo, 'native/tools/sound-cases/band-synth.json'), 'utf8')).find((c) => c.name === 'band-synth-funk');
+  result.allSynth = await page.evaluate(async ([track, sound, layers]) => {
+    const key = document.getElementById('all-voices'), kind = () => key.dataset.state;
+    const voicesSent = () => JSON.parse(window.sent.findLast((s) => s.type === 'voices')?.json ?? '{}');
+    const own = window.pageOwn(), before = JSON.parse(own.voices); // the page's own, before the step
+    let status = null; // the engine's `voices` event after the last press
+    for (let i = 0; i < 3 && kind() !== 'synth'; i++) status = await window.voicesReported(() => key.click());
+    const shown = kind(), sent = voicesSent();
+    window.bridge('timbre', { json: JSON.stringify(sound) });
+    await window.voicesReported(() => window.bridge('track', { json: JSON.stringify(track) }));
+    const pass = async (json) => { // from beat 0.2 to the first report of beat 20: the layers' peaks, the load at its end, the dropouts
+      window.bridge('timbre', { json });
+      const xruns = window.lastEngine().xruns, log = await window.playUntil(track.bpm, 20, 200), end = window.lastEngine();
+      return { peaks: Object.fromEntries(layers.map((l) => [l, log ? window.peakOf(log, l) : null])), load: +end.load.toFixed(3), dropouts: end.xruns - xruns };
+    };
+    const every = structuredClone(sound);
+    for (const l of ['bass', 'chords', 'pad', 'lead']) Object.assign(every[l], { fuzz: 1, overdrive: 1, distortion: 1, vibrato: 1, chorus: 1 });
+    const plain = await pass(JSON.stringify(sound)), effects = await pass(JSON.stringify(every));
+    for (const l of layers) { // the page's own voices again, as the user chooses them
+      const select = document.getElementById(`voice-${l}`), value = `${before[l]?.id}/${before[l]?.variant}`;
+      if (!select || ![...select.options].some((o) => o.value === value)) continue;
+      select.value = value;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    const after = voicesSent(), { restored, drumsBack } = await window.restorePage(own);
+    return { shown, sent, status: status && Object.fromEntries(layers.map((l) => [l, status[l]])), plain, effects, before, after, restored, drumsBack };
+  }, [synthCase.track, synthCase.sound, SIX]);
+  const allSynth = result.allSynth, synthVoice = (l) => !!VOICES[l][allSynth.sent[l]?.id] && VOICES[l][allSynth.sent[l].id].kind !== 'sample';
+  const back = (l) => allSynth.after[l]?.id === allSynth.before[l]?.id && allSynth.after[l]?.variant === allSynth.before[l]?.variant;
+  if (allSynth.shown !== 'synth' || !SIX.every((l) => synthVoice(l) && allSynth.status?.[l] === 'ready' && allSynth.plain.peaks[l] > 0))
+    problems.push(`all synth: ${JSON.stringify({ shown: allSynth.shown, sent: allSynth.sent, status: allSynth.status, peaks: allSynth.plain.peaks })}`);
+  if (!SIX.every((l) => back(l) && allSynth.restored?.[l] === 'ready') || !(allSynth.drumsBack > 0))
+    problems.push(`all synth: the page's own voices are not back: ${JSON.stringify({ before: allSynth.before, after: allSynth.after, restored: allSynth.restored, drumsBack: allSynth.drumsBack })}`);
+  if (allSynth.effects.dropouts > 0 || !(allSynth.effects.load <= 0.25)) problems.push(`all synth with every effect on: load ${allSynth.effects.load} (limit 0.25), dropouts ${allSynth.effects.dropouts}`);
   result.position = await page.locator('#play-position').innerText();
   result.chord = await page.locator('#play-now').innerText();
   result.framesPerSecond = await page.evaluate(() => new Promise((done) => {
@@ -367,30 +415,37 @@ try {
   });
   await page.evaluate(() => window.bridge('loop', { start: 0, end: 0 }));
 
-  // The sound reaches the engine: the song from the same beat at master.width 0 and at 1 (each pass begins with a `play` at that beat: a
-  // start resets the voices' random draws, so both passes play the same notes), through the page's own width knob (the page sends
-  // `timbre`, the shell queues it, control() calls setSound). The layers' levels the engine reports come from behind the balance, whose
-  // places the width multiplies (masterParams.width = 2 * knob, so knob 1 doubles the places): the peak of a mono layer at place p is
-  // 1 + |p| times its level, so a layer away from the middle is louder at knob 1 by 20 log10 (1 + 2 |p|) dB than at 0 (chords p 0.3:
-  // 4.1 dB, pad -0.2: 2.9 dB, percussion -0.4: 5.1 dB; the places are the fine values of 'mix/pan'). Every layer that sounds in both
-  // passes must reach at least half of its predicted gain, and at least one must sound. The figures (predicted beside measured) are in
-  // the output; with the `timbre` case of control() taken out the gains are about 0 dB.
+  // The sound reaches the engine: a track of the step's own, sent through the bridge as the organ's step does, band.json's case band-funk
+  // (100 bpm; chords and pad from beat 0, percussion from beat 16), at master.width 0 and at 1, each pass a play from beat 0 to the engine's
+  // first report of beat 20 (playUntil: a start resets the voices' random draws, so both passes play the same notes over the same span of
+  // the song), through the page's own width knob (the page sends `timbre`, the shell queues it, control() calls setSound). The layers'
+  // levels the engine reports come from behind the balance, whose places the width multiplies (masterParams.width = 2 * knob, so knob 1
+  // doubles the places): the peak of a mono layer at place p is 1 + |p| times its level, so a layer away from the middle is louder at knob 1
+  // by 20 log10 (1 + 2 |p|) dB than at 0 (chords p 0.3: 4.1 dB, pad -0.2: 2.9 dB, percussion -0.4: 5.1 dB; the places are the fine values
+  // of 'mix/pan'). Each of the three must sound in both passes and reach at least half of its predicted gain. The figures (predicted beside
+  // measured) are in the output; with the `timbre` case of control() taken out the gains are about 0 dB. Then the page's own track,
+  // voices, tuning and sound again (restorePage).
   const PLACES = { chords: 0.3, pad: -0.2, percussion: -0.4 };
+  const widthCase = JSON.parse(readFileSync(join(repo, 'native/tools/sound-cases/band.json'), 'utf8')).find((c) => c.name === 'band-funk');
   const widthLevels = async (value) => {
     await setRange('timbre-master-width', value);
-    await page.evaluate(() => { const play = window.sent.findLast((s) => s.type === 'play'); window.bridge('play', { startBeats: 64, bpm: play.bpm }); window.engineLog.length = 0; });
-    await sleep(3200);
-    return page.evaluate((layers) => Object.fromEntries(layers.map((l) => [l, Math.max(0, ...window.engineLog.map((m) => m.peaks?.[l] ?? 0))])), Object.keys(PLACES));
+    return page.evaluate(async ([bpm, layers]) => {
+      const log = await window.playUntil(bpm, 20, 200);
+      return Object.fromEntries(layers.map((l) => [l, log ? window.peakOf(log, l) : 0]));
+    }, [widthCase.track.bpm, Object.keys(PLACES)]);
   };
   if (await page.evaluate(() => !document.getElementById('timbre-master-width'))) problems.push('timbre: the width knob is not on the page');
   else {
+    const own = await page.evaluate(() => window.pageOwn());
+    await page.evaluate((track) => window.voicesReported(() => window.bridge('track', { json: JSON.stringify(track) })), widthCase.track);
     const narrow = await widthLevels(0), wide = await widthLevels(100);
     await setRange('timbre-master-width', 50);
+    await page.evaluate((o) => window.restorePage(o), own);
     const predicted = Object.fromEntries(Object.entries(PLACES).map(([l, p]) => [l, +(20 * Math.log10(1 + 2 * Math.abs(p))).toFixed(2)]));
     const gainDb = Object.fromEntries(Object.keys(PLACES).map((l) => [l, narrow[l] > 0 && wide[l] > 0 ? +(20 * Math.log10(wide[l] / narrow[l])).toFixed(2) : null]));
-    result.timbreReachesEngine = { width0: Object.fromEntries(Object.entries(narrow).map(([l, v]) => [l, +v.toFixed(3)])), width1: Object.fromEntries(Object.entries(wide).map(([l, v]) => [l, +v.toFixed(3)])), predictedDb: predicted, gainDb };
-    const sounding = Object.keys(PLACES).filter((l) => gainDb[l] !== null), short = sounding.filter((l) => !(gainDb[l] >= predicted[l] / 2));
-    if (!sounding.length || short.length) problems.push(`timbre: the engine did not hear the width (gain at width 1 against 0 in dB, measured against predicted: ${JSON.stringify(Object.fromEntries(Object.keys(PLACES).map((l) => [l, [gainDb[l], predicted[l]]])))}${sounding.length ? '' : '; no layer sounded'})`);
+    result.timbreReachesEngine = { width0: narrow, width1: wide, predictedDb: predicted, gainDb };
+    const short = Object.keys(PLACES).filter((l) => !(gainDb[l] >= predicted[l] / 2)); // a layer silent in a pass (null) is short too
+    if (short.length) problems.push(`timbre: the engine did not hear the width (gain at width 1 against 0 in dB, measured against predicted: ${JSON.stringify(Object.fromEntries(Object.keys(PLACES).map((l) => [l, [gainDb[l], predicted[l]]])))})`);
   }
 
   // Reaction time. One way UI -> app is half a ping round trip; then the control waits for the next audio block

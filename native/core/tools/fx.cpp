@@ -31,7 +31,7 @@
 //       the synth voice `key` ("chords/epiano/rhodes", "chords/organ/jazz") as setVoices builds it (makeVoice, no pack, the rate) with the
 //       timbre as setSound takes it (JSON) and the tuning as setTuning takes it, its notes each from its frame on, through Tones and its organ
 //       chains as the engine plays them (the noise of Engine::prepare); no layer chain, no mixer. A note's leslie and swell are the event's
-//       fields, artTime gives it the art swell with that time.
+//       fields, artTime gives it the art swell with that time. A name of HIT_NAMES in the place of <midi> is a hit of that name (Task 23).
 // The tones render in calls of SYNTH_FRAMES (256) frames, the engine's chunk.
 #include "../src/convolver.h"
 #include "../src/guitar_fx.h"
@@ -250,7 +250,10 @@ int main(int argc, char** argv) {
                     }
                     if (i + 3 >= argc) { std::printf("%s", usage.c_str()); return 2; }
                     Note n { static_cast<size_t>(std::atoll(argv[i])), {} };
-                    n.e.midi = std::atoi(argv[i + 1]);
+                    const auto name = std::find_if(std::begin(HIT_NAMES), std::end(HIT_NAMES), [&](const char* h) { return std::string(h) == argv[i + 1]; });
+                    n.e.hit = name != std::end(HIT_NAMES); // a hit of that name (Task 23), else a note of that midi
+                    if (n.e.hit) n.e.name = static_cast<int>(name - std::begin(HIT_NAMES));
+                    else n.e.midi = std::atoi(argv[i + 1]);
                     n.e.vel = std::atof(argv[i + 2]);
                     n.e.durBeats = std::atof(argv[i + 3]); // one beat a second
                     notes.push_back(n);
@@ -261,7 +264,7 @@ int main(int argc, char** argv) {
                 const auto tones = std::make_unique<Tones>();
                 tones->sr = rate;
                 tones->basic = &basicWaves(rate);
-                tones->noise = noiseBuffer(Rng(1).fork("noise"), 1, 1, 0, rate)[0]; // as Engine::prepare
+                tones->noise = synthNoise(rate); // as Engine::prepare
                 for (OrganChain& c : tones->chains) c.prepare(rate);
                 VoiceState state;
                 state.rng = voice->startRng;

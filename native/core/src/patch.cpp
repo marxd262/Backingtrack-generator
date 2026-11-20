@@ -70,6 +70,8 @@
  */
 #include "patch.h"
 
+#include "convolver.h"
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -409,5 +411,7 @@ int Tones::takeChain() {
     chains[static_cast<size_t>(taken)].live = false;
     return taken;
 }
+
+std::vector<float> synthNoise(double sampleRate) { return noiseBuffer(Rng(1).fork("noise"), 1, 1, 0, sampleRate)[0]; }
 
 } // namespace btg::detail

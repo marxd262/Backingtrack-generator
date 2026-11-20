@@ -3,8 +3,8 @@
 // tunedValue; the engine builds the voice again on every setTuning and setSound with the same serial (its voice instance and chain go on),
 // so reading them here, when the voice is built, is the same. Here too, on the control thread, the waves of every key at the engine's rate.
 // Times are frames from the tone's time 0 (the web's t), or frames of the chain's clock where the chain is set.
-#include "../patch.h"
 #include "../sound_data.h"
+#include "nodes.h"
 
 #include <algorithm>
 #include <cmath>
@@ -23,8 +23,6 @@ const int GEARS[12][2] = { { 85, 104 }, { 71, 82 }, { 67, 73 }, { 105, 108 }, { 
 const double NOTE = 0.2, ATTACK = 0.004, RELEASE = 0.012, CLICK_TC = 0.002, HELD_EPS = 0.005, TAIL = 10, GLIDE = 1;
 const double DRIVE_MAX = 6, DRIVE_REF = 0.4, RANGE = 4, PHASE = 2.399963;
 const char* const DRAWBARS[9] = { "d16", "d513", "d8", "d4", "d223", "d2", "d135", "d113", "d1" }; // tunables.js
-
-double hz(int m) { return 440 * std::pow(2.0, (m - 69) / 12.0); } // nodes.js
 
 // 23: how far the wheels of a pitch class miss equal temperament (cents)
 double wheelCents(int pitchClass) { return 1200 * std::log2((40.0 * GEARS[pitchClass][0]) / GEARS[pitchClass][1] / hz(24 + pitchClass)); }

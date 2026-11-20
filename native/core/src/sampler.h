@@ -14,9 +14,11 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <numbers>
 #include <string>
+#include <utility>
 
 namespace btg::detail {
 
@@ -24,6 +26,11 @@ constexpr int TONES = 256;
 extern const char* const LAYER_NAMES[Engine::layerCount];
 // DRUM_NAMES, then PERCUSSION_NAMES of src/core/events.js
 extern const char* const HIT_NAMES[22];
+// src/core/event-helpers.js: the hit that plays a name a kit has no sound of its own for
+extern const std::map<std::string, std::string> DRUM_FALLBACK;
+// synth.js 198: the gains of the left and the right channel of hit `name` in the kit, kitPans[DRUM_FALLBACK[name] ?? name] (KIT_PAN), at
+// `kit` (the timbre's width times mix/pan "kit"; a hit KIT_PAN does not name stays in the middle)
+std::pair<float, float> kitBalance(const std::string& name, double kit);
 
 enum class Art { none, staccato, dead, chuck, choke, palmMute, hammer, slideIn, scoop, slideOff, fall, bend, vibrato, swell };
 // Every art text the generator writes (articulation.js, organ.js); PlayEvent::artName points into it (art zones compare it).
@@ -240,6 +247,8 @@ std::shared_ptr<const Voice> makeVoice(Engine::Layer layer, const std::string& k
 std::shared_ptr<Voice> classicVoice(const Timbre& timbre);                                            // voices/classic.cpp
 std::shared_ptr<Voice> epianoVoice(const Tuning& tuning, const Timbre& timbre);                      // voices/epiano.cpp
 std::shared_ptr<Voice> organVoice(const std::string& key, const Tuning& tuning, double sampleRate); // voices/organ.cpp
+std::shared_ptr<Voice> drumsVoice(const Tuning& tuning, const Timbre& timbre, double kit);         // voices/drums.cpp; kit as kitBalance
+std::shared_ptr<Voice> percussionVoice();                                                          // voices/percussion.cpp
 struct WaveTables;
 // Tests only: what an organ voice plays key `midi` with: its wave (nullptr for another voice or none yet), the wheels' frequency and detune,
 // and the coefficients the wave was built from (a full build of them is the wave every range of it must equal)

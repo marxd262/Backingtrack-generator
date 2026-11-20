@@ -56,6 +56,25 @@
 //     five chorus sets, -10.9 to -9.9 dB), the tremolo (the three tremolo sets, -2.8 to -2.2 dB), the pad's LFO (every pad set, -26.6 to
 //     -4.9 dB), its extra saws (thickness 1, -4.2 dB), its octave sines (shimmer 1, -1.0 dB), its attack rule (the short note, -0.2 dB), the
 //     lead's filter ramp (every lead set, -19.8 to -2.0 dB), its triangle's 9 cents (every lead set, -11.6 to +1.5 dB).
+//     The synth kit (src/audio/voices/drums.js; Task 23), each hit through the balance of its place in the kit as synth.js builds it
+//     (KIT_PAN as sound.json holds it; hatHalf plays the closed hat at the place of its fallback, the open hat, which KIT_PAN gives the hat
+//     too, so no set tells the two places apart), and the synth percussion
+//     (src/audio/voices/percussion.js): every hit name (hatPedal at its fine value 1), each knob of the kit's sound at 0 and 1 on the hit it
+//     shapes, velocity 0.3, the kick, snare and crash and the tambourine and a conga at 44.1 and 96 kHz, the kick, a tom and a conga 92
+//     frames into a quantum (their oscillator's 440 Hz before its first event, which Chromium's first quantum plays on). Each of these makes
+//     a set fail when it is taken out (Task 23's mutation runs): the kick's pitch ramp (the nine kick sets, -0.6 to +2.3 dB), its click
+//     (kickPunch 1, -25.7 dB), the snare's triangle (the ten sets of the snare, side stick and rimshot, -14.8 to -0.4 dB), its click
+//     (snareSnap 1, -2.4 dB), the open hat's hold (its three sets, -8.0 to -1.7 dB), the toms' 1.35 (their four sets, +2.9 to +3.1 dB), the
+//     crash's loop (its three sets, -44.5 dB), the side stick's factor (+1.5 dB), the ride's fallback (mapped to the snare: +6.3 dB), the
+//     440 Hz (0 instead: the three sets inside a quantum, +4.6 to +4.7 dB), the noise's seed (every set that reads the noise, the organ's
+//     clicks too: -41.2 to +3.6 dB), the place in the kit (the 15 sets of a placed hit, -14.1 to -10.8 dB), the shaker's attack (-1.9 dB),
+//     the noise click of a conga or bongo (their seven sets, -32.3 to -24.8 dB), the percussion tone's pitch drop (the same seven, +2.9 to
+//     +4.1 dB), the tambourine's squares (its four sets, -9.7 to -9.5 dB), the cowbell's bandpass (-3.2 dB), the claves' second partial
+//     (-2.6 dB), and the knobs hatBright and hatLength not applied (their sets -1.0 and -1.7, -10.0 and -9.4 dB).
+//     Printed, not judged (LATE, ruling 9's cost for noise): the closed hat, the crash and the shaker that the page plays a quarter, a half
+//     and three quarters of a frame after a frame, the core on it. A buffer source that starts between frames reads its buffer
+//     interpolated for the whole hit (audio_buffer_source_handler.cc: ProcessInterpolatedPath, not ProcessFastPath), which dulls the noise;
+//     the line gives the core's level and its octave bands at 8 and 16 kHz against the web's.
 //     Events and their ends lie exactly on frames (renderWeb): with frame / rate the param events of a tone at 1632 / 48000 come a frame
 //     after its sources' start in Chromium (ceil(t * rate) against TimeToSampleFrame) and its first frame plays the gains' default 1 (the
 //     chord sets measured -48.4 to -45.2 dB, the 44.1 kHz set -39.8 dB, before the placement; the e-piano's frames were exact already).
@@ -117,6 +136,12 @@
 //     floor (5.1e-5): not traced into Chromium's source, not rebuilt. Without the phase of a start between frames (osc.h `lead`, Chromium's
 //     start_frame_offset) chorus 1 at 44.1 kHz measured -28.1 dB. The pad -137.6 to -123.9 dB (its figures move by about 0.1 dB from run to
 //     run: the browser's side), the lead -135.1 to -132.1 dB.
+//   voice (Task 23): the synth kit's 36 sets -156.3 (open hat, hatLength 0) to -121.9 dB (high tom), at most 3.9e-7 (the kick at 96 kHz);
+//     the percussion's 14 sets -143.4 (tambourine) to -119.9 dB (congaHigh at 96 kHz), at most 1.1e-6. The sets of a pitched hit (an
+//     oscillator with an a-rate frequency: kick, toms, congas, bongos; the a-rate kernel is not rebuilt, osc.cpp) lie at -135.0 to -119.9 dB,
+//     those of noise through filters at -156.3 to -128.8 dB. Off the grid (LATE, not judged), the core against the web: the closed hat a
+//     quarter, a half, three quarters of a frame late +2.82, +4.40, +2.82 dB, the crash +2.12, +3.14, +2.12 dB, the shaker +1.10, +1.54,
+//     +1.10 dB; in the 8 kHz band +0.94 to +1.49 dB, in the 16 kHz band +2.88 to +6.56 dB.
 //   --none: every set at 0.0 dB.
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -124,11 +149,13 @@ import { tmpdir } from 'node:os';
 import { dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
+import { fft } from './web-render.mjs';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const NONE = process.argv.includes('--none');
 const ONLY = process.argv.find((a) => a.startsWith('--only='))?.slice(7);
 const BAR = -60; // dB: the power of (core - web) over the power of web
+const KIT_PAN = JSON.parse(readFileSync(join(repo, 'native/core/data/sound.json'), 'utf8')).kitPan; // the page's kit places (renderWeb)
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.json': 'application/json', '.css': 'text/css' };
 
 // Times in seconds as the page schedules them; the core gets time * rate (the same double Chromium multiplies) as frames. A source starts on
@@ -258,11 +285,57 @@ VOICE.push(
   // the pad's whole graph: the extra saws and the octave sines, 16 nodes, SynthTone's limit (a larger one is not built: btg_fx exits with an error)
   classic('pad', 'shimmer 1 with thickness 1 (all 16 nodes)', PAD, { sound: { pad: { shimmer: 1, thickness: 1 } }, ...PAD_SET }),
 );
-const SETS = [...OSC, ...PARAM, ...GRAPH, ...VOICE];
+// Task 23, the synth kit (src/audio/voices/drums.js, its hits through their places in the kit) and the synth percussion
+// (src/audio/voices/percussion.js): events [frame, hit name, vel, seconds]. Every hit name (hatPedal at its fine value 1), each knob of the
+// kit's sound at 0 and 1 on the hit it shapes, velocity 0.3, 44.1 and 96 kHz, sets 92 frames into a quantum.
+const KIT = 'drums/synth/classic', PERC = 'percussion/synth/classic', hit = (name, vel = 0.8, frame = 1536) => [frame, name, vel, 0.1];
+const drums = (name, events, extra = {}) => voice(`drums ${name}`, KIT, events, { seconds: events.some(([, n]) => n === 'crash') ? 2 : 1, ...extra });
+const percussion = (name, events, extra = {}) => voice(`percussion ${name}`, PERC, events, extra);
+const DRUM_HITS = ['kick', 'snare', 'hat', 'openHat', 'tomHigh', 'tomMid', 'tomLow', 'crash', 'sideStick', 'rimshot', 'ride', 'rideBell', 'hatHalf', 'hatPedal'];
+const PERCUSSION_HITS = ['shaker', 'tambourine', 'congaHigh', 'congaLow', 'bongoHigh', 'bongoLow', 'claves', 'cowbell'];
+const KNOB_HITS = { kickPunch: 'kick', kickLength: 'kick', snareTone: 'snare', snareSnap: 'snare', hatBright: 'hat', hatLength: 'openHat' };
+VOICE.push(
+  ...DRUM_HITS.map((n) => (n === 'hatPedal' ? drums('hatPedal (its fine value 1)', [hit(n)], { tuning: { [KIT]: { hatPedal: 1 } } }) : drums(n, [hit(n)]))),
+  ...Object.entries(KNOB_HITS).flatMap(([k, n]) => [0, 1].map((v) => drums(`${n}, ${k} ${v}`, [hit(n)], { sound: { drums: { [k]: v } } }))),
+  ...['kick', 'snare'].map((n) => drums(`${n} velocity 0.3`, [hit(n, 0.3)])),
+  ...[44100, 96000].flatMap((rate) => ['kick', 'snare', 'crash'].map((n) => drums(`${n} at ${rate / 1000} kHz`, [hit(n)], { rate }))),
+  ...['kick', 'tomMid'].map((n) => drums(`${n}, started 92 frames into a quantum (frame 1500)`, [hit(n, 0.8, 1500)])),
+  ...PERCUSSION_HITS.map((n) => percussion(n, [hit(n)])),
+  percussion('tambourine velocity 0.3', [hit('tambourine', 0.3)]),
+  ...[44100, 96000].flatMap((rate) => ['tambourine', 'congaHigh'].map((n) => percussion(`${n} at ${rate / 1000} kHz`, [hit(n)], { rate }))),
+  percussion('congaHigh, started 92 frames into a quantum (frame 1500)', [hit('congaHigh', 0.8, 1500)]),
+);
+// Printed, not judged (ruling 9's cost for noise): the page plays the hit a quarter, a half and three quarters of a frame after frame 1536,
+// the core on it. Chromium then reads the noise buffer between its samples (linear interpolation) for the whole hit.
+const LATE = ['hat', 'crash', 'shaker'].flatMap((n) => [0.25, 0.5, 0.75].map((late) => voice(`${n === 'shaker' ? 'percussion' : 'drums'} ${n}, the web ${late} of a frame after frame 1536, the core on it`,
+  n === 'shaker' ? PERC : KIT, [hit(n)], { late, seconds: n === 'crash' ? 2 : 1 })));
+const SETS = [...OSC, ...PARAM, ...GRAPH, ...VOICE, ...LATE];
 
 function noise(rate) { // 1 s, mono, in [-0.5, 0.5)
   let seed = 1;
   return Float32Array.from({ length: rate }, () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return 0.5 * (seed / 2147483648 - 1); });
+}
+
+// The line of a set off the frame grid (LATE): the core's level and its power in the octave bands 8 and 16 kHz (5.6 to 11.3 kHz, 11.3 to
+// 22.6 kHz, edges at the centre over and times the root of 2) against the web's, both channels summed, as sound-compare.mjs measures bands.
+function lateLine(name, webs, cores, rate) {
+  const bands = (channels) => {
+    let n = 1;
+    while (n < channels[0].length) n <<= 1;
+    const re = new Float64Array(n), im = new Float64Array(n);
+    re.set(channels[0]);
+    im.set(channels[1]);
+    fft(re, im);
+    const out = { total: 0, 8000: 0, 16000: 0 };
+    for (let k = 0; k <= n / 2; k++) {
+      const m = (n - k) % n, p = (re[k] ** 2 + im[k] ** 2 + re[m] ** 2 + im[m] ** 2) / 2, hz = (k * rate) / n;
+      out.total += p;
+      for (const c of [8000, 16000]) if (hz >= c / Math.SQRT2 && hz < c * Math.SQRT2) out[c] += p;
+    }
+    return out;
+  };
+  const [w, c] = [webs, cores].map(bands), db = (x) => (10 * Math.log10(x)).toFixed(2);
+  return `${name}  level ${db(c.total / w.total)} dB  band 8 kHz ${db(c[8000] / w[8000])} dB  band 16 kHz ${db(c[16000] / w[16000])} dB  (not judged)`;
 }
 
 const f32 = (buffer) => new Float32Array(buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength));
@@ -270,7 +343,7 @@ const b64 = (floats) => Buffer.from(floats.buffer, floats.byteOffset, floats.byt
 
 // in the page: one set through Chromium; both channels as base64
 async function renderWeb(page, set, samples) {
-  return page.evaluate(async ([set, input]) => {
+  return page.evaluate(async ([set, input, kitPan]) => {
     const toF32 = (text) => new Float32Array(Uint8Array.from(atob(text), (c) => c.charCodeAt(0)).buffer);
     const toB64 = (floats) => {
       const bytes = new Uint8Array(floats.buffer, floats.byteOffset, floats.byteLength);
@@ -345,29 +418,54 @@ async function renderWeb(page, set, samples) {
       const { completeTimbre } = await import('/core/timbre.js');
       const { createRng } = await import('/core/rng.js');
       const { noiseBuffer } = await import('/audio/nodes.js');
+      const { DRUM_FALLBACK } = await import('/core/event-helpers.js');
+      const { tunedValue } = await import('/audio/voices/tunables.js');
       const p = await import('/audio/voice-params.js');
-      const [layer, id, variant] = set.key.split('/'), sound = completeTimbre(set.sound), rng = createRng(1);
+      const [layer, id, variant] = set.key.split('/'), sound = completeTimbre(set.sound), rng = createRng(1), tuning = set.tuning ?? {};
       const params = { drums: p.drumParams(sound.drums), bass: p.bassParams(sound.bass), chords: p.chordParams(sound.chords), pad: p.padParams(sound.pad), lead: {} }[layer];
       const play = createVoice(layer, { id, variant }, ctx, { params, getTimbre: () => sound[layer], rng: rng.fork(`voice-${layer}`),
-        noise: noiseBuffer(ctx, rng.fork('noise'), 1), getTuning: () => set.tuning ?? {}, setStatus: () => {}, track: () => {} });
+        noise: noiseBuffer(ctx, rng.fork('noise'), 1), getTuning: () => tuning, setStatus: () => {}, track: () => {} });
       const sum = gain(1);
       sum.connect(out);
+      // A drums hit through the balance of its place in the kit, as synth.js builds it (balance, kitPans, the layer's trigger), unless the
+      // voice's fine value kitPan is 0: kitPan is KIT_PAN as sound.json holds it (export-events.mjs reads it from synth.js).
+      const places = {};
+      const into = (e) => {
+        const name = DRUM_FALLBACK[e.name] ?? e.name;
+        if (layer !== 'drums' || tunedValue(set.key, 'kitPan', tuning) === 0 || kitPan[name] === undefined) return sum;
+        if (!places[name]) {
+          const input = ctx.createGain(), split = ctx.createChannelSplitter(2), merge = ctx.createChannelMerger(2), left = ctx.createGain(), right = ctx.createGain();
+          input.channelCount = 2;
+          input.channelCountMode = 'explicit';
+          const pan = Math.min(1, Math.max(-1, p.masterParams(sound.master).width * tunedValue('mix/pan', 'kit', tuning) * kitPan[name]));
+          left.gain.value = 1 - pan;
+          right.gain.value = 1 + pan;
+          input.connect(split);
+          split.connect(left, 0).connect(merge, 0, 0);
+          split.connect(right, 1).connect(merge, 0, 1);
+          merge.connect(sum);
+          places[name] = input;
+        }
+        return places[name];
+      };
       // An event and its end exactly on their frames (Task 20): frame / r times r can come out a hair above the frame (1632 / 48000 *
       // 48000 = 1632.0000000000002), and so can t + dur (1536 / 44100 + 0.5 at 44.1 kHz). Chromium then starts a source on the frame
       // (TimeToSampleFrame rounds through 1/1024 frame) but an AudioParam event one frame later (ceil(t * rate)): the source's first frame
       // plays the param's default (the organ's key gain and click gain: 1). The core places events on frames (ruling 9), its ends a whole
       // number of frames later: the time, then the duration, steps down by a double's last bit until it is not above its frame.
+      // A hit's name stands in the place of the midi. `late`: the page plays the event that fraction of a frame after its frame, as it is.
       const below = (x) => { const f = new Float64Array([x]); new BigInt64Array(f.buffer)[0] -= 1n; return f[0]; };
       for (const [frame, midi, vel, dur, fields] of set.events) {
-        let t = frame / r, d = dur;
-        while (t * r > frame) t = below(t);
-        while ((t + d) * r > frame + Math.round(dur * r)) d = below(d);
-        play(sum, t, { type: 'note', layer, midi, vel, dur: d, ...fields });
+        let t = (frame + (set.late ?? 0)) / r, d = dur;
+        while (!set.late && t * r > frame) t = below(t);
+        while (!set.late && (t + d) * r > frame + Math.round(dur * r)) d = below(d);
+        const e = typeof midi === 'string' ? { type: 'hit', layer, name: midi, vel, dur: d, ...fields } : { type: 'note', layer, midi, vel, dur: d, ...fields };
+        play(into(e), t, e);
       }
     }
     const rendered = await ctx.startRendering();
     return [toB64(rendered.getChannelData(0)), toB64(rendered.getChannelData(1))];
-  }, [set, b64(samples)]);
+  }, [set, b64(samples), KIT_PAN]);
 }
 
 // btg_fx's arguments after <in> <out> <rate>: times in frames, as time * rate
@@ -415,6 +513,7 @@ try {
       const raw = f32(readFileSync(output));
       cores = [0, 1].map((c) => Float32Array.from({ length: raw.length / 2 }, (_, i) => raw[2 * i + c]));
     }
+    if (set.late !== undefined) { console.log(lateLine(set.name, webs, cores, set.rate)); continue; }
     let error = 0, power = 0, largest = 0, at = 0, side = 0;
     webs.forEach((web, c) => {
       const core = cores[c];

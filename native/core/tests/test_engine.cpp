@@ -241,7 +241,7 @@ static std::unique_ptr<btg::detail::Tones> organTones(double sr) {
     auto tones = std::make_unique<Tones>();
     tones->sr = sr;
     tones->basic = &basicWaves(sr);
-    tones->noise = noiseBuffer(Rng(1).fork("noise"), 1, 1, 0, sr)[0];
+    tones->noise = synthNoise(sr);
     for (OrganChain& c : tones->chains) c.prepare(sr);
     return tones;
 }
@@ -1105,17 +1105,22 @@ int main(int argc, char** argv) {
                 "lead":{"fuzz":1,"overdrive":1,"distortion":1,"vibrato":1,"chorus":1}})";
         // And (Task 20) with the organ on the chords, the Leslie fast and the drive at 1, printed only. And (Task 22) with the classic synth
         // on bass, chords, pad and lead, dry (no send, no layer effect) and with every effect on, printed only.
+        // And (Task 23) with every layer on its synth voice (the classic synth, the synth kit and percussion), the same two ways.
         const char* CLASSIC4 = R"({"bass":{"id":"synth","variant":"classic"},"chords":{"id":"synth","variant":"classic"},"pad":{"id":"synth","variant":"classic"},"lead":{"id":"synth","variant":"classic"}})";
-        const char* CHORDS[5] = { "", R"({"chords":{"id":"epiano","variant":"rhodes"}})", R"({"chords":{"id":"organ","variant":"jazz"}})", CLASSIC4, CLASSIC4 };
-        const char* NAMES[5] = { "", " with the e-piano on the chords", " with the organ on the chords (Leslie fast, drive 1)",
-                                 " with the classic synth on bass, chords, pad and lead, every effect on", " with the classic synth on bass, chords, pad and lead, dry" };
+        const char* SYNTH6 = R"({"drums":{"id":"synth","variant":"classic"},"bass":{"id":"synth","variant":"classic"},"chords":{"id":"synth","variant":"classic"},)"
+                             R"("pad":{"id":"synth","variant":"classic"},"lead":{"id":"synth","variant":"classic"},"percussion":{"id":"synth","variant":"classic"}})";
+        const char* CHORDS[7] = { "", R"({"chords":{"id":"epiano","variant":"rhodes"}})", R"({"chords":{"id":"organ","variant":"jazz"}})", CLASSIC4, CLASSIC4, SYNTH6, SYNTH6 };
+        const char* NAMES[7] = { "", " with the e-piano on the chords", " with the organ on the chords (Leslie fast, drive 1)",
+                                 " with the classic synth on bass, chords, pad and lead, every effect on", " with the classic synth on bass, chords, pad and lead, dry",
+                                 " with every layer on its synth voice, every effect on", " with every layer on its synth voice, dry" };
         for (const auto& [bpm, sr, chordsVoice] : { std::tuple { 20.0, rate, 0 }, std::tuple { 400.0, rate, 0 }, std::tuple { 400.0, 96000, 0 },
                                                     std::tuple { 400.0, rate, 1 }, std::tuple { 400.0, 96000, 1 }, std::tuple { 400.0, rate, 2 }, std::tuple { 400.0, 96000, 2 },
-                                                    std::tuple { 400.0, rate, 3 }, std::tuple { 400.0, 96000, 3 }, std::tuple { 400.0, rate, 4 }, std::tuple { 400.0, 96000, 4 } }) {
+                                                    std::tuple { 400.0, rate, 3 }, std::tuple { 400.0, 96000, 3 }, std::tuple { 400.0, rate, 4 }, std::tuple { 400.0, 96000, 4 },
+                                                    std::tuple { 400.0, rate, 5 }, std::tuple { 400.0, 96000, 5 }, std::tuple { 400.0, rate, 6 }, std::tuple { 400.0, 96000, 6 } }) {
             btg::Engine engine;
             engine.setPackSource(source);
             if (chordsVoice == 2) engine.setTuning(R"({"chords/organ/jazz":{"leslie":3,"drive":1}})");
-            engine.setSound(chordsVoice == 4 ? DRY : EVERY);
+            engine.setSound(chordsVoice == 4 || chordsVoice == 6 ? DRY : EVERY);
             engine.setTrack(band);
             if (chordsVoice > 0) engine.setVoices(CHORDS[chordsVoice]);
             engine.setMaster(0.7f); // fader 0.7 = gain 0.49 (see above)
@@ -2934,6 +2939,218 @@ int main(int argc, char** argv) {
                 counted(0.5);
                 std::printf("classic render: %ld allocations, %ld frees (%s)\n", allocations, frees, e->voiceStatus().c_str());
                 CHECK(allocations == 0 && frees == 0 && e->voiceStatus().find(R"("chords":"ready")") != std::string::npos);
+            }
+        }
+
+        // The synth kit and the synth percussion (Task 23; voices/drums.cpp, voices/percussion.cpp). `band`: the fixture with all six
+        // layers on (the lead playing a melody), `kitOnly`: the drums alone; dry, no limiter (make).
+        {
+            const char* ALL = R"({"drums":{"id":"synth","variant":"classic"},"bass":{"id":"synth","variant":"classic"},"chords":{"id":"synth","variant":"classic"},)"
+                              R"("pad":{"id":"synth","variant":"classic"},"lead":{"id":"synth","variant":"classic"},"percussion":{"id":"synth","variant":"classic"}})";
+            const char* SYNTH_KIT = R"({"drums":{"id":"synth","variant":"classic"},"percussion":{"id":"synth","variant":"classic"}})";
+            const char* SAMPLE_KIT = R"({"drums":{"id":"sample","variant":"standard"},"percussion":{"id":"sample","variant":"studio"}})";
+            const char* SILENT_KIT = R"({"drums":{"id":"none","variant":"none"}})";
+            const auto swap = [](std::string& s, const std::string& from, const std::string& to) { s.replace(s.find(from), from.size(), to); };
+            std::string band = track, kitOnly = track;
+            for (const char* layer : { "chords", "pad", "lead", "percussion" }) swap(band, std::string("\"") + layer + "\":false", std::string("\"") + layer + "\":true");
+            swap(band, "\"lead\":\"off\"", "\"lead\":\"melody\""); // the lead layer plays only with a job
+            swap(kitOnly, "\"bass\":true", "\"bass\":false");
+            const auto nameIndex = [](const std::string& name) { return static_cast<int>(std::find(std::begin(HIT_NAMES), std::end(HIT_NAMES), name) - std::begin(HIT_NAMES)); };
+            // One hit of `name` (velocity 0.8) of the voice `key` builds, alone (no engine): its two channels over 2 s.
+            const auto hitOf = [&](const char* key, const std::string& name, const char* tuning = "{}", double width = 0.5) {
+                Timbre timbre;
+                timbre.master.width = width;
+                const btg::Engine::Layer layer = std::string(key).rfind("drums/", 0) == 0 ? btg::Engine::drums : btg::Engine::percussion;
+                const auto voice = makeVoice(layer, key, nullptr, parseTuning(tuning), timbre, rate);
+                const auto tones = organTones(rate); // the basic waves and the noise, as Engine::prepare makes them
+                VoiceState state;
+                PlayEvent e;
+                e.layer = layer;
+                e.hit = true;
+                e.name = nameIndex(name);
+                e.vel = 0.8;
+                if (voice) voice->play(e, 0, 1.0, state, *tones);
+                std::array<std::vector<float>, 2> out { std::vector<float>(2 * rate), std::vector<float>(2 * rate) };
+                for (size_t at = 0; at < out[0].size(); at += SYNTH_FRAMES)
+                    for (SynthTone& t : tones->synth) if (t.active) t.render(&out[0][at], &out[1][at], SYNTH_FRAMES, tones->scratch);
+                return out;
+            };
+            const auto blocks = [](btg::Engine& e, btg::Transport& t, int n) { return render(e, t, (n * 480 - 0.5) / rate, 480); }; // n blocks of 480
+            const auto peakOf = [](const std::vector<float>& x, size_t from, size_t to) {
+                float p = 0.0f;
+                for (size_t i = from; i < to; ++i) p = std::max(p, std::fabs(x[i]));
+                return p;
+            };
+            // Both voices play: with every layer on its synth voice each of the six is ready and has a level.
+            {
+                auto e = make(band, ALL);
+                btg::Transport t;
+                t.play(64.0, e->bpm());
+                const Result r = render(*e, t, 4.0, 480);
+                bool all = r.finite;
+                for (int l = 0; l < btg::Engine::layerCount; ++l) {
+                    const float level = e->takePeak(l);
+                    std::printf("every layer on its synth voice: %s peak %.3f\n", LAYER_NAMES[l], level);
+                    all = all && level > 0.01f && e->voiceStatus().find(std::string("\"") + LAYER_NAMES[l] + "\":\"ready\"") != std::string::npos;
+                }
+                CHECK(all);
+            }
+            // Every drum name gives the synth kit a level but hatPedal, which is silent at its fine value's default 0 and plays at 1; every
+            // percussion name gives the synth percussion one; a name of the other layer is silent in each. The side stick is the snare at its
+            // fine value's factor (0.45): from 2 to 10 ms after the hit both gains of the neutral snare (no click) hold their peaks, so the
+            // largest samples there stand in that ratio up to the float rounding of the gains and the sum.
+            {
+                bool levels = true;
+                for (int i = 0; i < static_cast<int>(std::size(HIT_NAMES)); ++i) {
+                    const bool drum = i < 14;
+                    const float peak = peakOf(hitOf(drum ? "drums/synth/classic" : "percussion/synth/classic", HIT_NAMES[i])[0], 0, 2 * rate);
+                    const float other = peakOf(hitOf(drum ? "percussion/synth/classic" : "drums/synth/classic", HIT_NAMES[i])[0], 0, 2 * rate);
+                    std::printf("synth %s: %s peak %.4f (the other voice %.4f)\n", drum ? "kit" : "percussion", HIT_NAMES[i], peak, other);
+                    levels = levels && (std::string(HIT_NAMES[i]) == "hatPedal" ? peak == 0.0f : peak > 0.01f) && other == 0.0f;
+                }
+                const float pedal = peakOf(hitOf("drums/synth/classic", "hatPedal", R"({"drums/synth/classic":{"hatPedal":1}})")[0], 0, 2 * rate);
+                const double factor = tunedValue("drums/synth/classic", "sideStick", {});
+                const double ratio = peakOf(hitOf("drums/synth/classic", "sideStick")[0], 96, 480) / peakOf(hitOf("drums/synth/classic", "snare")[0], 96, 480);
+                std::printf("synth kit: hatPedal at its fine value 1 peak %.4f; side stick over snare %.6f (factor %.2f)\n", pedal, ratio, factor);
+                CHECK(levels && pedal > 0.01f && std::fabs(ratio / factor - 1) < 1e-4);
+            }
+            // The place in the kit (synth.js 198, kitBalance): the synth kit's hat, half-open hat, high and low tom and crash at width 0.5
+            // and 1, as the right over the left channel of a sample, equal the sample kit's (format 1, the constant samples of dcKit, as the
+            // sample kit's test above measures them) and (1 + pan) / (1 - pan). The half-open hat is placed by its fallback, the open hat;
+            // KIT_PAN gives the hat the same place, so this cannot tell which of the two places it.
+            for (const double width : { 0.5, 1.0 }) {
+                for (const char* name : { "hat", "hatHalf", "tomHigh", "tomLow", "crash" }) {
+                    const auto synth = hitOf("drums/synth/classic", name, "{}", width);
+                    Timbre timbre;
+                    timbre.master.width = width;
+                    const auto voice = makeVoice(btg::Engine::drums, "drums/sample/brushes", dcKit(false), {}, timbre);
+                    auto tones = std::make_unique<Tones>();
+                    tones->sr = rate;
+                    VoiceState state;
+                    state.rng = voice->startRng;
+                    PlayEvent e;
+                    e.hit = true;
+                    e.vel = 1.0;
+                    e.name = nameIndex(name);
+                    voice->play(e, 0, 0.5, state, *tones);
+                    std::vector<float> left(400), right(400);
+                    for (Tone& tone : tones->all) if (tone.active) tone.render(left.data(), right.data(), 400);
+                    const std::string stand = DRUM_FALLBACK.count(name) ? DRUM_FALLBACK.at(name) : name;
+                    const double pan = std::min(1.0, 2 * width * soundData().kitPan.at(stand) * tunedValue("mix/pan", "kit", {}));
+                    const double ratio = synth[1][200] / synth[0][200], sample = right[200] / left[200];
+                    std::printf("synth kit %s at width %.1f: right over left %.5f, the sample kit's %.5f, (1 + pan) / (1 - pan) %.5f\n", name, width, ratio, sample, (1 + pan) / (1 - pan));
+                    CHECK(synth[0][200] != 0.0f && std::fabs(ratio - sample) < 1e-4 && std::fabs(ratio - (1 + pan) / (1 - pan)) < 1e-4);
+                }
+            }
+            // A voice change under a ringing crash: the drums alone from beat 47.9 (the fixture's one crash at 48.00, a kick and a ride
+            // within 3 ms of it), the synth kit changed to the sample kit 0.07 s in; until the next hit (a ride at 48.26) the output equals
+            // the render without the change, bit for bit: the old hits ring out on their own (red when the layer's synth tones are cut at
+            // the change). The crash rings there (rms above 1e-3).
+            {
+                const auto run = [&](bool change) {
+                    auto e = make(kitOnly, SYNTH_KIT);
+                    btg::Transport t;
+                    t.play(47.9, e->bpm());
+                    blocks(*e, t, 7);
+                    if (change) e->setVoices(SAMPLE_KIT);
+                    return blocks(*e, t, 14); // to beat 48.25
+                };
+                const Result changed = run(true), kept = run(false);
+                std::printf("synth kit to the sample kit under a ringing crash: %s until the next hit (rms %.4f)\n",
+                            changed.left == kept.left && changed.right == kept.right ? "the same" : "NOT THE SAME", kept.rms);
+                CHECK(changed.left == kept.left && changed.right == kept.right && kept.rms > 1e-3);
+            }
+            // A jump under the crash: from beat 47.9, 0.07 s in, a jump to beat 8 with the drums switched to a silent voice (no new hit),
+            // equals the same without the jump, bit for bit, for 2 s: the hits ring out over a jump (they are not released). The crash
+            // still sounds from 0.5 to 1 s after it; after its stop (1.7 s after its start) no synth tone is left and the output stays below
+            // -180 dBFS (the sum's shelf still plays out its state).
+            {
+                const auto run = [&](bool jump) {
+                    auto e = make(kitOnly, SYNTH_KIT);
+                    btg::Transport t;
+                    t.play(47.9, e->bpm());
+                    blocks(*e, t, 7);
+                    e->setVoices(SILENT_KIT);
+                    if (jump) t.seek(8.0);
+                    const Result r = render(*e, t, 2.0, 480);
+                    return std::pair(r, e->activeSynthTones()); // the tones left after the 2 s
+                };
+                const auto [jumped, left] = run(true);
+                const Result stayed = run(false).first;
+                const float ringing = std::max(peakOf(jumped.left, rate / 2, rate), peakOf(jumped.right, rate / 2, rate));
+                const float after = std::max(peakOf(jumped.left, rate * 7 / 4, 2 * rate), peakOf(jumped.right, rate * 7 / 4, 2 * rate));
+                std::printf("synth kit, a jump under the crash: %s as without it; peak 0.5 to 1 s after it %.2e, from 1.75 s %.2e, %d synth tones left\n",
+                            jumped.left == stayed.left && jumped.right == stayed.right ? "the same" : "NOT THE SAME", ringing, after, left);
+                CHECK(jumped.left == stayed.left && jumped.right == stayed.right && ringing > 1e-4f && after < 1e-9f && left == 0);
+            }
+            // A loop of one beat (48 to 49) over the crash: every lap strikes its hits again and the old laps' ring on over the wrap (the
+            // crash 1.7 s, almost three laps of 0.6 s): over ten laps more synth tones are active than one lap strikes, and at most three
+            // laps' worth.
+            {
+                int lap = 0; // the hits of one lap that sound (hatPedal is silent)
+                for (const btg::Event& ev : btg::buildEvents(kitOnly))
+                    if (ev.type == btg::Event::Type::hit && ev.name != "hatPedal" && ev.t * (100.0 / 60.0) >= 48.0 - 1e-9 && ev.t * (100.0 / 60.0) < 49.0) ++lap;
+                auto e = make(kitOnly, SYNTH_KIT);
+                btg::Transport t;
+                t.setLoop(48.0, 49.0);
+                t.play(48.0, e->bpm());
+                int most = 0;
+                std::vector<float> l(480), r(480);
+                for (int block = 0; block < 600; ++block) { // 6 s
+                    const auto b = t.advance(480, rate);
+                    e->render(l.data(), r.data(), b.frames, b);
+                    most = std::max(most, e->activeSynthTones());
+                }
+                std::printf("synth kit loop over the crash: at most %d synth tones active over ten laps of %d hits\n", most, lap);
+                CHECK(lap > 0 && most > lap && most <= 3 * lap);
+            }
+            // Stop and silence with every layer on its synth voice: from 0.5 s after the stop the output is exactly 0 in both channels and
+            // no synth tone is active.
+            {
+                auto e = make(band, ALL);
+                btg::Transport t;
+                t.play(64.0, e->bpm());
+                render(*e, t, 1.0, 480);
+                t.stop();
+                const Result after = render(*e, t, 1.0, 480);
+                const float late = std::max(peakIn(after.left, 0.5, 1.0), peakIn(after.right, 0.5, 1.0));
+                std::printf("every layer on its synth voice, stop: peak from 60 to 150 ms after it %.2e, from 0.5 s %.2e, %d synth tones\n", peakIn(after.left, 0.06, 0.15), late,
+                            e->activeSynthTones());
+                CHECK(peakIn(after.left, 0.06, 0.15) > 1e-6 && late == 0.0f && e->activeSynthTones() == 0);
+            }
+            // No allocation and no free in render (ruling 14) with the synth kit and percussion: the band's sample voices, then every layer on
+            // its synth voice, the kit and percussion back to their sample voices and to the synth ones again while playing, a restart, a
+            // jump and a stop, the counts armed around the render calls only.
+            {
+                auto e = make(band, nullptr); // the fixture's sample voices
+                btg::Transport t;
+                std::vector<float> l(480), r(480);
+                const auto counted = [&](double seconds) {
+                    counting = true;
+                    for (int done = 0; done < seconds * rate;) {
+                        const auto b = t.advance(480, rate);
+                        e->render(l.data(), r.data(), b.frames, b);
+                        done += b.frames;
+                    }
+                    counting = false;
+                };
+                allocations = frees = 0;
+                t.play(64.0, e->bpm());
+                counted(0.5);
+                e->setVoices(ALL);
+                counted(0.5);
+                e->setVoices(SAMPLE_KIT);
+                counted(0.5);
+                e->setVoices(SYNTH_KIT);
+                counted(0.5);
+                t.play(64.0, e->bpm());
+                counted(1.0);
+                t.seek(32.0);
+                counted(0.5);
+                t.stop();
+                counted(0.5);
+                std::printf("synth kit and percussion render: %ld allocations, %ld frees (%s)\n", allocations, frees, e->voiceStatus().c_str());
+                CHECK(allocations == 0 && frees == 0 && e->voiceStatus() == R"({"drums":"ready","bass":"ready","chords":"ready","pad":"ready","lead":"ready","percussion":"ready"})");
             }
         }
     }

@@ -29,7 +29,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { renderWeb, wavBytes } from './web-render.mjs';
+import { fft, renderWeb, wavBytes } from './web-render.mjs';
 import { writeAbPage } from './ab-page.mjs';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -59,28 +59,6 @@ function readWav(file) {
     }
   }
   throw new Error(`${file}: no data chunk`);
-}
-
-function fft(re, im) { // in place, radix 2
-  const n = re.length;
-  for (let i = 1, j = 0; i < n; i++) {
-    let bit = n >> 1;
-    for (; j & bit; bit >>= 1) j ^= bit;
-    j ^= bit;
-    if (i < j) { [re[i], re[j]] = [re[j], re[i]]; [im[i], im[j]] = [im[j], im[i]]; }
-  }
-  for (let len = 2; len <= n; len <<= 1) {
-    const wr = Math.cos(-2 * Math.PI / len), wi = Math.sin(-2 * Math.PI / len), half = len / 2;
-    for (let i = 0; i < n; i += len) {
-      let cr = 1, ci = 0;
-      for (let k = 0; k < half; k++) {
-        const a = i + k, b = a + half;
-        const tr = re[b] * cr - im[b] * ci, ti = re[b] * ci + im[b] * cr;
-        re[b] = re[a] - tr; im[b] = im[a] - ti; re[a] += tr; im[a] += ti;
-        [cr, ci] = [cr * wr - ci * wi, cr * wi + ci * wr];
-      }
-    }
-  }
 }
 
 // Power in the eight octave bands (edges at centre / sqrt 2 and centre * sqrt 2, both channels summed) and in the full band.

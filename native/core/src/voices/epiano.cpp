@@ -1,7 +1,7 @@
 // The FM e-piano: src/audio/voices/epiano.js line by line (line numbers of that file), built with SynthTone's calls (patch.h). The web
 // reads its values at every tone's start; the engine builds the voice again on every setSound and setTuning, so reading them here, when
 // the voice is built, is the same. Times are frames from the tone's time 0 (the web's t).
-#include "../patch.h"
+#include "nodes.h"
 
 #include <algorithm>
 #include <cmath>
@@ -10,8 +10,6 @@ namespace btg::detail {
 namespace {
 
 const double REL = 0.18; // the fade after the note's end (s)
-
-double hz(int m) { return 440 * std::pow(2.0, (m - 69) / 12.0); } // nodes.js
 
 class Epiano final : public Voice {
 public:

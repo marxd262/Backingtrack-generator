@@ -106,7 +106,7 @@ struct Tones {
     int quantum = 0;                   // the place of the chunk's first frame in its render quantum: frames since the play began, mod 128
     uint8_t gen[Engine::layerCount] = {}; // per layer, the generation of its chains (0 or 1) a tone started now rings through (engine.cpp)
     std::array<OrganChain, CHAINS> chains; // the organ chains of the voice instances (VoiceState::chain) and of those that ring out
-    std::vector<float> noise;          // synth.js 60: noiseBuffer(ctx, createRng(1).fork('noise'), 1) at sr (Engine::prepare)
+    std::vector<float> noise;          // synthNoise(sr) (Engine::prepare)
 
     Tone* start(const Note& n);
     // A free synth tone, else the oldest (as start), emptied and active, its time 0 `delay` frames into the chunk (and its place in the
@@ -119,5 +119,9 @@ struct Tones {
     // chain goes); -1 before the chains are prepared.
     int takeChain();
 };
+
+// Control thread (allocates): the synth voices' noise at `sampleRate`, synth.js 60: noiseBuffer(ctx, createRng(1).fork('noise'), 1), one
+// second, mono. Engine::prepare, btg_fx (voice-compare.mjs) and the tests make Tones::noise with it.
+std::vector<float> synthNoise(double sampleRate);
 
 } // namespace btg::detail

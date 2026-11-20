@@ -498,7 +498,7 @@ void Engine::prepare(double sampleRate) {
     m.tones.quantum = 0;
     for (Tone& t : m.tones.all) t.active = false;
     for (SynthTone& t : m.tones.synth) t.active = false;
-    m.tones.noise = detail::noiseBuffer(Rng(1).fork("noise"), 1, 1, 0, sampleRate)[0]; // allocates: synth.js 60
+    m.tones.noise = detail::synthNoise(sampleRate); // allocates
     for (detail::OrganChain& c : m.tones.chains) c.prepare(sampleRate); // allocates: the Leslie's delays; every chain given up
     m.restart(true);
     for (int l = 0; l < layerCount; ++l) {

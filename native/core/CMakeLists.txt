@@ -59,9 +59,11 @@ add_library(btg_core STATIC
     src/param.cpp
     src/patch.cpp
     src/voices/classic.cpp
+    src/voices/drums.cpp
     src/voices/epiano.cpp
     src/voices/organ.cpp
     src/voices/organ_chain.cpp
+    src/voices/percussion.cpp
     src/analysis.cpp
     src/file_player.cpp
     src/decode.cpp

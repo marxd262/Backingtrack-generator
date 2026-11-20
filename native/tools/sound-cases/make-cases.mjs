@@ -114,7 +114,7 @@ for (const n of PERCUSSION) if (!hitCount[n]) problems.push(`no ${n} in any kit 
 
 // Task 13: one track per style, all six layers with the style's voices, a rolled form, the layers where mix/pan puts them (width 0.5).
 // The same set is the A/B set for listening (native/tools/ab-samples.cmd).
-const bandOf = (id) => track(id, { layers: { drums: true, bass: true, chords: true, pad: true, lead: true, percussion: true },
+const bandOf = (id, voices) => track(id, { layers: { drums: true, bass: true, chords: true, pad: true, lead: true, percussion: true }, voices,
   extra: { form: rollForm({ template: 'auto', style: id, targetBars: 24, seed: 1, tags: STYLE_PRESETS.find((s) => s.id === id).tags }) } });
 const bands = Object.fromEntries(STYLE_PRESETS.map((s) => [s.id, bandOf(s.id)]));
 write('band.json', STYLE_PRESETS.map((style) => ({
@@ -408,5 +408,27 @@ for (const layer of ['bass', 'chords', 'pad', 'lead']) {
 }
 write('classic.json', classicCases);
 console.log(`classic.json: ${classicCases.length} cases`);
+
+// Task 23: the synth kit and the synth percussion alone, dry, as kits.json plays their sample voices (the funk style, seed 1, KIT_FORM, ornaments
+// 1): the drums at the neutral sound and each of the six knobs of their sound at its ends (every one's neutral value is 0.5), the percussion's
+// jobs. Then the nine bands of band.json with every layer on its synth voice. Each knob case fails when the core ignores its knob (Task 23's
+// mutation runs), except three that cannot fail red: hatBright 0 and hatLength 0 and 1 stay within the synth limits then (bands +2.44 dB
+// at 8 kHz at worst); voice-compare's sets "drums hat, hatBright 0" and "drums openHat, hatLength 0, 1" fail then (-1.0, -10.0, -9.4 dB).
+const SYNTH_VOICE = { id: 'synth', variant: 'classic' }, KIT_KNOBS = ['kickPunch', 'kickLength', 'snareTone', 'snareSnap', 'hatBright', 'hatLength'];
+const kitSynth = (name, layer, fields, claims, job) => claimed({ name, dry: true, kind: 'synth', sound: set(neutralSound, fields),
+  track: track('funk', { layers: { [layer]: true }, voices: { [layer]: SYNTH_VOICE }, seed: 1, extra: { form: KIT_FORM, ornaments: 1, ...(job && { jobs: { lead: 'melody', percussion: job } }) } }) }, claims);
+const kitsSynthCases = [kitSynth('drums-synth', 'drums', {}, ['voice:drums'])];
+for (const k of KIT_KNOBS) for (const v of DEFAULT_TIMBRE.drums[k] === 0 ? [0.5, 1] : [0, 1]) kitsSynthCases.push(kitSynth(`drums-synth-${k}-${v}`, 'drums', { [`drums.${k}`]: v }, ['voice:drums', `synth:drums.${k}`]));
+for (const job of [undefined, 'bongos', 'claves', 'cowbell']) kitsSynthCases.push(kitSynth(`percussion-synth${job ? `-${job}` : ''}`, 'percussion', {}, ['voice:percussion'], job));
+for (const c of kitsSynthCases.filter((k) => k.name.startsWith('drums'))) {
+  const events = buildEvents(c.track);
+  if (!events.some((e) => e.type === 'marker' && e.name === 'fill') || !events.some((e) => e.type === 'hit' && e.name === 'crash')) problems.push(`${c.name}: no fill or no crash`);
+}
+write('kits-synth.json', kitsSynthCases);
+const ALL_SYNTH = Object.fromEntries(Object.keys(VOICES).map((l) => [l, SYNTH_VOICE]));
+const bandSynthCases = STYLE_PRESETS.map((s) => claimed({ name: `band-synth-${s.id}`, track: bandOf(s.id, ALL_SYNTH), sound: neutral(0.5), dry: true, kind: 'synth' },
+  Object.keys(VOICES).map((l) => `voice:${l}`)));
+write('band-synth.json', bandSynthCases);
+console.log(`kits-synth.json: ${kitsSynthCases.length} cases, band-synth.json: ${bandSynthCases.length} cases`);
 for (const p of problems) console.error(`ERROR ${p}`);
 process.exit(problems.length ? 1 : 0);
