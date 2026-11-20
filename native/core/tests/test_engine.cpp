@@ -1103,15 +1103,19 @@ int main(int argc, char** argv) {
         const char* EVERY = R"({"master":{"reverb":1,"echo":1,"roomWet":1,"roomSize":1},"bass":{"fuzz":1,"overdrive":1,"distortion":1,"vibrato":1,"chorus":1},
                 "chords":{"fuzz":1,"overdrive":1,"distortion":1,"vibrato":1,"chorus":1},"pad":{"fuzz":1,"overdrive":1,"distortion":1,"vibrato":1,"chorus":1},
                 "lead":{"fuzz":1,"overdrive":1,"distortion":1,"vibrato":1,"chorus":1}})";
-        // And (Task 20) with the organ on the chords, the Leslie fast and the drive at 1, printed only.
-        const char* CHORDS[3] = { "", R"({"chords":{"id":"epiano","variant":"rhodes"}})", R"({"chords":{"id":"organ","variant":"jazz"}})" };
-        const char* NAMES[3] = { "", " with the e-piano on the chords", " with the organ on the chords (Leslie fast, drive 1)" };
+        // And (Task 20) with the organ on the chords, the Leslie fast and the drive at 1, printed only. And (Task 22) with the classic synth
+        // on bass, chords, pad and lead, dry (no send, no layer effect) and with every effect on, printed only.
+        const char* CLASSIC4 = R"({"bass":{"id":"synth","variant":"classic"},"chords":{"id":"synth","variant":"classic"},"pad":{"id":"synth","variant":"classic"},"lead":{"id":"synth","variant":"classic"}})";
+        const char* CHORDS[5] = { "", R"({"chords":{"id":"epiano","variant":"rhodes"}})", R"({"chords":{"id":"organ","variant":"jazz"}})", CLASSIC4, CLASSIC4 };
+        const char* NAMES[5] = { "", " with the e-piano on the chords", " with the organ on the chords (Leslie fast, drive 1)",
+                                 " with the classic synth on bass, chords, pad and lead, every effect on", " with the classic synth on bass, chords, pad and lead, dry" };
         for (const auto& [bpm, sr, chordsVoice] : { std::tuple { 20.0, rate, 0 }, std::tuple { 400.0, rate, 0 }, std::tuple { 400.0, 96000, 0 },
-                                                    std::tuple { 400.0, rate, 1 }, std::tuple { 400.0, 96000, 1 }, std::tuple { 400.0, rate, 2 }, std::tuple { 400.0, 96000, 2 } }) {
+                                                    std::tuple { 400.0, rate, 1 }, std::tuple { 400.0, 96000, 1 }, std::tuple { 400.0, rate, 2 }, std::tuple { 400.0, 96000, 2 },
+                                                    std::tuple { 400.0, rate, 3 }, std::tuple { 400.0, 96000, 3 }, std::tuple { 400.0, rate, 4 }, std::tuple { 400.0, 96000, 4 } }) {
             btg::Engine engine;
             engine.setPackSource(source);
             if (chordsVoice == 2) engine.setTuning(R"({"chords/organ/jazz":{"leslie":3,"drive":1}})");
-            engine.setSound(EVERY);
+            engine.setSound(chordsVoice == 4 ? DRY : EVERY);
             engine.setTrack(band);
             if (chordsVoice > 0) engine.setVoices(CHORDS[chordsVoice]);
             engine.setMaster(0.7f); // fader 0.7 = gain 0.49 (see above)
@@ -1423,7 +1427,7 @@ int main(int argc, char** argv) {
     }
 
     // The voice chosen plays (upright: the same test pack as finger, level 3 instead of 4 in tunables.js), a fine value acts
-    // and is clamped, a synth voice is silent and says so. Drums muted, no limiter: the bass alone, linear.
+    // and is clamped, a voice the core does not have is silent and says so. Drums muted, no limiter: the bass alone, linear.
     const auto bassOnly = [&](const char* voices, const char* tuning) {
         btg::Engine engine;
         engine.setPackSource(source);
@@ -1445,7 +1449,7 @@ int main(int argc, char** argv) {
     const auto quieter = bassOnly(finger, R"({"bass/sample/finger":{"level":2}})");
     const auto clamped = bassOnly(finger, R"({"bass/sample/finger":{"level":100}})");
     const auto broken = bassOnly(finger, "not json");
-    const auto synth = bassOnly(R"({"bass":{"id":"synth","variant":"classic"}})", "{}");
+    const auto synth = bassOnly(R"({"bass":{"id":"none","variant":"none"}})", "{}"); // a key no voice has (Task 22: synth/classic plays)
     CHECK(plain.first > 0.005);
     // Linear only to about 0.1 %: a tone's release ends at an absolute floor of 0.0001, as in the web (sampler.js FLOOR).
     CHECK(std::fabs(upright.first / plain.first / 0.75 - 1) < 3e-3); // same draws (fork "voice-bass" of seed 1), only the level differs
@@ -1585,7 +1589,7 @@ int main(int argc, char** argv) {
             btg::Transport t;
             t.play(from, engine.bpm());
             CHECK(render(engine, t, 0.3, 480).rms > 0.001); // the pad sounds
-            engine.setVoices(R"({"pad":{"id":"synth","variant":"classic"}})");
+            engine.setVoices(R"({"pad":{"id":"none","variant":"none"}})"); // a key no voice has
             if (loop) t.setLoop(from - 4.0, from + 1.0); else t.seek(from + 8.0);
             const Result after = render(engine, t, 2.6, 480);
             double tail = 0.0; // the last 0.1 s
@@ -1641,7 +1645,7 @@ int main(int argc, char** argv) {
             engine.prepare(rate);
             btg::Transport t;
             if (how > 0) {
-                engine.setVoices(R"({"bass":{"id":"synth","variant":"classic"}})");
+                engine.setVoices(R"({"bass":{"id":"none","variant":"none"}})"); // a key no voice has
                 if (how == 2) t.setLoop(slide, slide + 1.0);
                 t.play(how == 1 ? slide - 8.0 : slide + 0.5, engine.bpm());
                 render(engine, t, 0.3, 480); // the loop: up to its end
@@ -2692,6 +2696,245 @@ int main(int argc, char** argv) {
             std::printf("organ, four chains busy: the fifth instance took slot %d (the first instance's: %d); the other three %s, the taken slot %s before and %s after\n",
                         taken, fourSlots[0], others ? "unchanged" : "CHANGED", before ? "unchanged" : "CHANGED", alone ? "plays the fifth alone" : "DOES NOT play the fifth alone");
             CHECK(taken == fourSlots[0] && others && before && alone);
+        }
+
+        // The classic synth (Task 22) on bass, chords, pad and lead: its voice (voices/classic.cpp) on the tracks above and on `four` (the
+        // fixture with those four layers alone, the lead playing a melody) and `pads` (the pad alone), dry, no limiter.
+        {
+            const char* CLASSIC = R"({"bass":{"id":"synth","variant":"classic"},"chords":{"id":"synth","variant":"classic"},"pad":{"id":"synth","variant":"classic"},"lead":{"id":"synth","variant":"classic"}})";
+            const char* CLASSIC_CHORDS = R"({"chords":{"id":"synth","variant":"classic"}})";
+            const char* CLASSIC_PAD = R"({"pad":{"id":"synth","variant":"classic"}})";
+            const char* SILENT_PAD = R"({"pad":{"id":"none","variant":"none"}})";
+            const auto swap = [](std::string& s, const std::string& from, const std::string& to) { s.replace(s.find(from), from.size(), to); };
+            std::string four = track, pads = track;
+            swap(four, "\"drums\":true", "\"drums\":false");
+            swap(four, "\"chords\":false", "\"chords\":true");
+            swap(four, "\"pad\":false", "\"pad\":true");
+            swap(four, "\"lead\":false", "\"lead\":true");
+            swap(four, "\"lead\":\"off\"", "\"lead\":\"melody\""); // the lead layer plays only with a job
+            swap(pads, "\"drums\":true", "\"drums\":false");
+            swap(pads, "\"bass\":true", "\"bass\":false");
+            swap(pads, "\"pad\":false", "\"pad\":true");
+            const btg::Engine::Layer FOUR[4] = { btg::Engine::bass, btg::Engine::chords, btg::Engine::pad, btg::Engine::lead };
+            const auto interleaved = [&](btg::Engine& e, btg::Transport& t, int blocks, const auto& before) {
+                std::vector<float> l(480), r(480), out;
+                for (int block = 0; block < blocks; ++block) {
+                    before(block);
+                    const auto b = t.advance(480, rate);
+                    e.render(l.data(), r.data(), b.frames, b);
+                    for (int i = 0; i < b.frames; ++i) { out.push_back(l[i]); out.push_back(r[i]); }
+                }
+                return out;
+            };
+            const auto secondDifference = [](const std::vector<float>& out) { // per channel of an interleaved render; a NaN is the largest
+                double jump = 0.0;
+                for (size_t i = 4; i < out.size(); ++i) {
+                    const double d = std::fabs(out[i] - 2.0f * out[i - 2] + out[i - 4]);
+                    if (!(d <= jump)) jump = d;
+                }
+                return jump;
+            };
+            // It plays: bass, chords, pad and lead with synth/classic are ready and each has a level.
+            {
+                auto e = make(four, CLASSIC);
+                btg::Transport t;
+                t.play(64.0, e->bpm());
+                const Result r = render(*e, t, 4.0, 480);
+                bool all = r.finite;
+                for (const btg::Engine::Layer l : FOUR) {
+                    const float level = e->takePeak(l);
+                    std::printf("classic: %s peak %.3f\n", LAYER_NAMES[l], level);
+                    all = all && level > 0.01f && e->voiceStatus().find(std::string("\"") + LAYER_NAMES[l] + "\":\"ready\"") != std::string::npos;
+                }
+                CHECK(all);
+            }
+            // The chords' chains run in two channels while their chorus is above 0 (Voice::stereo: the voice's two panned saws), in one at 0.
+            // With the chain's vibrato at 1, so that a chain is built (its chorus is 0 by ownsChorus): at 0 the layer's two channels are one
+            // signal that its balance alone scales (correlation above 0.9999), at 1 they are not (below 0.99). A chain in one channel gives the
+            // right the left's signal.
+            for (const double chorus : { 1.0, 0.0 }) {
+                const std::string sound = std::string(R"({"master":{"reverb":0,"echo":0,"roomWet":0},"chords":{"vibrato":1,"chorus":)") + (chorus > 0 ? "1" : "0") + "}}";
+                auto e = organ(keys, CLASSIC_CHORDS, "{}", sound.c_str());
+                btg::Transport t;
+                t.play(64.0, e->bpm());
+                const Result r = render(*e, t, 2.0, 480);
+                double lr = 0.0, ll = 0.0, rr = 0.0;
+                for (size_t i = 0; i < r.left.size(); ++i) { lr += static_cast<double>(r.left[i]) * r.right[i]; ll += static_cast<double>(r.left[i]) * r.left[i]; rr += static_cast<double>(r.right[i]) * r.right[i]; }
+                const double correlation = lr / std::sqrt(ll * rr);
+                std::printf("classic chords, chorus %.0f, the chain's vibrato 1: left and right correlate %.5f, rms %.4f\n", chorus, correlation, r.rms);
+                CHECK(r.finite && r.rms > 1e-3 && (chorus > 0 ? correlation < 0.99 : correlation > 0.9999));
+            }
+            // Review Focus 5, pitch: the bass's sine (sub 1 and cutoff 0: sineGain 3, its saws at 0.4 through a lowpass that has fallen to
+            // 56 Hz by 0.15 s): A2 at 44.1 and 96 kHz within 2 cents of 110 Hz, between the first and the last upward zero crossing from 0.2 s on.
+            for (const double sr : { 44100.0, 96000.0 }) {
+                Timbre timbre;
+                timbre.bass.sub = 1;
+                timbre.bass.cutoff = 0;
+                const auto voice = makeVoice(btg::Engine::bass, "bass/synth/classic", nullptr, {}, timbre, sr);
+                auto tones = std::make_unique<Tones>();
+                tones->sr = sr;
+                tones->basic = &basicWaves(sr);
+                VoiceState state;
+                PlayEvent e;
+                e.layer = btg::Engine::bass;
+                e.midi = 45;
+                e.vel = 0.8;
+                e.durBeats = 2.0;
+                voice->play(e, 0, 1.0, state, *tones);
+                std::vector<float> l(static_cast<size_t>(1.2 * sr)), r(l.size());
+                for (size_t at = 0; at < l.size(); at += SYNTH_FRAMES)
+                    for (SynthTone& t : tones->synth) if (t.active) t.render(&l[at], &r[at], static_cast<int>(std::min<size_t>(SYNTH_FRAMES, l.size() - at)), tones->scratch);
+                double first = -1.0, last = -1.0;
+                int crossings = 0;
+                for (size_t i = static_cast<size_t>(0.2 * sr); i + 1 < l.size(); ++i)
+                    if (l[i] <= 0 && l[i + 1] > 0) {
+                        last = (static_cast<double>(i) + l[i] / (l[i] - l[i + 1])) / sr;
+                        if (first < 0) first = last;
+                        ++crossings;
+                    }
+                const double cents = 1200 * std::log2((crossings - 1) / (last - first) / 110.0);
+                std::printf("classic bass at %.0f Hz: A2 %+.3f cents off 110 Hz over %d periods\n", sr, cents, crossings - 1);
+                CHECK(crossings > 100 && std::fabs(cents) < 2);
+            }
+            // Review Focus 2: the chords switch between the organ, the sample guitar and the classic synth every 0.25 s for 10 s. Old tones
+            // ring out and nothing clicks, by Task 20's measure: the second difference stays below 0.01 (-40 dBFS), on a sound whose own high
+            // partials lie under it, as there (the organ's click and percussion off): the chords' brightness 0 (the classic chords' lowpass
+            // from 720 to 450 Hz). The classic chords alone, without any change, measure 0.0462 at the neutral sound, 0.0030 at brightness 0.
+            const char* DARK = R"({"master":{"reverb":0,"echo":0,"roomWet":0},"chords":{"brightness":0}})";
+            {
+                auto e = organ(keys, ORGAN, R"({"chords/organ/jazz":{"click":0,"perc":0}})", DARK);
+                btg::Transport t;
+                t.play(64.0, e->bpm());
+                const char* cycle[3] = { ORGAN, FUNK, CLASSIC_CHORDS };
+                const std::vector<float> out = interleaved(*e, t, 1000, [&](int block) { if (block % 25 == 0) e->setVoices(cycle[block / 25 % 3]); });
+                double squares = 0.0;
+                for (const float x : out) squares += static_cast<double>(x) * x;
+                const double jump = secondDifference(out);
+                std::printf("classic, organ and guitar every 0.25 s: largest second difference %.4f, rms %.4f\n", jump, std::sqrt(squares / static_cast<double>(out.size())));
+                CHECK(jump < 0.01 && squares > 0.0);
+            }
+            // A voice change while playing changes ownsChorus (synth.js 276: setVoices sets the chains again, without `immediate`: a ramp). The
+            // chords' chorus at 1: classic for 1 s (the voice's own chorus, the chain's 0), the sample guitar for 1 s (the chain's chorus comes
+            // in), classic again for 3 s (it goes out). No step above Task 20's measure in either direction (the second difference below 0.01;
+            // brightness 0 as above: alone, at chorus 1, the classic chords measure 0.0018);
+            // from 0.2 s to 1 s after the change to the guitar the render differs from the same with the chorus knob at 0 by more than a tenth
+            // of that one's rms (the chain's chorus is heard); its last 0.5 s equal the render that stays classic within 1e-5 (the chain's
+            // chorus is out again).
+            {
+                const auto run = [&](const char* chorus, bool change) {
+                    const std::string sound = std::string(R"({"master":{"reverb":0,"echo":0,"roomWet":0},"chords":{"brightness":0,"chorus":)") + chorus + "}}";
+                    auto e = organ(keys, CLASSIC_CHORDS, "{}", sound.c_str());
+                    btg::Transport t;
+                    t.play(64.0, e->bpm());
+                    return interleaved(*e, t, 500, [&](int block) {
+                        if (change && block == 100) e->setVoices(FUNK);
+                        if (change && block == 200) e->setVoices(CLASSIC_CHORDS);
+                    });
+                };
+                const std::vector<float> changed = run("1", true), knobOff = run("0", true), stays = run("1", false);
+                const auto from = [](double seconds) { return static_cast<size_t>(2 * seconds * rate); }; // interleaved
+                double apart = 0.0, off = 0.0, back = 0.0;
+                for (size_t i = from(1.2); i < from(2.0); ++i) {
+                    const double d = changed[i] - knobOff[i];
+                    apart += d * d;
+                    off += static_cast<double>(knobOff[i]) * knobOff[i];
+                }
+                for (size_t i = from(4.5); i < changed.size(); ++i) back = std::max(back, static_cast<double>(std::fabs(changed[i] - stays[i])));
+                const double jump = secondDifference(changed);
+                std::printf("classic chords chorus 1 to the guitar and back: largest second difference %.4f; the chain's chorus under the guitar %.1f dB "
+                            "of the render without it; the last 0.5 s %.1e off the render that stays classic\n", jump, 10 * std::log10(apart / off), back);
+                CHECK(jump < 0.01 && apart > 0.01 * off && back < 1e-5);
+            }
+            // Review Focus 4: a jump under a held pad chord, the pad switched to a silent voice with it: the old tones fall over the pad's
+            // release (0.9 s) without a step (the largest difference of two successive samples from the jump on within 10 % of the tones' own in
+            // their last 0.2 s before it) and are gone after it: none is active from the release and two chunks on, and the output stays below
+            // -180 dBFS. A loop of one beat (0.6 s) over that chord: every lap starts its tones again and the wrap lets the last lap's fall
+            // over 0.9 s, so the tones of at most three laps are active; red when a jump leaves the tones ringing (each rings 3 s and more).
+            {
+                double padFrom = -1.0; // beat of the first pad note of at least 2 s
+                for (const btg::Event& ev : btg::buildEvents(pads))
+                    if (ev.type == btg::Event::Type::note && ev.layer == "pad" && ev.dur >= 2.0) { padFrom = ev.t * (100.0 / 60.0); break; }
+                int lap = 0; // the pad's notes in one lap of the loop
+                for (const btg::Event& ev : btg::buildEvents(pads))
+                    if (ev.type == btg::Event::Type::note && ev.layer == "pad" && ev.t * (100.0 / 60.0) > padFrom - 1e-6 && ev.t * (100.0 / 60.0) < padFrom + 1.0) ++lap;
+                CHECK(padFrom >= 0.0 && lap > 0);
+                {
+                    auto e = make(pads, CLASSIC_PAD);
+                    btg::Transport t;
+                    t.play(padFrom, e->bpm());
+                    const Result before = render(*e, t, 1.0, 480);
+                    e->setVoices(SILENT_PAD);
+                    t.seek(padFrom + 8.0);
+                    const Result falling = render(*e, t, 0.9 + 2.0 * SYNTH_FRAMES / rate, 480);
+                    const int left = e->activeSynthTones();
+                    const Result rest = render(*e, t, 0.3, 480);
+                    double own = 0.0, jump = std::fabs(falling.left[0] - before.left.back());
+                    for (size_t i = before.left.size() - rate / 5; i < before.left.size(); ++i) own = std::max(own, static_cast<double>(std::fabs(before.left[i] - before.left[i - 1])));
+                    for (size_t i = 1; i < falling.left.size(); ++i) jump = std::max(jump, static_cast<double>(std::fabs(falling.left[i] - falling.left[i - 1])));
+                    std::printf("classic pad jump: largest step %.2e after it, %.2e before it; %d synth tones active %.3f s after it, then peak %.2e\n", jump, own, left,
+                                static_cast<double>(falling.left.size()) / rate, rest.peak);
+                    CHECK(own > 1e-4 && jump < 1.1 * own && left == 0 && rest.peak < 1e-9);
+                }
+                {
+                    auto e = make(pads, CLASSIC_PAD);
+                    btg::Transport t;
+                    t.setLoop(padFrom, padFrom + 1.0);
+                    t.play(padFrom, e->bpm());
+                    int most = 0;
+                    interleaved(*e, t, 600, [&](int) { most = std::max(most, e->activeSynthTones()); }); // 6 s, ten laps
+                    std::printf("classic pad loop: at most %d synth tones active over ten laps of %d notes\n", most, lap);
+                    CHECK(most >= lap && most <= 3 * lap);
+                }
+            }
+            // Stop and silence with the four layers: the stop chokes the tones (15 ms, ended at 1e-7: 0.24 s); while they ring after the wet
+            // fade (50 ms) the output is not 0, from 0.5 s on it is exactly 0 in both channels and no synth tone is active.
+            {
+                auto e = make(four, CLASSIC);
+                btg::Transport t;
+                t.play(64.0, e->bpm());
+                render(*e, t, 1.0, 480);
+                t.stop();
+                const Result after = render(*e, t, 1.0, 480);
+                const float late = std::max(peakIn(after.left, 0.5, 1.0), peakIn(after.right, 0.5, 1.0));
+                std::printf("classic stop: peak from 60 to 150 ms after it %.2e, from 0.5 s %.2e\n", peakIn(after.left, 0.06, 0.15), late);
+                CHECK(peakIn(after.left, 0.06, 0.15) > 1e-6 && late == 0.0f && e->activeSynthTones() == 0);
+            }
+            // No allocation and no free in render (ruling 14) with the classic synth: the four layers from their sample voices to synth/classic
+            // and back and to it again while playing, the chords' chorus turned on (the voice built again, the chain in two channels), a
+            // restart, a jump and a stop, the counts armed around the render calls only.
+            {
+                auto e = make(four, nullptr); // the fixture's sample voices
+                btg::Transport t;
+                std::vector<float> l(480), r(480);
+                const auto counted = [&](double seconds) {
+                    counting = true;
+                    for (int done = 0; done < seconds * rate;) {
+                        const auto b = t.advance(480, rate);
+                        e->render(l.data(), r.data(), b.frames, b);
+                        done += b.frames;
+                    }
+                    counting = false;
+                };
+                allocations = frees = 0;
+                t.play(64.0, e->bpm());
+                counted(0.5);
+                e->setVoices(CLASSIC);
+                counted(0.5);
+                e->setVoices(R"({"bass":{"id":"sample","variant":"finger"},"chords":{"id":"sample","variant":"funk"},"pad":{"id":"sample","variant":"strings"},"lead":{"id":"sample","variant":"flute"}})");
+                counted(0.5);
+                e->setVoices(CLASSIC);
+                counted(0.5);
+                e->setSound(R"({"master":{"reverb":0,"echo":0,"roomWet":0},"chords":{"chorus":1}})");
+                counted(0.5);
+                t.play(64.0, e->bpm());
+                counted(1.0);
+                t.seek(32.0);
+                counted(0.5);
+                t.stop();
+                counted(0.5);
+                std::printf("classic render: %ld allocations, %ld frees (%s)\n", allocations, frees, e->voiceStatus().c_str());
+                CHECK(allocations == 0 && frees == 0 && e->voiceStatus().find(R"("chords":"ready")") != std::string::npos);
+            }
         }
     }
 

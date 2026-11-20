@@ -172,7 +172,9 @@ for (const layer of Object.keys(VOICES)) {
 }
 function claimed(c, claims) {
   const events = buildEvents(c.track);
-  for (const g of FX_LAYERS) for (const k of PHASE4) if (c.sound[g][k] !== 0 && !claims.includes(claimOf(g, k)) && !claims.includes('style')) problems.push(`${c.name}: ${g}.${k} is on but not claimed`);
+  // a voice that makes the knob's effect itself (its registry uses name it: the classic chords' chorus, ownChorus in synth.js) claims it as synth:
+  const owns = (g, k) => claims.includes(`synth:${g}.${k}`) && VOICES[g][c.track.voices[g].id].uses.includes(`${g}.${k}`);
+  for (const g of FX_LAYERS) for (const k of PHASE4) if (c.sound[g][k] !== 0 && !claims.includes(claimOf(g, k)) && !owns(g, k) && !claims.includes('style')) problems.push(`${c.name}: ${g}.${k} is on but not claimed`);
   // ruling 10: the synth limits wherever a layer plays a voice that is not a sample voice, also in a whole band
   const synth = (effectsOn(c.sound) && !Object.values(c.track.layers).every(Boolean)) || synthLayers(c, events).length > 0;
   if (claims.includes('style') && synth) c.kind = 'synth';
@@ -388,5 +390,23 @@ const organCases = [
 ];
 write('organ.json', organCases);
 console.log(`organ.json: ${organCases.length} cases`);
+
+// Task 22: the classic synth on each of its four layers alone, neutral and each knob of its voice's uses at its ends (a knob whose neutral
+// value is 0 at 0.5 and 1, as the e-piano's tremolo: at 0 its case would be the neutral one); the lead's uses are empty. Each case fails
+// when the core ignores its knob (Task 22's mutation runs), except three that cannot fail red: pad lfoSpeed 0 and 1 and pad thickness 0
+// stay within the synth limits then (bands +2.47 dB, envelope 0.950 at worst); voice-compare's sets "classic pad lfoSpeed 0, 1" and
+// "classic pad thickness 0" fail then (-18.8, -10.2 and +3.6 dB).
+const CLASSIC = { id: 'synth', variant: 'classic' }, CLASSIC_STYLE = { bass: 'funk', chords: 'dreamy', pad: 'dreamy', lead: 'psych' };
+const classicCases = [];
+for (const layer of ['bass', 'chords', 'pad', 'lead']) {
+  classicCases.push(synthSolo(`classic-${layer}-neutral`, layer, CLASSIC, CLASSIC_STYLE[layer], {}, [`voice:${layer}`]));
+  for (const path of VOICES[layer].synth.uses) {
+    const k = path.split('.')[1];
+    for (const v of DEFAULT_TIMBRE[layer][k] === 0 ? [0.5, 1] : [0, 1])
+      classicCases.push(synthSolo(`classic-${layer}-${k}-${v}`, layer, CLASSIC, CLASSIC_STYLE[layer], { [path]: v }, [`voice:${layer}`, `synth:${path}`]));
+  }
+}
+write('classic.json', classicCases);
+console.log(`classic.json: ${classicCases.length} cases`);
 for (const p of problems) console.error(`ERROR ${p}`);
 process.exit(problems.length ? 1 : 0);

@@ -5,6 +5,7 @@
  *                             the table pair for a frequency and their crossfade
  *   oscillator_handler.cc    (Copyright 2022 The Chromium Authors): frequency and detune in float, the clamp to the Nyquist frequency, the
  *                             increments of the k-rate and the a-rate path, the linear, 3-point and 5-point interpolation, the read index
+ *                             (since Task 22 also where it begins for a start between frames, Process)
  *   oscillator_handler.h     (Copyright 2022 The Chromium Authors): the thresholds kInterpolate2Point and kInterpolate3Point
  *   cpu/x86/oscillator_kernel_sse2.cc (Copyright 2020 The Chromium Authors): ProcessKRateVector, the k-rate kernel's four float read
  *                             indices, their step and wrap, the table indices and interpolation factors made from them, the double index
@@ -275,6 +276,10 @@ void Oscillator::constant(float hz, float cents, float* out, int count, long lon
     const float increment = frequency * w.rateScale;
     const unsigned mask = static_cast<unsigned>(w.size - 1);
     const double size = w.size, inverse = 1.0 / w.size;
+    if (lead > 0) { // Process: a start between frames sets the read index to the part of a frame since then, times the k-rate increment
+        index = lead * frequency * w.rateScale;
+        lead = 0.0;
+    }
     if (!(increment >= INTERPOLATE_2_POINT)) {
         for (int i = 0; i < count; ++i) {
             out[i] = interpolate(index, std::fabs(increment), mask, factor, lower, higher);
@@ -331,6 +336,7 @@ void Oscillator::moving(const float* hz, const float* cents, bool hzMoving, bool
     if (!centsMoving) scale *= std::exp2(cents[0] / 1200);
     const unsigned mask = static_cast<unsigned>(w.size - 1);
     const double size = w.size, inverse = 1.0 / w.size;
+    lead = 0.0; // the a-rate path: Process's frequency is 0 there, a start between frames moves nothing
     double at = index;
     for (int i = 0; i < count; ++i) {
         const float v = hzMoving && centsMoving ? std::exp2(cents[i] * k) * hz[i] : hzMoving ? hz[i] : std::exp2(cents[i] * k);

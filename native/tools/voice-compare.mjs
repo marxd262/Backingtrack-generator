@@ -45,6 +45,17 @@
 //     -10.2, -18.1 to -7.5 dB), the preamp's 20 Hz highpass (every set with the drive on, -24.3 to -10.1 dB), the swell's glide (the swell
 //     set, -24.8 dB), the Leslie's speed change (the slow-to-fast set, -9.9 dB), the Leslie knob (leslie 0, 2 and 3: +3.6, -8.3, -7.9 dB;
 //     each against the events under which the preset's mode 1 plays otherwise), the drive knob (drive 0 and 1, +4.0 and -12.7 dB).
+//     The classic synth (src/audio/voices/classic.js; Task 22) on bass, chords, pad and lead: each layer neutral and each knob of its uses at
+//     0 and 1, a bass note shorter than holdMin + holdCut, the chords' chorus in two channels (alone, with the tremolo, at 44.1 and 96 kHz),
+//     their tremolo, a chord of four, a pad note too short for its attack, the lead's 20 ms note and a low and a high note, the pad at 44.1 and
+//     96 kHz, two sets 92 frames into a quantum, and the pad's whole graph (shimmer 1 with thickness 1: 16 nodes, SynthTone's NODES; with
+//     NODES 15 btg_fx refuses it, "the voice's graph does not fit a SynthTone", and every other set passes). Each of these makes a set fail when it is taken out (Task 22's mutation runs): the bass's
+//     sine (every bass set, -13.1 to -1.1 dB), its decay gain (pluck 1, -1.2 dB), its two saws' opposite detune (every bass set, -19.0 to
+//     -4.1 dB), the square's 7 cents (every chords set, -6.4 to +3.2 dB), the chorus saws' late start (the five chorus sets, +0.3 dB), their
+//     phase at a start between frames (chorus 1 at 44.1 kHz, -28.1 dB: at 48 and 96 kHz 11 and 17 ms are whole frames), the panners (the
+//     five chorus sets, -10.9 to -9.9 dB), the tremolo (the three tremolo sets, -2.8 to -2.2 dB), the pad's LFO (every pad set, -26.6 to
+//     -4.9 dB), its extra saws (thickness 1, -4.2 dB), its octave sines (shimmer 1, -1.0 dB), its attack rule (the short note, -0.2 dB), the
+//     lead's filter ramp (every lead set, -19.8 to -2.0 dB), its triangle's 9 cents (every lead set, -11.6 to +1.5 dB).
 //     Events and their ends lie exactly on frames (renderWeb): with frame / rate the param events of a tone at 1632 / 48000 come a frame
 //     after its sources' start in Chromium (ceil(t * rate) against TimeToSampleFrame) and its first frame plays the gains' default 1 (the
 //     chord sets measured -48.4 to -45.2 dB, the 44.1 kHz set -39.8 dB, before the placement; the e-piano's frames were exact already).
@@ -98,6 +109,14 @@
 //     index): the LFOs' path before a speed change the browser already knows of (this page schedules every event before the render, so
 //     from the chain's first setValue on its LFOs run a-rate while a later change is listed; the core sees an event in its own chunk), and
 //     the rest of a quantum begun on the k-rate path when an event of the next chunk switches it (never here: chunks end on quanta).
+//   voice (Task 22): the classic synth's 46 sets -138.8 (chords brightness 1) to -94.7 dB (chorus 1 at 96 kHz), at most 5.2e-5. The bass
+//     -133.6 to -106.5 dB; its lowest figures (cutoff 0 -109.3, resonance 1 -106.5 dB) are its tone's end: the core ends a synth tone one chunk
+//     (256 frames) after its last source's stop, where the browser's lowpass at 56 Hz or with Q 14 dB rings on (1.3e-5 and 4.3e-5, the
+//     amp at its 1e-4 floor). The chords in one channel -138.8 to -123.7 dB; in two channels -121.1 (44.1 kHz) to -94.7 dB, the largest
+//     difference a few frames after the sources' stop, where the browser's render is exactly 0 and the core's lowpass rings on at the amp's
+//     floor (5.1e-5): not traced into Chromium's source, not rebuilt. Without the phase of a start between frames (osc.h `lead`, Chromium's
+//     start_frame_offset) chorus 1 at 44.1 kHz measured -28.1 dB. The pad -137.6 to -123.9 dB (its figures move by about 0.1 dB from run to
+//     run: the browser's side), the lead -135.1 to -132.1 dB.
 //   --none: every set at 0.0 dB.
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -207,6 +226,37 @@ VOICE.push(
   organ('jazz', 'a chord, then a single note after a gap, 92 frames into a quantum', chordThenNote(1500)),
   organ('jazz', 'a chord, then a single note after a gap at 44.1 kHz', chordThenNote(), { rate: 44100 }),
   organ('jazz', 'a chord, then a single note after a gap at 96 kHz (tables of 16384)', chordThenNote(), { rate: 96000 }),
+);
+// Task 22, the classic synth on bass, chords, pad and lead (src/audio/voices/classic.js): each layer neutral and each knob of its uses at 0
+// and 1; the chords' chorus in two channels (both judged), its saws started 11 and 17 ms after the tone; two rates; two sets 92 frames into a
+// quantum.
+const classic = (layer, name, events, extra = {}) => voice(`classic ${layer} ${name}`, `${layer}/synth/classic`, events, extra);
+const knobs = (layer, names, events, extra = {}) => names.flatMap((k) => [0, 1].map((v) => classic(layer, `${k} ${v}`, events, { sound: { [layer]: { [k]: v } }, ...extra })));
+const BASS = [[1536, 45, 0.8, 0.5]], CHORD = [[1536, 57, 0.8, 0.5]], PAD = [[1536, 57, 0.8, 2]], LEAD = [[1536, 69, 0.8, 0.5]];
+const CHORUS = { chords: { chorus: 1 } }, PAD_SET = { seconds: 3.5 }, CHORD_SET = { seconds: 2 };
+VOICE.push(
+  classic('bass', 'neutral', BASS),
+  ...knobs('bass', ['sub', 'pluck', 'cutoff', 'resonance', 'roundness'], BASS),
+  classic('bass', 'a note of 0.05 s (shorter than holdMin + holdCut)', [[1536, 45, 0.8, 0.05]]),
+  classic('chords', 'neutral', CHORD, CHORD_SET),
+  ...knobs('chords', ['brightness', 'length'], CHORD, CHORD_SET),
+  classic('chords', 'chorus 1 (two channels)', CHORD, { sound: CHORUS, ...CHORD_SET }),
+  classic('chords', 'tremolo 1', CHORD, { sound: { chords: { tremolo: 1 } }, ...CHORD_SET }),
+  classic('chords', 'chorus 1 with tremolo 1', CHORD, { sound: { chords: { chorus: 1, tremolo: 1 } }, ...CHORD_SET }),
+  classic('chords', 'chord of four (A3 C4 E4 G4)', [57, 60, 64, 67].map((m) => [1536, m, 0.8, 0.5]), CHORD_SET),
+  classic('pad', 'neutral', PAD, PAD_SET),
+  ...knobs('pad', ['attack', 'cutoff', 'lfoSpeed', 'lfoDepth', 'shimmer', 'thickness'], PAD, PAD_SET),
+  classic('pad', 'attack 1, a note of 1 s (too short for its attack: line 57 shortens it)', [[1536, 57, 0.8, 1]], { sound: { pad: { attack: 1 } }, ...PAD_SET }),
+  classic('lead', 'neutral', LEAD),
+  classic('lead', 'a note of 0.02 s (the hold floor)', [[1536, 69, 0.8, 0.02]]),
+  classic('lead', 'low note (C3)', [[1536, 48, 0.8, 0.5]]),
+  classic('lead', 'high note (C7)', [[1536, 96, 0.8, 0.5]]),
+  ...[44100, 96000].flatMap((rate) => [classic('chords', `chorus 1 at ${rate / 1000} kHz`, CHORD, { sound: CHORUS, ...CHORD_SET, rate }),
+    classic('pad', `neutral at ${rate / 1000} kHz`, PAD, { ...PAD_SET, rate })]),
+  classic('chords', 'chorus 1 with tremolo 1, started 92 frames into a quantum (frame 1500)', [[1500, 57, 0.8, 0.5]], { sound: { chords: { chorus: 1, tremolo: 1 } }, ...CHORD_SET }),
+  classic('pad', 'neutral, started 92 frames into a quantum (frame 1500)', [[1500, 57, 0.8, 2]], PAD_SET),
+  // the pad's whole graph: the extra saws and the octave sines, 16 nodes, SynthTone's limit (a larger one is not built: btg_fx exits with an error)
+  classic('pad', 'shimmer 1 with thickness 1 (all 16 nodes)', PAD, { sound: { pad: { shimmer: 1, thickness: 1 } }, ...PAD_SET }),
 );
 const SETS = [...OSC, ...PARAM, ...GRAPH, ...VOICE];
 

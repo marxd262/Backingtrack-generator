@@ -4,6 +4,7 @@
 // events (json_compare.h): numbers bit for bit ("identical") or within 1.5e-6 ("close", which fails too: a difference in the last bits,
 // possibly another platform's math library; an exception has to be ruled and named here); anything else fails, also an unknown fn.
 #include "../src/convolver.h"
+#include "../src/sound_data.h"
 #include "../src/sound_model.h"
 #include "json_compare.h"
 
@@ -91,6 +92,9 @@ const std::map<std::string, std::function<json(const json&)>> FUNCTIONS {
         }
         return json { { "length", length }, { "sumSquares", sums }, { "at", at } };
     } },
+    { "ownsChorus", [](const json& in) {
+        const std::string layer = in.at("layer").get<std::string>();
+        return json(ownsChorus(layer, layer + "/" + in.at("id").get<std::string>() + "/" + in.at("variant").get<std::string>())); } },
 };
 
 } // namespace

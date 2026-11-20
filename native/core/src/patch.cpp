@@ -1,7 +1,8 @@
 /*
  * The nodes of a synth tone follow Chromium, third_party/blink/renderer/ at 158.0.8127.18 (audio_utilities.cc: at main, as for mod_fx.cpp):
  *   modules/webaudio/audio_scheduled_source_handler.cc (Copyright 2022 The Chromium Authors): a source's start and end frame, its time
- *                                                       rounded up, the end exclusive
+ *                                                       rounded up, the end exclusive; the start time's offset from its frame
+ *                                                       (start_frame_offset, Task 22)
  *   modules/webaudio/audio_buffer_source_handler.cc    (Copyright 2022 The Chromium Authors): at rate 1 the offset rounded to a frame and the
  *                                                       frames copied (ClampGrainParameters, ProcessFastPath), the loop over the whole
  *                                                       buffer, silence after the end without a loop
@@ -120,6 +121,9 @@ int SynthTone::osc(const WaveTables& wave, float hz, float cents, double start, 
     node.start = framesUp(start);
     node.stop = framesUp(stop);
     node.oscillator.offset = static_cast<int>((quantum + node.start) % 128);
+    // -start_frame_offset of UpdateSchedulingInfo for a start before its frame; a start within 1/2048 frame after one (rounded down to it)
+    // gets 0: Chromium leaves that frame unwritten and goes on as from the frame, not rebuilt
+    node.oscillator.lead = std::max(0.0, static_cast<double>(node.start) - start);
     end = std::max(end, node.stop);
     return n;
 }

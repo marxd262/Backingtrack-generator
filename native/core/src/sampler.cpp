@@ -432,7 +432,8 @@ std::shared_ptr<const Voice> makeVoice(Engine::Layer layer, const std::string& k
                         v("lowDb"), v("midDb"), v("midHz"), v("highDb"), v("highHz"), v("layerSpread"), v("choke"), v("roomMic"), v("velCurve"), v("kitPan") };
     std::shared_ptr<Voice> voice;
     if (!pack) { // a synth voice (src/audio/voices/index.js, IMPLS)
-        if (key == "chords/epiano/rhodes") voice = epianoVoice(tuning, timbre);
+        if (key == "bass/synth/classic" || key == "chords/synth/classic" || key == "pad/synth/classic" || key == "lead/synth/classic") voice = classicVoice(timbre);
+        else if (key == "chords/epiano/rhodes") voice = epianoVoice(tuning, timbre);
         else if (key.rfind("chords/organ/", 0) == 0 && soundData().tunables.count(key)) voice = organVoice(key, tuning, sampleRate);
         else return nullptr;
     } else if (layer == Engine::drums || layer == Engine::percussion) {

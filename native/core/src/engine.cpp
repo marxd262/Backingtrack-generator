@@ -192,12 +192,13 @@ struct Engine::Impl {
         made->fx[chords] = detail::fxChainParams(timbre.chords.fuzz, timbre.chords.overdrive, timbre.chords.distortion, chords);
         made->fx[pad] = detail::fxChainParams(timbre.pad.fuzz, timbre.pad.overdrive, timbre.pad.distortion, pad);
         made->fx[lead] = detail::fxChainParams(timbre.lead.fuzz, timbre.lead.overdrive, timbre.lead.distortion, lead);
-        // shortcut: the chain always takes the chorus knob; synth.js 231 and 234 (ownChorus) give it 0 where the voice makes the chorus
-        // itself (the classic chord synth). Task 22, which ports that voice, adds the rule.
-        made->vibrato[bass] = timbre.bass.vibrato; made->chorus[bass] = timbre.bass.chorus;
-        made->vibrato[chords] = timbre.chords.vibrato; made->chorus[chords] = timbre.chords.chorus;
-        made->vibrato[pad] = timbre.pad.vibrato; made->chorus[pad] = timbre.pad.chorus;
-        made->vibrato[lead] = timbre.lead.vibrato; made->chorus[lead] = timbre.lead.chorus;
+        // synth.js 231 to 234: a chain whose chosen voice makes the chorus itself (ownChorus: the classic chord synth) gets 0; the web reads
+        // `chosen`, also when that voice failed to build
+        const auto chorus = [&](Layer l, double knob) { return detail::ownsChorus(LAYER_NAMES[l], chosen[l].key) ? 0.0 : knob; };
+        made->vibrato[bass] = timbre.bass.vibrato; made->chorus[bass] = chorus(bass, timbre.bass.chorus);
+        made->vibrato[chords] = timbre.chords.vibrato; made->chorus[chords] = chorus(chords, timbre.chords.chorus);
+        made->vibrato[pad] = timbre.pad.vibrato; made->chorus[pad] = chorus(pad, timbre.pad.chorus);
+        made->vibrato[lead] = timbre.lead.vibrato; made->chorus[lead] = chorus(lead, timbre.lead.chorus);
         // applyBus (synth.js 77 to 86); the compressor's own make-up (autoMakeupDb, knee 0) is taken back by the gain behind it
         const auto v = [&](const char* name) { return detail::tunedValue("mix/bus", name, tuning); };
         const auto autoMakeupDb = [](double threshold, double ratio) { return -0.6 * threshold * (1 - 1 / ratio); };

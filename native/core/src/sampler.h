@@ -237,6 +237,7 @@ public:
 // organ builds its wave tables for (0: none yet, the organ is silent; the engine builds its voices again when prepare sets the rate).
 std::shared_ptr<const Voice> makeVoice(Engine::Layer layer, const std::string& key, std::shared_ptr<const Pack> pack, const Tuning& tuning, const Timbre& timbre,
                                        double sampleRate = 0.0);
+std::shared_ptr<Voice> classicVoice(const Timbre& timbre);                                            // voices/classic.cpp
 std::shared_ptr<Voice> epianoVoice(const Tuning& tuning, const Timbre& timbre);                      // voices/epiano.cpp
 std::shared_ptr<Voice> organVoice(const std::string& key, const Tuning& tuning, double sampleRate); // voices/organ.cpp
 struct WaveTables;

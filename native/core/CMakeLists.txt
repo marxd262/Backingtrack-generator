@@ -58,6 +58,7 @@ add_library(btg_core STATIC
     src/osc.cpp
     src/param.cpp
     src/patch.cpp
+    src/voices/classic.cpp
     src/voices/epiano.cpp
     src/voices/organ.cpp
     src/voices/organ_chain.cpp

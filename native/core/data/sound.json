@@ -2418,5 +2418,83 @@
     "crash": -1.2,
     "tomHigh": 0.8,
     "tomLow": -1.2
+  },
+  "uses": {
+    "drums": {
+      "synth": [
+        "drums.kickPunch",
+        "drums.kickLength",
+        "drums.snareTone",
+        "drums.snareSnap",
+        "drums.hatBright",
+        "drums.hatLength",
+        "drums.room"
+      ],
+      "sample": [
+        "drums.room"
+      ]
+    },
+    "bass": {
+      "synth": [
+        "bass.sub",
+        "bass.pluck",
+        "bass.cutoff",
+        "bass.resonance",
+        "bass.roundness"
+      ],
+      "string": [
+        "bass.sub",
+        "bass.pluck",
+        "bass.cutoff",
+        "bass.roundness"
+      ],
+      "sample": [
+        "bass.cutoff"
+      ]
+    },
+    "chords": {
+      "synth": [
+        "chords.brightness",
+        "chords.length",
+        "chords.chorus",
+        "chords.tremolo"
+      ],
+      "string": [
+        "chords.brightness",
+        "chords.length"
+      ],
+      "epiano": [
+        "chords.brightness",
+        "chords.length",
+        "chords.tremolo"
+      ],
+      "organ": [],
+      "sample": [
+        "chords.brightness",
+        "chords.length"
+      ]
+    },
+    "pad": {
+      "synth": [
+        "pad.attack",
+        "pad.cutoff",
+        "pad.lfoSpeed",
+        "pad.lfoDepth",
+        "pad.shimmer",
+        "pad.thickness"
+      ],
+      "sample": [
+        "pad.attack",
+        "pad.cutoff"
+      ]
+    },
+    "lead": {
+      "synth": [],
+      "sample": []
+    },
+    "percussion": {
+      "synth": [],
+      "sample": []
+    }
   }
 }

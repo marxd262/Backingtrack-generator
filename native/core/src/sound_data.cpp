@@ -28,9 +28,19 @@ const SoundData& soundData() {
             if (audio.value("echo", false)) out.echoLayers.insert(layer);
         }
         out.kitPan = j.at("kitPan").get<std::map<std::string, double>>();
+        out.uses = j.at("uses").get<std::map<std::string, std::map<std::string, std::set<std::string>>>>();
         return out;
     }();
     return data;
+}
+
+bool ownsChorus(const std::string& layer, const std::string& key) {
+    if (key.rfind(layer + "/", 0) != 0) return false;
+    const std::string id = key.substr(layer.size() + 1, key.find('/', layer.size() + 1) - layer.size() - 1);
+    const auto ids = soundData().uses.find(layer);
+    if (ids == soundData().uses.end()) return false;
+    const auto uses = ids->second.find(id);
+    return uses != ids->second.end() && uses->second.count(layer + ".chorus") > 0;
 }
 
 Tuning parseTuning(const std::string& text) {

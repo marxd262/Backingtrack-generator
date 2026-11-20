@@ -84,6 +84,12 @@ add('MOD', () => MOD, [null]);
 add('noiseBuffer', ({ label, seconds, channels, decay, sampleRate }) => summary(noiseBuffer(context(sampleRate), createRng(1).fork(label), seconds, channels, decay), channels),
   [44100, 48000, 96000].map((sampleRate) => ({ label: 'noise', seconds: 1, channels: 1, decay: 0, sampleRate })));
 
+// Task 22: synth.js 231 (ownChorus, not exported), whether a layer's chosen voice makes the chorus itself, for every layer and every voice
+// id of the registry (the key with the id's first variant)
+const { VOICES } = await load('core/voices.js');
+add('ownsChorus', ({ layer, id }) => VOICES[layer][id].uses.includes(`${layer}.chorus`),
+  Object.keys(VOICES).flatMap((layer) => Object.keys(VOICES[layer]).map((id) => ({ layer, id, variant: VOICES[layer][id].variants[0] }))));
+
 mkdirSync(outDir, { recursive: true });
 writeFileSync(join(outDir, 'logic.json'), JSON.stringify(cases));
 console.log(`logic.json: ${cases.length} cases of ${new Set(cases.map((c) => c.fn)).size} functions`);

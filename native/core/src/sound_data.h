@@ -18,8 +18,12 @@ struct SoundData {
     std::set<std::string> roomLayers;                             // layerAudio: the layers with room: true (their sum goes into the reverb)
     std::set<std::string> echoLayers;                             // layerAudio: the layers with echo: true (chords, pad, lead: their trim output feeds the echo)
     std::map<std::string, double> kitPan;                        // synth.js KIT_PAN: hit name -> place in the kit (a hit not named stays in the middle)
+    std::map<std::string, std::map<std::string, std::set<std::string>>> uses; // core/voices.js: layer -> voice id -> the timbre knobs it uses
 };
 const SoundData& soundData(); // parsed on first use
+// synth.js 231, ownChorus: whether the voice `key` ("chords/synth/classic") of `layer` makes the chorus itself (its id's uses name
+// "<layer>.chorus"), so that the layer's chain leaves it out. A key of another layer or an id the registry does not have: false.
+bool ownsChorus(const std::string& layer, const std::string& key);
 using Tuning = std::map<std::string, std::map<std::string, double>>;
 // Overrides as the web app's setTuning takes them; only finite numbers inside objects count, anything else is left out. Never throws.
 Tuning parseTuning(const std::string& json);

@@ -200,23 +200,58 @@ try {
   if (!(result.effects.peaks.bass > 0)) problems.push('bass: no level with every effect on');
   const moved = Math.max(0, ...Object.values(result.effects.gainDb).filter((g) => g !== null).map(Math.abs));
   if (!(moved >= 1.5)) problems.push(`effects: no layer's peak changes with every effect on (dB against the page's timbre): ${JSON.stringify(result.effects.gainDb)}`);
+  // The helpers of the voice steps below (the e-piano's, the organ's, the classic synth's), in the page.
+  await page.evaluate(() => {
+    window.wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    window.peakOf = (log, layer, digits = 4) => +Math.max(0, ...log.map((m) => m.peaks?.[layer] ?? 0)).toFixed(digits);
+    window.pageOwn = () => { // what the page sent last: its track, voices (the track's when it sent none), tuning and sound
+      const last = (type) => window.sent.findLast((s) => s.type === type)?.json;
+      const own = { track: last('track'), tuning: last('tuning') ?? '{}', timbre: last('timbre') };
+      own.voices = last('voices') ?? JSON.stringify(JSON.parse(own.track).voices);
+      return own;
+    };
+    window.voicesReported = async (send) => { // the engine's next `voices` event after send(), null when none comes within 3 s
+      const before = window.voiceLog.length;
+      send();
+      for (let i = 0; i < 30 && window.voiceLog.length === before; i++) await window.wait(100);
+      return window.voiceLog.length > before ? window.voiceLog.at(-1) : null;
+    };
+    // a play from beat 0: its reports from beat 0.2 (not the lead, nor the tail of what played before the `play`) to the engine's first
+    // report of beat `until`, waiting at most tries x 0.1 s; null when that report does not come
+    window.playUntil = async (bpm, until, tries) => {
+      window.engineLog.length = 0;
+      window.bridge('play', { startBeats: 0, bpm });
+      const span = () => { const from = window.engineLog.findIndex((m) => m.playing && m.beats < 0.2); return from < 0 ? [] : window.engineLog.slice(from); };
+      for (let i = 0; i < tries && !span().some((m) => m.beats >= until); i++) await window.wait(100);
+      const log = span(), end = log.findIndex((m) => m.beats >= until);
+      return end < 0 ? null : log.slice(0, end + 1).filter((m) => m.beats >= 0.2);
+    };
+    // the page's own track, voices, tuning and sound again (`own` from pageOwn), shown by a play from beat 64: the `voices` event of the
+    // page's voices and the page's drums' peak over 2 s of it
+    window.restorePage = async (own) => {
+      window.bridge('track', { json: own.track });
+      const restored = await window.voicesReported(() => window.bridge('voices', { json: own.voices }));
+      window.bridge('tuning', { json: own.tuning });
+      window.bridge('timbre', { json: own.timbre });
+      window.bridge('play', { startBeats: 64, bpm: window.sent.findLast((s) => s.type === 'play').bpm });
+      await window.wait(500);
+      window.engineLog.length = 0;
+      await window.wait(2000);
+      return { restored, drumsBack: window.peakOf(window.engineLog, 'drums') };
+    };
+  });
   // The e-piano (Task 21): the page's chords voice set to chords/epiano/rhodes through the bridge, as the page sends `voices` (the voices it
   // sent last, the chords changed); the engine's `voices` event reports the chords ready, 4 s of play from beat 64 give them a level; then
   // the page's own voices again. Red when the core has no voice for the key (the chords stay silent).
   result.epiano = await page.evaluate(async () => {
-    const own = window.sent.findLast((s) => s.type === 'voices')?.json ?? JSON.stringify(JSON.parse(window.sent.findLast((s) => s.type === 'track').json).voices);
-    const reported = async (send) => { // the chords' status in the engine's next `voices` event
-      const before = window.voiceLog.length;
-      send();
-      for (let i = 0; i < 30 && window.voiceLog.length === before; i++) await new Promise((r) => setTimeout(r, 100));
-      return window.voiceLog.length > before ? window.voiceLog.at(-1).chords : 'no voices event';
-    };
-    const status = await reported(() => window.bridge('voices', { json: JSON.stringify({ ...JSON.parse(own), chords: { id: 'epiano', variant: 'rhodes' } }) }));
+    const own = window.pageOwn().voices;
+    const chords = async (send) => (await window.voicesReported(send))?.chords ?? 'no voices event';
+    const status = await chords(() => window.bridge('voices', { json: JSON.stringify({ ...JSON.parse(own), chords: { id: 'epiano', variant: 'rhodes' } }) }));
     window.bridge('play', { startBeats: 64, bpm: window.sent.findLast((s) => s.type === 'play').bpm });
     window.engineLog.length = 0;
-    await new Promise((r) => setTimeout(r, 4000));
-    const peak = +Math.max(0, ...window.engineLog.map((m) => m.peaks?.chords ?? 0)).toFixed(3), load = +window.lastEngine().load.toFixed(3);
-    return { status, peak, load, restored: await reported(() => window.bridge('voices', { json: own })) };
+    await window.wait(4000);
+    const peak = window.peakOf(window.engineLog, 'chords', 3), load = +window.lastEngine().load.toFixed(3);
+    return { status, peak, load, restored: await chords(() => window.bridge('voices', { json: own })) };
   });
   if (result.epiano.status !== 'ready' || !(result.epiano.peak > 0) || result.epiano.restored !== 'ready') problems.push(`e-piano: ${JSON.stringify(result.epiano)}`);
   // The organ (Task 20): a track of the step's own, sent through the bridge as the page sends `track` (with its voices), so that both passes
@@ -237,45 +272,48 @@ try {
   // which the page's drums have a level.
   const organCase = JSON.parse(readFileSync(join(repo, 'native/tools/sound-cases/organ.json'), 'utf8')).find((c) => c.name === 'organ-rock-drive-0');
   result.organ = await page.evaluate(async ([track, sound]) => {
-    const last = (type) => window.sent.findLast((s) => s.type === type)?.json;
-    const own = { track: last('track'), tuning: last('tuning') ?? '{}', timbre: last('timbre') };
-    own.voices = last('voices') ?? JSON.stringify(JSON.parse(own.track).voices);
-    const reported = async (send) => { // the chords' status in the engine's next `voices` event
-      const before = window.voiceLog.length;
-      send();
-      for (let i = 0; i < 30 && window.voiceLog.length === before; i++) await new Promise((r) => setTimeout(r, 100));
-      return window.voiceLog.length > before ? window.voiceLog.at(-1).chords : 'no voices event';
-    };
-    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-    const peak = (log, layer) => +Math.max(0, ...log.map((m) => m.peaks?.[layer] ?? 0)).toFixed(4);
+    const own = window.pageOwn();
+    const chords = async (send) => (await window.voicesReported(send))?.chords ?? 'no voices event';
     window.bridge('timbre', { json: JSON.stringify(sound) });
-    const status = await reported(() => window.bridge('track', { json: JSON.stringify(track) }));
-    const pass = async (drive) => { // the reports from beat 0.2 to the first of beat 32, of a play from beat 0
+    const status = await chords(() => window.bridge('track', { json: JSON.stringify(track) }));
+    const pass = (drive) => { // the reports from beat 0.2 to the first of beat 32, of a play from beat 0
       window.bridge('tuning', { json: JSON.stringify(Object.fromEntries(['jazz', 'rock', 'gospel', 'ballad'].map((v) => [`chords/organ/${v}`, { drive }]))) });
-      window.engineLog.length = 0;
-      window.bridge('play', { startBeats: 0, bpm: track.bpm });
-      const span = () => { const from = window.engineLog.findIndex((m) => m.playing && m.beats < 0.2); return from < 0 ? [] : window.engineLog.slice(from); };
-      for (let i = 0; i < 250 && !span().some((m) => m.beats >= 32); i++) await wait(100);
-      const log = span(), end = log.findIndex((m) => m.beats >= 32);
-      return end < 0 ? null : log.slice(0, end + 1).filter((m) => m.beats >= 0.2);
+      return window.playUntil(track.bpm, 32, 250);
     };
     const passes = [await pass(0), await pass(1)];
-    const [drive0, drive1] = passes.map((log) => (log ? peak(log, 'chords') : null)), drums = Math.max(...passes.map((log) => (log ? peak(log, 'drums') : 0)));
+    const [drive0, drive1] = passes.map((log) => (log ? window.peakOf(log, 'chords') : null)), drums = Math.max(...passes.map((log) => (log ? window.peakOf(log, 'drums') : 0)));
     const load = +window.lastEngine().load.toFixed(3);
-    window.bridge('track', { json: own.track });
-    const restored = await reported(() => window.bridge('voices', { json: own.voices }));
-    window.bridge('tuning', { json: own.tuning });
-    window.bridge('timbre', { json: own.timbre });
-    window.bridge('play', { startBeats: 64, bpm: window.sent.findLast((s) => s.type === 'play').bpm });
-    await wait(500);
-    window.engineLog.length = 0;
-    await wait(2000);
-    const drumsBack = peak(window.engineLog, 'drums');
-    return { status, drive0, drive1, gainDb: drive0 > 0 && drive1 > 0 ? +(20 * Math.log10(drive1 / drive0)).toFixed(2) : null, drums, load, restored, drumsBack };
+    const back = await window.restorePage(own);
+    return { status, drive0, drive1, gainDb: drive0 > 0 && drive1 > 0 ? +(20 * Math.log10(drive1 / drive0)).toFixed(2) : null, drums, load,
+      restored: back.restored?.chords ?? 'no voices event', drumsBack: back.drumsBack };
   }, [organCase.track, organCase.sound]);
   if (result.organ.status !== 'ready' || !(result.organ.drive0 > 0) || !(result.organ.drive1 > 0) || !(Math.abs(result.organ.gainDb) >= 1.5) || result.organ.drums !== 0
     || result.organ.restored !== 'ready' || !(result.organ.drumsBack > 0))
     problems.push(`organ: ${JSON.stringify(result.organ)}`);
+  // The classic synth (Task 22) on bass, chords, pad and lead: a track of the step's own, sent through the bridge as the page sends `track`,
+  // the track of band.json's case band-funk (all six layers with sample voices, 100 bpm; bass, chords, pad and lead each have a note at beat
+  // 0), with that case's sound. Then the four layers set to synth/classic as the page sends `voices` (the track's voices, those four
+  // changed): the engine's `voices` event reports all four ready, and a play from beat 0 up to the engine's first report of beat 8 (the
+  // reports from beat 0.2 on, as the organ's) gives each of the four a level. Red when the core has no voice for one of the keys (that layer
+  // is reported silent and has no level). Then the page's own track, voices,
+  // tuning and sound again, shown by a play from beat 64 in which the page's drums have a level.
+  const bandCase = JSON.parse(readFileSync(join(repo, 'native/tools/sound-cases/band.json'), 'utf8')).find((c) => c.name === 'band-funk');
+  result.classic = await page.evaluate(async ([track, sound]) => {
+    const LAYERS = ['bass', 'chords', 'pad', 'lead'];
+    const own = window.pageOwn();
+    window.bridge('timbre', { json: JSON.stringify(sound) });
+    await window.voicesReported(() => window.bridge('track', { json: JSON.stringify(track) }));
+    const voices = { ...track.voices, ...Object.fromEntries(LAYERS.map((l) => [l, { id: 'synth', variant: 'classic' }])) };
+    const status = await window.voicesReported(() => window.bridge('voices', { json: JSON.stringify(voices) }));
+    const played = await window.playUntil(track.bpm, 8, 100);
+    const peaks = Object.fromEntries(LAYERS.map((l) => [l, played && window.peakOf(played, l)]));
+    const load = +window.lastEngine().load.toFixed(3);
+    const { restored, drumsBack } = await window.restorePage(own);
+    return { status: status && Object.fromEntries(LAYERS.map((l) => [l, status[l]])), peaks, load, restored, drumsBack };
+  }, [bandCase.track, bandCase.sound]);
+  if (!['bass', 'chords', 'pad', 'lead'].every((l) => result.classic.status?.[l] === 'ready' && result.classic.peaks[l] > 0 && result.classic.restored?.[l] === 'ready')
+    || !(result.classic.drumsBack > 0))
+    problems.push(`classic: ${JSON.stringify(result.classic)}`);
   result.position = await page.locator('#play-position').innerText();
   result.chord = await page.locator('#play-now').innerText();
   result.framesPerSecond = await page.evaluate(() => new Promise((done) => {

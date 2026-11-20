@@ -48,6 +48,8 @@ if (process.argv.includes('--data') || dataOnly >= 0) {
     hitKeys: { ...HIT_KEYS, 'drums/sample/rimshot': hitKeysFor('drums', 'rimshot') },
     layerAudio: LAYER_AUDIO,
     kitPan: readKitPan(),
+    // the timbre knobs each voice id of each layer uses (the core's ownsChorus reads them, synth.js 231)
+    uses: Object.fromEntries(VOICE_LAYERS.map((layer) => [layer, Object.fromEntries(Object.entries(VOICES[layer]).map(([id, v]) => [id, v.uses]))])),
   };
   const dir = dataOnly >= 0 ? resolve(process.argv[dataOnly + 1]) : join(repo, 'native/core/data');
   mkdirSync(dir, { recursive: true });
