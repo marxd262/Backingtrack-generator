@@ -9,6 +9,8 @@
 // in: mono, 32-bit float, little endian; out: stereo interleaved (L = R except after mod and series), the same frames; processed in blocks of
 // 128 frames, as the browser does.
 // --two: those 4x shapers run at 2x. --change: set() at that frame with new knobs while playing (the browser: ctx.suspend, set, resume), any number.
+// --stereo <frame> (Task 20b; guitar, mod, series, none): in is two channels, interleaved; the chain runs in the left one alone until that
+// frame (a multiple of 128) and in both from it on, as Chromium's nodes do once their input has two channels (0: from the start).
 // none copies the input (the red run of the comparison). guitar, mod and series build the chain at frame 0 as createInstruments does
 // ({ immediate: true }); series is a GuitarFx into a ModFx, set in that order (synth.js applyFx).
 //
@@ -256,7 +258,18 @@ int main(int argc, char** argv) {
             writeFloats(argv[2], both.data(), both.size());
             return 0;
         }
-        std::vector<float> right; // the modulation modes' second channel; the others write L = R
+        std::vector<float> right; // the second channel: the modulation modes' and that of a stereo input; the others write L = R
+        long long stereoFrom = -1;
+        for (int i = 5; i + 1 < argc; ++i)
+            if (std::string(argv[i]) == "--stereo") stereoFrom = std::atoll(argv[i + 1]);
+        if (stereoFrom >= 0) {
+            if (stereoFrom % 128 != 0) throw std::runtime_error("--stereo: the frame must be a multiple of 128 (the browser changes between render quanta)");
+            const size_t frames = x.size() / 2;
+            right.resize(frames);
+            for (size_t i = 0; i < frames; ++i) { right[i] = x[2 * i + 1]; x[i] = x[2 * i]; }
+            x.resize(frames);
+        }
+        const auto stereoAt = [&](size_t frame) { return stereoFrom >= 0 && static_cast<long long>(frame) >= stereoFrom; };
         if (mode == "shaper") {
             if (argc != 7) { std::printf("%s", usage.c_str()); return 2; }
             static const float line[2] = { -1.0f, 1.0f };
@@ -290,15 +303,17 @@ int main(int argc, char** argv) {
                     if (!changes.empty() && frame <= changes.back().frame) throw std::runtime_error("--change: the frames must ascend");
                     changes.push_back({ frame, fxChainParams(std::atof(argv[i + 2]), std::atof(argv[i + 3]), std::atof(argv[i + 4]), layer) });
                     i += 5;
-                } else throw std::runtime_error("unknown option " + option);
+                } else if (option == "--stereo" && i + 1 < argc) i += 2;
+                else throw std::runtime_error("unknown option " + option);
             }
             GuitarFx fx;
             fx.prepare(layer, rate, hardFourX, fuzzFourX);
             fx.set(fxChainParams(std::atof(argv[6]), std::atof(argv[7]), std::atof(argv[8]), layer), true);
             for (size_t at = 0, next = 0; at < x.size(); at += 128) {
                 while (next < changes.size() && changes[next].frame <= at) fx.set(changes[next++].params, false);
-                fx.process(&x[at], static_cast<int>(std::min<size_t>(128, x.size() - at)));
+                fx.process(&x[at], right.empty() ? nullptr : &right[at], static_cast<int>(std::min<size_t>(128, x.size() - at)), stereoAt(at));
             }
+            if (stereoFrom > 0) std::copy(x.begin(), x.begin() + std::min(stereoFrom, static_cast<long long>(x.size())), right.begin()); // mono: L = R
         } else if (mode == "mod" || mode == "series") {
             const bool series = mode == "series";
             const int at = series ? 6 : 5, width = series ? 6 : 3; // the first knob in argv; knobs per set: fuzz, overdrive, distortion (series), vibrato, chorus, bpm
@@ -328,7 +343,8 @@ int main(int argc, char** argv) {
                     if (!changes.empty() && frame <= changes.back().frame) throw std::runtime_error("--change: the frames must ascend");
                     changes.push_back({ frame, knobs(i + 2) });
                     i += 2 + width;
-                } else throw std::runtime_error("unknown option " + option);
+                } else if (option == "--stereo" && i + 1 < argc) i += 2;
+                else throw std::runtime_error("unknown option " + option);
             }
             GuitarFx guitar;
             ModFx modulation;
@@ -336,15 +352,15 @@ int main(int argc, char** argv) {
             if (series) { guitar.prepare(layer, rate, hardFourX, fuzzFourX); guitar.set(first.fx, true); }
             modulation.prepare(rate);
             modulation.set(first.mod, true);
-            right.resize(x.size());
+            right.resize(x.size()); // a stereo input's right channel, processed in place
             for (size_t from = 0, next = 0; from < x.size(); from += 128) {
                 while (next < changes.size() && changes[next].frame <= from) {
                     if (series) guitar.set(changes[next].knobs.fx, false);
                     modulation.set(changes[next++].knobs.mod, false);
                 }
                 const int count = static_cast<int>(std::min<size_t>(128, x.size() - from));
-                if (series) guitar.process(&x[from], count);
-                modulation.process(&x[from], &x[from], &right[from], count);
+                if (series) guitar.process(&x[from], &right[from], count, stereoAt(from));
+                modulation.process(&x[from], &right[from], &x[from], &right[from], count, stereoAt(from));
             }
         } else if (mode != "none") {
             std::printf("%s", usage.c_str());

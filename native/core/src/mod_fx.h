@@ -19,6 +19,7 @@ public:
     void reset();                                            // zeros, write index 0
     int length() const { return static_cast<int>(ring_.size()); }
     float process(float x, float delaySeconds); // writes x, then reads delaySeconds back (clamped to [0, max])
+    void copyTo(ModDelay& other) const;         // the ring and its write index into a ring of the same length (no allocation)
 
 private:
     std::vector<float> ring_;
@@ -26,19 +27,20 @@ private:
     float rate_ = 48000.0f, max_ = 0.05f;
 };
 
-// One layer's chain: mono in, left and right out.
+// One layer's chain: one channel or two in, left and right out. With two, every node runs in two channels as Chromium runs it once its input
+// has two: a ring per channel for the vibrato's delay and for each copy (one delay kernel per channel), the delay times, gains and LFOs once.
 class ModFx {
 public:
-    void prepare(double sampleRate); // three rings of 0.05 s (allocates), ramp constants, the panners' gains; then reset()
-    void reset();                    // not built, every state empty, LFO phases 0
+    void prepare(double sampleRate); // six rings of 0.05 s (allocates), ramp constants, the panners' gains; then reset()
+    void reset();                    // not built, mono, every state empty, LFO phases 0
     void set(const ModParams& p, bool atStart); // mod-fx.js set(): atStart = createInstruments' { immediate: true }
     bool built() const { return built_; }
-    // x may be left or right. Not built: both outputs are x, bit for bit.
-    // shortcut: mono, one signal in; the stereo voices of Phase 5 need the panner's stereo case (stereo_panner.cc) and a second ring for the
-    // vibrato's delay and for each copy (Chromium keeps one delay kernel per channel). When the input becomes stereo, Chromium's DelayNode
-    // up-mixes its rings into the new channel layout (delay_handler.cc 145 to 196), and its StereoPannerNode switches to the stereo formula
-    // (stereo_panner.cc 63 to 79), under which an up-mixed mono copy at -0.7 comes out at 1.891 x on the left instead of 0.972 x (+5.8 dB).
-    void process(const float* x, float* left, float* right, int count);
+    // An output may be its channel's input. stereo false: inL alone is read (inR may be null); true: both. Not built: the outputs are the
+    // input, bit for bit (mono: inL on both). The first stereo call turns the chain to two channels for good (until reset): each left ring is
+    // copied into the right one, as Chromium's DelayNode up-mixes its rings into the new channel layout (delay_handler.cc 145 to 196), and the
+    // panners take the formula of a stereo input (stereo_panner.cc 126 to 152), under which an up-mixed mono copy at -0.7 comes out at
+    // 1.891 x on the left instead of 0.972 x (+5.8 dB).
+    void process(const float* inL, const float* inR, float* outL, float* outR, int count, bool stereo);
 
 private:
     // An OscillatorNode of type sine (oscillator_handler.cc): the phase counts wave-table entries (4096) in double and goes on by the float
@@ -56,11 +58,11 @@ private:
     };
 
     double rate_ = 48000.0;
-    float rateScale_ = 0.0f, panGain_[2][2] = {}; // 4096 / rate; [copy][left, right]
-    bool built_ = false;
+    float rateScale_ = 0.0f, panGain_[2][2] = {}, panStereo_[2][2] = {}; // 4096 / rate; [copy][left, right] of a mono and of a stereo input
+    bool built_ = false, stereo_ = false;
     Ramp dry_, out_, straight_, vibWet_, vibDepth_, vibFrequency_, wet_;
     Lfo vibLfo_, lfo_[2];
-    ModDelay vib_, copy_[2];
+    ModDelay vib_[2], copy_[2][2]; // [channel], [copy][channel]
 };
 
 } // namespace btg::detail

@@ -27,11 +27,14 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
  * DAMAGE.
  *
- * And these three files, each with the copyright line given here (its notice is Chromium's LICENSE text below, as the files refer to it):
+ * And these four files, each with the copyright line given here (its notice is Chromium's LICENSE text below, as the files refer to it):
  *   platform/audio/cpu/x86/delay_sse2.cc  (Copyright 2016 The Chromium Authors: the read position in float, the interpolation)
- *   platform/audio/stereo_panner.cc       (Copyright 2014 The Chromium Authors: the equal-power gains of a mono input, as float)
+ *   platform/audio/stereo_panner.cc       (Copyright 2014 The Chromium Authors: the equal-power gains of a mono input, as float; Task 20b:
+ *                                           those of a stereo input, which keep one side and add the other's share to it)
  *   modules/webaudio/oscillator_handler.cc (Copyright 2022 The Chromium Authors: the phase of the sine LFO, its increment in float and
  *                                           the double accumulation; the wave table and its interpolation are not taken)
+ *   modules/webaudio/delay_handler.cc     (Copyright 2022 The Chromium Authors, Task 20b: a ring per channel, and at the turn of the input
+ *                                           to two channels the rings up-mixed with the write index kept: the left one copied to the right)
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -115,6 +118,11 @@ float ModDelay::process(float x, float delaySeconds) {
     return s1 + factor * (s2 - s1);
 }
 
+void ModDelay::copyTo(ModDelay& other) const {
+    std::copy(ring_.begin(), ring_.end(), other.ring_.begin());
+    other.write_ = write_;
+}
+
 float ModFx::Lfo::next(float increment) {
     const float sample = static_cast<float>(std::sin(2 * std::numbers::pi * index / TABLE));
     index += increment;
@@ -125,26 +133,30 @@ float ModFx::Lfo::next(float increment) {
 void ModFx::prepare(double sampleRate) {
     rate_ = sampleRate;
     rateScale_ = static_cast<float>(TABLE) / static_cast<float>(sampleRate); // PeriodicWave::RateScale()
-    vib_.prepare(MAX_DELAY, sampleRate);
-    for (ModDelay& d : copy_) d.prepare(MAX_DELAY, sampleRate);
-    // stereo_panner.cc PanToTargetValue, mono input: the pan is a float, the angle double, the gains float (copy A at -0.7, copy B at 0.7)
+    for (ModDelay& d : vib_) d.prepare(MAX_DELAY, sampleRate);
+    for (auto& copy : copy_) for (ModDelay& d : copy) d.prepare(MAX_DELAY, sampleRate);
+    // stereo_panner.cc PanToTargetValue: the pan is a float, the angle double, the gains float (copy A at -0.7, copy B at 0.7); the angle of
+    // a mono input from (pan + 1) / 2, of a stereo one from pan + 1 (a float sum) at a pan up to 0, else from the pan itself
     for (int i = 0; i < 2; ++i) {
         const float pan = static_cast<float>((i ? 1 : -1) * MOD.chorusPan);
         const double radian = (static_cast<double>(pan) * 0.5 + 0.5) * (std::numbers::pi / 2);
         panGain_[i][0] = static_cast<float>(std::cos(radian));
         panGain_[i][1] = static_cast<float>(std::sin(radian));
+        const double stereo = static_cast<double>(pan <= 0 ? pan + 1 : pan) * (std::numbers::pi / 2);
+        panStereo_[i][0] = static_cast<float>(std::cos(stereo));
+        panStereo_[i][1] = static_cast<float>(std::sin(stereo));
     }
     reset();
 }
 
 void ModFx::reset() {
-    built_ = false;
+    built_ = stereo_ = false;
     for (Ramp* r : { &dry_, &out_, &straight_, &vibWet_, &vibDepth_, &vibFrequency_, &wet_ }) r->jump(0.0f);
     dry_.jump(1.0f);
     vibLfo_ = {};
     lfo_[0] = lfo_[1] = {};
-    vib_.reset();
-    for (ModDelay& d : copy_) d.reset();
+    for (ModDelay& d : vib_) d.reset();
+    for (auto& copy : copy_) for (ModDelay& d : copy) d.reset();
 }
 
 void ModFx::set(const ModParams& p, bool atStart) {
@@ -169,32 +181,53 @@ void ModFx::set(const ModParams& p, bool atStart) {
     to(wet_, p.chorus.wet);
 }
 
-void ModFx::process(const float* x, float* left, float* right, int count) {
+void ModFx::process(const float* inL, const float* inR, float* outL, float* outR, int count, bool stereo) {
     if (!built_) {
-        if (left != x) std::copy(x, x + count, left);
-        if (right != x) std::copy(x, x + count, right);
+        const float* const inRight = stereo ? inR : inL;
+        if (outL != inL) std::copy(inL, inL + count, outL);
+        if (outR != inRight) std::copy(inRight, inRight + count, outR);
         return;
+    }
+    if (stereo && !stereo_) {
+        vib_[0].copyTo(vib_[1]);
+        for (auto& copy : copy_) copy[0].copyTo(copy[1]);
+        stereo_ = true;
     }
     // AudioParam values are floats; a delay time is the param's own value plus the LFO's output through a gain, in float
     const float vibBase = static_cast<float>(MOD.vibBase), chorusBase = static_cast<float>(MOD.chorusBase), chorusDepth = static_cast<float>(MOD.chorusDepth);
     const float chorusIncrement[2] = { static_cast<float>(MOD.chorusHz[0]) * rateScale_, static_cast<float>(MOD.chorusHz[1]) * rateScale_ };
     for (int i = 0; i < count; ++i) {
-        const float in = x[i];
         // vibrato: straight through, or all of it through the moved delay (no mixing: that would be a comb)
         const float vibLfo = vibLfo_.next(vibFrequency_.next() * rateScale_);
-        const float vibrated = vib_.process(in, vibBase + vibLfo * vibDepth_.next());
-        const float post = in * straight_.next() + vibrated * vibWet_.next();
-        // chorus: two copies of `post`, each panned, summed, then the wet gain; `post` and the sum go through `out`, the dry path beside it
-        float sum[2] = { 0.0f, 0.0f };
-        for (int c = 0; c < 2; ++c) {
-            const float copy = copy_[c].process(post, chorusBase + chorusDepth * lfo_[c].next(chorusIncrement[c]));
-            const float l = copy * panGain_[c][0], r = copy * panGain_[c][1];
-            sum[0] += l;
-            sum[1] += r;
-        }
+        const float vibTime = vibBase + vibLfo * vibDepth_.next(), straight = straight_.next(), vibWet = vibWet_.next();
+        const float copyTime[2] = { chorusBase + chorusDepth * lfo_[0].next(chorusIncrement[0]), chorusBase + chorusDepth * lfo_[1].next(chorusIncrement[1]) };
         const float wet = wet_.next(), out = out_.next(), dry = dry_.next();
-        left[i] = in * dry + (post + sum[0] * wet) * out;
-        right[i] = in * dry + (post + sum[1] * wet) * out;
+        // chorus: two copies of `post`, each panned, summed, then the wet gain; `post` and the sum go through `out`, the dry path beside it
+        if (!stereo) {
+            const float in = inL[i];
+            const float post = in * straight + vib_[0].process(in, vibTime) * vibWet;
+            float sum[2] = { 0.0f, 0.0f };
+            for (int c = 0; c < 2; ++c) {
+                const float copy = copy_[c][0].process(post, copyTime[c]);
+                const float l = copy * panGain_[c][0], r = copy * panGain_[c][1];
+                sum[0] += l;
+                sum[1] += r;
+            }
+            outL[i] = in * dry + (post + sum[0] * wet) * out;
+            outR[i] = in * dry + (post + sum[1] * wet) * out;
+            continue;
+        }
+        const float in[2] = { inL[i], inR[i] };
+        float post[2], copy[2][2]; // [channel], [copy][channel]
+        for (int ch = 0; ch < 2; ++ch) {
+            post[ch] = in[ch] * straight + vib_[ch].process(in[ch], vibTime) * vibWet;
+            for (int c = 0; c < 2; ++c) copy[c][ch] = copy_[c][ch].process(post[ch], copyTime[c]);
+        }
+        // copy A (pan up to 0) keeps its left and adds its right's share to it, copy B (pan above 0) the other way round
+        const float sumL = (copy[0][0] + copy[0][1] * panStereo_[0][0]) + copy[1][0] * panStereo_[1][0];
+        const float sumR = copy[0][1] * panStereo_[0][1] + (copy[1][1] + copy[1][0] * panStereo_[1][1]);
+        outL[i] = in[0] * dry + (post[0] + sumL * wet) * out;
+        outR[i] = in[1] * dry + (post[1] + sumR * wet) * out;
     }
 }
 

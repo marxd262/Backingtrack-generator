@@ -80,30 +80,33 @@ private:
     Down down1_, down2_;
 };
 
-// One layer's chain, mono (the left channel), in place.
+// One layer's chain, in place, in one channel (the left) or two, as Chromium runs every node of it once its input has two channels: a state
+// of every filter and shaper per channel, the gains (AudioParams) and the bias once for both.
 class GuitarFx {
 public:
     // bass, chords, pad, lead; coefficients, ramp constants, the curves; then reset(). hardFourX and fuzzFourX are the web's oversampling of the
     // two 4x shapers; false makes one 2x: a test hook (native/tools/fx-compare.mjs pins the same shapers of the browser's chain to 2x, so
     // that everything but the 4x stages' second stage, which Chromium convolves by FFT, is compared at near bit level). The engine never passes them.
     void prepare(Engine::Layer layer, double sampleRate, bool hardFourX = true, bool fuzzFourX = true);
-    void reset();                                         // not built, every state empty
+    void reset();                                         // not built, mono, every state empty
     void set(const FxChainParams& p, bool atStart);       // guitar-fx.js set(): atStart = createInstruments' { immediate: true }
     bool built() const { return built_; }
-    void process(float* x, int count); // untouched while not built
+    // Untouched while not built. stereo false: the left channel alone (right is not touched); true: both. The first stereo call turns the
+    // chain to two channels for good (until reset).
+    void process(float* left, float* right, int count, bool stereo);
 
 private:
     struct Stage { Ramp bypass, wet, drive, makeup; };
     // the chain's twelve filters in the order of the graph: coefficients from prepare, state from reset
     enum { odHp, odLp, distHp, distLp1, distLp2, fuzzHp, toneLp, toneHp, cabHp, cabPeak, cabLp1, cabLp2, filterCount };
+    struct Channel { Shaper soft, hard, fuzz, muff; Biquad filter[filterCount]; };
 
     double rate_ = 48000.0;
     float ref_ = 1.0f, invRef_ = 1.0f;
-    bool built_ = false;
+    bool built_ = false, stereo_ = false;
     Ramp dry_, wetOut_, cabDry_, cabWet_, bias_;
     Stage od_, dist_, fuzz_;
-    Shaper soft_, hard_, fuzzShaper_, muff_;
-    Biquad filter_[filterCount];
+    Channel channel_[2];
 };
 
 } // namespace btg::detail

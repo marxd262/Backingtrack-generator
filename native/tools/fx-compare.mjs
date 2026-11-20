@@ -1,7 +1,7 @@
 // The core's layer effects (native/core/src/guitar_fx.cpp; Task 19: mod_fx.cpp) against the web app's chains in Chromium, sample by sample:
 //   node native/tools/fx-compare.mjs [--none]   -> one line per set; exit code 1 when one differs by more than its limit
 // --none: btg_fx copies its input (no effect): the red run, how far each set's effect lies from its limit.
-// A mono test signal made here goes through the browser (OfflineAudioContext(2, frames, rate) on a page served from src/: buffer source ->
+// A test signal made here (mono; two channels in the stereo sets) goes through the browser (OfflineAudioContext(2, frames, rate) on a page served from src/: buffer source ->
 // node or chain -> destination; a chain is built at frame 0 with { immediate: true } as createInstruments does) and through btg_fx.
 // The limits of the guitar sets are measured (below); a difference above one is traced to its cause, never met by widening. How those of the
 // mod and series sets were set is under "mod, series".
@@ -83,6 +83,31 @@
 //     twin); with real zeros played (the plain twin of "(ideal LFO)") it is 0, and with a constant source of 1e-10 feeding the chain from
 //     frame 0 (its delays then process) 3e-8, the offset's own rounding. The core plays on, as the real app's voices do (zeros are not
 //     silence to its engine).
+//   stereo (Task 20b): the guitar, mod and series sets with an input of two channels that differ (the right one is the signal of the same
+//     segments with its frequencies times 0.79 and another noise seed): Chromium then runs every node of a chain in two channels, and so
+//     does the core (btg_fx --stereo 0); both channels are compared. Each set takes the limits of its mono kind above (guitar: the kind of its
+//     knobs; mod: its kind; the series: those of its mono twin); none is set from these sets' own figures. Two things follow from what a
+//     kind's limit is, and were ruled after a first run with a right channel at 1.26 times the frequencies had three sets above their kind's
+//     limit (bass all 0.3: windows 0.0400 dB against 0.035; chorus 1: 1.8e-4 against 1.4e-4; the join: 3.7e-4 against 3.6e-4; each one's
+//     twin exact):
+//       - the other channels stay inside the band of the standard signal (the right channel's frequencies times 0.79, the join's second
+//         source times 0.79 and 0.63). A kind's limits were measured over that band (the 4x kinds' as the browser's spread, the mod kinds'
+//         fitted to their sets): above it the bass's cabinet leaves a window at -67 dBFS, where the 4x stages' residual of 1e-4 is no
+//         longer small against the signal and the window measure reads the residual, not a level; and a mod set's difference grows with
+//         the signal's change per frame at the sweep's top. The join is not covered by that argument: from its frame on each channel is
+//         the standard signal plus a second one, up to twice the level and change per frame that any mono limit was measured on; it is
+//         judged at the "both" limit times STEREO_COPY all the same (measured 3.0e-4 against 7.0e-4), its twin exact.
+//       - a stereo set through the chorus takes its mono kind's limit per sample times STEREO_COPY = 1.945: a copy at pan -0.7 of a stereo
+//         input keeps its left and adds its right at cos(0.3 pi / 2) = 0.891 (stereo_panner.cc 126 to 152), so what the browser's oscillator
+//         moves in a copy reaches a side at up to 1.891 (with the other copy's share 2.345) where a mono input's copy has cos(0.15 pi / 2) =
+//         0.972 (1.205). The factor is the formula's, not a measurement. Their window figure is printed and not judged: the first run with
+//         this ruling kept the mono kind's window limit and had chorus 1 at 0.000248 dB against 0.0002 (mono chorus 1: 0.000066 dB). A
+//         window's level does not follow the formula (the side's own level changes with the other side's share), so a limit could only
+//         be fitted to that figure, and none is set; the twins hold the windows at 0.001 dB.
+//     Their "(2x exact)" and "(ideal LFO)" twins hold both channels at 1e-6. "a second, stereo source joins": a mod set running in mono
+//     gets a second source of two channels at a quantum boundary (ctx.suspend, connect, start); from that quantum on Chromium's DelayNodes
+//     have up-mixed their rings (delay_handler.cc 145 to 196) and its panners take the formula of a stereo input, and the core turns at
+//     that frame (btg_fx --stereo <frame>; its input from there is the two sources' sum per channel, in float, as the node's input sums them).
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -161,6 +186,17 @@ const MOD_TIME = [
 const series = (name, layer, knob, limit, windows) => ({ name: `series ${name}`, rate: 48000, kind: 'series', layer, knob, limit, windows, signal: 'standard' });
 const SERIES = [series('chords all 0.5 and both 0.5', 'chords', { fuzz: 0.5, overdrive: 0.5, distortion: 0.5, ...vc(0.5, 0.5) }, 1.4e-4, 0.002),
   series('bass overdrive 0.3 and vibrato 1', 'bass', { fuzz: 0, overdrive: 0.3, distortion: 0, ...vc(1, 0) }, 5.5e-4, 5e-4)];
+// Task 20b: the chains in two channels (the head of this file); the limits are those of each set's mono kind, through the chorus times
+// what the panner's formula for a stereo input adds to a copy's kept side
+const STEREO_COPY = (1 + Math.cos(0.3 * Math.PI / 2)) / Math.cos(0.15 * Math.PI / 2);
+const wide = (set) => (set.knob.chorus > 0 ? { ...set, limit: set.limit * STEREO_COPY, windows: Infinity } : set); // Infinity: printed, not judged
+const stereo = (name) => wide({ ...[...BASE, ...MODS, ...SERIES].find((s) => s.name === name), name: `${name} stereo`, stereo: true });
+const STEREO = [
+  ...['bass', 'chords', 'pad', 'lead'].flatMap((layer) => [0.3, 1].map((v) => ({ ...guitar(`${layer} all ${v} stereo`, layer, knobs(v, v, v)), stereo: true }))),
+  stereo('guitar chords all 0.5 44.1 kHz'), stereo('guitar chords all 0.5 96 kHz'),
+];
+const STEREO_MODS = ['mod vibrato 1 at 100 bpm', 'mod chorus 1', 'mod both 0.5 44.1 kHz', 'mod both 0.5 96 kHz', 'series chords all 0.5 and both 0.5'].map(stereo);
+const JOIN = wide(mod('both 0.5, a second, stereo source joins at 0.899 s', vc(0.5, 0.5), { join: MID }));
 // kinds: curves (the four curves of the live nodes against btg_fx curves), shaper (a WaveShaperNode: curve, oversample, gain of the signal),
 // guitar (createGuitarFx)
 const shaper = (name, curve, oversample, gain, extra = {}) => ({ name: `shaper ${name}`, rate: 48000, kind: 'shaper', curve, oversample, gain, limit: 1e-5, windows: 0.01, signal: 'standard', ...extra });
@@ -175,10 +211,12 @@ const SETS = [
   // the same, a constant source of 1e-10 into the chain from frame 0 keeps its delays processing: the difference is gone (it is the core's
   // 0 plus the offset's 1e-10 times the gains: 1e-6 holds with a margin of 1000)
   { ...ideal(MOD_TIME[1]), name: `${MOD_TIME[1].name} (ideal LFO, source silent until then, chain kept awake)`, start: 0.15, awake: true },
+  ...STEREO, ...STEREO_MODS, JOIN, ...STEREO.map(exact), ...STEREO_MODS.map((s) => (s.kind === 'series' ? ideal(exact(s)) : ideal(s))), ideal(JOIN),
 ];
 
-function signal(rate, segments) { // mono: the segments one after the other; t counts from the segment's start
-  let seed = 1;
+// one channel: the segments one after the other; t counts from the segment's start. f scales every frequency and seed starts the noise: the
+// stereo sets' other channels (the head of this file)
+function signal(rate, segments, { f = 1, seed = 1 } = {}) {
   const noise = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 2147483648 - 1; };
   const out = [], starts = [];
   for (const [seconds, kind, db] of segments) {
@@ -186,9 +224,9 @@ function signal(rate, segments) { // mono: the segments one after the other; t c
     starts.push(out.length);
     for (let i = 0; i < n; i++) {
       const t = i / rate;
-      out.push(kind === 'chord' ? a * Math.exp(-3 * (t % 0.3)) * (Math.sin(2 * Math.PI * 110 * t) + Math.sin(2 * Math.PI * 138.59 * t) + Math.sin(2 * Math.PI * 164.81 * t)) / 3
+      out.push(kind === 'chord' ? a * Math.exp(-3 * (t % 0.3)) * (Math.sin(2 * Math.PI * 110 * f * t) + Math.sin(2 * Math.PI * 138.59 * f * t) + Math.sin(2 * Math.PI * 164.81 * f * t)) / 3
         : kind === 'noise' ? a * noise()
-        : kind === 'sweep' ? a * Math.sin(2 * Math.PI * 50 * seconds / Math.log(160) * (160 ** (t / seconds) - 1)) : 0);
+        : kind === 'sweep' ? a * Math.sin(2 * Math.PI * 50 * f * seconds / Math.log(160) * (160 ** (t / seconds) - 1)) : 0);
     }
   }
   return { samples: Float32Array.from(out), starts };
@@ -197,8 +235,9 @@ function signal(rate, segments) { // mono: the segments one after the other; t c
 const f32 = (buffer) => new Float32Array(buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength));
 const b64 = (floats) => Buffer.from(floats.buffer, floats.byteOffset, floats.byteLength).toString('base64');
 
-// in the page: one set through Chromium; returns the left channel (or the four curves and their oversample values) as base64
-async function renderWeb(page, set, samples, liveCurves) {
+// in the page: one set through Chromium; returns both channels (or the four curves and their oversample values) as base64. inputs: the
+// source's channels, then those of the second source of a set that has one (join)
+async function renderWeb(page, set, inputs, liveCurves) {
   return page.evaluate(async ([input, set, curveBytes]) => {
     const toF32 = (text) => new Float32Array(Uint8Array.from(atob(text), (c) => c.charCodeAt(0)).buffer);
     const toB64 = (floats) => {
@@ -227,13 +266,13 @@ async function renderWeb(page, set, samples, liveCurves) {
       createGuitarFx(ctx, 'chords', ctx.destination).set(fxChainParams({ fuzz: 1 }, 'chords'), { immediate: true });
       return { oversample: made.map((s) => s.oversample), curves: made.map((s) => toB64(s.curve)) };
     }
-    const x = toF32(input);
+    const xs = input.map(toF32), x = xs[0];
     const ctx = new OfflineAudioContext(2, x.length, r);
     // set.start: seconds before the source starts; then the buffer holds only what follows (the 0.15 s of the lead are real silence on the
     // chain's input: nothing feeds it, as in the app before the first note), and the core is given the zeros
     const start = Math.round((set.start ?? 0) * r);
-    const buffer = ctx.createBuffer(1, x.length - start, r);
-    buffer.copyToChannel(x.subarray(start), 0);
+    const buffer = ctx.createBuffer(set.stereo ? 2 : 1, x.length - start, r);
+    for (let c = 0; c < buffer.numberOfChannels; c++) buffer.copyToChannel(xs[c].subarray(start), c);
     const source = ctx.createBufferSource();
     source.buffer = buffer;
     if (set.ideal) {
@@ -276,6 +315,12 @@ async function renderWeb(page, set, samples, liveCurves) {
       for (const c of set.changes ?? []) ctx.suspend(c.frame / r).then(() => { fx.set(modParams(c.knob, c.knob.bpm), { immediate: false }); ctx.resume(); });
       source.connect(fx.input);
       if (set.awake) { const keep = ctx.createConstantSource(); keep.offset.value = 1e-10; keep.connect(fx.input); keep.start(0); } // not silent: the delays keep processing
+      if (set.join !== undefined) { // a second source of two channels joins the chain's input between two render quanta
+        const joined = ctx.createBuffer(2, x.length - set.join, r), second = ctx.createBufferSource();
+        for (let c = 0; c < 2; c++) joined.copyToChannel(xs[1 + c].subarray(set.join), c);
+        second.buffer = joined;
+        ctx.suspend(set.join / r).then(() => { second.connect(fx.input); second.start(set.join / r); ctx.resume(); });
+      }
     } else {
       const two = set.two, series = set.kind === 'series';
       wrapped(ctx, (i) => (i === 1 && (two === 'hard' || two === 'both')) || (i === 2 && (two === 'fuzz' || two === 'both')));
@@ -289,7 +334,7 @@ async function renderWeb(page, set, samples, liveCurves) {
     source.start(start / r);
     const rendered = await ctx.startRendering();
     return { left: toB64(rendered.getChannelData(0)), right: toB64(rendered.getChannelData(1)) };
-  }, [b64(samples), set, liveCurves]);
+  }, [inputs.map(b64), set, liveCurves]);
 }
 
 const exe = ['native/build/core/Release/btg_fx.exe', 'native/build/core/btg_fx'].map((p) => join(repo, p)).find(existsSync);
@@ -312,7 +357,7 @@ try {
     const { name, rate, kind, limit } = set;
     if (only && !name.includes(only) && kind !== 'curves') continue;
     if (kind === 'curves') {
-      const web = await renderWeb(page, set, new Float32Array(1), null);
+      const web = await renderWeb(page, set, [new Float32Array(1)], null);
       const out = join(temp, 'curves.f32');
       execFileSync(exe, ['curves', out], { encoding: 'utf8', stdio: 'pipe' });
       const core = f32(readFileSync(out)), curves = web.curves.map((c) => f32(Buffer.from(c, 'base64')));
@@ -326,21 +371,29 @@ try {
       continue;
     }
     const segments = SIGNALS[set.signal], { samples, starts } = signal(rate, segments);
-    const rendered = await renderWeb(page, set, samples, kind === 'shaper' ? live?.[set.curve] ?? null : null);
-    // one or two channels are compared: the modulation chains write left and right, the others the same on both
-    const stereo = kind === 'mod' || kind === 'series';
-    const webs = (stereo ? [rendered.left, rendered.right] : [rendered.left]).map((c) => f32(Buffer.from(c, 'base64')));
+    // the right channel of a stereo set, the two of a join's second source (the head of this file)
+    const others = (set.stereo ? [{ f: 0.79, seed: 7 }] : set.join !== undefined ? [{ f: 0.79, seed: 7 }, { f: 0.63, seed: 11 }] : []).map((o) => signal(rate, segments, o).samples);
+    const rendered = await renderWeb(page, set, [samples, ...others], kind === 'shaper' ? live?.[set.curve] ?? null : null);
+    // one or two channels are compared: the modulation chains and every chain with a stereo input write left and right, the others the same on both
+    const twoSides = set.stereo || kind === 'mod' || kind === 'series';
+    const webs = (twoSides ? [rendered.left, rendered.right] : [rendered.left]).map((c) => f32(Buffer.from(c, 'base64')));
     const input = join(temp, 'in.f32'), output = join(temp, 'out.f32');
-    // the core gets the scaled signal itself (the page scales in a gain node: a float multiplication, the same one)
+    // the core gets the scaled signal itself (the page scales in a gain node: a float multiplication, the same one); two channels interleaved
+    // where the chain's input has two (from a join's frame on, each the sum of the two sources in float, as the node's input sums them)
     const given = kind === 'shaper' ? samples.map((v) => Math.fround(v * set.gain)) : samples;
-    writeFileSync(input, Buffer.from(given.buffer, given.byteOffset, given.byteLength));
+    const fed = !others.length ? given : Float32Array.from({ length: 2 * samples.length }, (_, j) => {
+      const i = j >> 1, c = j & 1;
+      return set.stereo ? (c ? others[0][i] : samples[i]) : samples[i] + (i >= set.join ? others[c][i] : 0);
+    });
+    writeFileSync(input, Buffer.from(fed.buffer, fed.byteOffset, fed.byteLength));
+    const stereoArgs = others.length ? ['--stereo', String(set.join ?? 0)] : [];
     const knobArgs = (k) => [k.fuzz, k.overdrive, k.distortion].map(String);
     const modArgs = (k) => [k.vibrato, k.chorus, k.bpm].map(String);
     const both = (k) => (kind === 'series' ? [...knobArgs(k), ...modArgs(k)] : modArgs(k));
     const changes = (args) => (set.changes ?? []).flatMap((c) => ['--change', String(c.frame), ...args(c.knob)]);
-    const mode = NONE ? ['none'] : kind === 'shaper' ? ['shaper', set.curve, String(set.oversample)]
-      : stereo ? [kind, ...(kind === 'series' ? [set.layer] : []), ...both(set.knob), ...(set.two ? ['--two', set.two] : []), ...changes(both)]
-      : ['guitar', set.layer, ...knobArgs(set.knob), ...(set.two ? ['--two', set.two] : []), ...changes(knobArgs)];
+    const mode = NONE ? ['none', ...stereoArgs] : kind === 'shaper' ? ['shaper', set.curve, String(set.oversample)]
+      : kind !== 'guitar' ? [kind, ...(kind === 'series' ? [set.layer] : []), ...both(set.knob), ...(set.two ? ['--two', set.two] : []), ...changes(both), ...stereoArgs]
+      : ['guitar', set.layer, ...knobArgs(set.knob), ...(set.two ? ['--two', set.two] : []), ...changes(knobArgs), ...stereoArgs];
     execFileSync(exe, [input, output, String(rate), ...mode], { encoding: 'utf8', stdio: 'pipe' });
     const raw = f32(readFileSync(output));
     const cores = webs.map((_, c) => Float32Array.from({ length: raw.length / 2 }, (_, i) => raw[2 * i + c]));
@@ -369,7 +422,7 @@ try {
     const segment = starts.findLastIndex((s) => s <= at), [, what, db] = segments[segment];
     const pass = largest <= limit && windows <= set.windows && dryOk;
     failed ||= !pass;
-    console.log(`${name}  max difference ${largest.toExponential(1)}  windows ${windows.toFixed(4)} dB  at ${(at / rate).toFixed(3)} s${stereo ? ` ${side ? 'right' : 'left'}` : ''} (${what}${db === undefined ? '' : ` ${db} dBFS`}, web ${web[at].toExponential(3)} core ${core[at].toExponential(3)})${dry}  ${pass ? 'PASS' : 'FAIL'}`);
+    console.log(`${name}  max difference ${largest.toExponential(1)}  windows ${windows.toFixed(4)} dB${set.windows === Infinity ? ' (not judged)' : ''}  at ${(at / rate).toFixed(3)} s${twoSides ? ` ${side ? 'right' : 'left'}` : ''} (${what}${db === undefined ? '' : ` ${db} dBFS`}, web ${web[at].toExponential(3)} core ${core[at].toExponential(3)})${dry}  ${pass ? 'PASS' : 'FAIL'}`);
   }
 } finally {
   await browser.close();

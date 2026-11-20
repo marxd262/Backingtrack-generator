@@ -156,6 +156,7 @@ struct Tone {
     bool active = false;
     uint64_t serial = 0, voice = 0;
     Engine::Layer layer = Engine::drums;
+    uint8_t gen = 0; // the generation of its layer's chains it was started under (Tones::gen): it rings out through those
     int delay = 0; // frames until it starts (position of the event inside the block)
     const float* data = nullptr;
     int channels = 1, frames = 0, loopStart = 0, loopEnd = 0;
@@ -220,6 +221,8 @@ public:
     virtual ~Voice() = default;
     // Audio thread: start what event `e` plays, `delay` frames into the current chunk. No allocation, no lock.
     virtual void play(const PlayEvent& e, int delay, double secondsPerBeat, VoiceState& state, Tones& tones) const = 0;
+    // Audio thread: whether the voice feeds its layer in two channels, so that Chromium runs the layer's chains in two (phase-5-design.md 4).
+    virtual bool stereo() const { return pack && pack->channels == 2; }
     Rng startRng { 1 }; // what state.rng starts from: Rng(1).fork("voice-<layer>")
     Tuned tuned {};
     std::shared_ptr<const Pack> pack;

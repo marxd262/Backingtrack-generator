@@ -47,14 +47,14 @@ int main() {
         never.prepare(btg::Engine::chords, sr);
         never.set(off, true);
         std::vector<float> y = x;
-        never.process(y.data(), static_cast<int>(y.size()));
+        never.process(y.data(), nullptr, static_cast<int>(y.size()), false);
         CHECK(!never.built() && y == x);
         const auto through = [&](size_t chunk) {
             GuitarFx g;
             g.prepare(btg::Engine::chords, sr);
             g.set(on, true);
             std::vector<float> out = x;
-            for (size_t at = 0; at < out.size(); at += chunk) g.process(out.data() + at, static_cast<int>(std::min(chunk, out.size() - at)));
+            for (size_t at = 0; at < out.size(); at += chunk) g.process(out.data() + at, nullptr, static_cast<int>(std::min(chunk, out.size() - at)), false);
             return out;
         };
         const std::vector<float> whole = through(x.size());
@@ -69,9 +69,9 @@ int main() {
         g.set(on, true);
         std::vector<float> a = x;
         const size_t change = static_cast<size_t>(0.3 * sr), exact = change + static_cast<size_t>(std::lround(0.2 * sr));
-        g.process(a.data(), static_cast<int>(change));
+        g.process(a.data(), nullptr, static_cast<int>(change), false);
         g.set(off, false);
-        g.process(a.data() + change, static_cast<int>(a.size() - change));
+        g.process(a.data() + change, nullptr, static_cast<int>(a.size() - change), false);
         CHECK(g.built() && std::equal(x.begin() + static_cast<long>(exact), x.end(), a.begin() + static_cast<long>(exact)));
         CHECK(!std::equal(x.begin() + static_cast<long>(change), x.begin() + static_cast<long>(change + 100), a.begin() + static_cast<long>(change)));
         const size_t before = exact - static_cast<size_t>(0.05 * sr);
@@ -112,7 +112,7 @@ int main() {
         const auto run = [&](ModFx& fx, const ModParams& p, const std::vector<float>& in) {
             fx.set(p, true);
             std::vector<float> l(in.size()), r(in.size());
-            fx.process(in.data(), l.data(), r.data(), static_cast<int>(in.size()));
+            fx.process(in.data(), nullptr, l.data(), r.data(), static_cast<int>(in.size()), false);
             return std::make_pair(l, r);
         };
         std::vector<float> one(1200, 0.0f), dc(1200, 1.0f);
@@ -140,7 +140,7 @@ int main() {
         never.set(modParams(0, 0, 100), true);
         std::vector<float> x(static_cast<size_t>(sr)), l(x.size()), r(x.size());
         for (size_t i = 0; i < x.size(); ++i) x[i] = static_cast<float>(0.4 * std::sin(2 * 3.14159265358979 * 220 * i / sr)); // goes on past 0.5 s: the compared range below carries signal
-        never.process(x.data(), l.data(), r.data(), static_cast<int>(x.size()));
+        never.process(x.data(), nullptr, l.data(), r.data(), static_cast<int>(x.size()), false);
         CHECK(!never.built() && l == x && r == x);
         const auto through = [&](size_t chunk) {
             ModFx g;
@@ -149,7 +149,7 @@ int main() {
             std::vector<float> a(x.size()), b(x.size());
             for (size_t from = 0; from < x.size(); from += chunk) {
                 const int n = static_cast<int>(std::min(chunk, x.size() - from));
-                g.process(x.data() + from, a.data() + from, b.data() + from, n);
+                g.process(x.data() + from, nullptr, a.data() + from, b.data() + from, n, false);
             }
             return std::make_pair(a, b);
         };
@@ -159,9 +159,9 @@ int main() {
         g.prepare(sr);
         g.set(modParams(1, 1, 100), true);
         const size_t change = static_cast<size_t>(0.3 * sr), exact = change + static_cast<size_t>(std::lround(0.2 * sr));
-        g.process(x.data(), l.data(), r.data(), static_cast<int>(change));
+        g.process(x.data(), nullptr, l.data(), r.data(), static_cast<int>(change), false);
         g.set(modParams(0, 0, 100), false);
-        g.process(x.data() + change, l.data() + change, r.data() + change, static_cast<int>(x.size() - change));
+        g.process(x.data() + change, nullptr, l.data() + change, r.data() + change, static_cast<int>(x.size() - change), false);
         CHECK(std::equal(x.begin() + static_cast<long>(exact), x.end(), l.begin() + static_cast<long>(exact)) && std::equal(x.begin() + static_cast<long>(exact), x.end(), r.begin() + static_cast<long>(exact)));
     }
     std::printf(failures ? "fx: %d FAILED\n" : "fx: all passed\n", failures);

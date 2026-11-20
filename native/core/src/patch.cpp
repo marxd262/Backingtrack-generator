@@ -383,6 +383,7 @@ SynthTone& Tones::startSynth(Engine::Layer layer, int delay, uint64_t voice, dou
     tone->serial = ++serial;
     tone->voice = voice;
     tone->layer = layer;
+    tone->gen = gen[layer];
     tone->delay = delay;
     tone->releaseSeconds = releaseSeconds;
     tone->basic = basic;

@@ -120,7 +120,8 @@
  * DAMAGE.
  *
  * Read only, nothing taken: direct_convolver.cc (Copyright (C) 2012 Intel Inc.) and simple_fft_convolver.cc, whose convolutions the
- * streaming FIRs below equal up to rounding.
+ * streaming FIRs below equal up to rounding; and (Task 20b) what wave_shaper_handler.cc and biquad_filter_handler.cc (Copyright 2022 The
+ * Chromium Authors) do when their input's channel count changes, from which GuitarFx::process departs.
  */
 #include "guitar_fx.h"
 
@@ -342,35 +343,39 @@ void GuitarFx::prepare(Engine::Layer layer, double sampleRate, bool hardFourX, b
     rate_ = sampleRate;
     ref_ = static_cast<float>(p.ref);
     invRef_ = static_cast<float>(1 / p.ref);
-    soft_.prepare(guitarCurve(Curve::soft), CURVE_POINTS, 2);
-    hard_.prepare(guitarCurve(Curve::hard), CURVE_POINTS, hardFourX ? 4 : 2);
-    fuzzShaper_.prepare(guitarCurve(Curve::fuzz), CURVE_POINTS, fuzzFourX ? 4 : 2);
-    muff_.prepare(guitarCurve(Curve::muff), CURVE_POINTS, 2);
+    Channel& c = channel_[0];
+    c.soft.prepare(guitarCurve(Curve::soft), CURVE_POINTS, 2);
+    c.hard.prepare(guitarCurve(Curve::hard), CURVE_POINTS, hardFourX ? 4 : 2);
+    c.fuzz.prepare(guitarCurve(Curve::fuzz), CURVE_POINTS, fuzzFourX ? 4 : 2);
+    c.muff.prepare(guitarCurve(Curve::muff), CURVE_POINTS, 2);
     // every AudioParam value is a float first
     const auto f = [](double v) { return static_cast<double>(static_cast<float>(v)); };
     const double q = f(Q_DB);
-    filter_[odHp] = highpassOf(f(720), q, sampleRate);
-    filter_[odLp] = lowpassOf(f(3500), q, sampleRate);
-    filter_[distHp] = highpassOf(f(p.distHp), q, sampleRate);
-    filter_[distLp1] = lowpassOf(f(6000), q, sampleRate);
-    filter_[distLp2] = lowpassOf(f(4500), q, sampleRate);
-    filter_[fuzzHp] = highpassOf(f(35), q, sampleRate);
-    filter_[toneLp] = lowpassOf(f(p.toneHz), q, sampleRate);
-    filter_[toneHp] = highpassOf(f(p.toneHz), q, sampleRate);
-    filter_[cabHp] = highpassOf(f(p.cabHp), q, sampleRate);
-    filter_[cabPeak] = peakingOf(f(p.cabPeakHz), f(1.2), f(p.cabPeakDb), sampleRate);
-    filter_[cabLp1] = lowpassOf(f(p.cabLp), q, sampleRate);
-    filter_[cabLp2] = lowpassOf(f(p.cabLp * 1.2), q, sampleRate);
+    c.filter[odHp] = highpassOf(f(720), q, sampleRate);
+    c.filter[odLp] = lowpassOf(f(3500), q, sampleRate);
+    c.filter[distHp] = highpassOf(f(p.distHp), q, sampleRate);
+    c.filter[distLp1] = lowpassOf(f(6000), q, sampleRate);
+    c.filter[distLp2] = lowpassOf(f(4500), q, sampleRate);
+    c.filter[fuzzHp] = highpassOf(f(35), q, sampleRate);
+    c.filter[toneLp] = lowpassOf(f(p.toneHz), q, sampleRate);
+    c.filter[toneHp] = highpassOf(f(p.toneHz), q, sampleRate);
+    c.filter[cabHp] = highpassOf(f(p.cabHp), q, sampleRate);
+    c.filter[cabPeak] = peakingOf(f(p.cabPeakHz), f(1.2), f(p.cabPeakDb), sampleRate);
+    c.filter[cabLp1] = lowpassOf(f(p.cabLp), q, sampleRate);
+    c.filter[cabLp2] = lowpassOf(f(p.cabLp * 1.2), q, sampleRate);
+    channel_[1] = c; // the same shapers and coefficients
     reset();
 }
 
 void GuitarFx::reset() {
-    built_ = false;
+    built_ = stereo_ = false;
     for (Ramp* r : { &dry_, &wetOut_, &cabDry_, &cabWet_, &bias_, &od_.bypass, &od_.wet, &od_.drive, &od_.makeup, &dist_.bypass, &dist_.wet, &dist_.drive,
                      &dist_.makeup, &fuzz_.bypass, &fuzz_.wet, &fuzz_.drive, &fuzz_.makeup }) r->jump(0.0f);
     dry_.jump(1.0f);
-    for (Biquad& b : filter_) b.x1 = b.x2 = b.y1 = b.y2 = 0.0;
-    soft_.reset(); hard_.reset(); fuzzShaper_.reset(); muff_.reset();
+    for (Channel& c : channel_) {
+        for (Biquad& b : c.filter) b.x1 = b.x2 = b.y1 = b.y2 = 0.0;
+        c.soft.reset(); c.hard.reset(); c.fuzz.reset(); c.muff.reset();
+    }
 }
 
 void GuitarFx::set(const FxChainParams& p, bool atStart) {
@@ -409,33 +414,49 @@ void GuitarFx::set(const FxChainParams& p, bool atStart) {
     to(cabWet_, p.cab);
 }
 
-// shortcut: mono, the left channel; the stereo voices of Phase 5 need a second state of every filter and shaper. When the input becomes
-// stereo, Chromium's WaveShaperNode uninitialises and re-initialises itself (wave_shaper_handler.cc 400 to 420): its shapers' state is lost.
-void GuitarFx::process(float* x, int count) {
+void GuitarFx::process(float* left, float* right, int count, bool stereo) {
     if (!built_) return;
+    // The turn to two channels: the right channel goes on from the left one's states. Here the core departs from Chromium, whose
+    // WaveShaperNodes and BiquadFilterNodes start empty in both channels when their input becomes stereo (wave_shaper_handler.cc 400 to 423,
+    // biquad_filter_handler.cc 377 to 400): under a ringing distortion that is a step (phase 5 ruling 4).
+    if (stereo && !stereo_) {
+        channel_[1] = channel_[0];
+        stereo_ = true;
+    }
+    float* const x[2] = { left, right };
+    const int channels = stereo ? 2 : 1;
     for (int i = 0; i < count; ++i) {
-        const float in = x[i], s = in * ref_; // the input node (gain 1), then `scaled`
-        // overdrive: the highpassed copy driven and added to the signal, soft clipping at 2x, lowpass
-        const float odBypass = s * od_.bypass.next();
-        const float odDriven = filter_[odHp].step(s) * od_.drive.next();
-        const float odClipped = soft_.process(s + odDriven);
-        const float odOut = odBypass + (filter_[odLp].step(odClipped) * od_.makeup.next()) * od_.wet.next();
-        // distortion: highpass, drive, lowpass, hard clipping at 4x, lowpass
-        const float distBypass = odOut * dist_.bypass.next();
-        const float distDriven = filter_[distHp].step(odOut) * dist_.drive.next();
-        const float distClipped = hard_.process(filter_[distLp1].step(distDriven));
-        const float distOut = distBypass + (filter_[distLp2].step(distClipped) * dist_.makeup.next()) * dist_.wet.next();
-        // fuzz: the bias in front of the drive, the Fuzz Face curve at 4x, highpass, 1.5, the Big Muff curve at 2x, the tone's two branches
-        const float fuzzBypass = distOut * fuzz_.bypass.next();
-        const float fuzzDriven = (distOut + bias_.next()) * fuzz_.drive.next();
-        const float muff = muff_.process(filter_[fuzzHp].step(fuzzShaper_.process(fuzzDriven)) * 1.5f);
-        const float tone = filter_[toneLp].step(muff) * 0.7f + filter_[toneHp].step(muff) * 0.6f;
-        const float fuzzOut = fuzzBypass + (tone * fuzz_.makeup.next()) * fuzz_.wet.next();
-        // cabinet: highpass, bell, two lowpasses; the dry part of the cabinet stage beside it; then 1 / ref and the chain's output gain
-        const float cabDried = fuzzOut * cabDry_.next();
-        const float cabbed = filter_[cabLp2].step(filter_[cabLp1].step(filter_[cabPeak].step(filter_[cabHp].step(fuzzOut)))) * cabWet_.next();
-        const float wet = ((cabDried + cabbed) * invRef_) * wetOut_.next();
-        x[i] = in * dry_.next() + wet;
+        const float odBypassGain = od_.bypass.next(), odDrive = od_.drive.next(), odMakeup = od_.makeup.next(), odWet = od_.wet.next();
+        const float distBypassGain = dist_.bypass.next(), distDrive = dist_.drive.next(), distMakeup = dist_.makeup.next(), distWet = dist_.wet.next();
+        const float fuzzBypassGain = fuzz_.bypass.next(), bias = bias_.next(), fuzzDrive = fuzz_.drive.next(), fuzzMakeup = fuzz_.makeup.next(), fuzzWet = fuzz_.wet.next();
+        const float cabDry = cabDry_.next(), cabWet = cabWet_.next(), wetOut = wetOut_.next(), dry = dry_.next();
+        for (int c = 0; c < channels; ++c) {
+            Channel& ch = channel_[c];
+            Biquad* const f = ch.filter;
+            const float in = x[c][i], s = in * ref_; // the input node (gain 1), then `scaled`
+            // overdrive: the highpassed copy driven and added to the signal, soft clipping at 2x, lowpass
+            const float odBypass = s * odBypassGain;
+            const float odDriven = f[odHp].step(s) * odDrive;
+            const float odClipped = ch.soft.process(s + odDriven);
+            const float odOut = odBypass + (f[odLp].step(odClipped) * odMakeup) * odWet;
+            // distortion: highpass, drive, lowpass, hard clipping at 4x, lowpass
+            const float distBypass = odOut * distBypassGain;
+            const float distDriven = f[distHp].step(odOut) * distDrive;
+            const float distClipped = ch.hard.process(f[distLp1].step(distDriven));
+            const float distOut = distBypass + (f[distLp2].step(distClipped) * distMakeup) * distWet;
+            // fuzz: the bias in front of the drive (a mono source, in both channels), the Fuzz Face curve at 4x, highpass, 1.5, the Big Muff
+            // curve at 2x, the tone's two branches
+            const float fuzzBypass = distOut * fuzzBypassGain;
+            const float fuzzDriven = (distOut + bias) * fuzzDrive;
+            const float muff = ch.muff.process(f[fuzzHp].step(ch.fuzz.process(fuzzDriven)) * 1.5f);
+            const float tone = f[toneLp].step(muff) * 0.7f + f[toneHp].step(muff) * 0.6f;
+            const float fuzzOut = fuzzBypass + (tone * fuzzMakeup) * fuzzWet;
+            // cabinet: highpass, bell, two lowpasses; the dry part of the cabinet stage beside it; then 1 / ref and the chain's output gain
+            const float cabDried = fuzzOut * cabDry;
+            const float cabbed = f[cabLp2].step(f[cabLp1].step(f[cabPeak].step(f[cabHp].step(fuzzOut)))) * cabWet;
+            const float wet = ((cabDried + cabbed) * invRef_) * wetOut;
+            x[c][i] = in * dry + wet;
+        }
     }
 }
 

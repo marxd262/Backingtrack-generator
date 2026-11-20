@@ -115,14 +115,18 @@ struct Engine::Impl {
     unsigned starts = 0; // Transport::Block::starts of the last block
     double skipBefore = -INFINITY; // song beat of the last jump less a frame: events triggered before it do not play (but see render)
     float gainNow[layerCount] = {}, panNow[layerCount] = {}, masterNow = 1.0f;
-    // The layers with a distortion chain and a modulation chain behind it (src/core/layers.js 10 to 15: fx), their state, and the values they
-    // were last given (modApplied: vibrato, chorus and the tempo of the last modParams).
+    // The layers with a distortion chain and a modulation chain behind it (src/core/layers.js 10 to 15: fx), their chains in two generations
+    // (phase 5 ruling 5, applyFx): tones.gen[l] is the one a tone started now rings through (Tone::gen). Per generation: whether the chains
+    // run in two channels, and the frames rendered since it last had an active tone (up to `drain`: see the chunk loop). The values the
+    // current generation was last given (modApplied: vibrato, chorus and the tempo of the last modParams).
     static constexpr Layer FX_LAYERS[] = { bass, chords, pad, lead };
-    detail::GuitarFx guitar[layerCount];
-    detail::ModFx mod[layerCount];
+    detail::GuitarFx guitar[2][layerCount];
+    detail::ModFx mod[2][layerCount];
+    bool stereo[2][layerCount] = {};
+    int quietFor[2][layerCount] = {}, drain = 0;
     detail::FxChainParams fxApplied[layerCount] = {};
     double modApplied[layerCount][3] = {};
-    bool fxAtOnce = true; // the next playing block with a setup is a start: the chains of a layer with no active tone are built anew (createInstruments, { immediate: true })
+    bool fxAtOnce = true; // the next playing block with a setup is a start: every layer's chains are built anew (createInstruments, { immediate: true }; applyFx)
     double masterGainNow = MASTER, shelfNow = 0.0, shelfSet = 0.0; // the sum's gain (synth.js `master`) and the shelf's gain now, and the one its coefficients are for
     detail::Biquad shelf[2];
     detail::Compressor glue, limiter; // Chromium's compressors (limiter: the name of the node in synth.js); each keeps its state across a restart
@@ -138,8 +142,8 @@ struct Engine::Impl {
     double wetAt[CHUNK];    // the wet fade's value of each frame of the chunk, for the second pass
     int wetFadeFrames = 2400, wetFadeLeft = -1; // the wet returns' fade after a stop or a restart: frames left, -1 = none
     bool wetClosed = false;                     // a stop's fade is over: the wet returns stay at 0 until playing resumes
-    bool quiet = false;                         // stopped, faded and no tone: the chain is skipped
-    float buffers[layerCount][2][CHUNK];
+    bool quiet = false;                         // stopped, faded, no tone and the layer chains drained: the chain is skipped
+    float buffers[2][layerCount][2][CHUNK];     // [generation][layer][channel]: what each generation's tones and chains make
     float mixed[2][CHUNK], reverbIn[2][CHUNK], reverbOut[2][CHUNK], roomIn[2][CHUNK], roomOut[2][CHUNK], shelved[2][CHUNK];
 
     Impl() {
@@ -263,32 +267,46 @@ struct Engine::Impl {
         for (detail::Biquad* f : { &roomHp[0], &roomHp[1], &roomLp[0], &roomLp[1] }) clear(*f);
     }
 
-    // Audio thread: the chains' values from the setup. At a start a layer none of whose tones is active gets its chains built anew from them
-    // (the web's new graph at every play()). A start that finds a tone of the layer still ringing (choked by a stop shortly before, or by this
-    // play itself; at a start only the old song's tones are active) never resets a chain under it: a built distortion chain and the
-    // modulation chain take the values as a change, as in mid-play (ruling P); an unbuilt distortion chain is still built at once, its
-    // creation fade passes the input bit for bit. The cost: after such a start the new song meets the old chains (bias settled, LFO phases
-    // running on) instead of ones that are 0.15 s old. Later only a layer whose values changed gets them (the web sets them again on every
-    // change, with the same result once its ramps are over). The modulation chain also follows the tempo (setTempo -> applyFx in synth.js):
-    // a change of more than 1e-9 bpm gets a ramp of its rate.
+    // Audio thread: the chains' values from the setup. At a start every fx layer gets fresh chains built from them at once (the web's new
+    // graph at every play()): in its current generation when none of the layer's tones is active there, else in the other one, so that the
+    // old song's tones (choked by a stop shortly before, or by this play itself; at a start only they are active) ring out on the chains
+    // they began under, as on the web's old graph, while the new song meets fresh ones (phase 5 ruling 5; it replaces ruling P of Phase 4).
+    // A third start while both generations still ring resets the one it takes under the tones of two starts before, as every start under
+    // ringing tones did before Phase 4 (it needs three starts within the old tones' ring-out of about 0.3 s). Later only the current
+    // generation of a layer whose values changed gets them (the web sets them again on every change, with the same result once its ramps
+    // are over); the other keeps the values it had when it was left. The modulation chain also follows the tempo (setTempo -> applyFx in
+    // synth.js): a change of more than 1e-9 bpm gets a ramp of its rate. The chains run in two channels from a start whose voice feeds two
+    // (Voice::stereo) or from a later block whose setup has such a voice (a setup that arrived while playing), until they are reset.
     void applyFx(bool atStart, double tempo) {
         for (const Layer l : FX_LAYERS) {
             const double v = setup->vibrato[l], c = setup->chorus[l];
-            const auto sounds = [l](const auto& t) { return t.active && t.layer == l; };
-            const bool ringing = atStart && (std::any_of(tones.all.begin(), tones.all.end(), sounds) || std::any_of(tones.synth.begin(), tones.synth.end(), sounds));
-            if (atStart && !(ringing && guitar[l].built())) {
-                guitar[l].reset();
-                guitar[l].set(setup->fx[l], true);
-            } else if (!(setup->fx[l] == fxApplied[l])) guitar[l].set(setup->fx[l], false);
-            if (atStart && !ringing) {
-                mod[l].reset();
-                mod[l].set(detail::modParams(v, c, tempo), true);
-            } else if (v != modApplied[l][0] || c != modApplied[l][1] || std::fabs(tempo - modApplied[l][2]) > 1e-9) {
-                mod[l].set(detail::modParams(v, c, tempo), false);
+            const bool twoChannels = setup->voice[l] && setup->voice[l]->stereo();
+            int g = tones.gen[l];
+            if (atStart) {
+                const auto sounds = [l, g](const auto& t) { return t.active && t.layer == l && t.gen == g; };
+                if (std::any_of(tones.all.begin(), tones.all.end(), sounds) || std::any_of(tones.synth.begin(), tones.synth.end(), sounds))
+                    tones.gen[l] = static_cast<uint8_t>(g = 1 - g);
+                guitar[g][l].reset();
+                guitar[g][l].set(setup->fx[l], true);
+                mod[g][l].reset();
+                mod[g][l].set(detail::modParams(v, c, tempo), true);
+                stereo[g][l] = twoChannels;
+                quietFor[g][l] = drain; // empty
+            } else {
+                if (!(setup->fx[l] == fxApplied[l])) guitar[g][l].set(setup->fx[l], false);
+                if (v != modApplied[l][0] || c != modApplied[l][1] || std::fabs(tempo - modApplied[l][2]) > 1e-9) mod[g][l].set(detail::modParams(v, c, tempo), false);
+                stereo[g][l] = stereo[g][l] || twoChannels;
             }
             fxApplied[l] = setup->fx[l];
             modApplied[l][0] = v; modApplied[l][1] = c; modApplied[l][2] = tempo;
         }
+    }
+    // Audio thread: no generation of a layer chain that is built still has its last tones in its pipelines (the chunk loop says how that is decided).
+    bool drained() const {
+        for (const Layer l : FX_LAYERS)
+            for (int g = 0; g < 2; ++g)
+                if ((guitar[g][l].built() || mod[g][l].built()) && quietFor[g][l] < drain) return false;
+        return true;
     }
 
     // Audio thread: layers whose voice changed (all: when playing starts) begin with the state of a voice just built.
@@ -478,9 +496,17 @@ void Engine::prepare(double sampleRate) {
     m.glue.prepare(static_cast<float>(sampleRate)); // a fresh node, before settleSum gives it its parameters
     m.limiter.prepare(static_cast<float>(sampleRate));
     m.settleSum();
-    for (const Layer l : Impl::FX_LAYERS) { // allocation-free; the curves and kernels are computed here, never first on the audio thread
-        m.guitar[l].prepare(l, sampleRate);
-        m.mod[l].prepare(sampleRate); // allocates: the three rings
+    // the four shapers' latency in series and 0.05 s for the modulation chain (mod_fx.cpp MAX_DELAY, the most one delay holds; the vibrato's
+    // delay and a chorus copy's are in series and take 26 ms together with today's values): the chunk loop
+    m.drain = 2 * (detail::Shaper::latency(2) + detail::Shaper::latency(4)) + static_cast<int>(std::ceil(0.05 * sampleRate));
+    for (const Layer l : Impl::FX_LAYERS) { // the curves and kernels are computed here, never first on the audio thread
+        for (int g = 0; g < 2; ++g) {
+            m.guitar[g][l].prepare(l, sampleRate);
+            m.mod[g][l].prepare(sampleRate); // allocates: the six rings
+            m.stereo[g][l] = false;
+            m.quietFor[g][l] = m.drain;
+        }
+        m.tones.gen[l] = 0;
         m.fxApplied[l] = {};
         for (double& v : m.modApplied[l]) v = 0.0;
     }
@@ -588,14 +614,15 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
     }
     // The layer effects: built at a play's first block, a lead's too (the creation fade and the bias then run in the lead as in the live web
     // app), and not again when the clock begins to move; later blocks only hand over what changed. A layer whose old tones still ring at
-    // that block keeps its chains (applyFx). Not in the echo's block: a start inside the wet fade must still build the chains.
+    // that block builds them in its other generation (applyFx). Not in the echo's block: a start inside the wet fade must still build the chains.
     // The vibrato's rate follows the tempo of the moment: the moving clock's (as the echo's), in a lead the block's own (Transport::Block::bpm),
     // else the song's.
     if (block.playing && m.setup) {
         m.applyFx(m.fxAtOnce, step > 0 ? step * sr * 60 : block.bpm > 0 ? block.bpm : m.bpm.load());
         m.fxAtOnce = false;
     }
-    // Stopped, the fade over and no tone left: the shelf and the compressors start empty, and the chain is skipped until playing resumes.
+    // Stopped, the fade over, no tone left and the layer chains drained: the shelf and the compressors start empty, and the chain is skipped
+    // until playing resumes.
     if (block.playing) {
         if (m.quiet) { // a new song's sound is there from its first frame, not gliding in from the last song's (every state it touches is empty)
             for (int l = 0; l < layerCount; ++l) m.panNow[l] = m.panTarget(l);
@@ -607,7 +634,8 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
             m.wetClosed = false;
         }
     } else if (const auto active = [](const auto& t) { return t.active; };
-               !m.quiet && m.wetFadeLeft < 0 && std::none_of(m.tones.all.begin(), m.tones.all.end(), active) && std::none_of(m.tones.synth.begin(), m.tones.synth.end(), active)) {
+               !m.quiet && m.wetFadeLeft < 0 && std::none_of(m.tones.all.begin(), m.tones.all.end(), active) && std::none_of(m.tones.synth.begin(), m.tones.synth.end(), active)
+               && m.drained()) {
         for (detail::Biquad& f : m.shelf) clear(f);
         m.glue.reset();
         m.limiter.reset();
@@ -651,17 +679,36 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
                 } else break;
             }
         }
-        for (auto& layer : m.buffers) for (auto& channel : layer) std::fill(channel, channel + count, 0.0f);
-        for (Tone& t : m.tones.all) if (t.active) t.render(m.buffers[t.layer][0], m.buffers[t.layer][1], count);
-        for (SynthTone& t : m.tones.synth) if (t.active) t.render(m.buffers[t.layer][0], m.buffers[t.layer][1], count, m.tones.scratch);
+        for (auto& gen : m.buffers) for (auto& layer : gen) for (auto& channel : layer) std::fill(channel, channel + count, 0.0f);
+        bool sounding[2][layerCount] = {}; // a tone of that generation and layer is active in this chunk
+        for (Tone& t : m.tones.all) if (t.active) { sounding[t.gen][t.layer] = true; t.render(m.buffers[t.gen][t.layer][0], m.buffers[t.gen][t.layer][1], count); }
+        for (SynthTone& t : m.tones.synth)
+            if (t.active) { sounding[t.gen][t.layer] = true; t.render(m.buffers[t.gen][t.layer][0], m.buffers[t.gen][t.layer][1], count, m.tones.scratch); }
         m.tones.quantum = (m.tones.quantum + count) % 128;
         // The distortion chains hear the sum of the layer's tones, before mute, fader and trim (synth.js: voice -> fx.input), the modulation
-        // chains what comes out of them; mono, so the right channel takes the left (the four layers' packs are mono: guitar_fx.cpp, the
-        // shortcut at process) until the chorus makes two channels of it.
+        // chains what comes out of them: in one channel, the right one then taking the left until the chorus makes two of it, or in two where
+        // the voice feeds two (Voice::stereo). Each generation hears the tones started under it. The current one runs while playing, as the
+        // web's chains do; a generation otherwise runs while it has an active tone and until it has drained: `drain` frames rendered after
+        // the last chunk in which it had one (the four shapers' latency in series and 0.05 s for the modulation chain, 3040 frames at
+        // 48 kHz: by then its pipelines hold nothing of its tones; what its filters still ring then is cut: 1.7e-7 for one bass tone's
+        // tail behind fuzz 1, measured once by a probe, not by a test). A drained generation that is not the current one costs nothing;
+        // the output of one that runs joins
+        // the current one's.
         for (const Layer l : Impl::FX_LAYERS) {
-            if (m.guitar[l].built()) m.guitar[l].process(m.buffers[l][0], count);
-            if (m.mod[l].built()) m.mod[l].process(m.buffers[l][0], m.buffers[l][0], m.buffers[l][1], count);
-            else if (m.guitar[l].built()) std::copy(m.buffers[l][0], m.buffers[l][0] + count, m.buffers[l][1]);
+            const int now = m.tones.gen[l];
+            for (const int g : { now, 1 - now }) {
+                int& quietFor = m.quietFor[g][l];
+                const bool runs = (block.playing && g == now) || sounding[g][l] || quietFor < m.drain;
+                quietFor = sounding[g][l] ? 0 : std::min(quietFor + count, m.drain);
+                if (!runs) continue;
+                float* const bl = m.buffers[g][l][0];
+                float* const br = m.buffers[g][l][1];
+                if (m.guitar[g][l].built()) m.guitar[g][l].process(bl, br, count, m.stereo[g][l]);
+                if (m.mod[g][l].built()) m.mod[g][l].process(bl, br, bl, br, count, m.stereo[g][l]);
+                else if (m.guitar[g][l].built() && !m.stereo[g][l]) std::copy(bl, bl + count, br);
+                if (g != now)
+                    for (int c = 0; c < 2; ++c) for (int i = 0; i < count; ++i) m.buffers[now][l][c][i] += m.buffers[g][l][c][i];
+            }
         }
 
         const float masterTarget = m.master * m.master;
@@ -682,7 +729,8 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
                 m.panNow[l] += smoothLevel * (m.panTarget(l) - m.panNow[l]);
                 m.roomSendsNow[l] += smoothLevel * ((s ? static_cast<float>(s->roomSends[l]) : 0.0f) - m.roomSendsNow[l]);
                 const float g = m.gainNow[l] * m.trim[l];
-                const float tl = m.buffers[l][0][i] * g, tr = m.buffers[l][1][i] * g; // after mute, fader and trim: the drums' send taps here
+                const auto& layer = m.buffers[m.tones.gen[l]][l]; // both generations' output (the chains above)
+                const float tl = layer[0][i] * g, tr = layer[1][i] * g; // after mute, fader and trim: the drums' send taps here
                 const float x = tl * (1 - m.panNow[l]), y = tr * (1 + m.panNow[l]);   // synth.js balance: the room's send taps here
                 peak[l] = std::max(peak[l], std::max(std::fabs(x), std::fabs(y)));
                 sum[0] += x;

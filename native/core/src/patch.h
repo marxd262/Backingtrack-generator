@@ -24,6 +24,7 @@ enum class Filter : uint8_t { lowpass, highpass, bandpass }; // the BiquadFilter
 struct SynthTone {
     struct Scratch { float block[NODES][2][SYNTH_FRAMES]; float values[2][SYNTH_FRAMES]; }; // every node's output over the chunk; a node's params
     bool active = false; uint64_t serial = 0, voice = 0; Engine::Layer layer = Engine::drums;
+    uint8_t gen = 0;                                    // its layer's chain generation at its start, as Tone::gen
     int delay = 0;                                      // frames until its time 0 (the event's place in the chunk), as Tone::delay
     float panLeft = 1, panRight = 1;                    // the kit's balance (drums synth), as Tone
     double chokeGain = 1, chokeMul = 1, releaseSeconds = 0; long long chokeIn = -1; // stop; a jump falls over releaseSeconds
@@ -97,6 +98,7 @@ struct Tones {
     double sr = 48000.0;
     const BasicWaves* basic = nullptr; // the basic waves at sr (Engine::prepare); every synth tone gets them
     int quantum = 0;                   // the place of the chunk's first frame in its render quantum: frames since the play began, mod 128
+    uint8_t gen[Engine::layerCount] = {}; // per layer, the generation of its chains (0 or 1) a tone started now rings through (engine.cpp)
 
     Tone* start(const Note& n);
     // A free synth tone, else the oldest (as start), emptied and active, its time 0 `delay` frames into the chunk (and its place in the

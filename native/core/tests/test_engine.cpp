@@ -123,6 +123,16 @@ static std::shared_ptr<const btg::Pack> tonePack(int rootKey, float amplitude, d
     pack->zones.push_back(zone);
     return pack;
 }
+// tonePack(57, 0.3, 0.3) in two channels (Task 20b): its sine of 200 frames on the left, one of 160 on the right, so that the layer's chains run
+// in two (Voice::stereo); each channel's samples are those of the mono pack of its period.
+static std::shared_ptr<const btg::Pack> stereoTone() {
+    const auto left = tonePack(57, 0.3f, 0.3, 200), right = tonePack(57, 0.3f, 0.3, 160);
+    auto pack = std::make_shared<btg::Pack>(*left);
+    pack->channels = 2;
+    pack->audio.clear();
+    for (size_t i = 0; i < left->audio.size(); ++i) { pack->audio.push_back(left->audio[i]); pack->audio.push_back(right->audio[i]); }
+    return pack;
+}
 // A format-1 hit pack whose one zone answers every key (the percussion of the tempo test): decaying noise, mono.
 static std::shared_ptr<const btg::Pack> anyKey() {
     auto pack = std::make_shared<btg::Pack>();
@@ -572,15 +582,27 @@ int main(int argc, char** argv) {
             tf.seek(64.0); tc.seek(64.0);
             CHECK(differs(render(*f, tf, 0.1, 480), render(*c, tc, 0.1, 480), 0, hold)); // red: no chain
         }
-        { // 3. a restart (play again, no stop) inside a note of the bass (1.55 s after beat 64; see 9) finds the old tones ringing through
-          // the chain and keeps it (ruling P): no dry 0.08 s after it. A start after a stop that has fallen quiet (no tone left, the output
-          // exactly 0) builds it anew: dry for 0.08 s again.
-            auto f = make(FUZZ), c = make(CLEAN);
-            btg::Transport tf, tc;
-            tf.play(64.0, f->bpm()); tc.play(64.0, c->bpm());
-            render(*f, tf, 1.55, 480); render(*c, tc, 1.55, 480);
-            tf.play(64.0, f->bpm()); tc.play(64.0, c->bpm());
-            CHECK(differs(render(*f, tf, 1.0, 480), render(*c, tc, 1.0, 480), 0, hold)); // red: a rebuild at the restart (dry), or no chain
+        { // 3. a restart (play again, no stop) inside a note of the bass (1.55 s after beat 64; see 9) gives the new song a fresh chain, as
+          // the web's new graph at every play() (phase 5 ruling 5): the old tones ring out on the chain they began under (9, 11) and the new
+          // song's first 0.08 s pass dry. So the restart's render less that of the same engine stopped there instead (the old tail alone)
+          // equals the clean engine's taken the same way within 1e-6 for 0.08 s, and then differs. A start after a stop that has fallen
+          // quiet (no tone left, the output exactly 0) builds it anew: dry for 0.08 s again.
+            auto f = make(FUZZ), c = make(CLEAN), fs = make(FUZZ), cs = make(CLEAN);
+            btg::Transport tf, tc, tfs, tcs;
+            for (auto [e, t] : { std::pair { f.get(), &tf }, std::pair { c.get(), &tc }, std::pair { fs.get(), &tfs }, std::pair { cs.get(), &tcs } }) {
+                t->play(64.0, e->bpm());
+                render(*e, *t, 1.55, 480);
+            }
+            tf.play(64.0, f->bpm()); tc.play(64.0, c->bpm()); tfs.stop(); tcs.stop();
+            const auto newSong = [&](btg::Engine& e, btg::Transport& t, btg::Engine& stopped, btg::Transport& ts) {
+                Result r = render(e, t, 1.0, 480);
+                const Result tail = render(stopped, ts, 1.0, 480);
+                for (size_t i = 0; i < r.left.size(); ++i) r.left[i] -= tail.left[i];
+                return r;
+            };
+            const Result fNew = newSong(*f, tf, *fs, tfs), cNew = newSong(*c, tc, *cs, tcs);
+            CHECK(rmsOf(cNew.left, 0, hold) > 1e-3 && near(fNew, cNew, 0, hold)); // red: the chain kept under the old tones (ruling P)
+            CHECK(differs(fNew, cNew, hold, n));                                  // red: no chain
             tf.stop(); tc.stop();
             CHECK(render(*f, tf, 1.0, 480).left.back() == 0.0f && render(*c, tc, 1.0, 480).left.back() == 0.0f);
             tf.play(64.0, f->bpm()); tc.play(64.0, c->bpm());
@@ -665,49 +687,57 @@ int main(int argc, char** argv) {
             CHECK(near(same, again, 0, same.left.size()));                  // deterministic
             CHECK(differs(same, told, lead, lead + static_cast<size_t>(0.2 * rate))); // red: no chain, or the block's tempo is not read
         }
-        // 9. a start under ringing tones keeps the chains (ruling P): a stop (or a play with no stopped block between) chokes the old tones,
-        // which ring on through the chains; a play 20 ms after the stop, or at once, with the app's lead must leave them ringing as a stop
-        // alone does. From the stop to the end of the lead (the new song schedules nothing in it) the engine that got the play equals within
-        // 1e-6 the same engine that only got the stop, up to where that one falls quiet (its output exactly 0 to the end: a quiet engine
-        // skips its chains, while the playing one runs them on; with the bass fuzz that is the chain's own residual, 3e-6 at 140 ms, after the
-        // last bass tone has ended). The layer alone (sends 0, no limiter; the chords from the fixture with its chords switched on), stopped
-        // 1.55 s after beat 64, inside a note of the bass (at 1 s the fixture's bass is between two notes); `peak` is what still rings from
-        // the play on. The chords also with the e-piano (Task 21): its synth tones ring through the chorus (red when the start looks only
-        // at the sample tones).
+        // 9. a start under ringing tones leaves the old tones on the chains they began under (phase 5 ruling 5; ruling P of Phase 4 kept the
+        // chains for it): a stop (or a play with no stopped block between) chokes the old tones, which ring on through those chains; a play
+        // 20 ms after the stop, or at once, with the app's lead must leave them ringing as a stop alone does. From the stop to the end of the
+        // lead (the new song schedules nothing in it) the engine that got the play, less what its new chains make by themselves in the lead
+        // (a fresh engine's lead: the fuzz's bias through its highpass, 2.8e-4; 0 for the others), equals within 1e-6 the same engine that
+        // only got the stop, up to where that one falls quiet (its output exactly 0 to the end). The layer alone (sends 0, no limiter; the
+        // chords from the fixture with its chords switched on), stopped 1.55 s after beat 64, inside a note of the bass (at 1 s the fixture's
+        // bass is between two notes); `peak` is what still rings from the play on. The chords also with the e-piano (Task 21): its synth tones
+        // ring through the chorus (red when the start looks only at the sample tones). And the residual R-1 of Phase 4's re-review: a play
+        // that switches the distortion on (the sound given just before it, and before the stop of the engine it is compared with) leaves the
+        // old tones clean, as on the web's old graph: red when they ring through the chain the new song gets.
         {
             std::string chorded = track;
             chorded.replace(chorded.find("\"chords\":false"), 14, "\"chords\":true");
-            const std::tuple<const char*, const char*, btg::Engine::Layer, const char*> cases[] = {
-                { "bass fuzz 1", FUZZ, btg::Engine::bass, nullptr },
-                { "bass vibrato 1", R"({"master":{"reverb":0,"echo":0,"roomWet":0},"bass":{"vibrato":1}})", btg::Engine::bass, nullptr },
-                { "chords chorus 1", R"({"master":{"reverb":0,"echo":0,"roomWet":0},"chords":{"chorus":1}})", btg::Engine::chords, nullptr },
-                { "chords chorus 1, e-piano", R"({"master":{"reverb":0,"echo":0,"roomWet":0},"chords":{"chorus":1}})", btg::Engine::chords, R"({"chords":{"id":"epiano","variant":"rhodes"}})" } };
+            const char* DISTORTION = R"({"master":{"reverb":0,"echo":0,"roomWet":0},"bass":{"distortion":1}})";
+            // name, sound, the layer alone, voices, the sound given at the play (nullptr: none)
+            const std::tuple<const char*, const char*, btg::Engine::Layer, const char*, const char*> cases[] = {
+                { "bass fuzz 1", FUZZ, btg::Engine::bass, nullptr, nullptr },
+                { "bass vibrato 1", R"({"master":{"reverb":0,"echo":0,"roomWet":0},"bass":{"vibrato":1}})", btg::Engine::bass, nullptr, nullptr },
+                { "chords chorus 1", R"({"master":{"reverb":0,"echo":0,"roomWet":0},"chords":{"chorus":1}})", btg::Engine::chords, nullptr, nullptr },
+                { "chords chorus 1, e-piano", R"({"master":{"reverb":0,"echo":0,"roomWet":0},"chords":{"chorus":1}})", btg::Engine::chords, R"({"chords":{"id":"epiano","variant":"rhodes"}})", nullptr },
+                { "bass clean, distortion 1 from the play on", CLEAN, btg::Engine::bass, nullptr, DISTORTION } };
             for (const auto& c : cases)
                 for (const double gap : { 0.02, 0.0 }) {
                     const char* name = std::get<0>(c);
                     const btg::Engine::Layer alone = std::get<2>(c);
-                    const auto run = [&](bool replay) {
-                        auto e = make(std::get<1>(c));
+                    const auto run = [&](int mode) { // 0: the play, 1: a stop instead, 2: a fresh engine's lead
+                        auto e = make(mode == 2 && std::get<4>(c) ? std::get<4>(c) : std::get<1>(c));
                         if (alone == btg::Engine::chords) e->setTrack(chorded);
                         if (std::get<3>(c)) e->setVoices(std::get<3>(c));
                         for (int l = 0; l < btg::Engine::layerCount; ++l) e->setMuted(static_cast<btg::Engine::Layer>(l), l != alone);
                         btg::Transport t;
-                        t.play(64.0, e->bpm());
-                        render(*e, t, 1.55, 480);
                         Result r;
-                        if (gap > 0) { t.stop(); r = render(*e, t, gap, 480); }
-                        if (replay) t.play(64.0, e->bpm(), 0.15); else t.stop();
+                        if (mode < 2) {
+                            t.play(64.0, e->bpm());
+                            render(*e, t, 1.55, 480);
+                            if (gap > 0) { t.stop(); r = render(*e, t, gap, 480); }
+                            if (std::get<4>(c)) e->setSound(std::get<4>(c));
+                        }
+                        if (mode == 1) t.stop(); else t.play(64.0, e->bpm(), 0.15);
                         const Result lead = render(*e, t, 0.15, 480);
                         r.left.insert(r.left.end(), lead.left.begin(), lead.left.end());
                         return r;
                     };
-                    const Result a = run(true), b = run(false);
+                    const Result a = run(0), b = run(1), own = run(2);
                     const size_t played = static_cast<size_t>(std::lround(gap * rate));
                     size_t quiet = b.left.size();
                     while (quiet > 0 && b.left[quiet - 1] == 0.0f) --quiet;
                     double most = 0.0, level = 0.0;
                     for (size_t i = 0; i < quiet; ++i) {
-                        most = std::max(most, static_cast<double>(std::fabs(a.left[i] - b.left[i])));
+                        most = std::max(most, static_cast<double>(std::fabs(a.left[i] - (i >= played ? own.left[i - played] : 0.0f) - b.left[i])));
                         if (i >= played) level = std::max(level, static_cast<double>(std::fabs(b.left[i])));
                     }
                     std::printf("start under ringing tones, %s, play %.0f ms after the stop: largest difference to a stop alone %.2e up to %.0f ms after the stop (peak %.3f)\n",
@@ -739,6 +769,94 @@ int main(int argc, char** argv) {
                 std::printf("stop behind distortion 1: from 100 ms after the stop, successive samples differ by %.1f dB at most, second difference %.1f dB (re the peak %.3f before it)\n",
                             20 * std::log10(first / peak), 20 * std::log10(second / peak), peak);
                 CHECK(peak > 0.01 && second < 1e-4 * peak);
+            }
+            // 11. the new song after a restart under ringing tones meets fresh chains, as the web's new graph at every play() (phase 5 ruling
+            // 5), the cases of 9 with the play at once: the restart with the app's lead, its render less that of the same engine stopped there
+            // instead (the old tails on their own chains, 9), equals within 1e-6 a fresh engine started at the same place with the same lead,
+            // from the restart through 1 s of the song, both channels. Red when a start keeps the chains of a layer whose tones ring (ruling
+            // P: the LFO phases run on, the bias has settled) or resets them under the old tones. Then a stop: the engine falls quiet (both
+            // generations of the chains drained): its output is exactly 0 from 0.5 s after it, and a play 1 s after it with another sound (the
+            // sum's brightness and width) equals exactly a fresh engine with that sound, which needs the start out of quiet (settleSum: the
+            // sum's values at once). Red when quiet never comes (an output of 0 alone does not show that).
+            const char* OTHER = R"({"master":{"reverb":0,"echo":0,"roomWet":0,"brightness":0.9,"width":0.9}})";
+            for (const auto& c : cases) {
+                const btg::Engine::Layer alone = std::get<2>(c);
+                Result again; // mode 0: the play after the stop
+                const auto run = [&](int mode) { // 0: restart, 1: stopped instead, 2: fresh, 3: fresh with OTHER
+                    auto e = make(mode == 3 ? OTHER : mode == 2 && std::get<4>(c) ? std::get<4>(c) : std::get<1>(c));
+                    if (alone == btg::Engine::chords) e->setTrack(chorded);
+                    if (std::get<3>(c)) e->setVoices(std::get<3>(c));
+                    for (int l = 0; l < btg::Engine::layerCount; ++l) e->setMuted(static_cast<btg::Engine::Layer>(l), l != alone);
+                    e->prepare(rate); // the mutes at once: given after a prepare they fade in 20 ms, which the fresh engine would still show
+                    btg::Transport t;
+                    if (mode == 3) {
+                        t.play(64.0, e->bpm());
+                        return render(*e, t, 0.5, 480);
+                    }
+                    if (mode < 2) {
+                        t.play(64.0, e->bpm());
+                        render(*e, t, 1.55, 480);
+                        if (std::get<4>(c)) e->setSound(std::get<4>(c));
+                    }
+                    if (mode == 1) t.stop(); else t.play(64.0, e->bpm(), 0.15);
+                    Result r = render(*e, t, 1.15, 480);
+                    if (mode == 0) {
+                        t.stop();
+                        const Result after = render(*e, t, 1.0, 480);
+                        r.peak = 0.0; // here: the largest sample from 0.5 s after the stop on
+                        for (size_t i = static_cast<size_t>(0.5 * rate); i < after.left.size(); ++i)
+                            r.peak = std::max(r.peak, static_cast<double>(std::max(std::fabs(after.left[i]), std::fabs(after.right[i]))));
+                        e->setSound(OTHER);
+                        t.play(64.0, e->bpm());
+                        again = render(*e, t, 0.5, 480);
+                    }
+                    return r;
+                };
+                const Result a = run(0), b = run(1), fresh = run(2), anew = run(3);
+                double most = 0.0;
+                for (size_t i = 0; i < fresh.left.size(); ++i)
+                    for (const auto side : { &Result::left, &Result::right })
+                        most = std::max(most, static_cast<double>(std::fabs((a.*side)[i] - (b.*side)[i] - (fresh.*side)[i])));
+                const bool same = again.left == anew.left && again.right == anew.right;
+                std::printf("restart under ringing tones, %s: the new song against a fresh engine, largest difference %.2e (song peak %.3f); after a stop %.2e, "
+                            "then a play with another sound %s a fresh engine's\n", std::get<0>(c), most, fresh.peak, a.peak, same ? "equals" : "DIFFERS from");
+                CHECK(a.left.size() == fresh.left.size() && b.left.size() == fresh.left.size() && fresh.peak > 0.01 && most < 1e-6 && a.peak == 0.0);
+                CHECK(anew.peak > 0.01 && same);
+            }
+            // 12. the turn to two channels under a ringing distorted tone (phase 5 ruling 4): the chords alone with distortion 1 hold a stab
+            // of the mono test pack (the fixture without its rhythm: a stab of 2.09 s); 0.5 s into it the chords change to a voice with a
+            // two-channel pack, so their chains run in two channels from the block that takes the setup on, while the old mono tone rings
+            // on (no new tone in the next 1.5 s). The right channel goes on from the left one's states: the largest difference of two
+            // successive samples on the right in the 50 ms from the turn stays within 1.1 times the largest in the 0.2 s before it.
+            // Chromium empties the states there (the core departs from it, guitar_fx.cpp): a step of about the tail's level (measured with
+            // the right states emptied: 1.18 times, so this bound alone is a thin one). The pan is 0, so that the sides are the same until the
+            // turn, and in those 50 ms, the old mono tone alone, the right channel stays the left one within 1e-6 (emptied: by the tail's
+            // level). That the turn came shows once the new voice plays: its right channel is not its left.
+            {
+                std::string held = chorded;
+                const std::string rhythm = R"("rhythm":["funky","syncopated"])";
+                held.replace(held.find(rhythm), rhythm.size(), R"("rhythm":[])");
+                double longest = -1.0;
+                for (const btg::Event& e : btg::buildEvents(held))
+                    if (longest < 0 && e.type == btg::Event::Type::note && e.layer == "chords" && e.dur >= 2.0) longest = e.t * (100.0 / 60.0);
+                auto e = make(R"({"master":{"reverb":0,"echo":0,"roomWet":0},"chords":{"distortion":1}})");
+                e->setPackSource([](const std::string& id) { return id == "chords-steel" ? stereoTone() : source(id); });
+                e->setTrack(held);
+                for (int l = 0; l < btg::Engine::layerCount; ++l) e->setMuted(static_cast<btg::Engine::Layer>(l), l != btg::Engine::chords);
+                e->setPan(btg::Engine::chords, 0.0f);
+                btg::Transport t;
+                t.play(longest, e->bpm());
+                const Result before = render(*e, t, 0.5, 480);
+                e->setVoices(R"({"chords":{"id":"sample","variant":"steel"}})");
+                const Result after = render(*e, t, 0.05, 480), later = render(*e, t, 2.5, 480);
+                double own = 0.0, step = std::fabs(after.right[0] - before.right.back()), apart = 0.0, sides = 0.0;
+                for (size_t i = before.right.size() - rate / 5; i < before.right.size(); ++i) own = std::max(own, static_cast<double>(std::fabs(before.right[i] - before.right[i - 1])));
+                for (size_t i = 1; i < after.right.size(); ++i) step = std::max(step, static_cast<double>(std::fabs(after.right[i] - after.right[i - 1])));
+                for (size_t i = 0; i < after.right.size(); ++i) apart = std::max(apart, static_cast<double>(std::fabs(after.right[i] - after.left[i])));
+                for (size_t i = 0; i < later.right.size(); ++i) sides = std::max(sides, static_cast<double>(std::fabs(later.right[i] - later.left[i])));
+                std::printf("turn to two channels under distortion 1: on the right, largest step %.2e in the 50 ms from it, %.2e in the 0.2 s before; right against left %.2e there; "
+                            "then the sides differ by %.3f (%s)\n", step, own, apart, sides, e->voiceStatus().c_str());
+                CHECK(longest > 0 && own > 1e-3 && step < 1.1 * own && apart < 1e-6 && sides > 0.01 && e->voiceStatus().find(R"("chords":"ready")") != std::string::npos);
             }
         }
     }
@@ -915,13 +1033,14 @@ int main(int argc, char** argv) {
             layers += std::any_of(events.begin(), events.end(), [&](const btg::Event& e) { return e.layer == name; });
         CHECK(layers == 6);
         const bool onCi = argc > 2 && std::string(argv[2]) == "--ci";
+        const char* EVERY = R"({"master":{"reverb":1,"echo":1,"roomWet":1,"roomSize":1},"bass":{"fuzz":1,"overdrive":1,"distortion":1,"vibrato":1,"chorus":1},
+                "chords":{"fuzz":1,"overdrive":1,"distortion":1,"vibrato":1,"chorus":1},"pad":{"fuzz":1,"overdrive":1,"distortion":1,"vibrato":1,"chorus":1},
+                "lead":{"fuzz":1,"overdrive":1,"distortion":1,"vibrato":1,"chorus":1}})";
         for (const auto& [bpm, sr, epiano] : { std::tuple { 20.0, rate, false }, std::tuple { 400.0, rate, false }, std::tuple { 400.0, 96000, false },
                                                std::tuple { 400.0, rate, true }, std::tuple { 400.0, 96000, true } }) {
             btg::Engine engine;
             engine.setPackSource(source);
-            engine.setSound(R"({"master":{"reverb":1,"echo":1,"roomWet":1,"roomSize":1},"bass":{"fuzz":1,"overdrive":1,"distortion":1,"vibrato":1,"chorus":1},
-                "chords":{"fuzz":1,"overdrive":1,"distortion":1,"vibrato":1,"chorus":1},"pad":{"fuzz":1,"overdrive":1,"distortion":1,"vibrato":1,"chorus":1},
-                "lead":{"fuzz":1,"overdrive":1,"distortion":1,"vibrato":1,"chorus":1}})");
+            engine.setSound(EVERY);
             engine.setTrack(band);
             if (epiano) engine.setVoices(R"({"chords":{"id":"epiano","variant":"rhodes"}})");
             engine.setMaster(0.7f); // fader 0.7 = gain 0.49 (see above)
@@ -940,6 +1059,31 @@ int main(int argc, char** argv) {
                 CHECK(sounded);
             }
             if (asserted) CHECK(load < 0.25);
+        }
+        // Printed only (Task 20b, what the second generation of the chains costs): the load of the 0.3 s after a restart under ringing tones
+        // (the band as above at 400 bpm, restarted 2 s after beat 64, so that the old tones ring out on the four layers' old chains while the
+        // new song runs through fresh ones), against the 0.3 s after a fresh start at the same place, at 48 and 96 kHz.
+        for (const int sr : { rate, 96000 }) {
+            double load[2];
+            for (const bool restart : { false, true }) {
+                btg::Engine engine;
+                engine.setPackSource(source);
+                engine.setSound(EVERY);
+                engine.setTrack(band);
+                engine.setMaster(0.7f);
+                engine.prepare(sr);
+                btg::Transport t;
+                t.play(64.0, 400.0);
+                if (restart) {
+                    render(engine, t, 2.0, 480, sr);
+                    t.play(64.0, 400.0);
+                }
+                const auto began = std::chrono::steady_clock::now();
+                render(engine, t, 0.3, 480, sr);
+                load[restart] = std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count() / 0.3;
+            }
+            std::printf("restart under ringing tones at %d Hz, every effect on: load %.1f %% in the 0.3 s after it, %.1f %% after a fresh start (not asserted)\n",
+                        sr, 100 * load[1], 100 * load[0]);
         }
         // The engine's wiring of the vibrato, absolute (review I-3): each of the four layers alone (the others muted), from beat 64 with no
         // lead, reverb, echo and room 0, no limiter, fader and master 1: what stands behind the chain is gains (trim, fader, balance, master
@@ -991,10 +1135,10 @@ int main(int argc, char** argv) {
                     const std::vector<float>& in = side ? dry.right : dry.left;
                     float* out = (side ? r.right : r.left).data();
                     const size_t first = toBpm > 0 ? at : in.size();
-                    chain.process(in.data(), out, unused.data(), static_cast<int>(first));
+                    chain.process(in.data(), nullptr, out, unused.data(), static_cast<int>(first), false);
                     if (first == in.size()) continue;
                     chain.set(btg::detail::modParams(1, 0, toBpm), false);
-                    chain.process(in.data() + first, out + first, unused.data(), static_cast<int>(in.size() - first));
+                    chain.process(in.data() + first, nullptr, out + first, unused.data(), static_cast<int>(in.size() - first), false);
                 }
                 return r;
             };
@@ -1021,6 +1165,45 @@ int main(int argc, char** argv) {
             std::printf("wiring bass from 60 to 160 bpm: peak %.4f, error against ModFx changed at frame 36000 %.2e (tolerance %.2e), against ModFx left at 60 bpm %.4f\n",
                         off.peak, error, tolerance, unchanged);
             CHECK(off.left.size() == 72000 && error <= tolerance && unchanged > 0.01 * off.peak);
+            // In two channels (Task 20b): the chords play a two-channel pack (stereoTone), so their chains run in two from the start
+            // (Voice::stereo). The chords alone as above at 100 bpm, their pan 0 (the balance then scales both sides by 1). Chorus 1: the
+            // render equals ModFx in two channels (set at once with modParams(0, 1, 100)) fed the two channels of the render with the chorus
+            // at 0, from the first frame, within the tolerance above (the copies' panners mix the sides, so each channel through its own
+            // chain, which holds for the vibrato, does not hold here). Distortion 1 (not linear: the gains behind the chain cannot be taken
+            // out of its input): the render's left equals that of the mono pack of the left channel alone, its right that of the right
+            // channel alone, bit for bit (each channel has its own filter and shaper states, the gains are one). Red when the chains of a
+            // two-channel voice run on its left channel only.
+            const auto stereoChords = [&](std::shared_ptr<const btg::Pack> pack, const char* sound) {
+                btg::Engine engine;
+                engine.setPackSource([pack](const std::string& id) { return id == "chords-funk" ? pack : source(id); });
+                engine.setSound(sound);
+                engine.setTrack(band);
+                for (int l = 0; l < btg::Engine::layerCount; ++l) engine.setMuted(static_cast<btg::Engine::Layer>(l), l != btg::Engine::chords);
+                engine.setPan(btg::Engine::chords, 0.0f);
+                engine.setLimiter(false);
+                engine.prepare(rate);
+                btg::Transport t;
+                t.play(64.0, 100.0);
+                return render(engine, t, 1.5, 480);
+            };
+            const char *CHORUS = R"({"master":{"reverb":0,"echo":0,"roomWet":0},"chords":{"chorus":1}})", *DISTORTED = R"({"master":{"reverb":0,"echo":0,"roomWet":0},"chords":{"distortion":1}})";
+            const Result dry = stereoChords(stereoTone(), DRY), chorused = stereoChords(stereoTone(), CHORUS);
+            Result expected;
+            expected.left.resize(dry.left.size());
+            expected.right.resize(dry.left.size());
+            btg::detail::ModFx chain;
+            chain.prepare(rate);
+            chain.set(btg::detail::modParams(0, 1, 100), true);
+            chain.process(dry.left.data(), dry.right.data(), expected.left.data(), expected.right.data(), static_cast<int>(dry.left.size()), true);
+            const double chorusError = worst(chorused, expected), sides = worst({ dry.left, dry.left }, { dry.right, dry.right });
+            std::printf("wiring chords in two channels: peak %.4f, the sides differ by %.4f, chorus 1 against ModFx in two channels %.2e (tolerance %.2e)\n",
+                        dry.peak, sides, chorusError, 2e-6 * dry.peak);
+            CHECK(dry.peak > 1e-3 && sides > 0.1 * dry.peak && chorusError <= 2e-6 * dry.peak);
+            const Result both = stereoChords(stereoTone(), DISTORTED), leftAlone = stereoChords(tonePack(57, 0.3f, 0.3, 200), DISTORTED),
+                         rightAlone = stereoChords(tonePack(57, 0.3f, 0.3, 160), DISTORTED);
+            std::printf("wiring chords in two channels, distortion 1: left against the left channel's mono pack %.2e, right against the right one's %.2e (peak %.4f)\n",
+                        worst({ both.left, both.left }, { leftAlone.left, leftAlone.left }), worst({ both.right, both.right }, { rightAlone.right, rightAlone.right }), both.peak);
+            CHECK(both.peak > 1e-3 && both.left == leftAlone.left && both.right == rightAlone.right && both.right != leftAlone.right);
         }
         // The echo's time in the engine, with the pad alone (sustained sines, echo 1, reverb and room 0, no limiter).
         std::string pad = band;

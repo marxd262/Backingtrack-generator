@@ -240,6 +240,7 @@ Tone* Tones::start(const Note& n) {
         if (t.serial < tone->serial) tone = &t; // all busy: the oldest goes
     }
     tone->start(n, sr, ++serial);
+    tone->gen = gen[n.layer];
     return tone;
 }
 
