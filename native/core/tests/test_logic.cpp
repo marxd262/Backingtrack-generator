@@ -15,6 +15,7 @@
 #include "../src/sound_data.h"
 #include "../src/sound_model.h"
 #include "../src/string_model.h"
+#include "../src/timbre.h"
 #include "../src/track_internal.h"
 #include "btg/track.h"
 #include "json_compare.h"
@@ -177,6 +178,15 @@ const std::map<std::string, std::function<json(const json&)>> FUNCTIONS {
     { "copyPart", [](const json& in) { const Json o = ordered(in); return thrown([&] { return copyPart(argument(o, "form"), argument(o, "index")); }); } },
     { "deletePart", [](const json& in) { const Json o = ordered(in); return thrown([&] { return deletePart(argument(o, "form"), argument(o, "index")); }); } },
     { "movePart", [](const json& in) { const Json o = ordered(in); return thrown([&] { return movePart(argument(o, "form"), argument(o, "index"), argument(o, "dir")); }); } },
+    // Task 28: the sound model's logic. resolveTimbre and resolveTrackTimbre sum in the order the tags are named, so their `in` is the TEXT of the tags or of the track (a json
+    // value here is sorted by key); where the web throws (an unknown tag) the output is { threw: true }. The other functions take an object { field: value }, a field left out is null.
+    { "resolveTimbre", [](const json& in) { return thrown([&] { return resolveTimbre(Json::parse(in.get<std::string>())); }); } },
+    { "resolveTrackTimbre", [](const json& in) { return thrown([&] { return resolveTrackTimbre(Json::parse(in.get<std::string>())); }); } },
+    { "usesTimbreField", [](const json& in) { const Json o = ordered(in); return json(usesTimbreField(argument(o, "voices"), argument(o, "path"))); } },
+    { "isSoundOnlyChange", [](const json& in) { const Json o = ordered(in); return json(isSoundOnlyChange(argument(o, "prev"), argument(o, "next"))); } },
+    { "tagEffect", [](const json& in) { const Json o = ordered(in); return plain(tagEffect(argument(o, "tag"), argument(o, "track"))); } },
+    { "organTuning", [](const json& in) { return plain(organTuning(ordered(in))); } },
+    { "presetDrive", [](const json& in) { return json(presetDrive(ordered(in))); } },
 };
 
 } // namespace

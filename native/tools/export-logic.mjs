@@ -833,6 +833,172 @@ for (const form of ODD_FORMS) for (const index of [0, 1, 2, -1]) {
 }
 for (const form of ODD_FORMS) edit('addPart', { form });
 
+// Task 28: the sound model's logic (timbre.js, voices.js, tags.js, ui/tag-effects.js, ui/organ-tuning.js). resolveTimbre and resolveTrackTimbre sum in the
+// order the tags are named, which a json value in the test would sort: their `in` is the TEXT of the tags or of the track, and where the web throws (an unknown
+// tag) the output is { threw: true } (attempt). The other functions never throw in the web on what the cases hold (the export fails if one does); a field a case
+// leaves out is undefined in the web, null in the core.
+const { TAG_CATEGORIES, isSoundOnlyChange } = await load('core/tags.js');
+const { resolveTimbre, resolveTrackTimbre } = await load('core/timbre.js');
+const { usesTimbreField } = await load('core/voices.js');
+const { isValidForm } = await load('core/form.js');
+const { tagEffect } = await load('ui/tag-effects.js');
+const { organTuning, presetDrive, LESLIE_MODES, DEFAULT_ORGAN } = await load('ui/organ-tuning.js');
+const { TIMBRE_EFFECTS } = await load('core/timbre-effects.js');
+
+const TAG_LIST = TAG_CATEGORIES.flatMap((c) => c.tags.map((tag) => ({ category: c.id, tag })));
+const ALL_TAG_IDS = TAG_LIST.map((t) => t.tag);
+const EMPTY_TAGS = Object.fromEntries(TAG_CATEGORIES.map((c) => [c.id, []]));
+const FULL_TAGS = Object.fromEntries(TAG_CATEGORIES.map((c) => [c.id, [...c.tags]]));
+const tagsWithout = (tags, tag) => Object.fromEntries(Object.entries(tags).map(([c, list]) => [c, list.filter((x) => x !== tag)]));
+const alone = ({ category, tag }) => ({ [category]: [tag] });
+// 200 random sets from a fixed seed: some categories, in a random order, each with some of its tags in a random order, now and then one tag twice (the sum goes in the order named)
+const tagRng = createRng(2028).fork('tag-sets');
+const shuffled = (list) => {
+  const a = [...list];
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(tagRng.next() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+};
+const randomTags = () => Object.fromEntries(shuffled(TAG_CATEGORIES.filter(() => tagRng.next() < 0.75))
+  .map((c) => [c.id, shuffled(c.tags.filter(() => tagRng.next() < 0.45)).concat(tagRng.next() < 0.1 ? c.tags.slice(0, 1) : [])]));
+const RANDOM_TAGS = Array.from({ length: 200 }, randomTags);
+const BAD_TAG_SETS = [[], [[]], ['x'], 'x', '', 5, 0, true, false, { nope: [] }, { nope: ['driving'] }, { drums: ['nope'] }, { drums: ['punchy'] }, { drums: 'driving' }, { drums: '' }, { drums: 5 }, { drums: null },
+  { drums: {} }, { drums: [5] }, { drums: [null] }, { drums: [['driving']] }, { drums: ['driving'], nope: [] }, { mood: ['dark'], drums: 'x' }, { toString: [] }, { 1: [] }, { drums: ['toString'] },
+  { drums: ['driving'], bass: ['nope'] }, { drums: [''] }];
+
+// resolveTimbre: every tag alone, every style's tags, the 200 random sets, nothing, all, a tag twice (also in another order), what the web throws on
+add('resolveTimbre', attempt((text) => resolveTimbre(JSON.parse(text))), texts([...TAG_LIST.map(alone), ...STYLE_PRESETS.map((p) => p.tags), ...RANDOM_TAGS, {}, null, EMPTY_TAGS, FULL_TAGS,
+  { drums: ['driving', 'driving'] }, { mood: ['dark', 'warm'], synths: ['warm'] }, { synths: ['warm'], mood: ['dark', 'warm'] }, { mood: ['warm', 'dark'] },
+  { padSound: ['airy', 'glassy', 'thick', 'airy'] }, { drumSound: ['punchy', 'boomy', 'snappy', 'crisp', 'roomy'], mood: ['dark'], chordSound: ['ringing', 'mellow', 'biting'] },
+  { chordSound: ['mellow', 'ringing'] }, { chordSound: ['ringing', 'mellow'] }, { mood: ['bright'], bassSound: ['sub', 'round'] }, { bassSound: ['round', 'sub'], mood: ['bright'] },
+  ...BAD_TAG_SETS]));
+
+// resolveTrackTimbre: a track of each style, the parity set's tracks as they are and with variety off; seeds 1 to 10, variety on and off, with and without tags; the knobs set by hand
+const SPREAD = [...new Map(parityTracks.map((t) => [JSON.stringify(t.tags), t])).values()]; // the first track of each distinct set of tags
+const FIELD_PATHS = Object.entries(DEFAULT_TIMBRE).flatMap(([group, fields]) => Object.keys(fields).map((field) => [group, field]));
+const levelOf = (group, v) => Object.fromEntries(Object.keys(DEFAULT_TIMBRE[group]).map((field) => [field, v]));
+const KNOB_SETS = [
+  ...FIELD_PATHS.flatMap(([group, field]) => [0, 0.5, 1].map((v) => ({ [group]: { [field]: v } }))), // one knob
+  ...Object.keys(DEFAULT_TIMBRE).flatMap((group) => [0, 0.5, 1].map((v) => ({ [group]: levelOf(group, v) }))), // a group
+  ...[0, 0.5, 1].map((v) => Object.fromEntries(Object.keys(DEFAULT_TIMBRE).map((group) => [group, levelOf(group, v)]))), // all 47
+  ...[0, 1, 2].map((offset) => { // every third knob, the values going 0, 0.5, 1
+    const out = {};
+    FIELD_PATHS.forEach(([group, field], i) => { if (i % 3 === offset) (out[group] ??= {})[field] = [0, 0.5, 1][i % 9 === offset ? 0 : i % 9 === offset + 3 ? 1 : 2]; });
+    return out;
+  }),
+  { drums: { snareTone: 1, hatBright: 0 }, bass: { cutoff: 0.5 }, master: { echo: 0 } }, // knobs the drift moves
+];
+const noTags = (t) => Object.fromEntries(Object.entries(t).filter(([key]) => key !== 'tags'));
+const trackTexts = texts;
+add('resolveTrackTimbre', attempt((text) => resolveTrackTimbre(JSON.parse(text))), [...new Set([
+  ...trackTexts(parityTracks),
+  ...trackTexts(parityTracks.map((t) => ({ ...t, variety: false }))),
+  ...trackTexts(SPREAD.flatMap((t) => Array.from({ length: 10 }, (_, i) => i + 1).flatMap((seed) => [true, false].flatMap((variety) =>
+    [{ ...t, seed, variety }, { ...noTags(t), seed, variety: true }])))),
+  ...trackTexts(SPREAD.flatMap((t) => KNOB_SETS.map((timbre) => ({ ...t, timbre })))),
+  ...trackTexts(SPREAD.slice(0, 5).flatMap((t) => KNOB_SETS.map((timbre) => ({ ...t, variety: false, timbre })))),
+  ...trackTexts(KNOB_SETS.map((timbre) => ({ ...noTags(SPREAD[0]), timbre }))),
+  ...trackTexts(RANDOM_TAGS.flatMap((tags, i) => [{ tags, variety: true, seed: i + 1 }, { tags, variety: false, seed: i + 1 }, { tags, variety: true, seed: i + 1, timbre: KNOB_SETS[(i * 7) % KNOB_SETS.length] }])),
+])]);
+// the edges: what is no track, the seed of every kind, `variety` of every kind, tags that throw, a timbre of every shape
+const SOUND = { tags: { drums: ['driving'], drumSound: ['punchy'], mood: ['dark'], padSound: ['airy'] } };
+const SEED_KINDS = [0, 1, -1, 1.5, 2 ** 32, 2 ** 32 + 7, 2 ** 32 - 1, 2 ** 53, 1e300, -1e300, 0.1, 123456789, 'x', '5', '', null, true, false, [], [5], {}];
+const BAD_TIMBRES = [null, 0, 'x', [], [0.5], {}, { drums: null }, { drums: 'x' }, { drums: [] }, { drums: { kickPunch: '0.5' } }, { drums: { kickPunch: null } }, { drums: { kickPunch: true } },
+  { drums: { kickPunch: [] } }, { drums: { kickPunch: {} } }, { drums: { kickPunch: -1, kickLength: 2, snareTone: 1e308, snareSnap: -1e308 } }, { drums: { kickPunch: 0.3 }, nope: { a: 1 }, bass: { nope: 1, cutoff: 0.2 } },
+  { chords: [0.1] }, { chords: { length: 0.9, brightness: 0.1 } }, { master: { echo: 0, reverb: 1, width: 0.25, roomSize: 0.75, roomWet: 0.1, brightness: 2 } }, { toString: { a: 1 }, drums: { constructor: 1 } },
+  { lead: { fuzz: 0.2, overdrive: 0.4, distortion: 0.6, vibrato: 0.8, chorus: 1 } }];
+add('resolveTrackTimbre', attempt((text) => resolveTrackTimbre(JSON.parse(text))), texts([
+  null, 0, 1, 'x', '', true, false, [], [SOUND], {}, { tags: null }, { tags: {} }, { variety: true }, { variety: true, seed: 5 }, { tags: [] }, { tags: 'x' }, { tags: { nope: ['x'] }, variety: true, seed: 1 },
+  { tags: { drums: ['nope'] } }, { ...SOUND, tags: { drums: ['punchy'] } }, { ...SOUND, tags: 5 },
+  ...SEED_KINDS.flatMap((seed) => [{ ...SOUND, variety: true, seed }, { ...SOUND, variety: false, seed }]),
+  ...[true, false, null, 0, 1, 'true', 'yes', [], [true], {}].map((variety) => ({ ...SOUND, variety, seed: 3 })), { ...SOUND, variety: true },
+  ...BAD_TIMBRES.flatMap((timbre) => [{ ...SOUND, timbre }, { ...SOUND, variety: true, seed: 9, timbre }]),
+]));
+
+// usesTimbreField: every voice of the register on its layer against each of the 47 paths, the removed voice, voices the register does not know, voices missing, paths of every kind
+const PATHS = FIELD_PATHS.map(([group, field]) => `${group}.${field}`);
+const VOICE_CASES = Object.entries(VOICES).flatMap(([layer, ids]) => Object.entries(ids).map(([id, v]) => ({ layer, id, variant: v.variants[0] })));
+const REMOVED = { chords: { id: 'sample', variant: 'organ' } };
+const ALL_SYNTH = Object.fromEntries(Object.keys(VOICES).map((layer) => [layer, 'synth']));
+const ALL_SAMPLE = Object.fromEntries(Object.keys(VOICES).map((layer) => [layer, { id: 'sample', variant: VOICES[layer].sample.variants[0] }]));
+const ODD_VOICES = [null, 0, 'x', true, [], {}, { nope: 1 }, { chords: 'nope' }, { chords: { id: 'organ', variant: 'zzz' } }, { chords: { id: 'organ' } }, { drums: 5 }, { bass: ['string'] }, { pad: { id: 'sample', variant: 'warm' } },
+  { drums: 'toString' }, { chords: { id: 'sample', variant: 'organ', extra: 1 } }, { chords: 'sample/organ' }, { bass: 'string', chords: 'string' }];
+const ODD_PATHS = ['x', '', 'drums', 'bass', 'drums.', '.room', '.', 'drums.room.x', 'bass.fuzz.x', 'master.echo', 'master', 'lead.fuzz', 'lead.x', 'percussion.x', 'percussion.fuzz', 'Drums.room', 'constructor', 'toString.x',
+  '__proto__.x', 'drums.fuzz', 'pad.chorus', 'chords.chorus', 'chords.vibrato', 'chords.overdrive', 'bass.distortion', 'drums.vibrato', 'chords.length.x', 'chords.nope', 'nope.room', 'drums room', 'drums,room',
+  null, 5, 1.5, true, false, [], ['drums.room'], ['drums', 'room'], [['bass.cutoff']], {}, { room: 1 }];
+add('usesTimbreField', ({ voices, path }) => usesTimbreField(voices, path), [
+  ...VOICE_CASES.flatMap(({ layer, id, variant }) => PATHS.map((path) => ({ voices: { [layer]: { id, variant } }, path }))),
+  ...VOICE_CASES.flatMap(({ layer, id }) => PATHS.filter((p) => p.startsWith(`${layer}.`)).map((path) => ({ voices: { [layer]: id }, path }))),
+  ...PATHS.flatMap((path) => [ALL_SYNTH, ALL_SAMPLE, REMOVED, { chords: 'organ' }, { bass: 'string', chords: 'string' }].map((voices) => ({ voices, path }))),
+  ...ODD_VOICES.flatMap((voices) => PATHS.map((path) => ({ voices, path }))), ...PATHS.map((path) => ({ path })),
+  ...ODD_PATHS.flatMap((path) => [undefined, ALL_SYNTH, ALL_SAMPLE, { chords: 'organ' }].map((voices) => ({ voices, path }))), { voices: ALL_SYNTH }, {},
+]);
+
+// isSoundOnlyChange: each tag added and removed alone against an empty and a full set, every pair of tags, 200 random pairs, equal sets and sets in another order, and what is no set of tags
+const RANDOM_PAIRS = Array.from({ length: 200 }, (_, i) => {
+  const prev = randomTags();
+  if (i % 2) return { prev, next: randomTags() };
+  const next = structuredClone(prev), cat = TAG_CATEGORIES[Math.floor(tagRng.next() * TAG_CATEGORIES.length)];
+  const list = (next[cat.id] ??= []), tag = cat.tags[Math.floor(tagRng.next() * cat.tags.length)];
+  if (list.includes(tag)) next[cat.id] = list.filter((x) => x !== tag); else list.push(tag);
+  return { prev, next };
+});
+const SHAPES = [null, 0, 5, 'x', '', true, false, [], [[]], [['punchy']], [['driving']], [['punchy'], ['sub']], [[], []], {}, { a: [] }, { a: 'x' }, { a: null }, { a: 5 }, { a: {} }, { a: ['punchy'] }, { a: [5] },
+  { a: [null] }, { a: [true] }, { a: ['1'] }, { a: [1] }, { a: [['punchy']] }, { a: [['sub']] }, { a: [[]] }, { a: [{}] }, { a: [['x', 'y']] }, { a: ['punchy'], b: 'x' }, { a: ['punchy'], b: ['sub'] }, { b: ['punchy'], a: ['sub'] },
+  { a: ['punchy', 'sub'] }, { a: ['punchy'] , b: ['punchy'] }, { nope: ['punchy'] }, { drums: ['punchy'] }, { drumSound: ['punchy'] }, { drumSound: ['punchy', 'punchy'] }, { 1: ['punchy'] }, { toString: ['punchy'] }];
+// (a list that both sides share is one object in the web's Set, two in the file: the call gets the case as the file holds it)
+add('isSoundOnlyChange', (input) => { const { prev, next } = JSON.parse(JSON.stringify(input)); return isSoundOnlyChange(prev, next); }, [
+  ...TAG_LIST.flatMap((t) => [{ prev: EMPTY_TAGS, next: alone(t) }, { prev: alone(t), next: EMPTY_TAGS }, { prev: {}, next: alone(t) }, { prev: alone(t), next: {} },
+    { prev: tagsWithout(FULL_TAGS, t.tag), next: FULL_TAGS }, { prev: FULL_TAGS, next: tagsWithout(FULL_TAGS, t.tag) }, { prev: EMPTY_TAGS, next: EMPTY_TAGS }, { prev: alone(t), next: alone(t) },
+    { prev: FULL_TAGS, next: FULL_TAGS }, { prev: EMPTY_TAGS, next: FULL_TAGS }, { prev: FULL_TAGS, next: EMPTY_TAGS }]),
+  ...TAG_LIST.flatMap((a) => TAG_LIST.map((b) => ({ prev: alone(a), next: alone(b) }))),
+  ...RANDOM_PAIRS, ...STYLE_PRESETS.flatMap((p) => [{ prev: p.tags, next: EMPTY_TAGS }, { prev: EMPTY_TAGS, next: p.tags }, { prev: p.tags, next: { ...p.tags, drumSound: [...p.tags.drumSound, 'roomy'] } },
+    { prev: p.tags, next: { ...p.tags, drumSound: [...p.tags.drumSound, 'driving'] } }]),
+  { prev: { drumSound: ['punchy', 'snappy'] }, next: { drumSound: ['snappy', 'punchy'] } }, { prev: { drumSound: ['punchy'], mood: ['dark'] }, next: { mood: ['dark'], drumSound: ['punchy'] } },
+  { prev: { drumSound: ['punchy', 'punchy'] }, next: { drumSound: ['punchy'] } }, { prev: { drumSound: ['punchy'], bassSound: ['punchy'] }, next: { drumSound: ['punchy'] } },
+  { prev: { drums: ['loose'], mood: ['dark'] }, next: { drums: [], mood: ['dark'] } }, { prev: { drums: ['loose'] }, next: { mood: ['dark'] } }, { prev: { mood: ['dreamy'] }, next: {} }, { prev: { mood: ['dark'] }, next: { mood: ['dreamy'] } },
+  { prev: { development: ['withBreakouts'] }, next: {} }, { prev: { development: ['withBreakouts'] }, next: { development: ['buildsSlowly'] } }, { prev: {}, next: { nope: ['punchy'] } }, { prev: { nope: ['punchy'] }, next: { other: ['sub'] } },
+  { prev: { a: ['x'] }, next: {} }, { prev: { a: ['toString'] }, next: {} }, { prev: { a: ['constructor'] }, next: { a: ['__proto__'] } }, { prev: {}, next: { a: ['hasOwnProperty'] } },
+  ...SHAPES.flatMap((shape) => [{ prev: shape, next: {} }, { prev: {}, next: shape }, { prev: shape, next: shape }, { prev: shape, next: { drumSound: ['punchy'] } }, { prev: { drumSound: ['punchy'] }, next: shape },
+    { prev: shape, next: EMPTY_TAGS }, { prev: EMPTY_TAGS, next: shape }]),
+  { prev: {} }, { next: {} }, {}, { prev: null, next: null }, { prev: { drumSound: ['punchy'] } }, { next: { drumSound: ['punchy'] } },
+]);
+
+// tagEffect: every tag against tracks without a form, with a valid one and with one that is not, with voices that use the knobs a tag moves and voices that do not, with a knob set by hand, and odd tags
+const FORM_OK = { sections: [{ type: 'intro', bars: 2 }, { type: 'chorus', bars: 4 }] };
+const FORM_BAD = { sections: [{ type: 'nope', bars: 4 }] };
+if (!isValidForm(FORM_OK) || isValidForm(FORM_BAD) || isValidForm({}) || isValidForm(null)) throw new Error('the forms of the tagEffect cases are not what they claim');
+const EFFECT_FORMS = [{}, { form: FORM_OK }, { form: FORM_BAD }, { form: null }, { form: 'x' }, { form: { sections: [] } }, { form: { sections: [{ type: 'verse', bars: 8 }], feel: { dynamics: 0.5 } } }];
+const VOICE_SETS = [{}, { voices: ALL_SYNTH }, { voices: ALL_SAMPLE }, { voices: { bass: 'string', chords: 'string' } }, { voices: { chords: 'epiano', pad: 'sample' } }, { voices: { chords: 'organ' } },
+  { voices: { drums: 'synth', bass: 'sample', chords: { id: 'sample', variant: 'organ' }, pad: 'synth' } }, { voices: null }, { voices: 'x' }];
+const EFFECT_TAGS = [...ALL_TAG_IDS, 'nope', '', 'toString', 'constructor', '__proto__', 'hasOwnProperty', null, 5, true, ['punchy'], ['driving'], [['sub']], {}, { punchy: 1 }];
+const KNOB_VALUES = [0.3, 0, 1, null, '0.5', [], {}, false];
+const ODD_TIMBRES = ['x', [], 'abc', 5, null, true, [0.5], {}, { drums: 'x' }, { drums: [] }, { drums: null }, { chords: [] }, { chords: 'abc' }, { chords: {} }, { chords: { length: 0 } }, { chords: { length: null } }, { chords: 5 },
+  { chords: [1, 2] }, { chords: { brightness: 0.5 } }, { master: { brightness: 0.2 } }, { nope: { a: 1 } },
+  // a group that is a text or a list has members of its own: `length`, and a text has `sub` (bass.sub)
+  { bass: 'abc' }, { bass: [] }, { bass: '' }, { pad: 'abc' }, { drums: 'abc' }, { master: [1] }, { chords: '' }, { bass: 5 }, { bass: true }, { chords: false }];
+const EFFECT_PATHS = [...new Set(Object.values(TIMBRE_EFFECTS).flatMap((fx) => Object.keys(fx)))];
+add('tagEffect', ({ tag, track }) => tagEffect(tag, track), [
+  ...EFFECT_TAGS.flatMap((tag) => EFFECT_FORMS.flatMap((form) => VOICE_SETS.map((voices) => ({ tag, track: { ...form, ...voices } })))),
+  ...ALL_TAG_IDS.flatMap((tag) => Object.keys(TIMBRE_EFFECTS[tag] ?? {}).flatMap((path) => {
+    const [group, field] = path.split('.');
+    return KNOB_VALUES.flatMap((value) => [{}, { voices: ALL_SYNTH }, { voices: ALL_SAMPLE }].map((voices) => ({ tag, track: { ...voices, timbre: { [group]: { [field]: value } } } })));
+  })),
+  ...EFFECT_TAGS.flatMap((tag) => ODD_TIMBRES.flatMap((timbre) => [{}, { voices: ALL_SYNTH }].map((voices) => ({ tag, track: { ...voices, timbre } })))),
+  ...EFFECT_PATHS.flatMap((path) => { // a knob of another path than the tag moves: it blocks nothing; every tag, one other knob set
+    const [group, field] = path.split('.');
+    return ['punchy', 'dark', 'warm', 'ringing'].map((tag) => ({ tag, track: { timbre: { [group]: { [field]: 0.4 } }, voices: ALL_SYNTH } }));
+  }),
+  ...EFFECT_TAGS.flatMap((tag) => [null, 0, 'x', [], true, [FORM_OK], { form: [FORM_OK] }].map((track) => ({ tag, track }))), { tag: 'punchy' }, { track: {} }, {},
+  ...ALL_TAG_IDS.map((tag) => ({ tag, track: { form: FORM_OK, voices: ALL_SYNTH, timbre: { drums: { kickPunch: 0.1, room: 0.9 }, bass: { cutoff: 0 } } } })),
+]);
+
+// organTuning: every Leslie mode (and ones that are none) against every drive, the default organ, a missing organ, what is no organ; presetDrive: every preset and what is none
+const DRIVES = [null, 0, 0.25, 0.5, 0.75, 1, -0.0001, 1.0001, 2, -1, 1e-300, 0.1, '0.5', '', true, false, [], [0.5], {}];
+const LESLIES = [...LESLIE_MODES, 'x', '', 'Slow', 'AUTO', null, 0, 1, true, ['slow'], ['auto'], ['off', 'fast'], {}, 'toString', 'constructor', 'hasOwnProperty'];
+add('organTuning', organTuning, [DEFAULT_ORGAN, {}, null, 0, 'x', true, [], [DEFAULT_ORGAN], { drive: 0.5 }, { leslie: 'fast' }, { extra: 1 }, { leslie: 'slow', drive: 0.3, extra: 1 }, { leslie: 'auto', drive: null }, { leslie: undefined, drive: undefined },
+  ...LESLIES.flatMap((leslie) => DRIVES.map((drive) => ({ leslie, drive })))]);
+add('presetDrive', presetDrive, [...VOICES.chords.organ.variants, 'nope', '', null, 5, true, 'toString', 'Jazz', ['rock'], ['gospel', 'x'], {}, [], 'chords/organ/jazz', '__proto__']);
+
 // The cases go to chunk files (logic-001.json, ...: each a JSON list of cases, a new one begun once the current passes CHUNK_BYTES), so that the
 // test never holds the whole reference; logic.json is the manifest: { total, chunks: [{ file, count }] } in the order of the cases.
 const CHUNK_BYTES = 16e6;

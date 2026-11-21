@@ -80,7 +80,9 @@ if (isMain && (process.argv.includes('--data') || dataOnly >= 0)) {
   // registers is part of it (chordOptions lists the qualities in register order), so the core reads this file with its keys in order
   const { LAYERS, LAYER_IDS } = await load('core/layers.js');
   const { CHORDS } = await load('core/chords.js');
-  const { TAG_CATEGORIES } = await load('core/tags.js');
+  const { TAG_CATEGORIES, TAG_PLAY_EFFECTS } = await load('core/tags.js');
+  const { TIMBRE_EFFECTS } = await load('core/timbre-effects.js');
+  const { LESLIE_MODES, DEFAULT_ORGAN } = await load('ui/organ-tuning.js');
   const { PART_TYPES, TRANSITIONS, FORM_LIMITS, FEEL_DEFAULTS, DYNAMICS_MAX } = await load('core/form-types.js');
   const { TEMPLATE_IDS, STYLE_TEMPLATE, TARGET_SIZES, DEV_FACTORS } = await load('core/form-roll.js');
   const { PROGRESSION_TEMPLATES } = await load('core/progressions.js');
@@ -94,6 +96,10 @@ if (isMain && (process.argv.includes('--data') || dataOnly >= 0)) {
     modes: Object.fromEntries(Object.entries(readLiteral('core/music.js', 'MODES')).map(([id, m]) => [id, { steps: m.steps, qualities: m.qualities, parentMajor: m.parentMajor, dominant: m.dominant }])),
     meters: Object.keys(METERS),
     tags: TAG_CATEGORIES,
+    // what the sound model and the tags' display read (timbre-effects.js, tags.js, ui/organ-tuning.js): the order of the entries is the order of the sums
+    timbreEffects: TIMBRE_EFFECTS,
+    tagPlayEffects: TAG_PLAY_EFFECTS,
+    organ: { leslieModes: LESLIE_MODES, leslieCode: readLiteral('ui/organ-tuning.js', 'LESLIE_CODE'), default: DEFAULT_ORGAN },
     form: { partTypes: PART_TYPES, transitions: TRANSITIONS, limits: FORM_LIMITS, feelDefaults: FEEL_DEFAULTS, dynamicsMax: DYNAMICS_MAX,
       // what rollForm reads (form-roll.js): the templates (not exported there: their literal, with the `slot` helper it calls), which style takes which, the sizes, the development factors
       templateIds: TEMPLATE_IDS, templates: readLiteral('core/form-roll.js', 'TEMPLATES', ['slot']), styleTemplate: STYLE_TEMPLATE, targetSizes: TARGET_SIZES, devFactors: DEV_FACTORS },
