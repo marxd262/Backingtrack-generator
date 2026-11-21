@@ -137,7 +137,7 @@ const set = (sound, fields) => { const s = structuredClone(sound); for (const [p
 // part of their range (the lowpass below 0.5, see brightnessHz; the time scale away from 0.5); their layer must play notes with a sample voice.
 const CLAIMS = {};
 // style: the case plays its style's own layer effects (resolveTrackTimbre). A case of the whole band keeps the sample limits, effects on or
-// not (phase-4 ruling R); a case of fewer layers with an effect on has the effects' (kind 'synth').
+// not (phase-4 ruling R); a case of fewer layers, sample voices alone, with an effect on has the effects' (kind 'synth').
 CLAIMS.style = (c) => (FX_LAYERS.every((g) => PHASE4.every((k) => c.sound[g][k] === resolveTrackTimbre(c.track)[g][k])) ? '' : "not the style's own layer effects");
 const knob = (path, layer, acts) => {
   CLAIMS[path] = (c, events) => {
@@ -175,10 +175,12 @@ function claimed(c, claims) {
   // a voice that makes the knob's effect itself (its registry uses name it: the classic chords' chorus, ownChorus in synth.js) claims it as synth:
   const owns = (g, k) => claims.includes(`synth:${g}.${k}`) && VOICES[g][c.track.voices[g].id].uses.includes(`${g}.${k}`);
   for (const g of FX_LAYERS) for (const k of PHASE4) if (c.sound[g][k] !== 0 && !claims.includes(claimOf(g, k)) && !owns(g, k) && !claims.includes('style')) problems.push(`${c.name}: ${g}.${k} is on but not claimed`);
-  // ruling 10: the synth limits wherever a layer plays a voice that is not a sample voice, also in a whole band
-  const synth = (effectsOn(c.sound) && !Object.values(c.track.layers).every(Boolean)) || synthLayers(c, events).length > 0;
+  // ruling 10 as tightened in Phase 5's fix wave: a case in which a layer plays a voice that is not a sample voice has the sample limits,
+  // effects on or not (every case of the six synth files lay inside them, p5-review/evidence.md); the effects' limits stay for a case of
+  // sample voices alone with a layer effect on and fewer layers than the whole band
+  const synth = effectsOn(c.sound) && !Object.values(c.track.layers).every(Boolean) && synthLayers(c, events).length === 0;
   if (claims.includes('style') && synth) c.kind = 'synth';
-  if ((c.kind === 'synth') !== synth) problems.push(`${c.name}: kind must be 'synth' exactly where a layer plays a voice that is not a sample voice, or a layer effect is on in a case of fewer layers than the whole band`);
+  if ((c.kind === 'synth') !== synth) problems.push(`${c.name}: kind must be 'synth' exactly where a layer effect is on in a case of sample voices alone and fewer layers than the whole band`);
   for (const what of claims) { const why = CLAIMS[what](c, events); if (why) problems.push(`${c.name}: ${why}`); }
   return c;
 }
@@ -331,15 +333,18 @@ modCases.push(claimed({ name: 'mod-psych', track: bands.psych, sound: resolveTra
 write('mod.json', modCases);
 console.log(`mod.json: ${modCases.length} cases`);
 
-// --- Phase 5: the synth voices. One layer alone with a synth voice, dry, the limits of synth voices (kind 'synth', ruling 10). ---
-const synthSolo = (name, layer, voice, style, fields, claims, extra = {}, tuning = undefined) => claimed({ name, dry: true, kind: 'synth', sound: set(neutralSound, fields), tuning,
+// --- Phase 5: the synth voices. One layer alone with a synth voice, dry, the sample limits (ruling 10 as tightened, see claimed). ---
+// The e-piano's, the classic synth's and the string voices' cases also judge the diff at voice-compare's bar (Phase 5 ruling 6): they run
+// Engine::render against the page, which follows it sample by sample there.
+const DIFF_BELOW = -60, judgeDiff = (cases) => cases.map((c) => ({ ...c, diffBelow: DIFF_BELOW }));
+const synthSolo = (name, layer, voice, style, fields, claims, extra = {}, tuning = undefined) => claimed({ name, dry: true, sound: set(neutralSound, fields), tuning,
   track: track(style, { layers: { [layer]: true }, voices: { [layer]: voice }, extra }) }, claims);
 // Task 21: the FM e-piano on the chords, neutral and each of its knobs at its ends (dreamy: long chords, so that length shows)
 const EPIANO = { id: 'epiano', variant: 'rhodes' };
 const epianoCases = [synthSolo('epiano-neutral', 'chords', EPIANO, 'dreamy', {}, ['voice:chords'])];
 for (const [k, values] of [['brightness', [0, 1]], ['length', [0, 1]], ['tremolo', [0.5, 1]]])
   for (const v of values) epianoCases.push(synthSolo(`epiano-${k}-${v}`, 'chords', EPIANO, 'dreamy', { [`chords.${k}`]: v }, ['voice:chords', `synth:chords.${k}`]));
-write('epiano.json', epianoCases);
+write('epiano.json', judgeDiff(epianoCases));
 console.log(`epiano.json: ${epianoCases.length} cases`);
 
 // Task 20: the tonewheel organ on the chords, in the default form (a verse, then a chorus: src/core/organ.js turns the Leslie fast and opens
@@ -372,9 +377,10 @@ CLAIMS.perc = (c, events) => {
 // The four presets in the styles scripts/render-organ.mjs and tunables.js measured them in (gospel in the rock case); jazz with the Leslie
 // off, always slow, always fast; rock with drive 0 and 1; ballad with the swell off; rock with no click; jazz with no percussion; and jazz
 // behind the layer chains, which the organ's two channels run in two (chorus, distortion, vibrato at 1). Each fails when the core ignores its
-// knob (Task 20's mutation runs), except two kinds that cannot fail red: the three Leslie modes (with the preset's mode 1 instead they stay
-// within the synth limits, envelope 0.962 at worst; voice-compare's sets "organ jazz leslie 0, 2, 3" fail then, +3.6 to -8.3 dB) and the
-// vibrato (as every vibrato case, mod.json; fx-compare's stereo vibrato set proves the chain).
+// knob (Task 20's mutation runs, again at the sample limits in Phase 5's fix wave), except two that cannot fail red: Leslie mode 2 (with
+// the preset's mode 1 instead it stays within the limits, envelope 0.980, bands -0.60 dB; voice-compare's set "organ jazz leslie 2" fails
+// then, -8.3 dB) and the vibrato (bands +0.86 dB at 8 kHz, envelope 0.997 without it; as every vibrato case, mod.json; fx-compare's
+// stereo vibrato set proves the chain).
 const ORGAN_STYLE = { jazz: 'blues', rock: 'rock', gospel: 'rock', ballad: 'dreamy' };
 const organSolo = (name, variant, tuning, claims, fields = {}) => synthSolo(name, 'chords', { id: 'organ', variant }, ORGAN_STYLE[variant], fields,
   ['voice:chords', ...claims], {}, tuning && { [`chords/organ/${variant}`]: tuning });
@@ -388,14 +394,18 @@ const organCases = [
   organSolo('organ-jazz-perc-0', 'jazz', { perc: 0 }, ['leslie:1', 'swell']),
   ...['chorus', 'distortion', 'vibrato'].map((k) => organSolo(`organ-jazz-${k}-1`, 'jazz', undefined, ['leslie:1', 'swell', 'perc', claimOf('chords', k)], { [`chords.${k}`]: 1 })),
 ];
+// The diff stays printed, not judged (-25 to -44 dB; -73 dB with the Leslie off or at one speed): Task 23a found organ-jazz's held by the
+// Leslie following the song form (its speed changes: the page's LFOs run a-rate while a later change is listed, the core's k-rate, a path
+// not rebuilt); the other cases' not traced.
 write('organ.json', organCases);
 console.log(`organ.json: ${organCases.length} cases`);
 
 // Task 22: the classic synth on each of its four layers alone, neutral and each knob of its voice's uses at its ends (a knob whose neutral
 // value is 0 at 0.5 and 1, as the e-piano's tremolo: at 0 its case would be the neutral one); the lead's uses are empty. Each case fails
-// when the core ignores its knob (Task 22's mutation runs), except three that cannot fail red: pad lfoSpeed 0 and 1 and pad thickness 0
-// stay within the synth limits then (bands +2.47 dB, envelope 0.950 at worst); voice-compare's sets "classic pad lfoSpeed 0, 1" and
-// "classic pad thickness 0" fail then (-18.8, -10.2 and +3.6 dB).
+// when the core ignores its knob (Task 22's mutation runs, again at the sample limits in Phase 5's fix wave). Pad lfoSpeed 0 stays within
+// the level, band and envelope limits then (bands +1.07 dB at 4 kHz, envelope 1.000); its diff measured -13.7 dB in that run, made before
+// the case carried diffBelow -60, so that it fails red on the diff is computed, not run; voice-compare's set "classic pad lfoSpeed 0" fails
+// then (-18.8 dB).
 const CLASSIC = { id: 'synth', variant: 'classic' }, CLASSIC_STYLE = { bass: 'funk', chords: 'dreamy', pad: 'dreamy', lead: 'psych' };
 const classicCases = [];
 for (const layer of ['bass', 'chords', 'pad', 'lead']) {
@@ -406,16 +416,17 @@ for (const layer of ['bass', 'chords', 'pad', 'lead']) {
       classicCases.push(synthSolo(`classic-${layer}-${k}-${v}`, layer, CLASSIC, CLASSIC_STYLE[layer], { [path]: v }, [`voice:${layer}`, `synth:${path}`]));
   }
 }
-write('classic.json', classicCases);
+write('classic.json', judgeDiff(classicCases));
 console.log(`classic.json: ${classicCases.length} cases`);
 
 // Task 23: the synth kit and the synth percussion alone, dry, as kits.json plays their sample voices (the funk style, seed 1, KIT_FORM, ornaments
 // 1): the drums at the neutral sound and each of the six knobs of their sound at its ends (every one's neutral value is 0.5), the percussion's
 // jobs. Then the nine bands of band.json with every layer on its synth voice. Each knob case fails when the core ignores its knob (Task 23's
-// mutation runs), except three that cannot fail red: hatBright 0 and hatLength 0 and 1 stay within the synth limits then (bands +2.44 dB
-// at 8 kHz at worst); voice-compare's sets "drums hat, hatBright 0" and "drums openHat, hatLength 0, 1" fail then (-1.0, -10.0, -9.4 dB).
+// mutation runs, again at the sample limits in Phase 5's fix wave), except two that cannot fail red: hatLength 0 and 1 stay within the
+// limits then (bands -1.11 and +0.31 dB at 8 kHz, envelope 1.000); voice-compare's sets "drums openHat, hatLength 0, 1" fail then (-10.0,
+// -9.4 dB).
 const SYNTH_VOICE = { id: 'synth', variant: 'classic' }, KIT_KNOBS = ['kickPunch', 'kickLength', 'snareTone', 'snareSnap', 'hatBright', 'hatLength'];
-const kitSynth = (name, layer, fields, claims, job) => claimed({ name, dry: true, kind: 'synth', sound: set(neutralSound, fields),
+const kitSynth = (name, layer, fields, claims, job) => claimed({ name, dry: true, sound: set(neutralSound, fields),
   track: track('funk', { layers: { [layer]: true }, voices: { [layer]: SYNTH_VOICE }, seed: 1, extra: { form: KIT_FORM, ornaments: 1, ...(job && { jobs: { lead: 'melody', percussion: job } }) } }) }, claims);
 const kitsSynthCases = [kitSynth('drums-synth', 'drums', {}, ['voice:drums'])];
 for (const k of KIT_KNOBS) for (const v of DEFAULT_TIMBRE.drums[k] === 0 ? [0.5, 1] : [0, 1]) kitsSynthCases.push(kitSynth(`drums-synth-${k}-${v}`, 'drums', { [`drums.${k}`]: v }, ['voice:drums', `synth:drums.${k}`]));
@@ -424,18 +435,20 @@ for (const c of kitsSynthCases.filter((k) => k.name.startsWith('drums'))) {
   const events = buildEvents(c.track);
   if (!events.some((e) => e.type === 'marker' && e.name === 'fill') || !events.some((e) => e.type === 'hit' && e.name === 'crash')) problems.push(`${c.name}: no fill or no crash`);
 }
+// The diff stays printed, not judged (-45 to -134 dB): Task 23a found drums-synth's held by one kick and hat on the grid at 21.6 s, where the
+// page's own time is one ulp after its frame (Chromium's window click there, which the core leaves out by ruling: 99.8 % of the difference);
+// the other cases' not traced.
 write('kits-synth.json', kitsSynthCases);
 const ALL_SYNTH = Object.fromEntries(Object.keys(VOICES).map((l) => [l, SYNTH_VOICE]));
-const bandSynthCases = STYLE_PRESETS.map((s) => claimed({ name: `band-synth-${s.id}`, track: bandOf(s.id, ALL_SYNTH), sound: neutral(0.5), dry: true, kind: 'synth' },
+const bandSynthCases = STYLE_PRESETS.map((s) => claimed({ name: `band-synth-${s.id}`, track: bandOf(s.id, ALL_SYNTH), sound: neutral(0.5), dry: true },
   Object.keys(VOICES).map((l) => `voice:${l}`)));
-write('band-synth.json', bandSynthCases);
+write('band-synth.json', bandSynthCases); // the diff stays printed, not judged (-48 to -125 dB): not traced
 console.log(`kits-synth.json: ${kitsSynthCases.length} cases, band-synth.json: ${bandSynthCases.length} cases`);
 
 // Task 24: the string model on the bass and on the chords alone (both voices are hidden in the page, a track names them), neutral and each
 // knob of its voice's uses at its ends (a knob whose neutral value is 0 at 0.5 and 1, as Task 22's), in the styles of the classic synth's
-// cases (dreamy: the chords' longest notes). Each case fails when the core holds its knob at the neutral value (Task 24's mutation runs),
-// except two that cannot fail red: bass sub 0.5 and roundness 0.5 stay within the synth limits then (bands +1.86 and +2.08 dB);
-// voice-compare's sets "string bass sub 0.5" and "string bass roundness 0.5" fail then (-19.7 and -26.9 dB).
+// cases (dreamy: the chords' longest notes). Each case fails when the core holds its knob at the neutral value (Task 24's mutation runs;
+// sub 0.5 and roundness 0.5 since the sample limits of Phase 5's fix wave).
 const STRING_VOICE = { bass: { id: 'string', variant: 'finger' }, chords: { id: 'string', variant: 'electric' } }, STRING_STYLE = { bass: 'funk', chords: 'dreamy' };
 const stringCases = [];
 for (const layer of ['bass', 'chords']) {
@@ -446,7 +459,7 @@ for (const layer of ['bass', 'chords']) {
       stringCases.push(synthSolo(`string-${layer}-${k}-${v}`, layer, STRING_VOICE[layer], STRING_STYLE[layer], { [path]: v }, [`voice:${layer}`, `synth:${path}`]));
   }
 }
-write('string.json', stringCases);
+write('string.json', judgeDiff(stringCases));
 console.log(`string.json: ${stringCases.length} cases`);
 for (const p of problems) console.error(`ERROR ${p}`);
 process.exit(problems.length ? 1 : 0);

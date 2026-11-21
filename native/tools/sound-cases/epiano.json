@@ -2,7 +2,6 @@
  {
   "name": "epiano-neutral",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -196,12 +195,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "epiano-brightness-0",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -395,12 +394,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "epiano-brightness-1",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -594,12 +593,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "epiano-length-0",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -793,12 +792,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "epiano-length-1",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -992,12 +991,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "epiano-tremolo-0.5",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -1191,12 +1190,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "epiano-tremolo-1",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -1390,6 +1389,7 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  }
 ]

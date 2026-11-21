@@ -82,7 +82,10 @@
 //     truncated: the 18 sets that read noise, -39.7 to +4.4 dB, the 11 of oscillators alone pass); the params' events shifted (not: 17, the
 //     hits with a fast envelope, -58.5 to -27.3 dB; the crash, the shaker 0.25, the e-piano, organ, bass, chords, pad and lead pass at -60.4
 //     to -98.8 dB); the sources' starts shifted (not: all 29); a glide's lead to its frame in full (classic.cpp with static_cast<int>(lead *
-//     sr): the glide's set -33.9 dB). The second sample across a looped buffer's end (its first frame) cannot fail
+//     sr): the glide's set -33.9 dB). The classic lead 0.432 of a frame after frame 120 (Phase 5's fix wave, sound case
+//     classic-lead-neutral's first note) starts inside the context's first render quantum, where every oscillator takes Chromium's a-rate
+//     path and a start between frames leaves its read index at 0 (patch.cpp, Tones::firstQuantum): with the index moved as on later quanta
+//     the set measures -22.8 dB. The second sample across a looped buffer's end (its first frame) cannot fail
 //     a set: the crash wraps once, 1 s in, where its envelope has fallen (-87.3 to -96.8 dB without it against -146.4 to -148.1 dB);
 //     test_synth.cpp proves it. The hat 1/4096 of a frame late is printed, not judged: Chromium starts its buffer on the frame and its gain's
 //     events on the next, so its first frame plays the noise at the gain's default 1, and so does the core's tone (the engine itself
@@ -400,6 +403,8 @@ const LATE = [
     { ...tuned('jazz', { drive: 0, click: 0, perc: 0 }), seconds: 1, late: 1 / 4096, judged: false }),
   // glide: a scoop's artTime, the engine's lead (btg_fx triggers the note that early, as the engine does); the page's voice ignores it
   classic('lead', `under a scoop's glide of 0.063421 s${between(LATE_BY, 4608)}`, [[4608, 69, 0.8, 0.5, { glide: 0.063421 }]], { late: LATE_BY }),
+  // Phase 5's fix wave: sound case classic-lead-neutral's first note (E5 at 0.002509 s), inside the context's first render quantum
+  classic('lead', `E5, classic-lead-neutral's first note${between(0.432, 120)}`, [[120, 76, 0.479, 1.06933]], { seconds: 1.5, late: 0.432 }),
   // Task 24: the string voices' buffers read between their samples (two of the sets above)
   strings('bass', `one note (E2)${between(LATE_BY)}`, STRING_NOTE.bass, { late: LATE_BY }),
   strings('chords', `the strum, then a single note${between(LATE_BY)}`, STRUM, { seconds: 2, late: LATE_BY }),

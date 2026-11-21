@@ -236,7 +236,8 @@ struct VoiceState {
 class Voice {
 public:
     virtual ~Voice() = default;
-    // Audio thread: start what event `e` plays, `delay` frames into the current chunk. No allocation, no lock.
+    // Audio thread: start what event `e` plays, `delay` frames from the current chunk's first frame on, possibly past the chunk (a glide
+    // whose lead was skipped: engine.cpp). No allocation, no lock.
     virtual void play(const PlayEvent& e, int delay, double secondsPerBeat, VoiceState& state, Tones& tones) const = 0;
     // Audio thread: whether the voice feeds its layer in two channels, so that Chromium runs the layer's chains in two (phase-5-design.md 4).
     virtual bool stereo() const { return pack && pack->channels == 2; }
@@ -258,7 +259,7 @@ public:
 // the lowpass and time scale of the note voices, the width of the kit's pan, what the synth voices read of it. `sampleRate`: the rate the
 // organ builds its wave tables for (0: none yet, the organ is silent; the engine builds its voices again when prepare sets the rate).
 std::shared_ptr<const Voice> makeVoice(Engine::Layer layer, const std::string& key, std::shared_ptr<const Pack> pack, const Tuning& tuning, const Timbre& timbre,
-                                       double sampleRate = 0.0);
+                                       double sampleRate);
 std::shared_ptr<Voice> classicVoice(const Timbre& timbre);                                            // voices/classic.cpp
 std::shared_ptr<Voice> epianoVoice(const Tuning& tuning, const Timbre& timbre);                      // voices/epiano.cpp
 std::shared_ptr<Voice> organVoice(const std::string& key, const Tuning& tuning, double sampleRate); // voices/organ.cpp

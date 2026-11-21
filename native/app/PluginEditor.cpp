@@ -215,6 +215,7 @@ private:
     // Message thread: a queued message has run on the loader thread.
     void done (const juce::var& message, const Done& r) {
         const auto type = message["type"].toString();
+        if (r.failed.isNotEmpty()) error = r.failed; // a failed message of any type shows as a failed track's (the next track or voices sets it anew)
         if (type == "pack") { // for native/app/web/sampler.js: error "" = ready
             auto* reply = new juce::DynamicObject();
             reply->setProperty ("id", message["id"]);

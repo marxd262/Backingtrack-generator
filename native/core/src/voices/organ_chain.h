@@ -4,7 +4,7 @@
 // set the chain, and organ-leslie.js. Its tones enter at three places (the wheels into `pre`, the key clicks through their highpass, the
 // percussion through its envelope); then the swell pedal, the clean path beside the tube preamp, the Leslie, the level; two channels out.
 // Its params are AudioParams on the chain's own clock, its LFOs Chromium's oscillators on a custom wave (organ_chain.cpp names the files).
-// Four of them live in Tones (patch.h) as slots, allocated with the engine; a voice instance (VoiceState::chain) holds one. No allocation,
+// CHAINS of them live in Tones (patch.h) as slots, allocated with the engine; a voice instance (VoiceState::chain) holds one. No allocation,
 // no lock, no throw once prepared.
 
 #include "btg/engine.h"

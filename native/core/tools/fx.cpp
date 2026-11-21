@@ -290,6 +290,7 @@ int main(int argc, char** argv) {
                 for (size_t at = 0; at < frames; at += SYNTH_FRAMES) {
                     const int count = static_cast<int>(std::min<size_t>(SYNTH_FRAMES, frames - at));
                     tones->quantum = static_cast<int>(at % 128); // the render's frame 0 is the play's first frame, as the context's
+                    tones->firstQuantum = at < 128 ? static_cast<int>(128 - at) : 0;
                     for (Note& n : notes) { // the notes that begin in this chunk, as the engine hands them to the voice: the frame and the part (raw)
                         const double x = n.time - static_cast<double>(at);
                         if (x < 0 || x >= count) continue;

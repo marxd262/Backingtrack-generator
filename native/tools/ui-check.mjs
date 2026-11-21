@@ -267,6 +267,21 @@ try {
     return { status, peak, load, restored: await chords(() => window.bridge('voices', { json: own })) };
   });
   if (result.epiano.status !== 'ready' || !(result.epiano.peak > 0) || result.epiano.restored !== 'ready') problems.push(`e-piano: ${JSON.stringify(result.epiano)}`);
+  // A failed queued message of any type shows in the strip as a failed track's (Phase 5's fix wave, PluginEditor.cpp done()): a `pack`
+  // message for a pack that does not exist fails, and the engine's reports then carry its failure as `error`; the page's own track sent
+  // after it clears it as a track clears it. Then the page's own track, voices, tuning and sound again. Red when done() takes a failure
+  // only from a track or voices (it returned before it for every other type). A timbre's or tuning's text never fails (engine.h: no valid
+  // JSON counts as the default), only a voice or convolver that cannot be built (out of memory), which a page cannot cause.
+  result.failure = await page.evaluate(async () => {
+    const own = window.pageOwn();
+    const errorAfter = async (send) => { send(); await window.wait(600); return window.lastEngine().error ?? ''; };
+    const shown = await errorAfter(() => window.bridge('pack', { id: 'ui-check-no-such-pack' }));
+    const cleared = await errorAfter(() => window.bridge('track', { json: own.track }));
+    const { restored, drumsBack } = await window.restorePage(own);
+    return { shown, cleared, restored, drumsBack };
+  });
+  if (!result.failure.shown.includes('ui-check-no-such-pack') || result.failure.cleared !== '' || !(result.failure.drumsBack > 0))
+    problems.push(`a failed message: ${JSON.stringify(result.failure)}`);
   // The organ (Task 20): a track of the step's own, sent through the bridge as the page sends `track` (with its voices), so that both passes
   // play the same known notes: the track of organ.json's case organ-rock-drive-0 (the chords alone on chords/organ/rock, a verse with the
   // swell pedal at -3 dB and a chorus at 0 dB, 8 bars at 124 bpm), with that case's sound. Why it shows the drive: the tube's curve keeps a

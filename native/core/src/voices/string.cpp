@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <atomic>
 #include <climits>
+#include <compare>
 #include <iterator>
 #include <map>
 

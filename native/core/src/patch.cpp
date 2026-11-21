@@ -13,7 +13,12 @@
  *   platform/audio/stereo_panner.cc                    (Copyright 2014 The Chromium Authors): the gains of a mono input, as float
  *   modules/webaudio/oscillator_handler.cc             (Copyright 2022 The Chromium Authors): the first render quantum of an a-rate
  *                                                       oscillator, the increments from the quantum's first frame (Process); the start
- *                                                       frame and read index of a start between frames (Process, Task 23a)
+ *                                                       frame and read index of a start between frames (Process, Task 23a); in the
+ *                                                       context's first render quantum the a-rate path, which leaves that read index at
+ *                                                       0 (Process, Phase 5's fix wave)
+ *   modules/webaudio/audio_param_handler.cc            (Copyright 2022 The Chromium Authors): a setValue at time 0 gives a param sample-
+ *                                                       accurate values in the context's first render quantum (HasSampleAccurateValues,
+ *                                                       Phase 5's fix wave)
  * Each file's head: "Use of this source code is governed by a BSD-style license that can be found in the LICENSE file." That file's text:
  *
  * Redistribution and use in source and binary forms, with or without
@@ -127,11 +132,14 @@ int SynthTone::osc(const WaveTables& wave, float hz, float cents, double start, 
     node.constant[1] = cents;
     // The start frame and the part of a frame from the start time to it: -start_frame_offset of UpdateSchedulingInfo for a start before its
     // frame; a start within 1/2048 frame after a frame, which TimeToSampleFrame rounds down to it, leaves that frame unwritten (0) and plays
-    // from the next with 1 - start_frame_offset (oscillator_handler.cc 739 to 743). Both are the start rounded up.
+    // from the next with 1 - start_frame_offset (oscillator_handler.cc 739 to 743). Both are the start rounded up. Except in the offline
+    // context's first render quantum (Tones::firstQuantum): there every oscillator takes Process's a-rate path (setting a param's .value schedules
+    // setValueAtTime at currentTime, 0 there, which gives it sample-accurate values in that quantum: audio_param_handler.cc 1059 to 1073; one
+    // with a timeline takes that path anyway), on which the frequency that moves the read index stays 0 (oscillator_handler.cc 710 to 746).
     node.start = frameOf(std::ceil(start));
     node.stop = framesUp(stop);
     node.oscillator.offset = static_cast<int>((quantum + node.start) % 128);
-    node.oscillator.lead = std::max(0.0, static_cast<double>(node.start) - start); // (a NaN start: 0)
+    node.oscillator.lead = node.start < firstQuantum ? 0.0 : std::max(0.0, static_cast<double>(node.start) - start); // (a NaN start: 0)
     end = std::max(end, node.stop);
     return n;
 }
@@ -420,6 +428,7 @@ SynthTone& Tones::startSynth(Engine::Layer layer, double delay, uint64_t voice, 
     tone->releaseSeconds = releaseSeconds;
     tone->basic = basic;
     tone->quantum = (quantum + tone->delay) % 128;
+    tone->firstQuantum = std::max(0, firstQuantum - tone->delay);
     return *tone;
 }
 
@@ -427,7 +436,7 @@ int Tones::takeChain() {
     if (!chains[0].prepared()) return -1;
     int taken = -1;
     for (int i = 0; i < CHAINS && taken < 0; ++i) if (!chains[i].live || (chains[i].orphan && !chains[i].busy())) taken = i;
-    if (taken < 0) { // all four busy: the oldest orphan goes (with one voice instance holding one, three are orphans)
+    if (taken < 0) { // all busy: the oldest orphan goes (with one voice instance holding one, the others are orphans)
         const auto rank = [&](int k) { return std::pair(!chains[k].orphan, chains[k].serial); };
         for (int i = 0; i < CHAINS; ++i) if (taken < 0 || rank(i) < rank(taken)) taken = i;
         for (SynthTone& t : synth) if (t.active && t.bus >= 0 && t.bus / 3 == taken) t.active = false; // they would play into the new chain: cut

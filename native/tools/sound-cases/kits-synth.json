@@ -2,7 +2,6 @@
  {
   "name": "drums-synth",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -205,7 +204,6 @@
  {
   "name": "drums-synth-kickPunch-0",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0,
@@ -408,7 +406,6 @@
  {
   "name": "drums-synth-kickPunch-1",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 1,
@@ -611,7 +608,6 @@
  {
   "name": "drums-synth-kickLength-0",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -814,7 +810,6 @@
  {
   "name": "drums-synth-kickLength-1",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -1017,7 +1012,6 @@
  {
   "name": "drums-synth-snareTone-0",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -1220,7 +1214,6 @@
  {
   "name": "drums-synth-snareTone-1",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -1423,7 +1416,6 @@
  {
   "name": "drums-synth-snareSnap-0",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -1626,7 +1618,6 @@
  {
   "name": "drums-synth-snareSnap-1",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -1829,7 +1820,6 @@
  {
   "name": "drums-synth-hatBright-0",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -2032,7 +2022,6 @@
  {
   "name": "drums-synth-hatBright-1",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -2235,7 +2224,6 @@
  {
   "name": "drums-synth-hatLength-0",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -2438,7 +2426,6 @@
  {
   "name": "drums-synth-hatLength-1",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -2641,7 +2628,6 @@
  {
   "name": "percussion-synth",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -2844,7 +2830,6 @@
  {
   "name": "percussion-synth-bongos",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -3047,7 +3032,6 @@
  {
   "name": "percussion-synth-claves",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -3250,7 +3234,6 @@
  {
   "name": "percussion-synth-cowbell",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,

@@ -22,7 +22,9 @@ constexpr int NODES = 16, PARAMS = 6; // the pad's tone has 16 nodes; the e-pian
 // The most frames one render() takes: the engine's chunk (engine.cpp CHUNK, which asserts that the two are equal).
 constexpr int SYNTH_FRAMES = 256;
 static_assert(SYNTH_FRAMES == CHAIN_FRAMES, "an organ chain processes the chunk its tones rendered");
-constexpr int CHAINS = 4; // organ chain slots (phase 5 ruling 2): one voice instance's and three ringing out
+// The organ chain slots (phase 5 ruling 2, eight since its fix wave): one voice instance's and seven ringing out.
+// shortcut: a ninth organ instance ringing at once still cuts the oldest chain's tones in one frame, upgrade: fade the taken chain's tones
+constexpr int CHAINS = 8;
 
 enum class Filter : uint8_t { lowpass, highpass, bandpass }; // the BiquadFilterNode types of the synth voices
 
@@ -37,6 +39,7 @@ struct SynthTone {
     long long age = 0, end = 0; // frames since frame 0; the last source's stop: inactive one chunk (SYNTH_FRAMES) after it
     const BasicWaves* basic = nullptr; // the basic waves at the engine's rate, for osc(Wave, ...)
     int quantum = 0;            // the place of frame 0 in its render quantum (Tones::startSynth); set before the graph is built
+    int firstQuantum = 0;       // frames of the play's first render quantum from frame 0 on (Tones::firstQuantum); set before the graph is built
     double late = 0.0;          // [0, 1): the tone's time 0 lies this part of a frame after frame 0 (Tones::startSynth); set before the graph is
                                 // built, every time the calls below take (sources' starts and stops, every param's events) is that much later
     std::shared_ptr<const void> hold; // what its buffer's data lives in (a string voice's buffers: Voice::held); the engine drops it once the
@@ -109,6 +112,8 @@ struct Tones {
     double sr = 48000.0;
     const BasicWaves* basic = nullptr; // the basic waves at sr (Engine::prepare); every synth tone gets them
     int quantum = 0;                   // the place of the chunk's first frame in its render quantum: frames since the play began, mod 128
+    int firstQuantum = 0;              // frames of the play's first render quantum from the chunk's first frame on (128 at the play's first
+                                       // frame, 0 from its 128th on), the offline context's first quantum (SynthTone::osc)
     double late = 0.0;                 // the part of a frame from the frame a voice's play() gets to the event's time (the engine sets it,
                                        // a part below 1/2048 as 0: engine.cpp lateOf)
     uint8_t gen[Engine::layerCount] = {}; // per layer, the generation of its chains (0 or 1) a tone started now rings through (engine.cpp)
@@ -121,9 +126,9 @@ struct Tones {
     // jump lets it fall over releaseSeconds (every voice gives its own: 0 would cut it in one frame). The voice then builds its graph.
     SynthTone& startSynth(Engine::Layer layer, double delay, uint64_t voice, double releaseSeconds);
     // A chain slot for a new organ chain, which the voice then starts: one that is not live, else one whose orphan has rung out, else the
-    // oldest orphan, whose tones are cut (all four busy: a voice instance and three that ring out, which takes four voice changes or starts
-    // within about 0.3 s after the old tones' ends; with one organ layer every other busy chain is an orphan then, without one the oldest
-    // chain goes); -1 before the chains are prepared.
+    // oldest orphan, whose tones are cut (all CHAINS busy: a voice instance and the others ringing out, each an instance that played and was
+    // given up less than its held tones plus 0.3 s before; with one organ layer every other busy chain is an orphan then, without one the
+    // oldest chain goes); -1 before the chains are prepared.
     int takeChain();
 };
 

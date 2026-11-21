@@ -1,7 +1,7 @@
 // Sound comparison: renders the same tracks with the web app and with the native core and checks level, octave bands and envelope.
 //   node native/tools/sound-compare.mjs <cases.json> [output folder]   (default folder: .superpowers/audio-ab/compare)
 //   node native/tools/sound-compare.mjs --self-check                  (the measuring itself: must pass, and must catch -2 dB and a treble tilt)
-// cases.json: array of { name, track, sound?, tuning?, dry?, limiter?, tail?, kind?, peakBelow? }
+// cases.json: array of { name, track, sound?, tuning?, dry?, limiter?, tail?, kind?, peakBelow?, diffBelow? }
 //   track  path to a track JSON (relative to cases.json) or the track object
 //   sound  timbre overrides like track.timbre ({ master: { brightness: 0.3 } }), laid over the track's own; both renders read the result
 //          (the web render resolves it in the browser, the native one gets resolveTrackTimbre(track) as btg_render --sound, as play.js sends it)
@@ -12,12 +12,14 @@
 //   kind   "sample" (default) or "synth": chooses the limits
 //   peakBelow  a bound in dBFS for the native render's own largest sample (not relative to the web render; judged whatever the limiter): the
 //          case FAILs, with the figure, when that peak is not below it (the plan's "below full scale": 0)
+//   diffBelow  a bound in dB for the case's diff (below): the case FAILs, with the figure, when its diff is not below it
 // Exit code 1 if a case fails (also one that cannot render, or whose renders differ in length by more than 50 ms).
 // balance = (right minus left level of the native render) minus (the same of the web render); limit as the level limit.
 // stereo = L/R correlation of each render: printed on every line, never judged; it shows a chorus (a mono layer: 1.000, chorus 1: about 0.83).
-// diff = power of (native - web) over the power of web, dB: printed below every case, never judged and no part of the verdict. It is the
+// diff = power of (native - web) over the power of web, dB: printed below every case, judged only for a case that carries diffBelow. It is the
 // sample-by-sample disagreement of the two renders and is dominated by the dry voices' own: with every effect off it already lies at about
-// -31 dB (the bass) to about -3 dB (the lead guitar); the voices are matched by level, bands and envelope, not by waveform. It
+// -31 dB (the bass) to about -3 dB (the lead guitar) for the sample voices, which are matched by level, bands and envelope, not by waveform
+// (the synth voices of epiano, classic and string.json follow the page sample by sample: diffBelow -60, make-cases.mjs). It
 // can show an effect that is missing where that floor is low (a bass without its vibrato: +3.4 dB against -31 dB with it), never where it is
 // high, and never say that an effect that is there is right; the chains are judged sample by sample in fx-compare.mjs.
 // peak = the native render's largest sample minus the web render's, in dB; printed on every line, judged (+-1 dB, the plan's limit for the
@@ -104,7 +106,7 @@ const peakOf = (x) => { let m = 0; for (let i = 0; i < x.length; i++) m = Math.m
 const peakDb = (x) => 20 * Math.log10(Math.max(peakOf(x), 1e-15)); // Math.max keeps the NaN
 
 // both over the length of the shorter one (a length difference above MAX_LENGTH_GAP fails); differences are native minus web
-function measure(web, native, kind = 'sample', judgePeak = false, peakBelow = null) {
+function measure(web, native, kind = 'sample', judgePeak = false, peakBelow = null, diffBelow = null) {
   const limit = LIMITS[kind];
   if (!limit) throw new Error(`unknown kind: ${kind}`);
   const seconds = [web.length / 2 / RATE, native.length / 2 / RATE];
@@ -124,7 +126,7 @@ function measure(web, native, kind = 'sample', judgePeak = false, peakBelow = nu
   bands.forEach((d, i) => { if (d !== null && (worst < 0 || size(d) > size(bands[worst]))) worst = i; });
   const env = pearson(envelope(w), envelope(v));
   const peaks = [peakDb(w), peakDb(v)], peak = peaks[1] - peaks[0];
-  // printed, not judged (phase-4-design.md 6.2): diff = power of (native - web) over that of web; stereo = L/R correlation of each render
+  // printed (phase-4-design.md 6.2): diff = power of (native - web) over that of web, judged against diffBelow; stereo = L/R correlation of each render
   let dd = 0, ww = 0;
   const s = [0, 0, 0, 0, 0, 0]; // web LL, RR, LR, native LL, RR, LR
   for (let i = 0; i < n; i += 2) {
@@ -137,8 +139,9 @@ function measure(web, native, kind = 'sample', judgePeak = false, peakBelow = nu
     level: over(level, limit.level), balance: balance !== null && over(balance, limit.level), bands: bands.some((d) => d !== null && over(d, limit.band)),
     envelope: !(env >= limit.env), length: !(Math.abs(seconds[0] - seconds[1]) <= MAX_LENGTH_GAP), peak: judgePeak && over(peak, limit.peak),
     peakBelow: peakBelow !== null && !(peaks[1] < peakBelow), // a NaN fails
+    diffBelow: diffBelow !== null && !(diff < diffBelow),
   };
-  return { level, balance, peak, peaks, peakBelow, diff, stereo, bands, bandMax: worst >= 0 ? bands[worst] : null, bandHz: worst >= 0 ? BANDS[worst] : null, env, seconds, failed, pass: !Object.values(failed).some(Boolean) };
+  return { level, balance, peak, peaks, peakBelow, diffBelow, diff, stereo, bands, bandMax: worst >= 0 ? bands[worst] : null, bandHz: worst >= 0 ? BANDS[worst] : null, env, seconds, failed, pass: !Object.values(failed).some(Boolean) };
 }
 
 function line(name, m) {
@@ -146,7 +149,8 @@ function line(name, m) {
   const length = m.failed.length ? `  LENGTH web ${m.seconds[0].toFixed(2)} s, native ${m.seconds[1].toFixed(2)} s` : '';
   const peak = `peak ${signed(m.peak)} dB (web ${signed(m.peaks[0])}, native ${signed(m.peaks[1])} dBFS)${m.peakBelow === null ? '' : m.failed.peakBelow ? `  NATIVE PEAK ${signed(m.peaks[1])} dBFS NOT BELOW ${m.peakBelow}` : ` (native below ${m.peakBelow})`}`;
   let text = `${name}  level ${signed(m.level)} dB  balance ${balance} dB  ${peak}  bands max ${max} dB at ${at}  envelope ${m.env.toFixed(3)}  stereo web ${m.stereo[0].toFixed(3)} native ${m.stereo[1].toFixed(3)}${length}  ${m.pass ? 'PASS' : 'FAIL'}`;
-  text += `\n    diff ${Number.isFinite(m.diff) ? m.diff.toFixed(1) : m.diff} dB (not judged)`; // below the verdict: it is no part of it
+  const judged = m.diffBelow === null ? '(not judged)' : m.failed.diffBelow ? `DIFF NOT BELOW ${m.diffBelow} dB` : `(below ${m.diffBelow} dB)`;
+  text += `\n    diff ${Number.isFinite(m.diff) ? m.diff.toFixed(1) : m.diff} dB ${judged}`; // below the verdict line, part of it only with diffBelow
   if (!m.pass) text += `\n    failed: ${Object.keys(m.failed).filter((k) => m.failed[k]).join(', ')}\n    bands ${BANDS.map((hz, i) => `${hz}: ${m.bands[i] === null ? '-' : signed(m.bands[i])}`).join('  ')}`;
   return text;
 }
@@ -163,7 +167,8 @@ function prepareCase(c, baseDir) {
   const tuning = c.dry ? lay(c.tuning, { 'mix/room': { wet: 0 } }) : c.tuning;
   const limiter = c.dry ? false : c.limiter !== false;
   if (c.peakBelow !== undefined && !Number.isFinite(c.peakBelow)) throw new Error(`bad peakBelow: ${JSON.stringify(c.peakBelow)}`);
-  return { name: c.name, kind: c.kind ?? 'sample', dry: !!c.dry, limiter, peakBelow: c.peakBelow ?? null, track, options: { tuning, limiter: limiter ? undefined : false, tail: c.tail ?? 0.2 } };
+  if (c.diffBelow !== undefined && !Number.isFinite(c.diffBelow)) throw new Error(`bad diffBelow: ${JSON.stringify(c.diffBelow)}`);
+  return { name: c.name, kind: c.kind ?? 'sample', dry: !!c.dry, limiter, peakBelow: c.peakBelow ?? null, diffBelow: c.diffBelow ?? null, track, options: { tuning, limiter: limiter ? undefined : false, tail: c.tail ?? 0.2 } };
 }
 
 // One case after the other, each in its own browser, so that a case that cannot render costs only itself. Throws with the reason.
@@ -210,7 +215,7 @@ async function runCases(raw, baseDir, out) {
       const c = prepareCase(entry, baseDir);
       const { web, native } = await renderCase(c);
       const gain = writePair(out, c.name, web, native);
-      const m = measure(web, native, c.kind, c.limiter, c.peakBelow);
+      const m = measure(web, native, c.kind, c.limiter, c.peakBelow, c.diffBelow);
       console.log(line(c.name, m));
       if (gain < 1) console.log(turnedDown(gain, c.dry));
       results.push({ name, m });
@@ -247,6 +252,7 @@ async function selfCheck(out) {
   let top = 0, topAt = 0; // the native render's largest sample, raised by 1.5 dB: only the peak notices (judged here as for a case with the limiter)
   native.forEach((v, i) => { if (Math.abs(v) > top) { top = Math.abs(v); topAt = i; } });
   const raised = native.map((v, i) => (i === topAt ? v * 10 ** (1.5 / 20) : v));
+  const diff = measure(web, native, c.kind).diff; // the pair's own, for the diffBelow lines
   const checks = [
     ['as it is', native, 'must PASS', (m) => m.pass],
     ['web against itself', web, 'must give diff -Infinity and equal stereo figures', (m) => m.diff === -Infinity && m.stereo[0] === m.stereo[1]],
@@ -258,10 +264,12 @@ async function selfCheck(out) {
     ['native peak +1.5 dB (its largest sample)', raised, 'must FAIL on peak', (m) => m.failed.peak, true],
     ['native peak 0.1 dB above its bound (peakBelow)', native, 'must FAIL on peakBelow', (m) => m.failed.peakBelow && !m.pass && !Object.entries(m.failed).some(([k, v]) => v && k !== 'peakBelow'), false, peakDb(native) - 0.1],
     ['native peak 0.1 dB below its bound (peakBelow)', native, 'must PASS', (m) => m.pass && m.peakBelow !== null, false, peakDb(native) + 0.1],
+    ['native diff 0.1 dB above its bound (diffBelow)', native, 'must FAIL on diffBelow', (m) => m.failed.diffBelow && !m.pass && !Object.entries(m.failed).some(([k, v]) => v && k !== 'diffBelow'), false, null, diff - 0.1],
+    ['native diff 0.1 dB below its bound (diffBelow)', native, 'must PASS', (m) => m.pass && m.diffBelow !== null, false, null, diff + 0.1],
   ];
   let ok = true;
-  for (const [what, samples, want, good, judgePeak = false, peakBelow = null] of checks) {
-    const m = measure(web, samples, c.kind, judgePeak, peakBelow);
+  for (const [what, samples, want, good, judgePeak = false, peakBelow = null, diffBelow = null] of checks) {
+    const m = measure(web, samples, c.kind, judgePeak, peakBelow, diffBelow);
     console.log(line(`${c.name} (${what})`, m));
     console.log(`  ${good(m) ? 'ok' : 'WRONG'}: ${want}`);
     ok &&= good(m);

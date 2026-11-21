@@ -201,8 +201,7 @@
     "roomWet": 0.5
    }
   },
-  "dry": true,
-  "kind": "synth"
+  "dry": true
  },
  {
   "name": "band-synth-psych",
@@ -406,8 +405,7 @@
     "roomWet": 0.5
    }
   },
-  "dry": true,
-  "kind": "synth"
+  "dry": true
  },
  {
   "name": "band-synth-dreamy",
@@ -615,8 +613,7 @@
     "roomWet": 0.5
    }
   },
-  "dry": true,
-  "kind": "synth"
+  "dry": true
  },
  {
   "name": "band-synth-blues",
@@ -812,8 +809,7 @@
     "roomWet": 0.5
    }
   },
-  "dry": true,
-  "kind": "synth"
+  "dry": true
  },
  {
   "name": "band-synth-rock",
@@ -1016,8 +1012,7 @@
     "roomWet": 0.5
    }
   },
-  "dry": true,
-  "kind": "synth"
+  "dry": true
  },
  {
   "name": "band-synth-hardrock",
@@ -1221,8 +1216,7 @@
     "roomWet": 0.5
    }
   },
-  "dry": true,
-  "kind": "synth"
+  "dry": true
  },
  {
   "name": "band-synth-reggae",
@@ -1424,8 +1418,7 @@
     "roomWet": 0.5
    }
   },
-  "dry": true,
-  "kind": "synth"
+  "dry": true
  },
  {
   "name": "band-synth-country",
@@ -1626,8 +1619,7 @@
     "roomWet": 0.5
    }
   },
-  "dry": true,
-  "kind": "synth"
+  "dry": true
  },
  {
   "name": "band-synth-poppunk",
@@ -1830,7 +1822,6 @@
     "roomWet": 0.5
    }
   },
-  "dry": true,
-  "kind": "synth"
+  "dry": true
  }
 ]

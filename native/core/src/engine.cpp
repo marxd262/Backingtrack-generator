@@ -17,6 +17,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <array>
 #include <atomic>
 #include <iterator>
 #include <mutex>
@@ -87,7 +88,9 @@ struct Engine::Impl {
     PackSource source;
     // shortcut: packs are never released while the engine lives (tones point into them); release by reference count when memory matters.
     std::map<std::string, std::shared_ptr<const Pack>> packs;
-    struct Chosen { std::string key, status = "silent"; std::shared_ptr<const Voice> voice; uint64_t serial = 0; } chosen[layerCount];
+    struct Chosen { std::string key, status = "silent"; std::shared_ptr<const Voice> voice; uint64_t serial = 0; };
+    using Voices = std::array<Chosen, layerCount>;
+    Voices chosen;
     Tuning tuning;
     detail::Timbre timbre; // DEFAULT_TIMBRE until setSound
     uint64_t serials = 0;
@@ -183,51 +186,59 @@ struct Engine::Impl {
         release();
     }
     void release() { std::erase_if(keep, [](const std::shared_ptr<const void>& set) { return set.use_count() == 1; }); }
-    // Control thread: the layer's voice prepared for the current song at the current rate (Voice::prepare; a voice that computes nothing ahead
-    // stays as it is; without a song or a rate it waits). `same`: the layer's voice as it was prepared for this song and rate before it was
-    // built again, or nullptr.
-    void prepareVoice(int l, const Voice* same) {
-        if (!chosen[l].voice || !current || !(rate > 0)) return;
-        std::shared_ptr<const Voice> made = chosen[l].voice->prepare(*current, rate, same);
-        if (!made) return;
-        if (std::shared_ptr<const void> held = made->held(); held && std::find(keep.begin(), keep.end(), held) == keep.end()) keep.push_back(std::move(held));
-        chosen[l].voice = std::move(made);
+    // Control thread: `c`'s voice prepared for `forSong` at the current rate (Voice::prepare; a voice that computes nothing ahead stays as it
+    // is; without a song or a rate it waits). `same`: the layer's voice as it was prepared for this song and rate before it was built again,
+    // or nullptr.
+    std::shared_ptr<const Voice> prepared(const Chosen& c, const PlaySong* forSong, const Voice* same) const {
+        if (!c.voice || !forSong || !(rate > 0)) return c.voice;
+        std::shared_ptr<const Voice> made = c.voice->prepare(*forSong, rate, same);
+        return made ? made : c.voice;
     }
-    // Control thread, under `control`: the setup of the control state. From the first prepare on it carries the convolvers; a new
-    // mix.roomSize (exact compare, as applyRoom) gets a new, empty room: its tail is cut, as Chromium's ConvolverHandler::SetBuffer does.
-    std::shared_ptr<Setup> buildSetup() {
+    // Control thread: the voices a call built and prepared (a copy of `chosen` it changed) become the chosen ones, their sets of buffers
+    // kept. Nothing here throws (buildSetup made room in `keep`): a call commits through this after everything that can throw.
+    void commit(Voices& voices) {
+        for (const Chosen& c : voices)
+            if (std::shared_ptr<const void> held = c.voice ? c.voice->held() : nullptr; held && std::find(keep.begin(), keep.end(), held) == keep.end()) keep.push_back(std::move(held));
+        chosen = std::move(voices);
+    }
+    // Control thread, under `control`: the setup of these voices, fine values and timbre. From the first prepare on it carries the
+    // convolvers; a new mix.roomSize (exact compare, as applyRoom) gets a new, empty room: its tail is cut, as Chromium's
+    // ConvolverHandler::SetBuffer does.
+    std::shared_ptr<Setup> buildSetup(const Voices& voices, const Tuning& withTuning, const detail::Timbre& withTimbre) {
+        keep.reserve(keep.size() + layerCount); // commit() then cannot throw
         auto made = std::make_shared<Setup>();
         for (int l = 0; l < layerCount; ++l) {
-            made->voice[l] = chosen[l].voice;
-            made->serial[l] = chosen[l].serial;
-            made->pan[l] = static_cast<float>(detail::tunedValue("mix/pan", LAYER_NAMES[l], tuning));
-            made->roomSends[l] = detail::tunedValue("mix/room", LAYER_NAMES[l], tuning);
+            made->voice[l] = voices[l].voice;
+            made->serial[l] = voices[l].serial;
+            made->pan[l] = static_cast<float>(detail::tunedValue("mix/pan", LAYER_NAMES[l], withTuning));
+            made->roomSends[l] = detail::tunedValue("mix/room", LAYER_NAMES[l], withTuning);
         }
-        const detail::MasterParams mix = detail::masterParams(timbre.master);
+        const detail::Timbre& t = withTimbre;
+        const detail::MasterParams mix = detail::masterParams(t.master);
         made->masterGain = MASTER * mix.level;
         made->shelfDb = mix.shelfDb;
         made->shelfHz = mix.shelfFreq;
         made->width = mix.width;
         made->reverbWet = mix.reverbWet;
-        made->roomSend = detail::drumParams(timbre.drums).roomSend;
-        made->roomWet = mix.roomWet * detail::tunedValue("mix/room", "wet", tuning);
-        made->roomTone = detail::tunedValue("mix/room", "tone", tuning);
+        made->roomSend = detail::drumParams(t.drums).roomSend;
+        made->roomWet = mix.roomWet * detail::tunedValue("mix/room", "wet", withTuning);
+        made->roomTone = detail::tunedValue("mix/room", "tone", withTuning);
         made->echoWet = mix.echoWet;
         made->echoFeedback = mix.echoFeedback;
         made->echoTone = mix.echoTone;
-        made->fx[bass] = detail::fxChainParams(timbre.bass.fuzz, timbre.bass.overdrive, timbre.bass.distortion, bass);
-        made->fx[chords] = detail::fxChainParams(timbre.chords.fuzz, timbre.chords.overdrive, timbre.chords.distortion, chords);
-        made->fx[pad] = detail::fxChainParams(timbre.pad.fuzz, timbre.pad.overdrive, timbre.pad.distortion, pad);
-        made->fx[lead] = detail::fxChainParams(timbre.lead.fuzz, timbre.lead.overdrive, timbre.lead.distortion, lead);
+        made->fx[bass] = detail::fxChainParams(t.bass.fuzz, t.bass.overdrive, t.bass.distortion, bass);
+        made->fx[chords] = detail::fxChainParams(t.chords.fuzz, t.chords.overdrive, t.chords.distortion, chords);
+        made->fx[pad] = detail::fxChainParams(t.pad.fuzz, t.pad.overdrive, t.pad.distortion, pad);
+        made->fx[lead] = detail::fxChainParams(t.lead.fuzz, t.lead.overdrive, t.lead.distortion, lead);
         // synth.js 231 to 234: a chain whose chosen voice makes the chorus itself (ownChorus: the classic chord synth) gets 0; the web reads
         // `chosen`, also when that voice failed to build
-        const auto chorus = [&](Layer l, double knob) { return detail::ownsChorus(LAYER_NAMES[l], chosen[l].key) ? 0.0 : knob; };
-        made->vibrato[bass] = timbre.bass.vibrato; made->chorus[bass] = chorus(bass, timbre.bass.chorus);
-        made->vibrato[chords] = timbre.chords.vibrato; made->chorus[chords] = chorus(chords, timbre.chords.chorus);
-        made->vibrato[pad] = timbre.pad.vibrato; made->chorus[pad] = chorus(pad, timbre.pad.chorus);
-        made->vibrato[lead] = timbre.lead.vibrato; made->chorus[lead] = chorus(lead, timbre.lead.chorus);
+        const auto chorus = [&](Layer l, double knob) { return detail::ownsChorus(LAYER_NAMES[l], voices[l].key) ? 0.0 : knob; };
+        made->vibrato[bass] = t.bass.vibrato; made->chorus[bass] = chorus(bass, t.bass.chorus);
+        made->vibrato[chords] = t.chords.vibrato; made->chorus[chords] = chorus(chords, t.chords.chorus);
+        made->vibrato[pad] = t.pad.vibrato; made->chorus[pad] = chorus(pad, t.pad.chorus);
+        made->vibrato[lead] = t.lead.vibrato; made->chorus[lead] = chorus(lead, t.lead.chorus);
         // applyBus (synth.js 77 to 86); the compressor's own make-up (autoMakeupDb, knee 0) is taken back by the gain behind it
-        const auto v = [&](const char* name) { return detail::tunedValue("mix/bus", name, tuning); };
+        const auto v = [&](const char* name) { return detail::tunedValue("mix/bus", name, withTuning); };
         const auto autoMakeupDb = [](double threshold, double ratio) { return -0.6 * threshold * (1 - 1 / ratio); };
         const bool on = v("on") >= 0.5;
         const double glueDb = on ? v("glueDb") : 0, glueRatio = on ? v("glueRatio") : 1, ceiling = on ? v("ceilingDb") : -10;
@@ -245,16 +256,17 @@ struct Engine::Impl {
         }
         return made;
     }
-    void publishSetup() { publish(nullptr, buildSetup()); }
-    unsigned chooseVoices(const std::string& voicesJson); // setVoices without the publish (below)
-    // Control thread: the built voices again from the current tuning, timbre and rate, with the same serial (the layer's state goes on, as in
-    // the web), and prepared; `sameRate`: the rate is the one they were prepared for, so what does not depend on the change is taken over.
-    void rebuildVoices(bool sameRate) {
+    unsigned chooseVoices(const std::string& voicesJson, Voices& voices, uint64_t& serial, const PlaySong* forSong); // setVoices' building (below)
+    // Control thread: `voices` (a copy of the chosen ones) built again from these fine values and timbre at the current rate, with the same
+    // serial (the layer's state goes on, as in the web), and prepared for the current song; `sameRate`: the rate is the one they were
+    // prepared for, so what does not depend on the change is taken over.
+    void rebuildVoices(Voices& voices, const Tuning& withTuning, const detail::Timbre& withTimbre, bool sameRate) {
         for (int l = 0; l < layerCount; ++l) {
-            if (!chosen[l].voice) continue;
-            const std::shared_ptr<const Voice> before = chosen[l].voice;
-            chosen[l].voice = makeVoice(static_cast<Layer>(l), chosen[l].key, before->pack, tuning, timbre, rate);
-            prepareVoice(l, sameRate ? before.get() : nullptr);
+            Chosen& c = voices[l];
+            if (!c.voice) continue;
+            const std::shared_ptr<const Voice> before = c.voice;
+            c.voice = makeVoice(static_cast<Layer>(l), c.key, before->pack, withTuning, withTimbre, rate);
+            c.voice = prepared(c, current.get(), sameRate ? before.get() : nullptr);
         }
     }
     // Audio thread: where the layer goes, the mixer's pan or else the place mix/pan gives it, times the timbre's width (synth.js 173).
@@ -420,50 +432,64 @@ void Engine::setTrack(const std::string& trackJson) {
     }
     std::stable_sort(song->events.begin(), song->events.end(), [](const PlayEvent& x, const PlayEvent& y) { return x.beat < y.beat; });
     Impl& m = *impl_;
+    // the track's voices (prepared for the new song as they are chosen), every other voice prepared for it, the setup; then the control
+    // side takes them (nothing of it changes before: a throw, a prepare out of memory, leaves it as it was), and song and setup reach the
+    // audio thread in one swap
+    const json track = json::parse(trackJson); // buildSong has read it already
+    Impl::Voices voices = m.chosen;
+    uint64_t serial = m.serials;
+    const unsigned changed = track.is_object() && track.contains("voices") ? m.chooseVoices(track.at("voices").dump(), voices, serial, song.get()) : 0u;
+    for (int l = 0; l < layerCount; ++l) if (!(changed >> l & 1u)) voices[l].voice = m.prepared(voices[l], song.get(), nullptr);
+    std::shared_ptr<const Setup> made = m.buildSetup(voices, m.tuning, m.timbre);
+    m.commit(voices);
+    m.serials = serial;
+    m.current = song;
     m.lengthBeats = song->lengthBeats;
     m.bpm = built.bpm;
     if (!built.barBeats.empty()) m.beatsPerBar = built.barBeats[0];
-    m.current = song;
-    // the track's voices (prepared for the new song as they are chosen), every other voice prepared for it, then song and setup in one swap
-    const json track = json::parse(trackJson); // buildSong has read it already
-    const unsigned changed = track.is_object() && track.contains("voices") ? m.chooseVoices(track.at("voices").dump()) : 0u;
-    for (int l = 0; l < layerCount; ++l) if (!(changed >> l & 1u)) m.prepareVoice(l, nullptr);
-    m.publish(std::move(song), m.buildSetup());
+    m.publish(std::move(song), std::move(made));
 }
 
 void Engine::setVoices(const std::string& voicesJson) {
     Impl& m = *impl_;
     const std::lock_guard<std::recursive_mutex> hold(m.control);
-    if (m.chooseVoices(voicesJson)) m.publishSetup();
+    Impl::Voices voices = m.chosen;
+    uint64_t serial = m.serials;
+    if (!m.chooseVoices(voicesJson, voices, serial, m.current.get())) return;
+    std::shared_ptr<const Setup> made = m.buildSetup(voices, m.tuning, m.timbre);
+    m.commit(voices);
+    m.serials = serial;
+    m.publish(nullptr, std::move(made));
 }
 
-// Control thread, under `control`: the voices `voicesJson` names that differ from the chosen ones (or failed), built and prepared; one bit
-// per layer whose voice changed.
-unsigned Engine::Impl::chooseVoices(const std::string& voicesJson) {
+// Control thread, under `control`: the voices `voicesJson` names that differ from those in `voices` (or failed), built into `voices` with
+// serials counted on from `serial`, and prepared for `forSong`; one bit per layer whose voice changed. The pack cache is the only state of
+// the engine it changes.
+unsigned Engine::Impl::chooseVoices(const std::string& voicesJson, Voices& voices, uint64_t& serial, const PlaySong* forSong) {
     Impl& m = *this;
-    const json voices = json::parse(voicesJson, nullptr, false);
-    if (!voices.is_object()) return 0u;
+    const json given = json::parse(voicesJson, nullptr, false);
+    if (!given.is_object()) return 0u;
     unsigned changed = 0u;
     for (int l = 0; l < layerCount; ++l) {
-        const auto given = voices.find(LAYER_NAMES[l]);
-        if (given == voices.end() || !given->is_object()) continue;
+        const auto named = given.find(LAYER_NAMES[l]);
+        if (named == given.end() || !named->is_object()) continue;
         const auto text = [&](const char* field) {
-            const auto f = given->find(field);
-            return f != given->end() && f->is_string() ? f->get<std::string>() : std::string();
+            const auto f = named->find(field);
+            return f != named->end() && f->is_string() ? f->get<std::string>() : std::string();
         };
         const std::string key = std::string(LAYER_NAMES[l]) + "/" + text("id") + "/" + text("variant");
-        Impl::Chosen& c = m.chosen[l];
+        Impl::Chosen& c = voices[l];
         if (key == c.key && c.status.rfind("error: ", 0) != 0) continue; // unchanged: its state goes on
         changed |= 1u << l;
         c.key = key;
-        c.serial = ++m.serials;
+        c.serial = ++serial;
         c.voice = nullptr;
         c.status = "silent";
         const auto id = detail::soundData().packs.find(key);
         if (id == detail::soundData().packs.end()) { // not a sample voice: a synth voice, when the core has it
             c.voice = makeVoice(static_cast<Layer>(l), key, nullptr, m.tuning, m.timbre, m.rate);
             if (c.voice) c.status = "ready";
-            m.prepareVoice(l, nullptr);
+            c.voice = m.prepared(c, forSong, nullptr);
             continue;
         }
         try {
@@ -486,17 +512,25 @@ unsigned Engine::Impl::chooseVoices(const std::string& voicesJson) {
 void Engine::setTuning(const std::string& tuningJson) {
     Impl& m = *impl_;
     const std::lock_guard<std::recursive_mutex> hold(m.control);
-    m.tuning = detail::parseTuning(tuningJson);
-    m.rebuildVoices(true);
-    m.publishSetup();
+    Tuning tuning = detail::parseTuning(tuningJson);
+    Impl::Voices voices = m.chosen;
+    m.rebuildVoices(voices, tuning, m.timbre, true);
+    std::shared_ptr<const Setup> made = m.buildSetup(voices, tuning, m.timbre);
+    m.commit(voices); // the control side changes from here on, after everything that can throw
+    m.tuning = std::move(tuning);
+    m.publish(nullptr, std::move(made));
 }
 
 void Engine::setSound(const std::string& timbreJson) {
     Impl& m = *impl_;
     const std::lock_guard<std::recursive_mutex> hold(m.control);
-    m.timbre = detail::completeTimbre(timbreJson);
-    m.rebuildVoices(true);
-    m.publishSetup();
+    const detail::Timbre timbre = detail::completeTimbre(timbreJson);
+    Impl::Voices voices = m.chosen;
+    m.rebuildVoices(voices, m.tuning, timbre, true);
+    std::shared_ptr<const Setup> made = m.buildSetup(voices, m.tuning, timbre);
+    m.commit(voices); // the control side changes from here on, after everything that can throw
+    m.timbre = timbre;
+    m.publish(nullptr, std::move(made));
 }
 
 std::string Engine::voiceStatus() const {
@@ -534,8 +568,10 @@ void Engine::prepare(double sampleRate) {
     const bool newRate = sampleRate != m.rate;
     if (newRate) { m.reverb = nullptr; m.room = nullptr; } // responses for the new rate
     m.rate = sampleRate;
-    if (newRate) m.rebuildVoices(false); // the organ's waves and the string voices' buffers are built for the rate
-    std::shared_ptr<const Setup> made = m.buildSetup(), old[3]; // what this replaces is freed here, at the end, never on the audio thread
+    Impl::Voices voices = m.chosen;
+    if (newRate) m.rebuildVoices(voices, m.tuning, m.timbre, false); // the organ's waves and the string voices' buffers are built for the rate
+    std::shared_ptr<const Setup> made = m.buildSetup(voices, m.tuning, m.timbre), old[3]; // what this replaces is freed here, at the end, never on the audio thread
+    m.commit(voices);
     std::shared_ptr<const PlaySong> oldSongs[2];
     {
         const std::lock_guard<std::mutex> lock(m.swap);
@@ -646,6 +682,7 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
     // schedule nothing (other standing blocks, as a render's tail or a test's, are handled as before).
     if (block.playing && (!m.wasPlaying || restarted)) { // the web builds its voices (and its delay, with the time of the tempo) anew at every play()
         m.tones.quantum = 0; // the render quanta are counted from a play's first frame (the web's play() falls on one; a jump does not move them)
+        m.tones.firstQuantum = 128; // and the first is the offline context's first (a live play's lead keeps its tones out of it)
         m.restart(true);
         m.echoAtOnce = true;
         m.fxAtOnce = true;
@@ -784,6 +821,7 @@ void Engine::render(float* left, float* right, int frames, const Transport::Bloc
             else if (c.orphan) c.live = false;
         }
         m.tones.quantum = (m.tones.quantum + count) % 128;
+        m.tones.firstQuantum = std::max(0, m.tones.firstQuantum - count);
         // The distortion chains hear the sum of the layer's tones, before mute, fader and trim (synth.js: voice -> fx.input), the modulation
         // chains what comes out of them: in one channel, the right one then taking the left until the chorus makes two of it, or in two where
         // the voice feeds two (Voice::stereo). Each generation hears the tones started under it. The current one runs while playing, as the

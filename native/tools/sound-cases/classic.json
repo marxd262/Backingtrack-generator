@@ -2,7 +2,6 @@
  {
   "name": "classic-bass-neutral",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -192,12 +191,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "classic-bass-sub-0.5",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -387,12 +386,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "classic-bass-sub-1",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -582,12 +581,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "classic-bass-pluck-0",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -777,12 +776,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "classic-bass-pluck-1",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -972,12 +971,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "classic-bass-cutoff-0",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -1167,12 +1166,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "classic-bass-cutoff-1",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -1362,12 +1361,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "classic-bass-resonance-0",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -1557,12 +1556,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "classic-bass-resonance-1",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -1752,12 +1751,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "classic-bass-roundness-0.5",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -1947,12 +1946,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "classic-bass-roundness-1",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -2142,12 +2141,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "classic-chords-neutral",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -2341,12 +2340,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "classic-chords-brightness-0",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -2540,12 +2539,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "classic-chords-brightness-1",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -2739,12 +2738,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "classic-chords-length-0",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -2938,12 +2937,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "classic-chords-length-1",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -3137,12 +3136,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "classic-chords-chorus-0.5",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -3336,12 +3335,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "classic-chords-chorus-1",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -3535,12 +3534,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "classic-chords-tremolo-0.5",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -3734,12 +3733,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "classic-chords-tremolo-1",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -3933,12 +3932,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "classic-pad-neutral",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -4132,12 +4131,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "classic-pad-attack-0",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -4331,12 +4330,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "classic-pad-attack-1",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -4530,12 +4529,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "classic-pad-cutoff-0",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -4729,12 +4728,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "classic-pad-cutoff-1",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -4928,12 +4927,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "classic-pad-lfoSpeed-0",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -5127,12 +5126,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "classic-pad-lfoSpeed-1",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -5326,12 +5325,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "classic-pad-lfoDepth-0",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -5525,12 +5524,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "classic-pad-lfoDepth-1",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -5724,12 +5723,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "classic-pad-shimmer-0.5",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -5923,12 +5922,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "classic-pad-shimmer-1",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -6122,12 +6121,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "classic-pad-thickness-0",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -6321,12 +6320,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "classic-pad-thickness-1",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -6520,12 +6519,12 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  },
  {
   "name": "classic-lead-neutral",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -6719,6 +6718,7 @@
      "randomness": 0.5
     }
    }
-  }
+  },
+  "diffBelow": -60
  }
 ]

@@ -2,7 +2,6 @@
  {
   "name": "organ-jazz",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -196,7 +195,6 @@
  {
   "name": "organ-rock",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -394,7 +392,6 @@
  {
   "name": "organ-gospel",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -592,7 +589,6 @@
  {
   "name": "organ-ballad",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -791,7 +787,6 @@
  {
   "name": "organ-jazz-leslie-0",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -990,7 +985,6 @@
  {
   "name": "organ-jazz-leslie-2",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -1189,7 +1183,6 @@
  {
   "name": "organ-jazz-leslie-3",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -1388,7 +1381,6 @@
  {
   "name": "organ-rock-drive-0",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -1591,7 +1583,6 @@
  {
   "name": "organ-rock-drive-1",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -1794,7 +1785,6 @@
  {
   "name": "organ-ballad-swell-0",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -1998,7 +1988,6 @@
  {
   "name": "organ-rock-click-0",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -2201,7 +2190,6 @@
  {
   "name": "organ-jazz-perc-0",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -2400,7 +2388,6 @@
  {
   "name": "organ-jazz-chorus-1",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -2594,7 +2581,6 @@
  {
   "name": "organ-jazz-distortion-1",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
@@ -2788,7 +2774,6 @@
  {
   "name": "organ-jazz-vibrato-1",
   "dry": true,
-  "kind": "synth",
   "sound": {
    "drums": {
     "kickPunch": 0.5,
