@@ -1,5 +1,7 @@
 // Compares the core's logic function by function with the web app in the working tree.
 // Usage: btg_logic_tests <logic.json>   (written by native/tools/export-logic.mjs)
+// logic.json is a manifest { total, chunks: [{ file, count }] }; the cases are in the chunk files next to it (a list each), read one at a
+// time. A manifest or chunk that is missing, cut off or no JSON, and a chunk or a total that does not hold the number the manifest says, fail.
 // Every case is { fn, in, out }: the core's function of that name gets `in` and must give `out`, compared as the parity test compares
 // events (json_compare.h): numbers bit for bit ("identical") or within 1.5e-6 ("close", which fails too: a difference in the last bits,
 // possibly another platform's math library; an exception has to be ruled and named here); anything else fails, also an unknown fn.
@@ -8,6 +10,7 @@
 // one case close on MSVC (task-24-report.md) differs from the web because one sin returns the other neighbour of a value that lies within
 // 1.2e-20 of the midpoint of two doubles, and with V8's results in place of the C runtime's the core's samples are the web's bit for bit.
 #include "../src/convolver.h"
+#include "../src/form_internal.h"
 #include "../src/harmony.h"
 #include "../src/sound_data.h"
 #include "../src/sound_model.h"
@@ -18,9 +21,11 @@
 
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <map>
+#include <set>
 
 using json = nlohmann::json;
 using namespace btg::detail;
@@ -74,6 +79,13 @@ json thrown(const std::function<Json()>& call) {
 json parsed(const std::string& text) { return json::parse(text, nullptr, false); }
 // Task 26: the argument of a case, null where the case leaves it out (the web's undefined)
 Json argument(const Json& in, const char* name) { const auto found = in.find(name); return found == in.end() ? Json() : *found; }
+// Task 27: a value the web calls with as `undefined` is { "$undefined": true } in a case (JSON has none); the core takes it as a discarded value
+Json undefinedOf(const Json& v) { return v.is_object() && v.size() == 1 && v.contains("$undefined") ? Json(Json::value_t::discarded) : v; }
+Json patchOf(const Json& patch) {
+    Json out = patch;
+    if (out.is_object()) for (auto it = out.begin(); it != out.end(); ++it) it.value() = undefinedOf(it.value());
+    return out;
+}
 
 const std::map<std::string, std::function<json(const json&)>> FUNCTIONS {
     { "completeTimbre", [](const json& in) { return toJson(completeTimbre(in.dump())); } },
@@ -155,6 +167,16 @@ const std::map<std::string, std::function<json(const json&)>> FUNCTIONS {
     { "romanDegree", [](const json& in) { const Json o = ordered(in); return thrown([&] { return Json(romanDegree(argument(o, "key"), argument(o, "chord"))); }); } },
     { "beatsUntilChange", [](const json& in) { const Json o = ordered(in); return thrown([&] { return beatsUntilChange(argument(o, "track"), o.at("songSec").get<double>()); }); } },
     { "degreeLabel", [](const json& in) { const Json o = ordered(in); return thrown([&] { return Json(degreeLabel(argument(o, "key"), o.at("pc").get<double>())); }); } },
+    // Task 27: rolling and editing a song form. A field a case leaves out is null; where the web throws the output is { threw: true }.
+    { "resolveTemplate", [](const json& in) { const Json o = ordered(in); return thrown([&] { return resolveTemplate(argument(o, "template"), argument(o, "style"), argument(o, "tags")); }); } },
+    { "rollForm", [](const json& in) { const Json o = ordered(in); return thrown([&] { return rollForm(o); }); } },
+    { "limits", [](const json& in) { const Json o = ordered(in); return thrown([&] { return limits(argument(o, "form"), argument(o, "index")); }); } },
+    { "editPart", [](const json& in) { const Json o = ordered(in); return thrown([&] { return editPart(argument(o, "form"), argument(o, "index"), patchOf(argument(o, "patch"))); }); } },
+    { "setLocked", [](const json& in) { const Json o = ordered(in); return thrown([&] { return setLocked(argument(o, "form"), argument(o, "index"), undefinedOf(o.at("locked"))); }); } },
+    { "addPart", [](const json& in) { const Json o = ordered(in); return thrown([&] { return addPart(argument(o, "form")); }); } },
+    { "copyPart", [](const json& in) { const Json o = ordered(in); return thrown([&] { return copyPart(argument(o, "form"), argument(o, "index")); }); } },
+    { "deletePart", [](const json& in) { const Json o = ordered(in); return thrown([&] { return deletePart(argument(o, "form"), argument(o, "index")); }); } },
+    { "movePart", [](const json& in) { const Json o = ordered(in); return thrown([&] { return movePart(argument(o, "form"), argument(o, "index"), argument(o, "dir")); }); } },
 };
 
 } // namespace
@@ -162,33 +184,67 @@ const std::map<std::string, std::function<json(const json&)>> FUNCTIONS {
 int main(int argc, char** argv) {
     if (argc < 2) { std::printf("usage: btg_logic_tests <logic.json>\n"); return 2; }
     std::ifstream file(argv[1], std::ios::binary);
-    if (!file) { std::printf("cannot open %s\n", argv[1]); return 2; }
-    const json cases = json::parse(file, nullptr, false);
-    if (cases.is_discarded()) { std::printf("%s is not valid JSON (cut off?): nothing was checked\n", argv[1]); return 1; }
-    if (!cases.is_array() || cases.empty()) { std::printf("%s has no case: nothing was checked\n", argv[1]); return 1; } // a gate must not pass on nothing
+    if (!file) { std::printf("cannot open %s: the manifest is missing, nothing was checked\n", argv[1]); return 1; }
+    // logic.json is the manifest { total, chunks: [{ file, count }] }; the cases are in the chunk files next to it, read one at a time
+    const json manifest = json::parse(file, nullptr, false);
+    if (manifest.is_discarded()) { std::printf("%s is not valid JSON (cut off?): nothing was checked\n", argv[1]); return 1; }
+    const auto count = [](const json& v) { return v.is_number_unsigned() ? v.get<size_t>() : static_cast<size_t>(-1); };
+    bool wellFormed = manifest.is_object() && manifest.contains("total") && count(manifest.at("total")) != static_cast<size_t>(-1)
+                      && manifest.contains("chunks") && manifest.at("chunks").is_array() && !manifest.at("chunks").empty();
+    size_t listed = 0;
+    if (wellFormed)
+        for (const json& chunk : manifest.at("chunks")) {
+            wellFormed = wellFormed && chunk.is_object() && chunk.contains("file") && chunk.at("file").is_string() && chunk.contains("count") && count(chunk.at("count")) != static_cast<size_t>(-1);
+            if (wellFormed) listed += count(chunk.at("count"));
+        }
+    if (!wellFormed) { std::printf("%s is no manifest { total, chunks: [{ file, count }] }: nothing was checked\n", argv[1]); return 1; }
+    std::set<std::string> named; // a chunk is a plain file name in the manifest's folder, and each is named once (a name twice would hide a chunk that is missing)
+    for (const json& chunk : manifest.at("chunks")) {
+        const std::string name = chunk.at("file").get<std::string>();
+        const std::filesystem::path path(name);
+        if (name.empty() || name == "." || name == ".." || path.filename() != path) { std::printf("%s names the chunk \"%s\": not a plain file name in its folder\n", argv[1], name.c_str()); return 1; }
+        if (!named.insert(name).second) { std::printf("%s names the chunk %s twice\n", argv[1], name.c_str()); return 1; }
+    }
+    if (listed != count(manifest.at("total"))) { std::printf("%s lists %zu cases in its chunks, its total is %zu\n", argv[1], listed, count(manifest.at("total"))); return 1; }
+    if (listed == 0) { std::printf("%s has no case: nothing was checked\n", argv[1]); return 1; } // a gate must not pass on nothing
+    const std::filesystem::path directory = std::filesystem::path(argv[1]).parent_path();
     long long identical = 0, close = 0, different = 0, closeString = 0;
     std::map<std::string, int> seen; // cases per function in the file
-    for (size_t i = 0; i < cases.size(); ++i) {
-        try {
-            const json& c = cases[i];
-            ++seen[c.at("fn").get<std::string>()];
-            const auto fn = FUNCTIONS.find(c.at("fn").get<std::string>());
-            btg::test::Compare compare;
-            json got;
-            if (fn == FUNCTIONS.end()) compare.fail("fn");
-            else { got = fn->second(c.at("in")); compare.value("out", c.at("out"), got); }
-            if (compare.result == btg::test::Match::identical) { ++identical; continue; }
-            if (compare.result == btg::test::Match::close && c.at("fn") == "renderString") { // the ruled exception (above): passes, counted
-                ++closeString;
-                std::printf("close (renderString, ruled): #%zu %s by %.3g\n", i, compare.field.c_str(), compare.delta);
-                continue;
-            }
-            if (compare.result == btg::test::Match::close) { ++close; std::printf("close: %s #%zu %s by %.3g\n", c.at("fn").get<std::string>().c_str(), i, compare.field.c_str(), compare.delta); continue; }
-            if (++different <= 20) std::printf("different: %s #%zu %s: in %s, want %s, got %s\n", c.at("fn").get<std::string>().c_str(), i, compare.field.c_str(),
-                                               c.at("in").dump().c_str(), c.at("out").dump().c_str(), got.dump().c_str());
-        } catch (const std::exception& error) { // a case that is no case, or a function that throws what the web's does not
-            if (++different <= 20) std::printf("different: #%zu threw: %s\n", i, error.what());
+    size_t read = 0;                 // cases read so far: the number of the next case
+    for (const json& chunk : manifest.at("chunks")) {
+        const std::string name = chunk.at("file").get<std::string>();
+        std::ifstream chunkFile(directory / name, std::ios::binary);
+        if (!chunkFile) { std::printf("chunk %s of %s is missing: the check is incomplete\n", name.c_str(), argv[1]); return 1; }
+        const json cases = json::parse(chunkFile, nullptr, false);
+        if (cases.is_discarded()) { std::printf("chunk %s is not valid JSON (cut off?): the check is incomplete\n", name.c_str()); return 1; }
+        if (!cases.is_array() || cases.size() != count(chunk.at("count"))) {
+            std::printf("chunk %s holds %zu cases, the manifest says %zu: the check is incomplete\n", name.c_str(), cases.is_array() ? cases.size() : size_t { 0 }, count(chunk.at("count")));
+            return 1;
         }
+        for (size_t n = 0; n < cases.size(); ++n) {
+            const size_t i = read + n; // the number of the case in the whole reference
+            try {
+                const json& c = cases[n];
+                ++seen[c.at("fn").get<std::string>()];
+                const auto fn = FUNCTIONS.find(c.at("fn").get<std::string>());
+                btg::test::Compare compare;
+                json got;
+                if (fn == FUNCTIONS.end()) compare.fail("fn");
+                else { got = fn->second(c.at("in")); compare.value("out", c.at("out"), got); }
+                if (compare.result == btg::test::Match::identical) { ++identical; continue; }
+                if (compare.result == btg::test::Match::close && c.at("fn") == "renderString") { // the ruled exception (above): passes, counted
+                    ++closeString;
+                    std::printf("close (renderString, ruled): #%zu %s by %.3g\n", i, compare.field.c_str(), compare.delta);
+                    continue;
+                }
+                if (compare.result == btg::test::Match::close) { ++close; std::printf("close: %s #%zu %s by %.3g\n", c.at("fn").get<std::string>().c_str(), i, compare.field.c_str(), compare.delta); continue; }
+                if (++different <= 20) std::printf("different: %s #%zu %s: in %s, want %s, got %s\n", c.at("fn").get<std::string>().c_str(), i, compare.field.c_str(),
+                                                   c.at("in").dump().c_str(), c.at("out").dump().c_str(), got.dump().c_str());
+            } catch (const std::exception& error) { // a case that is no case, or a function that throws what the web's does not
+                if (++different <= 20) std::printf("different: #%zu threw: %s\n", i, error.what());
+            }
+        }
+        read += cases.size();
     }
     // The reader of track.cpp takes 64 levels of nesting (MAX_DEPTH) and counts deeper text as `null`; the web's validateTrack answers on such text,
     // so no case of the file can hold it (the file has one at exactly 64): here the answer must be the one for `null`, and the program fails if not.
@@ -220,12 +276,34 @@ int main(int argc, char** argv) {
         if (!throws([&] { styleChordColor("blues", seed, true); })) { std::printf("FAIL: styleChordColor takes %s as a seed\n", seed.dump().c_str()); ++seedWrong; }
     }
     std::printf("seed: %d of 10 checks wrong\n", seedWrong);
+    // Task 27: where the web coerces a value (a text as an index or as `bars`, a number joined to a text) or indexes what is no list, the core throws, so these are no cases of the file either.
+    // (form_internal.h names each of them; the web: "1" is the second part, "8" + 8 is "88", Math.round("4") is 4, "abc"[0] is "a".)
+    int formWrong = 0;
+    {
+        const Json one = Json::parse(R"({"sections":[{"type":"verse","bars":8}]})"), textBars = Json::parse(R"({"sections":[{"type":"verse","bars":"8"}]})"), textList = Json::parse(R"({"sections":"abc"})");
+        const std::vector<std::pair<const char*, std::function<void()>>> mustThrow {
+            { "limits: a text as index", [&] { limits(one, Json("0")); } }, { "limits: null as index", [&] { limits(one, Json()); } },
+            { "limits: a text as bars", [&] { limits(textBars, Json(0)); } }, { "limits: a text as the list of parts", [&] { limits(textList, Json(0)); } },
+            { "editPart: a text as patch", [&] { editPart(one, Json(0), Json("x")); } }, { "editPart: a text as bars", [&] { editPart(one, Json(0), Json::parse(R"({"bars":"4"})")); } },
+            { "editPart: true as bars", [&] { editPart(one, Json(0), Json::parse(R"({"bars":true})")); } }, { "editPart: a list as bars", [&] { editPart(one, Json(0), Json::parse(R"({"bars":[4]})")); } },
+            { "editPart: a part with a text as bars", [&] { editPart(textBars, Json(0), Json::parse(R"({"bars":4})")); } },
+            { "setLocked: a text as index", [&] { setLocked(one, Json("0"), Json(true)); } }, { "copyPart: a text as index", [&] { copyPart(one, Json("0")); } },
+            { "deletePart: null as index", [&] { deletePart(one, Json()); } }, { "movePart: a text as dir", [&] { movePart(one, Json(0), Json("1")); } },
+            { "movePart: a text as index", [&] { movePart(one, Json("0"), Json(1)); } }, { "addPart: a text as the list of parts", [&] { addPart(textList); } },
+        };
+        for (const auto& [name, call] : mustThrow) {
+            bool threw = false;
+            try { call(); } catch (const std::invalid_argument&) { threw = true; }
+            if (!threw) { std::printf("FAIL: %s does not throw\n", name); ++formWrong; }
+        }
+        std::printf("form: %d of %zu checks wrong\n", formWrong, mustThrow.size());
+    }
     int untested = 0; // a function of the table that the file brings no case for was not checked
     for (const auto& entry : FUNCTIONS) if (!seen.count(entry.first)) { std::printf("no case for %s in %s\n", entry.first.c_str(), argv[1]); ++untested; }
-    std::printf("logic: functions %zu, cases %zu, identical %lld, close %lld, different %lld\n", FUNCTIONS.size(), cases.size(), identical, close, different);
+    std::printf("logic: functions %zu, cases %zu, identical %lld, close %lld, different %lld\n", FUNCTIONS.size(), read, identical, close, different);
     std::printf("renderString: %lld of %d cases close, passed by the ruled exception (a C runtime function's last bit against V8's)\n", closeString, seen["renderString"]);
     // A close is a difference in the last bits (possibly another platform's math library): it fails too. An exception has to be ruled
     // by the owner and named here (function and field, from the line above), not passed.
     if (close) std::printf("FAIL: %lld case(s) are only close, not bit for bit: a difference in the last bits, possibly another platform's math library; ruled exceptions are named in this test\n", close);
-    return different || untested || close || deepWrong || seedWrong ? 1 : 0;
+    return different || untested || close || deepWrong || seedWrong || formWrong ? 1 : 0;
 }

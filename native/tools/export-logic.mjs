@@ -1,7 +1,9 @@
 // Writes the reference of the logic test (native/core/tests/test_logic.cpp) from the web app in the working tree (src/, read only):
-//   node native/tools/export-logic.mjs <outDir>   -> <outDir>/logic.json, a list of { fn, in, out }
+//   node native/tools/export-logic.mjs <outDir>   -> <outDir>/logic-001.json, logic-002.json, ...: lists of { fn, in, out }, and
+//                                                    <outDir>/logic.json: the manifest { total, chunks: [{ file, count }] } that names them in order
 // One add() per function; later tasks append their functions here and in test_logic.cpp.
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -542,6 +544,316 @@ add('beatsUntilChange', attempt(({ track, songSec }) => beatsUntilChange(track, 
     { bars: BARSETS[8], length: 4, bpm: 100 }, { bars: BARSETS[9], length: 2, bpm: 100 }, { bars: BARSETS[0], bpm: 100 }, { bars: BARSETS[0], length: null, bpm: 100 },
     ...[0.5, 1, 1.5, 2.5, 4.5, 5].map((length) => ({ bars: BARSETS[0], length, bpm: 100 })), { bars: [], length: 0, bpm: 100 }].flatMap((track) => [0, 3.3, 5].map((songSec) => ({ track, songSec })))]);
 
+// Task 27: rolling and editing a song form (form-roll.js, form-ui.js). What a case holds is JSON: the web is given the value of the text (roundtrip), so a field that is
+// `undefined` is missing. Where `undefined` is the point (editPart's reset of a field, setLocked's value) the case says { $undefined: true } and the web gets the real thing.
+// A function that throws in the web has the output { threw: true }.
+const { rollForm, resolveTemplate, TEMPLATE_IDS, STYLE_TEMPLATE, TARGET_SIZES } = await load('core/form-roll.js');
+const { limits, editPart, setLocked, addPart, copyPart, deletePart, movePart } = await load('ui/form-ui.js');
+const { PART_TYPES, TRANSITIONS } = await load('core/form-types.js');
+const roundtrip = (value) => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)));
+
+// rollForm. 1. The product: the five templates and auto, the nine styles and an unknown one, the seven target sizes, the structure at 0, 0.6 and 1, seeds 1 to 20; each a second
+// time with the first roll as `previous`, every third part (the offset follows the seed) locked.
+const roll = (args) => { const input = roundtrip(args); const out = rollForm(input); cases.push({ fn: 'rollForm', in: input, out }); return out; };
+const lockEvery = (form, step, offset) => ({ ...form, sections: form.sections.map((s, i) => ((i + offset) % step === 0 ? { ...s, locked: true } : s)) });
+const rollTwice = (args, seed) => { const first = roll(args); roll({ ...args, previous: lockEvery(first, 3, seed % 3) }); };
+const ROLL_TEMPLATES = ['auto', ...TEMPLATE_IDS];
+for (const template of ROLL_TEMPLATES) for (const style of [...Object.keys(STYLE_TEMPLATE), 'nope']) for (const targetBars of TARGET_SIZES) for (const structure of [0, 0.6, 1])
+  for (let seed = 1; seed <= 20; seed++) rollTwice({ template, style, targetBars, feel: { structure }, seed }, seed);
+// 2. The development tags, each alone and together (and one twice), on a thinner product: both styles that decide nothing (an unknown one, where the tag picks the template, and psych)
+const DEV_SETS = [['buildsSlowly'], ['fullFromStart'], ['withBreakouts'], ['buildsSlowly', 'fullFromStart'], ['buildsSlowly', 'withBreakouts'], ['fullFromStart', 'withBreakouts'],
+  ['buildsSlowly', 'fullFromStart', 'withBreakouts'], ['withBreakouts', 'withBreakouts', 'buildsSlowly']];
+for (const template of ROLL_TEMPLATES) for (const style of ['nope', 'psych']) for (const development of DEV_SETS) for (const targetBars of [24, 48, 96, 192]) for (const structure of [0.6, 1])
+  for (let seed = 1; seed <= 5; seed++) rollTwice({ template, style, targetBars, feel: { structure }, seed, tags: { development } }, seed);
+// 3. What a branch needs that the product does not reach: arguments of every kind (each field alone, the others as BASE), and a previous form of every kind
+const ROLL_BASE = { template: 'pop', style: 'funk', targetBars: 48, seed: 3 };
+[null, 0, 'x', true, [], {}, [ROLL_BASE], { template: 'pop', targetBars: 96 }].forEach(roll);
+const rollWith = (fields, seeds = [3]) => seeds.forEach((seed) => roll({ ...ROLL_BASE, seed, ...fields }));
+[undefined, null, 'auto', 'nope', '', 5, true, [], {}, ['pop'], 'Pop', 'toString', 'jam', 'blues'].forEach((template) => rollWith({ template }, [1, 2, 3]));
+[undefined, null, 5, '', 'nope', 'toString', '__proto__', 'constructor', 'hasOwnProperty', ['funk'], {}, true, ...Object.keys(STYLE_TEMPLATE)].forEach((style) => rollWith({ template: 'auto', style }, [1, 2]));
+[undefined, null, 'x', '48', true, [], {}, 0, -5, 10, 24, 28, 30, 40, 48.5, 80, 112, 144, 160, 1000, 1e308, -1e308, 5e-324, 24.0000001].forEach((targetBars) =>
+  ['auto', 'pop', 'blues'].forEach((template) => rollWith({ template, targetBars }, [1, 2])));
+[undefined, null, 0, 'x', true, [], [0.5], {}, { structure: -1 }, { structure: 2 }, { structure: 0.3 }, { structure: 1e308 }, { structure: '0.8' }, { structure: null }, { structure: true }, { dynamics: 1.3 },
+  { dynamics: 5 }, { dynamics: -3 }, { pauses: 0.1, randomness: 0.9 }, { structure: 0.45, dynamics: 0.2, pauses: 1, randomness: 0 }, { structure: 0.3, extra: 1 }, { structure: [0.5] }].forEach((feel) =>
+  ['pop', 'rock', 'blues'].forEach((template) => rollWith({ template, feel }, [1, 2, 3, 4])));
+[undefined, null, 0, 1, -1, 1.5, 0.5, -0.5, 2 ** 31, 2 ** 32, 2 ** 32 + 7, 2 ** 32 - 1, 4294967296.5, 2 ** 53, -(2 ** 53), 1e300, -1e300, 1e308, '5', true, [], [5], {}, '', 'x'].forEach((seed) =>
+  ['auto', 'rock'].forEach((template) => roll({ ...ROLL_BASE, template, targetBars: 96, seed })));
+[undefined, null, 5, 'x', [], {}, { development: null }, { development: 'buildsSlowly' }, { development: {} }, { development: [] }, { development: [5, null, 'x', ['buildsSlowly'], {}, true] }, { development: ['buildsSlowly', 5] },
+  { development: ['toString', 'constructor', '__proto__', 'hasOwnProperty'] }, { development: ['buildsSlowly', 'buildsSlowly'] }, { development: ['fullFromStart', 'buildsSlowly'] }, { development: ['buildsSlowly'], mood: ['x'] }].forEach((tags) =>
+  ['auto', 'pop'].forEach((template) => ['nope', 'funk'].forEach((style) => rollWith({ template, style, tags }, [1, 2]))));
+// every single part locked, the last, the first and the last, two next to each other, every second, all, none: of forms of every template, with the same template and another one
+for (const [t, template] of ['jam', 'pop', 'buildDrop', 'blues', 'rock'].entries()) for (const targetBars of [32, 96]) for (let seed = 1; seed <= 6; seed++) {
+  const args = { template, targetBars, seed, feel: { structure: 0.6 } };
+  const first = roll(args);
+  const n = first.sections.length, all = Array.from({ length: n }, (_, i) => i);
+  const patterns = [...all.slice(0, 12).map((i) => [i]), [n - 1], [0, n - 1], [1, 2], all, all.filter((i) => i % 2), [], [n - 2, n - 1]];
+  for (const locks of patterns) {
+    const previous = { ...first, sections: first.sections.map((s, i) => (locks.includes(i) ? { ...s, locked: true } : s)) };
+    for (const other of [template, ROLL_TEMPLATES[(t + 2) % 6]]) roll({ ...args, template: other, previous });
+  }
+}
+const locked = (type, bars, extra) => ({ type, bars, locked: true, ...extra });
+const PREVIOUS = [
+  { sections: Array.from({ length: 64 }, () => locked('verse', 8)) }, // 64 locked parts, 512 bars
+  { sections: Array.from({ length: 64 }, () => locked('verse', 64)) }, // each valid, together 4096 bars
+  { sections: Array.from({ length: 70 }, () => locked('verse', 4)) }, // beyond the parts: the web reads 64 of them
+  { sections: Array.from({ length: 9 }, () => locked('chorus', 64)) },
+  { sections: [locked('outro', 8), locked('intro', 4), locked('bridge', 4), locked('chorus', 8)] },
+  { sections: [locked('intro', 4)] }, { sections: [locked('outro', 4)] }, { sections: [locked('bridge', 8)] }, { sections: [locked('break', 8), locked('build', 4)] },
+  { sections: [locked('verse', 8, { level: -3, density: 0.5, transition: 'roll', crash: true, junk: 1 }), locked('chorus', 8, { level: null, density: null, transition: null })], feel: { structure: 0.1 }, template: 'blues', auto: true },
+  { sections: [locked('nope', 8), locked('verse', 0), locked('verse', 65), locked('verse', 2.5), locked('verse', 8, { level: 5 }), locked('verse', 8, { transition: 'x' }), locked('verse', 8, { crash: 1 }),
+    locked('verse', 8, { density: -2 }), locked('verse', 8, { locked: 'yes' }), { type: 'verse', bars: 8, locked: 'true' }, { type: 'verse', bars: 8, locked: 1 }, { type: 'verse', bars: 8 }, locked('chorus', 8)] },
+  { sections: [null, 5, 'x', [], { locked: true }, locked('verse', 8)] }, { sections: 'x' }, { sections: {} }, { sections: null }, [], 'x', 5, true, {}, null,
+  // one part longer than a small target allows (nothing is left to take away), two bridges (a guard rail the roll cannot mend), parts so short that the draw falls far under the target
+  { sections: [locked('verse', 64)] }, { sections: [locked('chorus', 64)] }, { sections: [locked('verse', 32)] },
+  { sections: [locked('verse', 8), locked('chorus', 8), locked('bridge', 4), locked('chorus', 8), locked('bridge', 4), locked('chorus', 8)] },
+  { sections: [locked('verse', 1)] }, { sections: [locked('verse', 4)] }, { sections: [locked('verse', 2), locked('chorus', 2)] }, { sections: [locked('intro', 2), locked('verse', 4), locked('chorus', 4)] },
+];
+for (const previous of PREVIOUS) for (const template of [...TEMPLATE_IDS]) for (const targetBars of [24, 96, 192]) for (const feel of [undefined, { structure: 0 }]) rollWith({ template, targetBars, previous, feel }, [1, 2]);
+// previous forms of random parts, locked or not (a small generator of its own: the cases must not change from run to run): the draw falls under the target or far above it, and the fit has to grow parts
+let lcg = 12345;
+const random = () => { lcg = (Math.imul(lcg, 1664525) + 1013904223) >>> 0; return lcg / 4294967296; };
+const choose = (list) => list[Math.floor(random() * list.length)];
+for (let i = 0; i < 2000; i++) {
+  const sections = Array.from({ length: 1 + Math.floor(random() * 10) }, () => ({ type: choose(PART_TYPES), bars: choose([1, 2, 3, 4, 8, 12, 16, 32, 64]), locked: random() < 0.75 }));
+  roll({ template: choose(TEMPLATE_IDS), targetBars: choose(TARGET_SIZES), seed: 1 + Math.floor(random() * 50), feel: { structure: choose([0, 0.3, 0.6, 1]) }, previous: { sections } });
+}
+
+// Inputs that make a branch of form-roll.js matter, which random forms reach rarely or not at all. They are found by probes: copies of form-roll.js outside src/ (written to a temporary
+// directory), one that counts how often the type search of assignTypes runs into its budget, and for each other branch one without it. The first inputs of a fixed stream (or list)
+// of candidates on which the copy without the branch answers otherwise than the real function are kept: a core without the branch fails on them. The export fails if a family finds too few.
+// The branches: the cut of a previous form to 64 parts, the bridge, the fit and the unit growth at 64 parts, the `ok` of the score, the filler of 8 bars, the growth of a main part.
+const probeDirectory = mkdtempSync(join(tmpdir(), 'btg-probe-'));
+const probeSource = readFileSync(join(src, 'core/form-roll.js'), 'utf8').replace(/from '(\.\/[^']+)'/g, (match, path) => `from '${pathToFileURL(join(src, 'core', path)).href}'`);
+const probeVariant = async (name, swaps) => {
+  let text = probeSource;
+  for (const [from, to] of swaps) {
+    if (!text.includes(from)) throw new Error(`form-roll.js no longer has "${from}": the probe "${name}" cannot be made`);
+    text = text.replace(from, to);
+  }
+  writeFileSync(join(probeDirectory, `${name}.mjs`), text);
+  return import(pathToFileURL(join(probeDirectory, `${name}.mjs`)).href);
+};
+globalThis.btgBudgetOverruns = 0;
+const counting = await probeVariant('counting', [['if (++nodes > SEARCH_BUDGET) return false;', 'if (++nodes > SEARCH_BUDGET) { globalThis.btgBudgetOverruns++; return false; }']]);
+const WITHOUT = {
+  cut: [['.slice(0, FORM_LIMITS.parts)', '']],
+  bridgeParts: [['sections.length >= FORM_LIMITS.parts ||', '']],
+  rangeParts: [['diff > 0 && items.length < FORM_LIMITS.parts', 'diff > 0']],
+  unitParts: [['if (!unit || items.length >= FORM_LIMITS.parts) return;', 'if (!unit) return;']],
+  scoreOk: [[' + (ok ? 0 : 1) }', ' }']],
+  fillerOptions: [['lengthOptions([PHRASE, 2 * FILLER_BARS])', 'lengthOptions([PHRASE, FILLER_BARS])']],
+  mainFirst: [['const c = room.some(isMain) ? room.filter(isMain) : room;', 'const c = room;']],
+};
+const variants = {};
+for (const [name, swaps] of Object.entries(WITHOUT)) variants[name] = await probeVariant(name, swaps);
+rmSync(probeDirectory, { recursive: true, force: true });
+const stream = (seed) => { // a stream of its own for each family: the cases do not change from run to run
+  let state = seed;
+  const next = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+  return { next, choose: (list) => list[Math.floor(next() * list.length)] };
+};
+const TEMPLATE_NAMES = [...TEMPLATE_IDS];
+const find = (what, wanted, make, tries, hit) => {
+  const found = [];
+  let tried = 0;
+  for (; tried < tries && found.length < wanted; tried++) {
+    const args = make();
+    if (hit(roundtrip(args))) found.push(args);
+  }
+  console.log(`  ${found.length} inputs ${what}: ${tried} candidates tried`);
+  if (found.length < wanted) throw new Error(`only ${found.length} of ${wanted} inputs ${what} in ${tries} tries: form-roll.js has changed?`);
+  return found;
+};
+const findOverruns = (wanted, make, tries) => find('run the type search into its budget', wanted, make, tries, (args) => { const before = globalThis.btgBudgetOverruns; counting.rollForm(args); return globalThis.btgBudgetOverruns > before; });
+const findKills = (branch, wanted, make, tries) => find(`tell the roll without "${branch}" from the roll`, wanted, make, tries, (args) => JSON.stringify(variants[branch].rollForm(roundtrip(args))) !== JSON.stringify(rollForm(roundtrip(args))));
+{
+  // 1. up to 24 parts, about one in five locked: the type search of assignTypes ends at its budget of 3000 nodes (one roll of such an input ends it up to 60 times)
+  const { next, choose } = stream(424242);
+  const overruns = findOverruns(24, () => ({ template: choose(TEMPLATE_NAMES), targetBars: choose(TARGET_SIZES), seed: 1 + Math.floor(next() * 50), feel: { structure: choose([0, 0.3, 0.6, 1]) },
+    previous: { sections: Array.from({ length: 1 + Math.floor(next() * 24) }, () => ({ type: choose(PART_TYPES), bars: choose([1, 2, 3, 4, 8, 12, 16, 32, 64]), locked: next() < 0.2 })) } }), 40000);
+  if (new Set(overruns.map((a) => a.template)).size < 3 || new Set(overruns.map((a) => a.targetBars)).size < 3) throw new Error('the inputs of the search budget are of too few templates or targets');
+  overruns.forEach(roll);
+}
+{
+  // 2. the limits of 64 parts, in a previous form of 20 to 70 places, most of them locked, 1 to 4 bars: the fit meets exactly 64 parts with bars still to add (fitInRange, and
+  // fitAnyLength for a unit: blues), a bridge would be the 65th part, and a locked part stands beyond the 64th place (the cut of lockedParts)
+  const { next, choose } = stream(31337);
+  const make = (lengths, shares) => () => {
+    const mixed = next() < 0.5, lockedShare = choose(shares);
+    const sections = Array.from({ length: choose(lengths) }, (_, i) => ({ type: mixed ? choose(['intro', 'verse', 'build', 'chorus', 'break', 'outro']) : i % 2 ? 'chorus' : 'verse', bars: choose([1, 1, 2, 3, 4]), locked: next() < lockedShare }));
+    return { template: choose(TEMPLATE_NAMES), targetBars: choose([64, 96, 128, 192]), seed: 1 + Math.floor(next() * 50), feel: { structure: choose([0, 0.3, 0.6, 1]) }, previous: { sections } };
+  };
+  const nearly64 = make([20, 30, 40, 50, 55, 58, 60, 62, 63, 64], [0.5, 0.8, 0.95, 1]);
+  findKills('rangeParts', 3, nearly64, 40000).forEach(roll);
+  findKills('unitParts', 4, nearly64, 40000).forEach(roll);
+  // (verses and choruses of 1 or 2 bars, template pop or rock: the only ones with a bridge)
+  const bridgeForms = ['pop', 'rock'].flatMap((template) => [50, 52, 54, 56, 57, 58, 59, 60, 61, 62, 63, 64].flatMap((places) => [128, 192].flatMap((targetBars) =>
+    Array.from({ length: 6 }, (_, i) => i + 1).flatMap((seed) => [1, 2].map((bars) => ({ template, targetBars, seed, previous: { sections: Array.from({ length: places }, (_, i) => locked(i % 2 ? 'chorus' : 'verse', bars)) } }))))));
+  let candidate = 0;
+  findKills('bridgeParts', 3, () => bridgeForms[candidate++], bridgeForms.length).forEach(roll);
+  const cutForm = () => ({ template: choose(['pop', 'rock']), targetBars: choose([96, 128]), seed: 1 + Math.floor(next() * 50), feel: { structure: choose([0.6, 1]) },
+    previous: { sections: Array.from({ length: choose([65, 66, 70]) }, (_, i) => ({ type: i % 2 ? 'chorus' : 'verse', bars: choose([1, 1, 2]), locked: next() < choose([0.8, 0.9, 0.95]) })) } });
+  findKills('cut', 6, cutForm, 40000).forEach(roll);
+}
+{
+  // 3. one to three locked parts of a kind that does not fit where it stands (a bridge, an intro or an outro in the middle, a break), among free ones: the type search fails
+  // while the guard rails count no fault and the length is right
+  // (the shapes: places, and the locked parts of them as [place, type, bars]; every shape with the three templates, four targets, structure 0.6 and 1, seeds 1 to 50)
+  const SHAPES = [[4, [[1, 'chorus', 48], [3, 'bridge', 12]]], [6, [[2, 'intro', 24], [3, 'intro', 8], [5, 'bridge', 24]]], [10, [[1, 'intro', 48], [4, 'break', 8]]],
+    [13, [[0, 'chorus', 16], [1, 'verse', 4], [2, 'outro', 3], [5, 'break', 2]]], [6, [[5, 'outro', 1]]]];
+  const candidates = SHAPES.flatMap(([places, locks]) => ['buildDrop', 'rock', 'pop'].flatMap((template) => [32, 48, 64, 96].flatMap((targetBars) => [0.6, 1].flatMap((structure) =>
+    Array.from({ length: 50 }, (_, i) => ({ template, targetBars, seed: i + 1, feel: { structure },
+      previous: { sections: Array.from({ length: places }, (_, place) => { const lock = locks.find(([at]) => at === place); return lock ? { type: lock[1], bars: lock[2], locked: true } : { type: 'verse', bars: 8, locked: false }; }) } }))))));
+  let candidate = 0;
+  findKills('scoreOk', 5, () => candidates[candidate++], candidates.length).forEach(roll);
+}
+{
+  // 4. one locked outro of 1 bar behind four to nine places: the draw has fewer parts than there are places before it, so the places are filled with fillers of 8 bars, and the fit has bars to add
+  const candidates = [4, 5, 6, 7, 8, 9].flatMap((places) => ['buildDrop', 'rock', 'pop'].flatMap((template) => [32, 48, 64, 96, 128].flatMap((targetBars) => [0.6, 1].flatMap((structure) =>
+    Array.from({ length: 50 }, (_, i) => ({ template, targetBars, seed: i + 1, feel: { structure },
+      previous: { sections: Array.from({ length: places }, (_, place) => (place === places - 1 ? { type: 'outro', bars: 1, locked: true } : { type: 'verse', bars: 8, locked: false })) } }))))));
+  let candidate = 0;
+  findKills('fillerOptions', 3, () => candidates[candidate++], candidates.length).forEach(roll);
+}
+{
+  // 5. the fit has to grow parts, and has a main part (verse, chorus) and another one to choose from: one to four locked parts, any type, any length
+  const { next, choose } = stream(2468);
+  // (build & drop has the parts of every kind: the build and the break are no main parts)
+  findKills('mainFirst', 6, () => ({ template: 'buildDrop', targetBars: choose([64, 96, 128, 192]), seed: 1 + Math.floor(next() * 50), feel: { structure: choose([0, 0.3, 0.6]) },
+    previous: { sections: Array.from({ length: 1 + Math.floor(next() * 3) }, () => ({ type: choose(PART_TYPES), bars: choose([2, 3, 4, 6, 8, 12, 16, 24, 32]), locked: true })) } }), 20000).forEach(roll);
+}
+// The budget again, by hand: the input of the review (ten free parts before a locked part of 64 bars; the roll ends the search 63 times) and its family: n free parts, then a locked break or
+// build of 64 bars, rock and pop, targets 48, 96 and 192, seeds 1 to 5
+const FREE_TYPES = ['break', 'build', 'outro', 'outro', 'outro', 'build', 'intro', 'outro', 'bridge', 'break'];
+roll({ template: 'rock', targetBars: 96, seed: 18, feel: { structure: 1 }, previous: { sections: [...[4, 4, 32, 32, 32, 12, 16, 12, 16, 4].map((bars, i) => ({ type: FREE_TYPES[i], bars })), locked('break', 64)] } });
+for (const n of [6, 8, 10, 12]) for (const last of ['break', 'build']) for (const template of ['rock', 'pop']) for (const targetBars of [48, 96, 192]) for (let seed = 1; seed <= 5; seed++)
+  roll({ template, targetBars, seed, feel: { structure: 1 }, previous: { sections: [...Array.from({ length: n }, (_, i) => ({ type: FREE_TYPES[i % 10], bars: 4 })), locked(last, 64)] } });
+// The limits of 64 parts in rolling: a previous of 66 locked parts of 1 to 3 bars, the last two free (the web reads 64 of the parts; the roll appends behind the 64th); each template at 192 bars
+// with 64 locked parts of 1 bar (the draw is appended behind the last lock and only the final cut to 64 parts removes it), the parts all verses and alternating verse and chorus
+roll({ template: 'rock', targetBars: 128, seed: 18, feel: { structure: 0.6 }, previous: { sections: Array.from({ length: 66 }, (_, i) => ({ type: i % 2 ? 'chorus' : 'verse', bars: 1 + (i % 3), locked: i < 64 })) } });
+for (const template of TEMPLATE_IDS) for (let seed = 1; seed <= 3; seed++) for (const alternating of [false, true])
+  roll({ template, targetBars: 192, seed, previous: { sections: Array.from({ length: 64 }, (_, i) => locked(alternating && i % 2 ? 'chorus' : 'verse', 1)) } });
+// blues: locked parts that leave the total 1 to 11 bars from a multiple of its unit of 12 (the total is the target within 5 or 6 bars)
+for (const targetBars of TARGET_SIZES) for (const at of [0, 1, 2]) for (let bars = 1; bars <= 11; bars++) for (let seed = 1; seed <= 3; seed++)
+  roll({ template: 'blues', targetBars, seed, previous: { sections: Array.from({ length: at + 1 }, (_, i) => (i === at ? locked('verse', bars) : { type: 'verse', bars: 12 })) } });
+
+// resolveTemplate: the template (or auto), the style and the tags, each of every kind
+const RT_STYLES = [undefined, null, ...Object.keys(STYLE_TEMPLATE), 'nope', '', 5, 'toString', '__proto__', 'constructor', 'hasOwnProperty', ['funk'], {}, true];
+const RT_TAGS = [undefined, null, 5, 'x', [], {}, { development: ['buildsSlowly'] }, { development: ['fullFromStart'] }, { development: ['buildsSlowly', 'fullFromStart'] }, { development: ['withBreakouts'] },
+  { development: ['withBreakouts', 'buildsSlowly'] }, { development: 'buildsSlowly' }, { development: [5, 'buildsSlowly'] }, { development: null }, { development: {} }];
+for (const template of [undefined, null, 'auto', ...TEMPLATE_IDS, 'nope', '', 5, true, [], {}, ['pop'], 'Pop', 'AUTO', 'toString', '__proto__']) for (const style of RT_STYLES) for (const tags of RT_TAGS) {
+  const input = roundtrip({ template, style, tags });
+  cases.push({ fn: 'resolveTemplate', in: input, out: resolveTemplate(input.template, input.style, input.tags) });
+}
+
+// The editing. A case is { form, index, patch | locked | dir }; the web gets the form as JSON and the patch and `locked` as they are (with their `undefined`s)
+const CALLS = { limits: ({ form, index }) => limits(form, index), editPart: ({ form, index, patch }) => editPart(form, index, patch), setLocked: ({ form, index, locked }) => setLocked(form, index, locked),
+  addPart: ({ form }) => addPart(form), copyPart: ({ form, index }) => copyPart(form, index), deletePart: ({ form, index }) => deletePart(form, index), movePart: ({ form, index, dir }) => movePart(form, index, dir) };
+const edit = (fn, input) => {
+  const encoded = { ...input };
+  if (input.patch) encoded.patch = Object.fromEntries(Object.entries(input.patch).map(([k, v]) => [k, v === undefined ? { $undefined: true } : v]));
+  if ('locked' in input && input.locked === undefined) encoded.locked = { $undefined: true };
+  let out;
+  try { out = CALLS[fn]({ ...input, form: roundtrip(input.form) }); } catch { out = { threw: true }; }
+  cases.push({ fn, in: encoded, out });
+};
+// 30 rolled forms, a fixed choice over the templates, styles, sizes and seeds; the odd ones with every third part locked
+const EDIT_FORMS = Array.from({ length: 30 }, (_, i) => {
+  const form = rollForm({ template: ROLL_TEMPLATES[i % 6], style: Object.keys(STYLE_TEMPLATE)[i % 9], targetBars: TARGET_SIZES[(i * 3) % 7], seed: 1 + i * 7, feel: { structure: [0.6, 1, 0.3][i % 3] } });
+  return i % 2 ? lockEvery(form, 3, i % 3) : form;
+});
+const patchesFor = (part) => [
+  ...[...PART_TYPES, 'x', null, undefined, 5].map((type) => ({ type })),
+  ...[1, 2, part.bars - 1, part.bars + 1, 64, 65, 0, -1, 2.5, 0.4, 1e9, null, undefined].map((bars) => ({ bars })),
+  ...[-24, -25, -3.3, 0, 1, null, 'x', undefined].map((level) => ({ level })), ...[-1, -2, 0.5, 1, 2, null, '0.5', undefined].map((density) => ({ density })),
+  ...[...TRANSITIONS, 'x', null, undefined].map((transition) => ({ transition })), ...[true, false, 'x', null, undefined].map((crash) => ({ crash })),
+  {}, { locked: true }, { foo: 1 }, { type: 'chorus', bars: 12, level: -2, density: 0.3, transition: 'roll', crash: true }, { level: undefined, density: undefined }, { type: 'bridge', transition: undefined },
+  { bars: 7, extra: 1 }, { type: 'verse', bars: null }, { bars: 4, level: 'x' },
+];
+const OUTSIDE = (n) => [-1, n, n + 1, 1.5, 1e9, -0.5]; // an index that is no part
+for (const form of EDIT_FORMS) {
+  const n = form.sections.length;
+  form.sections.forEach((part, index) => {
+    for (const patch of patchesFor(part)) edit('editPart', { form, index, patch });
+    for (const locked of [true, false, undefined, null, 1, 'x']) edit('setLocked', { form, index, locked });
+    for (const dir of [-1, 1, 0, 2, -2, 1.5, 1e9]) edit('movePart', { form, index, dir });
+    for (const fn of ['copyPart', 'deletePart', 'limits']) edit(fn, { form, index });
+  });
+  edit('addPart', { form });
+  for (const index of OUTSIDE(n)) {
+    for (const fn of ['copyPart', 'deletePart', 'limits']) edit(fn, { form, index });
+    edit('setLocked', { form, index, locked: true }); edit('editPart', { form, index, patch: { type: 'chorus' } });
+    for (const dir of [1, -1]) edit('movePart', { form, index, dir });
+  }
+}
+// the limits: 64 parts, a part of 64 bars, 512 bars, the room for one more part of 8 bars to the bar, the first and the last part, the only part
+const sec = (type, bars, extra) => ({ type, bars, ...extra });
+const formOf = (sections) => ({ template: 'pop', auto: false, feel: { structure: 0.6, dynamics: 0.6, pauses: 0.4, randomness: 0.5 }, sections });
+const times = (n, make) => Array.from({ length: n }, (_, i) => make(i));
+const LIMIT_FORMS = [
+  formOf(times(64, (i) => sec(i % 2 ? 'chorus' : 'verse', 8, i % 3 === 0 ? { locked: true } : {}))), // 64 parts, 512 bars
+  formOf(times(64, () => sec('verse', 1))), // 64 parts, 64 bars
+  formOf([...times(63, () => sec('verse', 1)), sec('chorus', 64)]), // 64 parts, 127 bars, one of 64
+  formOf([...times(62, () => sec('verse', 8)), sec('chorus', 7)]), // 63 parts, 503 bars: room for 8 (511)
+  formOf([...times(62, () => sec('verse', 8)), sec('chorus', 8)]), // 504 bars: room for exactly 8
+  formOf([...times(62, () => sec('verse', 8)), sec('chorus', 9)]), // 505 bars: none
+  formOf(times(8, () => sec('verse', 64))), // 512 bars in 8 parts of 64
+  formOf([...times(7, () => sec('verse', 64)), sec('outro', 63)]), // 511 bars
+  formOf([...times(7, () => sec('verse', 64)), sec('outro', 62)]), // 510 bars
+  formOf([sec('verse', 64)]), formOf([sec('verse', 1)]), formOf([sec('verse', 8, { locked: true })]), formOf([sec('intro', 2), sec('outro', 2)]),
+  formOf(times(65, () => sec('verse', 1))), // beyond the parts of a valid form
+];
+const LIMIT_PATCHES = (part) => [{ bars: part.bars + 1 }, { bars: part.bars - 1 }, { bars: 64 }, { bars: 1 }, { type: 'chorus' }, { level: -5 }, { level: undefined }, {}];
+for (const form of LIMIT_FORMS) {
+  const n = form.sections.length;
+  form.sections.forEach((part, index) => {
+    for (const patch of LIMIT_PATCHES(part)) edit('editPart', { form, index, patch });
+    for (const locked of [true, false]) edit('setLocked', { form, index, locked });
+    for (const dir of [-1, 1]) edit('movePart', { form, index, dir });
+    for (const fn of ['copyPart', 'deletePart', 'limits']) edit(fn, { form, index });
+  });
+  edit('addPart', { form });
+  for (const index of OUTSIDE(n)) for (const fn of ['copyPart', 'deletePart', 'limits']) edit(fn, { form, index });
+}
+// parts that are no parts, forms that are none: what the web does with them (a form without a list of parts throws)
+const ODD_FORMS = [
+  { sections: [{ type: 'verse' }] }, { sections: [{ type: 'verse', bars: 8 }, null, { type: 'chorus', bars: 8 }] }, { sections: [5, 'x', [], {}, 0, '', false] }, { sections: [{ type: 'verse', bars: 8 }], feel: { dynamics: 9 } },
+  { sections: [{ type: 'verse', bars: 8, level: 5 }] }, { sections: [{ type: 'nope', bars: 8 }] }, { sections: [{ type: 'verse', bars: 1.5 }] }, { sections: [{ type: 'verse', bars: null }] },
+  { sections: [{ type: 'verse', bars: 8 }], extra: 1, template: 'pop', auto: true, feel: null }, { sections: [{ type: 'verse', bars: 8 }] }, { sections: [] }, { sections: [{ type: 'verse', bars: 600 }] },
+  { sections: [{ type: 'verse', bars: 8, locked: 'yes' }, { type: 'chorus', bars: 8, locked: null }] }, { sections: [{ type: 'verse', bars: 8, level: -3, density: 0.2, transition: 'roll', crash: true, extra: 1 }] },
+  null, undefined, 0, 'x', true, [], {}, { sections: null }, { sections: undefined }, [{ type: 'verse', bars: 8 }],
+];
+for (const form of ODD_FORMS) for (const index of [0, 1, 2, 5, -1])
+  for (const input of [{ patch: { type: 'chorus' } }, { patch: { bars: 4 } }, { patch: { level: -3 } }, { patch: { transition: 'roll' } }, { patch: {} }, { patch: { level: undefined } }]) edit('editPart', { form, index, ...input });
+for (const form of ODD_FORMS) for (const index of [0, 1, 2, -1]) {
+  for (const fn of ['copyPart', 'deletePart', 'limits']) edit(fn, { form, index });
+  for (const locked of [true, undefined, null]) edit('setLocked', { form, index, locked });
+  for (const dir of [-1, 1, 0]) edit('movePart', { form, index, dir });
+}
+for (const form of ODD_FORMS) edit('addPart', { form });
+
+// The cases go to chunk files (logic-001.json, ...: each a JSON list of cases, a new one begun once the current passes CHUNK_BYTES), so that the
+// test never holds the whole reference; logic.json is the manifest: { total, chunks: [{ file, count }] } in the order of the cases.
+const CHUNK_BYTES = 16e6;
 mkdirSync(outDir, { recursive: true });
-writeFileSync(join(outDir, 'logic.json'), JSON.stringify(cases));
-console.log(`logic.json: ${cases.length} cases of ${new Set(cases.map((c) => c.fn)).size} functions`);
+for (const name of readdirSync(outDir)) if (/^logic(-\d+)?\.json$/.test(name)) rmSync(join(outDir, name)); // chunks of an earlier run
+const chunks = [];
+let pending = [], pendingBytes = 0;
+const flush = () => {
+  if (!pending.length) return;
+  const file = `logic-${String(chunks.length + 1).padStart(3, '0')}.json`;
+  writeFileSync(join(outDir, file), `[${pending.join(',')}]`);
+  chunks.push({ file, count: pending.length });
+  pending = [];
+  pendingBytes = 0;
+};
+for (const c of cases) {
+  const text = JSON.stringify(c);
+  pending.push(text);
+  pendingBytes += text.length + 1;
+  if (pendingBytes >= CHUNK_BYTES) flush();
+}
+flush();
+writeFileSync(join(outDir, 'logic.json'), JSON.stringify({ total: cases.length, chunks }));
+console.log(`logic.json: ${cases.length} cases of ${new Set(cases.map((c) => c.fn)).size} functions in ${chunks.length} chunks`);

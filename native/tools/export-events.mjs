@@ -38,9 +38,14 @@ function readKitPan() {
 // The data the core embeds (native/core/data): --data writes it there, --data-only <dir> writes it into <dir> and stops
 // (the check in native/core/CMakeLists.txt compares that copy with the checked-in files).
 // A table that src/ keeps to itself ("const NAME = [deepFreeze(]{...}" or "const NAME = [...]"): its literal, read out of the text like
-// KIT_PAN and evaluated.
-function readLiteral(file, name) {
+// KIT_PAN and evaluated. `helpers`: names of one-line "const NAME = ...;" functions of the same file that the literal calls.
+function readLiteral(file, name, helpers = []) {
   const text = readFileSync(join(repo, 'src', file), 'utf8');
+  const prelude = helpers.map((helper) => {
+    const start = text.indexOf(`const ${helper} = `);
+    if (start < 0) throw new Error(`${helper}: no "const ${helper} = ..." found in src/${file}`);
+    return text.slice(start, text.indexOf('\n', start));
+  }).join('\n');
   const head = `const ${name} = `;
   const at = text.indexOf(head);
   const found = at < 0 ? -1 : text.slice(at + head.length).search(/[[{]/);
@@ -52,7 +57,7 @@ function readLiteral(file, name) {
     if (text[end] === opening) depth++;
     else if (text[end] === closing && --depth === 0) break;
   }
-  return new Function(`return (${text.slice(open, end + 1)});`)();
+  return new Function(`${prelude}\nreturn (${text.slice(open, end + 1)});`)();
 }
 
 const dataOnly = isMain ? process.argv.indexOf('--data-only') : -1;
@@ -77,6 +82,7 @@ if (isMain && (process.argv.includes('--data') || dataOnly >= 0)) {
   const { CHORDS } = await load('core/chords.js');
   const { TAG_CATEGORIES } = await load('core/tags.js');
   const { PART_TYPES, TRANSITIONS, FORM_LIMITS, FEEL_DEFAULTS, DYNAMICS_MAX } = await load('core/form-types.js');
+  const { TEMPLATE_IDS, STYLE_TEMPLATE, TARGET_SIZES, DEV_FACTORS } = await load('core/form-roll.js');
   const { PROGRESSION_TEMPLATES } = await load('core/progressions.js');
   const { SCALES } = await load('core/music.js');
   const { STANDARD_TUNING, FRETS } = await load('core/fretboard.js');
@@ -88,7 +94,9 @@ if (isMain && (process.argv.includes('--data') || dataOnly >= 0)) {
     modes: Object.fromEntries(Object.entries(readLiteral('core/music.js', 'MODES')).map(([id, m]) => [id, { steps: m.steps, qualities: m.qualities, parentMajor: m.parentMajor, dominant: m.dominant }])),
     meters: Object.keys(METERS),
     tags: TAG_CATEGORIES,
-    form: { partTypes: PART_TYPES, transitions: TRANSITIONS, limits: FORM_LIMITS, feelDefaults: FEEL_DEFAULTS, dynamicsMax: DYNAMICS_MAX },
+    form: { partTypes: PART_TYPES, transitions: TRANSITIONS, limits: FORM_LIMITS, feelDefaults: FEEL_DEFAULTS, dynamicsMax: DYNAMICS_MAX,
+      // what rollForm reads (form-roll.js): the templates (not exported there: their literal, with the `slot` helper it calls), which style takes which, the sizes, the development factors
+      templateIds: TEMPLATE_IDS, templates: readLiteral('core/form-roll.js', 'TEMPLATES', ['slot']), styleTemplate: STYLE_TEMPLATE, targetSizes: TARGET_SIZES, devFactors: DEV_FACTORS },
     // what the harmony functions read (progressions.js, harmony.js, tags.js, fretboard.js, music.js SCALES)
     progressions: PROGRESSION_TEMPLATES,
     chordColors: { table: readLiteral('core/harmony.js', 'TABLE'), dominant: readLiteral('core/harmony.js', 'DOMINANT') },

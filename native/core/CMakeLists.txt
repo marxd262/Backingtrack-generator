@@ -73,6 +73,8 @@ add_library(btg_core STATIC
     src/sound_data.cpp
     src/track.cpp
     src/harmony.cpp
+    src/form_roll.cpp
+    src/form_edit.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/grooves_bytes.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/sound_bytes.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/music_bytes.cpp)

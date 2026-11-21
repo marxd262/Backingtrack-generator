@@ -35,7 +35,8 @@ Json chordOptions(const Json& key);
 // Throws std::invalid_argument for a quality the register does not have.
 Json chordName(const Json& chord);
 
-// What harmony.cpp takes from the helpers of track.cpp; each answers as the JavaScript's does.
+// What harmony.cpp and form_roll.cpp take from the helpers of track.cpp; each answers as the JavaScript's does.
+const Json& musicTable();                            // native/core/data/music.json, parsed once (the tables of the web app, written by export-events.mjs --data)
 int noteToPcOf(const Json& name);                    // music.js noteToPc (generator_internal.h has a lenient one of its own); throws std::invalid_argument for what is no note name
 bool isValidKeyValue(const Json& key);               // music.js isValidKey
 const char* const* spelledNames(const Json& key);    // music.js spelling: the twelve names of the key's spelling; throws like diatonicChords

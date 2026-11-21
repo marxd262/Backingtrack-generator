@@ -15,7 +15,13 @@
 
 #include "track_internal.h"
 
+#include <cstdint>
+
 namespace btg::detail {
+
+// rng.js createRng: `seed >>> 0`. A number of any value (a fraction, a negative one, beyond 2^32, not finite); null counts as 0. A seed that is a text, a boolean, a list or
+// an object throws std::invalid_argument (the web takes 5, 1, 5 of them): see the shortcut comment in harmony.cpp.
+uint32_t seedBase(const Json& seed);
 
 // progressions.js. Domain: a valid key, an integer seed (a number of any value works as `seed >>> 0` does: a fraction, a negative one, beyond 2^32; null or
 // missing is 0). Throws for a key that allowedChords throws for. A seed that is a text, a boolean, a list or an object throws (the web takes 5, 1, 5, ... of them).

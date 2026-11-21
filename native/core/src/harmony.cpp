@@ -74,7 +74,9 @@ double jsMax(double a, double b) { return std::isnan(a) || std::isnan(b) ? NAN :
 
 [[noreturn]] void thrown(const char* what) { throw std::invalid_argument(what); } // where the web app throws a TypeError or an Error
 
-// createRng(seed): the seed as an unsigned 32-bit integer (seed >>> 0); a missing seed or null counts as 0, as in the web app.
+} // namespace
+
+// createRng(seed): the seed as an unsigned 32-bit integer (seed >>> 0); a missing seed or null counts as 0, as in the web app (declared in harmony.h: form_roll.cpp reads it too).
 // shortcut: the coercions of JavaScript are not rebuilt for values no caller sends (a text, true or a list as seed: `>>> 0` makes 5, 1, 5 of them); they throw
 // std::invalid_argument instead of differing silently. Upgrade: when a track from a file with other types in `seed` is loaded (validateTrack does not check it).
 uint32_t seedBase(const Json& seed) {
@@ -85,6 +87,8 @@ uint32_t seedBase(const Json& seed) {
     const double m = jsMod(std::trunc(d), 4294967296.0);
     return static_cast<uint32_t>(m < 0 ? m + 4294967296.0 : m);
 }
+
+namespace {
 
 const ChordInfo* chordSpec(const std::string& quality) { // Object.hasOwn(CHORDS, quality): the key is the quality as a text
     const auto found = data().chords.find(quality);

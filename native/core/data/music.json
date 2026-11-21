@@ -608,7 +608,424 @@
       "pauses": 0.4,
       "randomness": 0.5
     },
-    "dynamicsMax": 1.3
+    "dynamicsMax": 1.3,
+    "templateIds": [
+      "jam",
+      "pop",
+      "buildDrop",
+      "blues",
+      "rock"
+    ],
+    "templates": {
+      "jam": {
+        "jam": true,
+        "head": [
+          {
+            "types": [
+              "intro"
+            ],
+            "bars": [
+              4,
+              8
+            ],
+            "p": 0.3
+          }
+        ],
+        "cycle": [
+          {
+            "types": [
+              "verse"
+            ],
+            "bars": [
+              8,
+              16
+            ],
+            "p": 1,
+            "repeat": [
+              1,
+              3
+            ]
+          },
+          {
+            "types": [
+              "chorus"
+            ],
+            "bars": [
+              8,
+              16
+            ],
+            "p": 0.6
+          },
+          {
+            "types": [
+              "break"
+            ],
+            "bars": [
+              4,
+              8
+            ],
+            "p": 0.12
+          }
+        ],
+        "tail": [
+          {
+            "types": [
+              "chorus"
+            ],
+            "bars": [
+              8,
+              16
+            ],
+            "p": 1
+          },
+          {
+            "types": [
+              "outro"
+            ],
+            "bars": [
+              4,
+              8
+            ],
+            "p": 0.35
+          }
+        ]
+      },
+      "pop": {
+        "bridge": 0.35,
+        "head": [
+          {
+            "types": [
+              "intro"
+            ],
+            "bars": [
+              4,
+              8
+            ],
+            "p": 0.65
+          }
+        ],
+        "cycle": [
+          {
+            "types": [
+              "verse"
+            ],
+            "bars": [
+              8,
+              16
+            ],
+            "p": 1
+          },
+          {
+            "types": [
+              "build"
+            ],
+            "bars": [
+              4
+            ],
+            "p": 0.35
+          },
+          {
+            "types": [
+              "chorus"
+            ],
+            "bars": [
+              8,
+              16
+            ],
+            "p": 1
+          },
+          {
+            "types": [
+              "break"
+            ],
+            "bars": [
+              4,
+              8
+            ],
+            "p": 0.2
+          }
+        ],
+        "tail": [
+          {
+            "types": [
+              "chorus"
+            ],
+            "bars": [
+              8,
+              16
+            ],
+            "p": 0.5
+          },
+          {
+            "types": [
+              "outro"
+            ],
+            "bars": [
+              4,
+              8
+            ],
+            "p": 0.6
+          }
+        ]
+      },
+      "buildDrop": {
+        "head": [
+          {
+            "types": [
+              "intro",
+              "verse"
+            ],
+            "bars": [
+              8,
+              16
+            ],
+            "p": 1
+          }
+        ],
+        "cycle": [
+          {
+            "types": [
+              "verse"
+            ],
+            "bars": [
+              8,
+              16
+            ],
+            "p": 0.3
+          },
+          {
+            "types": [
+              "build"
+            ],
+            "bars": [
+              4,
+              8
+            ],
+            "p": 0.9
+          },
+          {
+            "types": [
+              "chorus"
+            ],
+            "bars": [
+              8,
+              16
+            ],
+            "p": 1
+          },
+          {
+            "types": [
+              "break"
+            ],
+            "bars": [
+              8,
+              16
+            ],
+            "p": 0.45
+          }
+        ],
+        "tail": [
+          {
+            "types": [
+              "chorus"
+            ],
+            "bars": [
+              8,
+              16
+            ],
+            "p": 0.4
+          },
+          {
+            "types": [
+              "outro"
+            ],
+            "bars": [
+              8,
+              16
+            ],
+            "p": 0.6
+          }
+        ]
+      },
+      "blues": {
+        "unit": 12,
+        "head": [
+          {
+            "types": [
+              "intro"
+            ],
+            "bars": [
+              12
+            ],
+            "p": 0.3
+          }
+        ],
+        "cycle": [
+          {
+            "types": [
+              "verse"
+            ],
+            "bars": [
+              12
+            ],
+            "p": 1,
+            "repeat": [
+              1,
+              2
+            ]
+          },
+          {
+            "types": [
+              "chorus"
+            ],
+            "bars": [
+              12
+            ],
+            "p": 0.8
+          }
+        ],
+        "tail": [
+          {
+            "types": [
+              "chorus"
+            ],
+            "bars": [
+              12
+            ],
+            "p": 0.5
+          },
+          {
+            "types": [
+              "outro"
+            ],
+            "bars": [
+              12
+            ],
+            "p": 0.3
+          }
+        ]
+      },
+      "rock": {
+        "bridge": 0.3,
+        "head": [
+          {
+            "types": [
+              "intro"
+            ],
+            "bars": [
+              4,
+              8
+            ],
+            "p": 0.45
+          }
+        ],
+        "cycle": [
+          {
+            "types": [
+              "verse"
+            ],
+            "bars": [
+              8,
+              16
+            ],
+            "p": 1
+          },
+          {
+            "types": [
+              "verse"
+            ],
+            "bars": [
+              8
+            ],
+            "p": 0.3
+          },
+          {
+            "types": [
+              "build"
+            ],
+            "bars": [
+              4
+            ],
+            "p": 0.15
+          },
+          {
+            "types": [
+              "chorus"
+            ],
+            "bars": [
+              8,
+              16
+            ],
+            "p": 1
+          },
+          {
+            "types": [
+              "break"
+            ],
+            "bars": [
+              4,
+              8
+            ],
+            "p": 0.15
+          }
+        ],
+        "tail": [
+          {
+            "types": [
+              "chorus"
+            ],
+            "bars": [
+              8,
+              16
+            ],
+            "p": 0.4
+          },
+          {
+            "types": [
+              "outro"
+            ],
+            "bars": [
+              4,
+              8
+            ],
+            "p": 0.5
+          }
+        ]
+      }
+    },
+    "styleTemplate": {
+      "funk": "jam",
+      "reggae": "jam",
+      "psych": "buildDrop",
+      "dreamy": "pop",
+      "country": "pop",
+      "poppunk": "pop",
+      "blues": "blues",
+      "rock": "rock",
+      "hardrock": "rock"
+    },
+    "targetSizes": [
+      24,
+      32,
+      48,
+      64,
+      96,
+      128,
+      192
+    ],
+    "devFactors": {
+      "buildsSlowly": {
+        "intro": 1.6,
+        "build": 1.6
+      },
+      "fullFromStart": {
+        "intro": 0.2,
+        "build": 0.3
+      },
+      "withBreakouts": {
+        "break": 2.2
+      }
+    }
   },
   "progressions": {
     "minor": [

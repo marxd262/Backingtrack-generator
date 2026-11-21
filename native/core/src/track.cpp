@@ -40,10 +40,15 @@ struct Music {
     std::vector<std::pair<std::string, double>> feelDefaults;                                 // FEEL_DEFAULTS in order
 };
 
+const Json& musicJson() {
+    // a bad embedded file throws: that is a build error, not a user error
+    static const Json table = Json::parse(btg_music_json, btg_music_json + btg_music_json_size);
+    return table;
+}
+
 const Music& music() {
     static const Music data = [] {
-        // a bad embedded file throws: that is a build error, not a user error
-        const Json j = Json::parse(btg_music_json, btg_music_json + btg_music_json_size);
+        const Json& j = musicJson();
         Music m;
         for (const auto& [layer, ids] : j.at("voices").items()) {
             auto& list = m.voices.emplace_back(layer, std::vector<Voice>()).second;
@@ -753,7 +758,8 @@ Json chordName(const Json& chord) {
     return isString(root) || isObject(root) ? Json(jsString(root) + "undefined") : Json();
 }
 
-// what harmony.cpp takes from the helpers above
+// what harmony.cpp and form_roll.cpp take from the helpers above
+const Json& musicTable() { return musicJson(); }
 int noteToPcOf(const Json& name) { return noteToPc(&name); }
 bool isValidKeyValue(const Json& key) { return isValidKey(&key); }
 const char* const* spelledNames(const Json& key) { return spelling(key, noteToPc(own(key, "root")), modeOf(own(key, "mode"))); }
