@@ -29,7 +29,7 @@ file(DOWNLOAD ${dr_libs_url}/dr_wav.h ${dr_libs_dir}/dr_wav.h EXPECTED_HASH SHA2
 
 # The data of the web app (native/tools/export-events.mjs --data) as bytes in the library.
 # A byte array, not a string literal: MSVC caps string literals at 16 KB.
-foreach(data grooves sound music)
+foreach(data grooves sound music collation)
     set(data_file ${CMAKE_CURRENT_SOURCE_DIR}/data/${data}.json)
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${data_file})
     file(READ ${data_file} data_hex HEX)
@@ -77,9 +77,12 @@ add_library(btg_core STATIC
     src/form_edit.cpp
     src/timbre.cpp
     src/session.cpp
+    src/profiles.cpp
+    src/profile_tree.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/grooves_bytes.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/sound_bytes.cpp
-    ${CMAKE_CURRENT_BINARY_DIR}/music_bytes.cpp)
+    ${CMAKE_CURRENT_BINARY_DIR}/music_bytes.cpp
+    ${CMAKE_CURRENT_BINARY_DIR}/collation_bytes.cpp)
 target_include_directories(btg_core PUBLIC include PRIVATE ${dr_libs_dir})
 target_link_libraries(btg_core PRIVATE nlohmann_json::nlohmann_json signalsmith-stretch)
 # For measuring only: the numbers of the analysis can then be set through the environment (native/tools/analysis-sweep.ps1).
@@ -222,6 +225,10 @@ if(NODE)
     # the same for music.json (the tables of the track check)
     add_test(NAME music_data COMMAND ${CMAKE_COMMAND} -E compare_files --ignore-eol ${PROJECT_BINARY_DIR}/data-check/music.json ${CMAKE_CURRENT_SOURCE_DIR}/data/music.json)
     set_tests_properties(music_data PROPERTIES FIXTURES_REQUIRED sound_reference)
+    # collation.json follows the ICU of the Node that wrote it (native/tools/collation-data.mjs): another Node's ICU may change it, and then this check says what to do
+    add_test(NAME collation_data COMMAND ${CMAKE_COMMAND} -DNEW=${PROJECT_BINARY_DIR}/data-check/collation.json -DOLD=${CMAKE_CURRENT_SOURCE_DIR}/data/collation.json
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_collation.cmake)
+    set_tests_properties(collation_data PROPERTIES FIXTURES_REQUIRED sound_reference)
 else()
     message(WARNING "node not found: the parity test against the web app is not registered")
 endif()

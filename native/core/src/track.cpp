@@ -180,21 +180,23 @@ std::vector<Entry> entries(const Json& object) {
 // surrogate pair cannot be a UTF-8 text: it becomes U+FFFD (the web app's output keeps the lone surrogate, as an escape).
 void spread(Json& out, Val source) {
     if (source == nullptr) return;
+    ObjectBuilder members(std::move(out)); // linear in the number of keys
     if (source->is_object()) {
-        for (const Entry& e : entries(*source)) out[*e.key] = *e.value;
+        for (const Entry& e : entries(*source)) members.set(*e.key, *e.value);
     } else if (source->is_array()) {
-        for (size_t i = 0; i < source->size(); ++i) out[std::to_string(i)] = (*source)[i];
+        for (size_t i = 0; i < source->size(); ++i) members.set(std::to_string(i), (*source)[i]);
     } else if (source->is_string()) {
         const std::string& s = source->get_ref<const std::string&>();
         size_t unit = 0;
         for (size_t at = 0; at < s.size(); ++unit) {
             const auto lead = static_cast<unsigned char>(s[at]);
             const size_t bytes = lead < 0x80 ? 1 : lead < 0xE0 ? 2 : lead < 0xF0 ? 3 : 4;
-            if (bytes < 4) { out[std::to_string(unit)] = s.substr(at, bytes); }
-            else { out[std::to_string(unit)] = "\xEF\xBF\xBD"; out[std::to_string(++unit)] = "\xEF\xBF\xBD"; }
+            if (bytes < 4) { members.set(std::to_string(unit), s.substr(at, bytes)); }
+            else { members.set(std::to_string(unit), "\xEF\xBF\xBD"); members.set(std::to_string(++unit), "\xEF\xBF\xBD"); }
             at += bytes;
         }
     }
+    out = members.build();
 }
 
 // ---------- voices.js ----------
@@ -475,6 +477,10 @@ Json normalizeTrackValue(const Json& track) {
 // throws a RangeError). The core's reader and the helpers below recurse, and 2000 levels do not fit a secondary thread's 512 KB stack on macOS or
 // WebAssembly's default 64 KB; nothing the app reads nests beyond about 20. So nesting beyond MAX_DEPTH levels counts as no JSON, as `null`.
 // shortcut: 64 levels, where the web takes more; lift it if a format ever nests deeper (then make the reader and jsString iterative).
+//
+// Two more places where the reader is not JSON.parse (profiles.h names them): a lone surrogate escape ("\ud83d") becomes U+FFFD (string(), below), and bytes that are no
+// valid UTF-8 pass through unchanged where the web, which gets a decoded text, has U+FFFD for them.
+// shortcut: the text is taken as UTF-8 and not checked, upgrade: when a shell hands the core texts it did not decode itself and a damaged file must read as the web reads it.
 constexpr int MAX_DEPTH = 64;
 
 class Reader {
@@ -538,6 +544,7 @@ private:
                     if (hex4(low) && low >= 0xDC00 && low < 0xE000) { utf8(out, 0x10000 + ((unit - 0xD800) << 10) + (low - 0xDC00)); break; }
                     at = before; // not a pair: the first is alone, the second is read on its own
                 }
+                // shortcut: a lone surrogate becomes U+FFFD where the web keeps it, upgrade: when texts are held in UTF-16 or a name with one must survive
                 utf8(out, unit >= 0xD800 && unit < 0xE000 ? 0xFFFD : unit);
                 break;
             }
@@ -590,6 +597,7 @@ private:
         out = Json::object();
         skip();
         if (at < s.size() && s[at] == '}') { ++at; --depth; return true; }
+        ObjectBuilder members; // linear in the number of keys (operator[] searches them one by one)
         for (;;) {
             skip();
             std::string key;
@@ -598,11 +606,11 @@ private:
             if (at >= s.size() || s[at++] != ':') return false;
             Json v;
             if (!value(v)) return false;
-            out[key] = std::move(v);
+            members.set(std::move(key), std::move(v));
             skip();
             if (at >= s.size()) return false;
             if (s[at] == ',') { ++at; continue; }
-            if (s[at++] == '}') { --depth; return true; }
+            if (s[at++] == '}') { --depth; out = members.build(); return true; }
             return false;
         }
     }

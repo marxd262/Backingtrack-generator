@@ -12,10 +12,53 @@
 
 #include <functional>
 #include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace btg::detail {
 
 using Json = nlohmann::ordered_json;
+
+// An object built member by member in linear time: ordered_json's operator[] looks a key up by a linear search, so an object of n members costs n squared (80,000
+// keys took seconds). Up to SMALL members a linear search is cheaper than a hash index; beyond, the index is built. set(): a key twice keeps the last value at the first
+// one's place (JSON.parse). append(): the caller knows the key is new. build(): the object, once.
+class ObjectBuilder {
+public:
+    ObjectBuilder() = default;
+    explicit ObjectBuilder(Json&& existing) { // the members of an object, kept in order
+        if (existing.is_object()) for (auto it = existing.begin(); it != existing.end(); ++it) append(it.key(), std::move(it.value()));
+    }
+    void append(std::string key, Json value) {
+        if (!index_.empty()) index_.emplace(key, items_.size());
+        items_.emplace_back(std::move(key), std::move(value));
+        if (index_.empty() && items_.size() == SMALL) for (size_t i = 0; i < items_.size(); ++i) index_.emplace(items_[i].first, i);
+    }
+    void set(std::string key, Json value) {
+        if (index_.empty()) {
+            for (auto& item : items_) if (item.first == key) { item.second = std::move(value); return; }
+        } else {
+            const auto found = index_.find(key);
+            if (found != index_.end()) { items_[found->second].second = std::move(value); return; }
+        }
+        append(std::move(key), std::move(value));
+    }
+    Json build() {
+        Json out = Json::object();
+        // ordered_map is a std::vector of pairs: appending to it directly skips the search that its own insert does
+        auto& members = static_cast<std::vector<std::pair<const std::string, Json>>&>(*out.get_ptr<Json::object_t*>());
+        members.reserve(items_.size());
+        for (auto& item : items_) members.emplace_back(std::move(item.first), std::move(item.second));
+        items_.clear();
+        index_.clear();
+        return out;
+    }
+
+private:
+    static constexpr size_t SMALL = 16;
+    std::vector<std::pair<std::string, Json>> items_;
+    std::unordered_map<std::string, size_t> index_;
+};
 
 // voices.js: per layer { id, variant }; what is missing or invalid gets the default (the first sample variant), a valid voice with no or an
 // invalid variant its first variant, a removed voice (chords sample/organ) its successor. A new object.

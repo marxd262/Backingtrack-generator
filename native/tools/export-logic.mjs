@@ -1267,6 +1267,15 @@ add('presetDrive', presetDrive, [...VOICES.chords.organ.variants, 'nope', '', nu
   }
 }
 
+// Task 30a: the profiles (native/core/src/profiles.cpp, profile_tree.cpp): the cases are in export-logic-profiles.mjs (the inputs of the four tests of tests/core, the mutation
+// corpora, the broken files, the limits, the store, the order of names). It prints how many cases it made for what.
+{
+  const { profileCases } = await import(new URL('./export-logic-profiles.mjs', import.meta.url).href);
+  const before = cases.length;
+  const counts = await profileCases({ cases, load, mutations, ref: await import(new URL('./session-reference.mjs', import.meta.url).href) });
+  console.log(`profiles: ${cases.length - before} cases (${Object.entries(counts).map(([name, n]) => `${name} ${n}`).join(', ')})`);
+}
+
 // The cases go to chunk files (logic-001.json, ...: each a JSON list of cases, a new one begun once the current passes CHUNK_BYTES), so that the
 // test never holds the whole reference; logic.json is the manifest: { total, chunks: [{ file, count }] } in the order of the cases.
 const CHUNK_BYTES = 16e6;

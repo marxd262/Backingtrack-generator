@@ -1,7 +1,7 @@
 // Writes the reference for the C++ generator from the web app in the working tree (src/, read only).
 //   node native/tools/export-events.mjs <outDir>           -> <outDir>/cases.json (tracks and their events)
-//   node native/tools/export-events.mjs <outDir> --data    -> also rewrites native/core/data/grooves.json, sound.json and music.json
-//   node native/tools/export-events.mjs --data-only <dir>  -> writes only grooves.json, sound.json and music.json, into <dir>
+//   node native/tools/export-events.mjs <outDir> --data    -> also rewrites native/core/data/grooves.json, sound.json, music.json and collation.json
+//   node native/tools/export-events.mjs --data-only <dir>  -> writes only grooves.json, sound.json, music.json and collation.json, into <dir>
 // The first groups switch on drums and bass only; the groups of the other layers follow them.
 // Imported (by export-logic.mjs) it writes nothing and gives `parityTracks`, the tracks of cases.json.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -11,6 +11,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const isMain = process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 const out = resolve(process.argv[2] ?? join(repo, 'native/build/parity'));
+
+import { collationText } from './collation-data.mjs';
 
 const load = (file) => import(pathToFileURL(join(repo, 'src', file)).href);
 const { buildEvents, STYLE_PRESETS, GROOVES, METERS } = await load('index.js');
@@ -122,6 +124,7 @@ if (isMain && (process.argv.includes('--data') || dataOnly >= 0)) {
   writeFileSync(join(dir, 'grooves.json'), `${JSON.stringify(GROOVES)}\n`);
   writeFileSync(join(dir, 'sound.json'), `${JSON.stringify(sound, null, 2)}\n`);
   writeFileSync(join(dir, 'music.json'), `${JSON.stringify(music, null, 2)}\n`);
+  writeFileSync(join(dir, 'collation.json'), collationText()); // the order of profile names, from this Node's ICU (collation-data.mjs)
   if (dataOnly >= 0) process.exit(0);
 }
 

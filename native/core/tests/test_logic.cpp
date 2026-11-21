@@ -12,6 +12,7 @@
 #include "../src/convolver.h"
 #include "../src/form_internal.h"
 #include "../src/harmony.h"
+#include "../src/profiles.h"
 #include "../src/sound_data.h"
 #include "../src/sound_model.h"
 #include "../src/string_model.h"
@@ -27,7 +28,10 @@
 #include <fstream>
 #include <functional>
 #include <map>
+#include <memory>
+#include <optional>
 #include <set>
+#include <tuple>
 
 using json = nlohmann::json;
 using namespace btg::detail;
@@ -117,6 +121,56 @@ void printSessionStep(const json& c, const json& got) {
         return;
     }
 }
+
+// Task 30a: the profiles (profiles.h). A case carries the stored texts (name -> text) and whether a write fails; the output holds the texts afterwards. A text that
+// the function writes must be byte for byte the web's JSON.stringify, so the arguments of such a function come as a text (`args`): a json value here has sorted keys.
+struct MapStorage : btg::Storage {
+    std::map<std::string, std::string> files;
+    bool failWrites = false;
+    std::optional<std::string> read(const std::string& name) override { const auto it = files.find(name); return it == files.end() ? std::nullopt : std::optional<std::string>(it->second); }
+    bool write(const std::string& name, const std::string& text) override { if (failWrites) return false; files[name] = text; return true; }
+};
+MapStorage storageOf(const json& in) {
+    MapStorage storage;
+    if (in.contains("stored")) for (const auto& [name, text] : in.at("stored").items()) storage.files[name] = text.get<std::string>();
+    storage.failWrites = in.contains("fail") && in.at("fail").get<bool>();
+    return storage;
+}
+json storedOf(const MapStorage& storage) {
+    json out = json::object();
+    for (const auto& [name, text] : storage.files) out[name] = text;
+    return out;
+}
+// the ids a case gives, in order (the web's makeId; for loadTree the cases stub crypto.randomUUID with the same list)
+btg::detail::MakeId idsOf(const Json& in) {
+    const auto list = std::make_shared<std::vector<std::string>>();
+    const auto found = in.find("ids");
+    if (found != in.end()) for (const Json& id : *found) list->push_back(id.get<std::string>());
+    const auto next = std::make_shared<size_t>(0);
+    return [list, next]() -> std::string {
+        if (*next >= list->size()) throw std::invalid_argument("the case gives no more ids");
+        return (*list)[(*next)++];
+    };
+}
+// a lone surrogate (which a cut of a name inside an astral character leaves, kept as WTF-8) cannot be in the reference's JSON: both sides write it as the text \udXXX
+Json wtfSafe(Json v) {
+    if (v.is_string()) {
+        const std::string& text = v.get_ref<const std::string&>();
+        if (text.find('\xED') == std::string::npos) return v;
+        std::string out;
+        for (const char32_t cp : btg::detail::codePoints(text)) {
+            if (cp < 0xD800 || cp >= 0xE000) { btg::detail::appendCodePoint(out, cp); continue; }
+            static const char* HEX = "0123456789abcdef";
+            out += "\\u";
+            for (int shift = 12; shift >= 0; shift -= 4) out += HEX[(cp >> shift) & 0xF];
+        }
+        return out;
+    }
+    if (v.is_array() || v.is_object()) for (auto it = v.begin(); it != v.end(); ++it) it.value() = wtfSafe(it.value());
+    return v;
+}
+json profileOut(const Json& v) { return plain(wtfSafe(v)); }
+json storedAnd(const char* name, const Json& value, const MapStorage& storage) { return json { { name, profileOut(value) }, { "stored", storedOf(storage) } }; }
 
 const std::map<std::string, std::function<json(const json&)>> FUNCTIONS {
     { "completeTimbre", [](const json& in) { return toJson(completeTimbre(in.dump())); } },
@@ -219,6 +273,49 @@ const std::map<std::string, std::function<json(const json&)>> FUNCTIONS {
     { "presetDrive", [](const json& in) { return json(presetDrive(ordered(in))); } },
     // Task 29: the session, one case per sequence of actions (playSession above)
     { "session", playSession },
+    // Task 30a: the profiles. An argument a case leaves out is null; the ids a tree function asks for are `ids`; a function that writes is given its arguments as the text `args`.
+    { "PART_IDS", [](const json&) { return profileOut(PART_IDS()); } },
+    { "PART_PRESETS", [](const json&) { return profileOut(PART_PRESETS()); } },
+    { "LIMITS", [](const json&) { return profileOut(LIMITS()); } },
+    { "FORMATS", [](const json&) { return profileOut(FORMATS()); } },
+    { "captureParts", [](const json& in) { const Json o = ordered(in); return profileOut(captureParts(o.at("session"), argument(o, "ids"))); } },
+    { "sanitizeParts", [](const json& in) { return profileOut(sanitizeParts(ordered(in))); } },
+    { "applyParts", [](const json& in) { const Json o = ordered(in); return profileOut(applyParts(o.at("session"), argument(o, "parts"))); } },
+    { "partIdsOf", [](const json& in) { return profileOut(partIdsOf(ordered(in))); } },
+    { "mergeParts", [](const json& in) { const Json o = ordered(in); return profileOut(mergeParts(argument(o, "base"), argument(o, "over"))); } },
+    { "makeProfileFile", [](const json& in) { return profileOut(makeProfileFile(ordered(in))); } },
+    { "makeFolderFile", [](const json& in) { return profileOut(makeFolderFile(ordered(in))); } },
+    { "parseFile", [](const json& in) { return profileOut(parseFile(ordered(in))); } },
+    { "factoryProfiles", [](const json&) { return profileOut(factoryProfiles()); } },
+    { "factoryParts", [](const json& in) { return thrown([&] { return factoryParts(in.get<std::string>()); }); } },
+    { "readSession", [](const json& in) { return profileOut(readSession(ordered(in))); } },
+    { "writeSession", [](const json& in) { Json a = Json::parse(in.at("args").get<std::string>()); Json state = a.at("state"); writeSession(state, a.at("session")); return profileOut(state); } },
+    { "saveLast", [](const json& in) { MapStorage s = storageOf(in); const Json a = Json::parse(in.at("args").get<std::string>());
+        const Json entry = saveLast(s, a.at("session"), a.at("bar"), a.at("at")); return storedAnd("entry", entry, s); } },
+    { "loadLast", [](const json& in) { MapStorage s = storageOf(in); const Json entry = loadLast(s); return storedAnd("entry", entry, s); } },
+    { "compareNames", [](const json& in) { return json(compareNames(in.at("a").get<std::string>(), in.at("b").get<std::string>())); } },
+    { "lowerCase", [](const json& in) { return json(lowerCase(in.get<std::string>())); } },
+    { "newTree", [](const json&) { return profileOut(newTree()); } },
+    { "sortItems", [](const json& in) { return profileOut(sortItems(ordered(in))); } },
+    { "find", [](const json& in) { const Json o = ordered(in); return profileOut(find(o.at("tree"), argument(o, "id"))); } },
+    { "pathNames", [](const json& in) { const Json o = ordered(in); return profileOut(pathNames(o.at("tree"), argument(o, "id"))); } },
+    { "countProfiles", [](const json& in) { return json(countProfiles(ordered(in))); } },
+    { "countNodes", [](const json& in) { return json(countNodes(ordered(in))); } },
+    { "listFolders", [](const json& in) { return profileOut(listFolders(ordered(in))); } },
+    { "validName", [](const json& in) { const Json o = ordered(in); return profileOut(validName(o.at("tree"), argument(o, "parentId"), argument(o, "name"), argument(o, "exceptId"))); } },
+    { "freeName", [](const json& in) { return json(freeName(in.at("names").get<std::vector<std::string>>(), in.at("name").get<std::string>())); } },
+    { "addFolder", [](const json& in) { const Json o = ordered(in); return profileOut(addFolder(o.at("tree"), argument(o, "parentId"), argument(o, "name"), idsOf(o))); } },
+    { "addProfile", [](const json& in) { const Json o = ordered(in); return profileOut(addProfile(o.at("tree"), argument(o, "parentId"), argument(o, "name"), argument(o, "parts"), idsOf(o))); } },
+    { "renameNode", [](const json& in) { const Json o = ordered(in); return profileOut(renameNode(o.at("tree"), argument(o, "id"), argument(o, "name"))); } },
+    { "removeNode", [](const json& in) { const Json o = ordered(in); return profileOut(removeNode(o.at("tree"), argument(o, "id"))); } },
+    { "overwriteParts", [](const json& in) { const Json o = ordered(in); return profileOut(overwriteParts(o.at("tree"), argument(o, "id"), argument(o, "parts"))); } },
+    { "canMove", [](const json& in) { const Json o = ordered(in); return json(canMove(o.at("tree"), argument(o, "id"), argument(o, "targetId"))); } },
+    { "moveTargets", [](const json& in) { const Json o = ordered(in); return profileOut(moveTargets(o.at("tree"), argument(o, "id"))); } },
+    { "moveNode", [](const json& in) { const Json o = ordered(in); return profileOut(moveNode(o.at("tree"), argument(o, "id"), argument(o, "targetId"))); } },
+    { "importNode", [](const json& in) { const Json o = ordered(in); return profileOut(importNode(o.at("tree"), argument(o, "parentId"), argument(o, "node"), idsOf(o))); } },
+    { "isReservedId", [](const json& in) { return json(isReservedId(in.get<std::string>())); } },
+    { "loadTree", [](const json& in) { MapStorage s = storageOf(in); const Json tree = loadTree(s, idsOf(ordered(in))); return storedAnd("tree", tree, s); } },
+    { "saveTree", [](const json& in) { MapStorage s = storageOf(in); const bool saved = saveTree(s, Json::parse(in.at("args").get<std::string>()).at("tree")); return json { { "saved", saved }, { "stored", storedOf(s) } }; } },
 };
 
 } // namespace
@@ -342,6 +439,44 @@ int main(int argc, char** argv) {
         std::printf("form: %d of %zu checks wrong\n", formWrong, mustThrow.size());
     }
     std::printf("storage: %d calls of the session (it reads and writes nothing before Task 30)\n", sessionStorage.calls);
+    // Task 30a: where the core is NOT the web's, so these are no cases of the file (profile_tree.cpp, track.cpp: the `shortcut:` comments). 1. A character that collation.json
+    // does not hold (Greek, Cyrillic, CJK, an emoji) sorts after every covered character, and such characters among themselves by code point, where the web orders them by ICU.
+    // 2. A file whose text nests deeper than 64 levels counts as no JSON, where the web reads it.
+    int outsideWrong = 0;
+    try {
+        using btg::detail::compareNames;
+        const std::vector<std::tuple<std::string, std::string, int>> pairs {
+            { "Zebra", "\xCE\xA9mega", -1 }, { "~", "\xCE\xA9", -1 }, { "z", "\xCE\xB1", -1 }, { "\xCE\xA9", "\xD0\x9F\xD1\x80\xD0\xB8\xD0\xB2\xD0\xB5\xD1\x82", -1 },
+            { "\xD0\x9F\xD1\x80\xD0\xB8\xD0\xB2\xD0\xB5\xD1\x82", "\xE4\xB8\xAD\xE6\x96\x87", -1 }, { "\xE4\xB8\xAD\xE6\x96\x87", "\xF0\x9F\x98\x80", -1 }, { "\xF0\x9F\x98\x80", "\xF0\x9F\x98\x81", -1 },
+            { "\xCE\xA9", "\xCE\xA9", 0 }, { "a\xCE\xA9", "aZ", 1 }, { "\xCE\xA9" "A", "\xCE\xA9" "a", 0 }, { "\xF0\x9F\x98\x80", "\xCE\xA9", 1 }, { "9", "\xCE\xA9", -1 },
+        };
+        for (const auto& [a, b, want] : pairs)
+            if (compareNames(a, b) != want || compareNames(b, a) != -want) { std::printf("FAIL: compareNames(\"%s\", \"%s\") is not %d\n", a.c_str(), b.c_str(), want); ++outsideWrong; }
+        const Json sorted = btg::detail::sortItems(Json::parse(R"([{"type":"profile","name":"😀"},{"type":"profile","name":"中文"},{"type":"profile","name":"Zebra"},{"type":"profile","name":"Ω"},)"
+                                                               R"({"type":"profile","name":"apple"},{"type":"profile","name":"П"}])"));
+        std::string order;
+        for (const Json& n : sorted) order += n.at("name").get<std::string>() + "|";
+        if (order != "apple|Zebra|\xCE\xA9|\xD0\x9F|\xE4\xB8\xAD\xE6\x96\x87|\xF0\x9F\x98\x80|") { std::printf("FAIL: sortItems of names outside the table gives %s\n", order.c_str()); ++outsideWrong; }
+        if (btg::detail::lowerCase("\xC3\x84\xCE\xA9" "A") != "\xC3\xA4\xCE\xA9" "a") { std::printf("FAIL: lowerCase outside the table\n"); ++outsideWrong; }
+    } catch (const std::exception& error) { std::printf("FAIL: the check of names outside the table threw: %s\n", error.what()); ++outsideWrong; }
+    std::printf("outside: %d of %d checks wrong (names outside collation.json sort after the covered ones, by code point)\n", outsideWrong, 14);
+    int profileDepthWrong = 0;
+    try {
+        const auto fileWith = [](int levels) { // the profile file with an unknown field `extra` nested so that the text is `levels + 1` deep (the file's object is the first level)
+            return "{\"format\":\"backingtrack-profile\",\"version\":2,\"name\":\"x\",\"parts\":{\"tempo\":{\"bpm\":100}},\"extra\":" + std::string(static_cast<size_t>(levels), '[') + std::string(static_cast<size_t>(levels), ']') + "}";
+        };
+        const bool at63 = btg::detail::parseFile(Json(fileWith(63))).at("ok").get<bool>();
+        const bool at64 = btg::detail::parseFile(Json(fileWith(64))).at("ok").get<bool>();
+        if (!at63) { std::printf("FAIL: a profile file nested 64 levels deep is refused\n"); ++profileDepthWrong; }
+        if (at64) { std::printf("FAIL: a profile file nested 65 levels deep is read (the core's reader counts it as no JSON, the web reads it)\n"); ++profileDepthWrong; }
+        // forty folders inside each other (84 levels of text; the web reads them and keeps eight): refused here, as no JSON
+        std::string folders = "{\"format\":\"backingtrack-folder\",\"version\":1,\"name\":\"F\",\"items\":[";
+        for (int i = 0; i < 39; ++i) folders += "{\"type\":\"folder\",\"name\":\"F\",\"items\":[";
+        folders += "{\"type\":\"profile\",\"name\":\"p\",\"parts\":{\"tempo\":{\"bpm\":100}}}";
+        for (int i = 0; i < 40; ++i) folders += "]}";
+        if (btg::detail::parseFile(Json(folders)).at("ok").get<bool>()) { std::printf("FAIL: a folder file nested 84 levels deep is read\n"); ++profileDepthWrong; }
+    } catch (const std::exception& error) { std::printf("FAIL: the check of the depth of a profile file threw: %s\n", error.what()); ++profileDepthWrong; }
+    std::printf("profile depth: %d of 3 checks wrong (a file nested beyond 64 levels counts as no JSON; the web reads it)\n", profileDepthWrong);
     int untested = 0; // a function of the table that the file brings no case for was not checked
     for (const auto& entry : FUNCTIONS) if (!seen.count(entry.first)) { std::printf("no case for %s in %s\n", entry.first.c_str(), argv[1]); ++untested; }
     std::printf("logic: functions %zu, cases %zu, identical %lld, close %lld, different %lld\n", FUNCTIONS.size(), read, identical, close, different);
@@ -349,5 +484,5 @@ int main(int argc, char** argv) {
     // A close is a difference in the last bits (possibly another platform's math library): it fails too. An exception has to be ruled
     // by the owner and named here (function and field, from the line above), not passed.
     if (close) std::printf("FAIL: %lld case(s) are only close, not bit for bit: a difference in the last bits, possibly another platform's math library; ruled exceptions are named in this test\n", close);
-    return different || untested || close || deepWrong || seedWrong || formWrong || sessionStorage.calls ? 1 : 0;
+    return different || untested || close || deepWrong || seedWrong || formWrong || sessionStorage.calls || outsideWrong || profileDepthWrong ? 1 : 0;
 }
