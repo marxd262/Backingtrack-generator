@@ -23,10 +23,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # the parity test reads the web app from src/ of the checkout (native/tools/export-events.mjs)
+      # the parity test reads the web app from src/ of the checkout (native/tools/export-events.mjs).
+      # Node 26: native/core/data/collation.json comes from this Node's ICU (the head of that file names it); another ICU can
+      # sort a covered character otherwise, then the collation_data test says to regenerate the file.
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 26
 
       - name: Linux packages for JUCE
         if: runner.os == 'Linux'
