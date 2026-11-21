@@ -1,12 +1,14 @@
 // The web app's state and the rules that change it (native/PROTOKOLL.md). The state is the JSON object of src/ui/state.js (the fields of PROTOKOLL.md,
-// section 4) plus `touched` of app.js and `selected` of form-strip.js (selectedPart); the functions below are state.js's and the handlers' with their names,
-// line by line, on that object.
+// section 4) plus `touched` of app.js, `selected` of form-strip.js (selectedPart), the web's `errors`, what the profile window holds (`profiles`: selection, open
+// folders, message) and `resumed`; the tree, what "undo" keeps and the last session are held beside it (Session::Memory). The functions below are state.js's and
+// the handlers' with their names, line by line, on that object.
 // native/core/tests/test_logic.cpp (function `session`) plays the sequences of native/tools/export-logic.mjs against native/tools/session-reference.mjs.
 #include "btg/session.h"
 
 #include "form_internal.h"
 #include "generator_internal.h"
 #include "harmony.h"
+#include "profiles.h"
 #include "sound_data.h"
 #include "sound_model.h"
 #include "timbre.h"
@@ -27,7 +29,19 @@ extern const unsigned int btg_grooves_json_size;
 namespace btg {
 namespace {
 
+using detail::convertTempo;
 using detail::Json;
+using detail::keysOf;
+using detail::layerIds;
+using detail::meterKey;
+using detail::mixNames;
+using detail::num;
+using detail::numberOf;
+using detail::oneOf;
+using detail::scaleNames;
+using detail::styleIds;
+using detail::truthy;
+using detail::voiceLayers;
 using Change = Session::Change;
 
 // ---------- the tables (music.json, grooves.json, sound.json) ----------
@@ -38,12 +52,6 @@ const Json& preset(const std::string& id) { // state.js preset(id)
     for (const Json& p : music().at("styles")) if (p.at("id") == id) return p;
     throw std::invalid_argument("no such style");
 }
-std::vector<std::string> keysOf(const Json& object) { std::vector<std::string> out; for (auto it = object.begin(); it != object.end(); ++it) out.push_back(it.key()); return out; }
-const std::vector<std::string>& layerIds() { static const std::vector<std::string> ids = keysOf(music().at("layers")); return ids; }   // LAYER_IDS
-const std::vector<std::string>& voiceLayers() { static const std::vector<std::string> ids = keysOf(music().at("voices")); return ids; } // VOICE_LAYERS
-const std::vector<std::string>& styleIds() { static const std::vector<std::string> ids = [] { std::vector<std::string> out; for (const Json& p : music().at("styles")) out.push_back(p.at("id")); return out; }(); return ids; }
-const std::vector<std::string>& scaleNames() { static const std::vector<std::string> ids = keysOf(music().at("scaleModes")); return ids; } // SCALE_NAMES
-const std::vector<std::string>& mixNames() { static const std::vector<std::string> ids = [] { std::vector<std::string> out = layerIds(); out.push_back("master"); return out; }(); return ids; } // audio/mix.js MIX_NAMES
 const std::set<std::string>& timbrePaths() { // DEFAULT_TIMBRE as "group.field"
     static const std::set<std::string> paths = [] {
         std::set<std::string> out;
@@ -64,8 +72,7 @@ const Json& jobsFor(const std::string& layer) { return music().at("layers").at(l
 
 // ---------- what the controls can send (session-reference.mjs: int, oneOf, isDraw, isFrom) ----------
 
-const Json NONE; // a field the action does not have (the web's undefined)
-const Json& field(const Json& a, const char* name) { const auto it = a.find(name); return it == a.end() ? NONE : *it; }
+const Json& field(const Json& a, const char* name) { return detail::orNull(detail::member(a, name)); } // null for a field the action does not have (the web's undefined)
 bool isNullField(const Json& a, const char* name) { const auto it = a.find(name); return it != a.end() && it->is_null(); } // `=== null`: given as null, not missing
 bool isInt(const Json& v, double lo, double hi) { // Number.isInteger(v) && v >= lo && v <= hi
     if (!v.is_number()) return false;
@@ -73,35 +80,16 @@ bool isInt(const Json& v, double lo, double hi) { // Number.isInteger(v) && v >=
     return std::isfinite(d) && std::floor(d) == d && d >= lo && d <= hi;
 }
 bool oneOf(const Json& v, const Json& list) { return v.is_string() && std::find(list.begin(), list.end(), v) != list.end(); }
-bool oneOf(const Json& v, const std::vector<std::string>& list) { return v.is_string() && std::find(list.begin(), list.end(), v.get<std::string>()) != list.end(); }
 bool isDraw(const Json& v) { return v.is_number() && v.get<double>() >= 0 && v.get<double>() < 1; } // Math.random()
 bool isFrom(const Json& v) { return v == "start" || v == "play"; }
 bool isVariant(const Json& v) { return isInt(v, 1, 9999); }
 bool isDir(const Json& v) { return v.is_number() && (v.get<double>() == -1 || v.get<double>() == 1); }
-double numberOf(const Json& v) { return v.get<double>(); }
-// a number as the web holds it: a whole one an integer (as JSON.stringify writes it), any other a double
-Json num(double v) { return std::floor(v) == v && std::fabs(v) < 9007199254740992.0 ? Json(static_cast<std::int64_t>(v)) : Json(v); }
-// JavaScript truthiness. shortcut: only booleans, null and objects reach it (form.auto, track.form, a part's locked), upgrade: if a number or a text can
-bool truthy(const Json& v) { return v.is_boolean() ? v.get<bool>() : !v.is_null(); }
 const Json& pick(const Json& list, double r) { return list.at(static_cast<size_t>(std::floor(r * static_cast<double>(list.size())))); } // app.js 209 with the draw from the action
 
 // ---------- grooves.js ----------
 
-// meterKey: [6, 8] gives '6/8', anything that is no pair of integers ''. shortcut: an integer beyond 2^53 is '' here and printed by the web ('1e+21/4'),
-// upgrade: if a meter can come from outside the session's own actions (Task 30: profiles bring a meter checked against METERS)
-std::string meterKey(const Json& meter) {
-    constexpr double SAFE = 9007199254740991.0;
-    if (!meter.is_array() || meter.size() != 2 || !isInt(meter[0], -SAFE, SAFE) || !isInt(meter[1], -SAFE, SAFE)) return "";
-    return std::to_string(static_cast<std::int64_t>(numberOf(meter[0]))) + "/" + std::to_string(static_cast<std::int64_t>(numberOf(meter[1])));
-}
 bool isMeterKey(const std::string& key) { return music().at("meterGrid").contains(key); } // Object.hasOwn(METERS, key)
 int subOf(const std::string& key) { return grid(key).at("sub").get<int>(); }
-double convertTempo(double bpm, const std::string& fromKey, const std::string& toKey) {
-    if (!isMeterKey(fromKey) || !isMeterKey(toKey)) return bpm;
-    const int from = subOf(fromKey), to = subOf(toKey);
-    if (from == to) return bpm;
-    return std::min(200.0, std::max(40.0, detail::jsRound(bpm * (to == 3 ? 2.0 / 3.0 : 3.0 / 2.0))));
-}
 
 // ---------- core/voices.js ----------
 
@@ -268,6 +256,37 @@ bool addChord(Json& s, const Json& root, const Json& quality) {
     return true;
 }
 
+// ---------- ui/mix-state.js: the mixer's memory (mix.json, the web's backingtrack.mix) ----------
+
+double defaultPan(const std::string& layer) { return detail::soundData().tunables.at("mix/pan").at(layer).value; } // DEFAULT_PAN: the fine values mix/pan
+// sanitize: per name a number in 0..1 stays, anything else is 1; sanitizePan: per layer a number in -1..1 stays, anything else is the default
+Json sanitizeMix(const Json& raw) {
+    Json out = Json::object();
+    for (const std::string& name : mixNames()) {
+        const Json& v = detail::orNull(detail::member(raw, name));
+        out[name] = v.is_number() && v.get<double>() >= 0 && v.get<double>() <= 1 ? v : Json(1);
+    }
+    return out;
+}
+Json sanitizePan(const Json& raw) {
+    Json out = Json::object();
+    for (const std::string& layer : layerIds()) {
+        const Json& v = detail::orNull(detail::member(raw, layer));
+        out[layer] = v.is_number() && v.get<double>() >= -1 && v.get<double>() <= 1 ? v : num(defaultPan(layer));
+    }
+    return out;
+}
+// loadMix and loadPan of the stored text (nothing, or no JSON: the defaults). shortcut: a text nested deeper than 64 levels counts as no JSON (track.cpp's reader), where the web
+// reads the fields beside the deep one, upgrade: with the reader's limit
+Json loadMix(const std::optional<std::string>& text) { return sanitizeMix(text ? detail::parsedText(*text) : Json()); }
+Json loadPan(const std::optional<std::string>& text) { return sanitizePan(text ? detail::orNull(detail::member(detail::parsedText(*text), "pan")) : Json()); }
+// saveMix(storage, state.mix, state.pan): { ...sanitize(mix), pan: sanitizePan(pan) } (the pan is always given: state.pan)
+void saveMix(Storage& storage, const Json& s) {
+    Json stored = sanitizeMix(s.at("mix"));
+    stored["pan"] = sanitizePan(s.at("pan"));
+    storage.write(detail::MIX_NAME, detail::stringify(stored)); // a failing write is ignored: without storage the mixer holds until the page is loaded again
+}
+
 // The start state of the web app for a variant: the literal of state.js 58-90 (seed: the variant for rollVariant()), then app.js 484-485
 Json startState(double variant) {
     const Json& funk = preset("funk");
@@ -283,13 +302,21 @@ Json startState(double variant) {
                             { "chordColor", "triads" }, { "chordColorFromStyle", true }, { "style", "funk" }, { "mix", mix }, { "pan", pan },
                             { "organ", Json::object({ { "leslie", "auto" }, { "drive", nullptr } }) }, { "tempoRef", nullptr },
                             { "touched", Json::object({ { "key", false }, { "style", false }, { "tempo", false }, { "variant", false } }) },
-                            { "selectedPart", 0 } }); // form-strip.js 35: `selected`
+                            { "selectedPart", 0 }, // form-strip.js 35: `selected`
+                            { "errors", Json::array() }, { "resumed", nullptr } }); // state.js 88; no resume
     deriveBars(s);
     setFormTemplate(s, "auto");
     return s;
 }
 
 // ---------- the handlers (app.js and the panels; session-reference.mjs names their lines) ----------
+
+// What a step writes, held until the whole action is done (Session::apply writes it then, in order): the functions of profiles.h write through a Storage
+struct Pending : Storage {
+    std::vector<std::pair<std::string, std::string>> texts;
+    std::optional<std::string> read(const std::string&) override { return std::nullopt; }
+    bool write(const std::string& name, const std::string& text) override { texts.emplace_back(name, text); return true; }
+};
 
 struct Step {
     Json& s;
@@ -298,7 +325,13 @@ struct Step {
     std::string& pushed; // organ-panel.js 46: the tuning last handed to the player
     const Json playerLength;        // the track the player plays: every action that changes the length or the meter restarts it, so it is the state's before the action
     const std::string playerMeter;
+    const Json& tree;               // the profiles before the action
+    const Json& undo;               // what "Rückgängig" keeps: null or { tree, selection, message }
+    Json& last;                     // the last session: null or { parts, bar, at }
+    Pending pending {};
+    std::optional<Json> newTree {}, newUndo {}; // a commit's tree and undo, taken when its write holds
     Json& t() { return trackOf(s); }
+    Json& win() { return s["profiles"]; } // what profiles.js holds: selection, open, message
     void restartIfPlaying(bool inPlace) { c.restart = true; c.inPlace = inPlace; } // app.js 173-181
     // app.js 186-195 while a player runs: setTimbre always, setTempo with tempo, setTrack with patterns. play.js 172-178: setTrack refuses (false) a track of another
     // length, duration or meter than the player's, and the web restarts in place. Every bar has the meter's beats (derivedBars, setMeter, addChord), so the duration
@@ -351,13 +384,15 @@ struct Handler {
 
 const std::map<std::string, Handler>& handlers() {
     static const std::map<std::string, Handler> table {
-        // a fresh load keeps the mixer and the panorama: they are stored preferences (loadMix, loadPan); only the constructor gives their defaults
+        // a fresh load keeps the mixer and the panorama: they are stored preferences (loadMix, loadPan), read only by the constructor; the profile window, the tree and
+        // the last session stay too (PROTOKOLL.md section 2)
         { "start", { [](const Json&, const Json& a) { return isVariant(field(a, "variant")); },
                      [](Step& x) {
-                         const Json mix = x.s.at("mix"), pan = x.s.at("pan");
+                         const Json mix = x.s.at("mix"), pan = x.s.at("pan"), window = x.s.at("profiles");
                          x.s = startState(numberOf(x.a.at("variant")));
                          x.s["mix"] = mix;
                          x.s["pan"] = pan;
+                         x.s["profiles"] = window;
                          x.c.events = x.c.sound = x.c.voices = x.c.tempo = x.c.mix = true;
                      } } },
         { "newVariant", { [](const Json&, const Json& a) { return isVariant(field(a, "variant")); }, [](Step& x) { x.setVariant(num(numberOf(x.a.at("variant")))); } } },
@@ -483,10 +518,10 @@ const std::map<std::string, Handler>& handlers() {
                               else x.restartIfPlaying(true);
                           } } },
         { "setLevel", { [](const Json&, const Json& a) { return oneOf(field(a, "channel"), mixNames()) && isInt(field(a, "value"), 0, 100); },
-                        [](Step& x) { x.s["mix"][x.a.at("channel").get<std::string>()] = num(numberOf(x.a.at("value")) / 100); x.c.mix = true; },
+                        [](Step& x) { x.s["mix"][x.a.at("channel").get<std::string>()] = num(numberOf(x.a.at("value")) / 100); saveMix(x.pending, x.s); x.c.mix = true; }, // mixer.js 21, 37
                         [](const Json& s, const Json& a) { return showsPercent(s.at("mix").at(a.at("channel").get<std::string>()), a.at("value")); } } }, // mixer.js 101-103
         { "setPan", { [](const Json&, const Json& a) { return oneOf(field(a, "layer"), layerIds()) && isInt(field(a, "value"), -100, 100); },
-                      [](Step& x) { x.s["pan"][x.a.at("layer").get<std::string>()] = num(numberOf(x.a.at("value")) / 100); x.c.mix = true; },
+                      [](Step& x) { x.s["pan"][x.a.at("layer").get<std::string>()] = num(numberOf(x.a.at("value")) / 100); saveMix(x.pending, x.s); x.c.mix = true; }, // mixer.js 21, 57
                       [](const Json& s, const Json& a) { return showsPercent(s.at("pan").at(a.at("layer").get<std::string>()), a.at("value")); } } }, // mixer.js 111-112
         { "toggleMute", { [](const Json&, const Json& a) { return oneOf(field(a, "layer"), layerIds()); },
                           [](Step& x) { Json& on = x.t()["layers"][x.a.at("layer").get<std::string>()]; on = !truthy(on); x.c.mix = true; } } },
@@ -537,11 +572,369 @@ const std::map<std::string, Handler>& handlers() {
     return table;
 }
 
+// ---------- the profile window (profiles.js) and the last session (app.js); session-reference.mjs names their lines ----------
+
+// a message is the web's translation key with its parameters (PROTOKOLL.md section 3)
+Json msg(const std::string& key, Json params = Json::object()) { return Json::object({ { "key", key }, { "params", std::move(params) } }); }
+Json count(const std::string& key, double n, Json params = Json::object()) { params["n"] = num(n); return msg(n == 1 ? key + ".one" : key, std::move(params)); } // profile-parts-picker.js 17
+Json errorsOf(const Json& errors) { // profiles.js 151
+    Json out = Json::array();
+    for (const Json& e : errors) out.push_back(msg("err." + e.at("code").get<std::string>(), e.at("params")));
+    return out;
+}
+std::string wanted(const Json& name) { return detail::jsTrim(detail::jsSlice(detail::jsTrim(name.get<std::string>()), detail::NAME_LIMIT)); } // profiles.js 24
+constexpr double MAX_INT = 9007199254740991.0; // Number.MAX_SAFE_INTEGER
+
+// profiles.js 136-141 (`selected`): the kind of the selected row; an own entry with its node and the id of its folder (null: the top level); a vanished one is the session
+struct Chosen { std::string kind, styleId; Json node, parentId; };
+Chosen chosen(const Json& s, const Json& tree) {
+    const std::string selection = s.at("profiles").at("selection");
+    if (selection == "session" || selection == "mine") return { selection, "", Json(), Json() };
+    if (selection == "factory") return { "factory-folder", "", Json(), Json() };
+    if (selection.rfind("factory:", 0) == 0) return { "factory", selection.substr(8), Json(), Json() };
+    const Json f = detail::find(tree, Json(selection));
+    if (f.is_null()) return { "session", "", Json(), Json() };
+    return { f.at("node").at("type").get<std::string>(), "", f.at("node"), f.at("parent").is_null() ? Json() : f.at("parent").at("id") };
+}
+bool isOpen(const Json& open, const Json& key) { return std::find(open.begin(), open.end(), key) != open.end(); }
+Json opened(Json open, const Json& key) { if (!isOpen(open, key)) open.push_back(key); return open; } // a Set's add in the web: a key it has keeps its place
+// profiles.js 144-148 (`select`): the row is selected, "mine" and every folder above it open
+void selectRow(Json& win, const Json& tree, const Json& id) {
+    win["selection"] = id;
+    win["open"] = opened(win.at("open"), Json("mine"));
+    for (Json f = detail::find(tree, id); !f.is_null() && !f.at("parent").is_null(); f = detail::find(tree, f.at("parent").at("id"))) win["open"] = opened(win.at("open"), f.at("parent").at("id"));
+}
+// profiles.js 371-386: the visible rows of the tree view and whether they open (their order does not count here: only which are visible)
+std::vector<std::pair<Json, bool>> rows(const Json& s, const Json& tree) {
+    const Json& open = s.at("profiles").at("open");
+    std::vector<std::pair<Json, bool>> out { { "session", false }, { "factory", true } };
+    if (isOpen(open, "factory")) for (const Json& f : detail::factoryProfiles()) out.emplace_back(f.at("key"), false);
+    out.emplace_back("mine", true);
+    const std::function<void(const Json&)> walk = [&](const Json& items) {
+        for (const Json& n : items) {
+            const bool folder = n.at("type") == "folder";
+            out.emplace_back(n.at("id"), folder);
+            if (folder && isOpen(open, n.at("id"))) walk(n.at("items"));
+        }
+    };
+    if (isOpen(open, "mine")) walk(tree.at("items"));
+    return out;
+}
+void idsOf(const Json& items, std::set<std::string>& out) { for (const Json& n : items) { out.insert(n.at("id").get<std::string>()); if (n.at("type") == "folder") idsOf(n.at("items"), out); } }
+std::set<std::string> idsOf(const Json& tree) { std::set<std::string> out; idsOf(tree.at("items"), out); return out; }
+// what the window's fields can send (PROTOKOLL.md section 1): a name of the input (maxLength 60, no line breaks), a new id, the checked parts in their order
+bool isName(const Json& v) { return v.is_string() && detail::utf16Length(v.get_ref<const std::string&>()) <= detail::NAME_LIMIT && v.get_ref<const std::string&>().find_first_of("\n\r") == std::string::npos; }
+bool isNewId(const Json& v, const std::set<std::string>& used) { return v.is_string() && !v.get_ref<const std::string&>().empty() && !detail::isReservedId(v.get_ref<const std::string&>()) && !used.count(v.get_ref<const std::string&>()); }
+bool isIdList(const Json& v, const std::set<std::string>& used) {
+    if (!v.is_array() || v.size() > detail::NODE_LIMIT) return false;
+    std::set<std::string> seen;
+    for (const Json& id : v) if (!isNewId(id, used) || !seen.insert(id.get<std::string>()).second) return false;
+    return true;
+}
+bool isPartList(const Json& v, const Json& s) { // profiles.js 440-442: without a form its box is disabled
+    if (!v.is_array()) return false;
+    const Json ids = detail::PART_IDS();
+    std::ptrdiff_t last = -1;
+    for (const Json& id : v) {
+        const std::ptrdiff_t at = std::find(ids.begin(), ids.end(), id) - ids.begin();
+        if (!id.is_string() || at == static_cast<std::ptrdiff_t>(ids.size()) || at <= last) return false;
+        last = at;
+    }
+    return hasForm(s.at("track")) || std::find(v.begin(), v.end(), Json("form")) == v.end();
+}
+bool isFolderId(const Json& v, const Json& tree) { if (!v.is_string()) return false; const Json f = detail::find(tree, v); return !f.is_null() && f.at("node").at("type") == "folder"; }
+bool isPlaying(const Json& v) { return v.is_object() && isInt(field(v, "bar"), 0, MAX_INT) && isInt(field(v, "at"), 0, MAX_INT); }
+double loopBars(const Json& s) { const Json* f = formNow(s); return f != nullptr ? detail::formLengthOf(*f) : numberOf(s.at("track").at("length")); } // position.js 12
+// profile-session.js writeSession with its saveMix; the state keeps tempoRef as null where the web deletes it and holds no notice (the page's, PROTOKOLL.md section 6)
+void writeSession(Json& s, const Json& session, Storage& storage) {
+    detail::writeSession(s, session);
+    if (!s.contains("tempoRef")) s["tempoRef"] = nullptr;
+    s.erase("notice");
+    saveMix(storage, s);
+}
+// app.js 154-155: what stop() remembers while playing, the session at the bar it plays in its loop
+void remember(Step& x, const Json& playing) {
+    x.last = detail::saveLast(x.pending, detail::readSession(x.s), num(std::fmod(numberOf(playing.at("bar")), loopBars(x.s))), playing.at("at"));
+}
+// profiles.js 157-167. The tree's write is held with the action's others (Step::pending): if it fails, Session::apply takes nothing of the action but the message
+// (Review Focus 3, PROTOKOLL.md section 3). `openNext`: the open folders importRaw sets before its commit (351).
+void commit(Step& x, Json next, const Json& selectId, const Json& texts, bool undoable, const Json* openNext = nullptr) {
+    Json& win = x.win();
+    Json message = Json::array();
+    for (const Json& t : texts) if (!t.is_null()) message.push_back(t); // filter(Boolean)
+    x.newUndo = undoable ? Json::object({ { "tree", x.tree }, { "selection", win.at("selection") }, { "message", message } }) : Json();
+    if (openNext != nullptr) win["open"] = *openNext;
+    if (!selectId.is_null()) selectRow(win, next, selectId);
+    win["message"] = message;
+    detail::saveTree(x.pending, next);
+    x.newTree = std::move(next);
+}
+void say(Step& x, Json message) { x.win()["message"] = std::move(message); }
+// profiles.js 215-218
+void nameRefused(Step& x, const std::string& code, const Json& value) {
+    say(x, Json::array({ msg("ui.profileErr." + (code == "nameTaken" ? std::string("nameTakenHere") : code), Json::object({ { "name", wanted(value) } })) }));
+}
+detail::MakeId given(const Json& id) { return [id] { return id.get<std::string>(); }; } // the id the action brings
+struct OutOfIds {}; // the action brings fewer ids than the import makes nodes
+
+// valid: for a step built on the state; run: false for an action that turns out not valid on the way (nothing has changed then)
+struct ProfileHandler {
+    std::function<bool(const Step&)> valid;
+    std::function<bool(Step&)> run;
+};
+bool kindIs(const Step& x, std::initializer_list<const char*> kinds) { const std::string kind = chosen(x.s, x.tree).kind; return std::any_of(kinds.begin(), kinds.end(), [&](const char* k) { return kind == k; }); }
+
+const std::map<std::string, ProfileHandler>& profileHandlers() {
+    static const std::map<std::string, ProfileHandler> table {
+        // profiles.js 52 (onSelect) and 371-386: a click, Enter or Space on a visible row
+        { "profileSelect", { [](const Step& x) {
+                                 const Json& key = field(x.a, "key");
+                                 const auto all = rows(x.s, x.tree);
+                                 return key.is_string() && std::any_of(all.begin(), all.end(), [&](const auto& r) { return r.first == key; }); },
+                             [](Step& x) { x.win()["selection"] = x.a.at("key"); say(x, x.undo.is_null() ? Json() : x.undo.at("message")); return true; } } },
+        // 53-57 (onToggle): the twisty, ArrowRight on a closed row, ArrowLeft on an open one
+        { "profileToggle", { [](const Step& x) {
+                                 const Json& key = field(x.a, "key");
+                                 const auto all = rows(x.s, x.tree);
+                                 return key.is_string() && std::any_of(all.begin(), all.end(), [&](const auto& r) { return r.first == key && r.second; }); },
+                             [](Step& x) {
+                                 Json& open = x.win()["open"];
+                                 const auto at = std::find(open.begin(), open.end(), x.a.at("key"));
+                                 if (at != open.end()) open.erase(at); else open.push_back(x.a.at("key"));
+                                 return true; } } },
+        // 175-185: the session box stands only for the session (410); the folder select is listFolders, '' the top level
+        { "saveProfile", { [](const Step& x) {
+                               return kindIs(x, { "session" }) && isName(field(x.a, "name")) && (isNullField(x.a, "folder") || isFolderId(field(x.a, "folder"), x.tree))
+                                      && isPartList(field(x.a, "parts"), x.s) && isNewId(field(x.a, "id"), idsOf(x.tree)); },
+                           [](Step& x) {
+                               if (x.a.at("parts").empty()) { say(x, Json::array({ msg("ui.profileNeedParts") })); return true; }
+                               const Json r = detail::addProfile(x.tree, x.a.at("folder"), x.a.at("name"), detail::captureParts(detail::readSession(x.s), x.a.at("parts")), given(x.a.at("id")));
+                               if (r.at("ok") != true) { say(x, Json::array({ msg("ui.profileErr." + r.at("code").get<std::string>(), Json::object({ { "name", wanted(x.a.at("name")) } })) })); return true; }
+                               commit(x, r.at("tree"), r.at("id"), Json::array({ msg("ui.profileSaved", Json::object({ { "name", r.at("name") } })) }), false);
+                               return true; } } },
+        // 202-209: the overwrite button stands only for an own profile (413)
+        { "overwriteProfile", { [](const Step& x) { return kindIs(x, { "profile" }) && isPartList(field(x.a, "parts"), x.s); },
+                                [](Step& x) {
+                                    if (x.a.at("parts").empty()) { say(x, Json::array({ msg("ui.profileNeedParts") })); return true; }
+                                    const Json node = chosen(x.s, x.tree).node;
+                                    const Json r = detail::overwriteParts(x.tree, node.at("id"), detail::captureParts(detail::readSession(x.s), x.a.at("parts")));
+                                    if (r.at("ok") != true) { say(x, Json::array({ msg("ui.profileErr." + r.at("code").get<std::string>()) })); return true; }
+                                    commit(x, r.at("tree"), r.at("id"), Json::array({ msg("ui.profileOverwritten", Json::object({ { "name", node.at("name") } })) }), true);
+                                    return true; } } },
+        // 220-224 (doRename): rename stands for an own entry (416)
+        { "renameNode", { [](const Step& x) { return kindIs(x, { "profile", "folder" }) && isName(field(x.a, "name")); },
+                          [](Step& x) {
+                              const Json r = detail::renameNode(x.tree, chosen(x.s, x.tree).node.at("id"), x.a.at("name"));
+                              if (r.at("ok") != true) { nameRefused(x, r.at("code").get<std::string>(), x.a.at("name")); return true; }
+                              commit(x, r.at("tree"), r.at("id"), Json::array({ msg("ui.profileRenamed", Json::object({ { "name", r.at("name") } })) }), false);
+                              return true; } } },
+        // 226-231 (doSubfolder): the button stands for a folder and for "mine" (415)
+        { "addFolder", { [](const Step& x) { return kindIs(x, { "folder", "mine" }) && isName(field(x.a, "name")) && isNewId(field(x.a, "id"), idsOf(x.tree)); },
+                         [](Step& x) {
+                             const Chosen c = chosen(x.s, x.tree);
+                             const Json r = detail::addFolder(x.tree, c.kind == "mine" ? Json() : c.node.at("id"), x.a.at("name"), given(x.a.at("id")));
+                             if (r.at("ok") != true) { nameRefused(x, r.at("code").get<std::string>(), x.a.at("name")); return true; }
+                             commit(x, r.at("tree"), r.at("id"), Json::array({ msg("ui.profileFolderAdded", Json::object({ { "name", r.at("name") } })) }), false);
+                             return true; } } },
+        // 236-243 (move), from the move form (the selected entry, a target of `targets`) and from a drag (246-254: any own row onto "mine" or an own folder that is not its
+        // own and canMove): both are the targets of moveTargets but the entry's folder. shortcut: any own entry, also one whose row is hidden (a drag needs it visible,
+        // the form needs it selected), upgrade: if a shell can send a move for a row it does not show
+        { "moveNode", { [](const Step& x) {
+                            const Json& id = field(x.a, "id");
+                            const Json f = id.is_string() ? detail::find(x.tree, id) : Json();
+                            if (f.is_null() || !x.a.contains("target") || !(x.a.at("target").is_null() || x.a.at("target").is_string())) return false;
+                            const Json& target = x.a.at("target");
+                            if (target == (f.at("parent").is_null() ? Json() : f.at("parent").at("id"))) return false;
+                            const Json targets = detail::moveTargets(x.tree, id);
+                            return std::any_of(targets.begin(), targets.end(), [&](const Json& t) { return t.at("id") == target; }); },
+                        [](Step& x) {
+                            const Json node = detail::find(x.tree, x.a.at("id")).at("node");
+                            const Json& target = x.a.at("target");
+                            const Json where = target.is_null() ? Json() : detail::find(x.tree, target).at("node").at("name");
+                            const Json r = detail::moveNode(x.tree, x.a.at("id"), target);
+                            if (r.at("ok") != true) { say(x, Json::array({ msg("ui.profileErr." + r.at("code").get<std::string>()) })); return true; }
+                            const char* key = r.at("name") == node.at("name") ? "ui.profileMoved" : "ui.profileMovedRenamed";
+                            commit(x, r.at("tree"), x.a.at("id"), Json::array({ msg(key, Json::object({ { "name", node.at("name") }, { "folder", where }, { "newName", r.at("name") } })) }), true);
+                            return true; } } },
+        // 257-261 (remove), after the question of 263-271, which is the page's
+        { "deleteNode", { [](const Step& x) { return kindIs(x, { "profile", "folder" }); },
+                          [](Step& x) {
+                              const Json r = detail::removeNode(x.tree, chosen(x.s, x.tree).node.at("id"));
+                              if (r.at("ok") != true) { say(x, Json::array({ msg("ui.profileErr." + r.at("code").get<std::string>()) })); return true; }
+                              commit(x, r.at("tree"), r.at("parentId").is_null() ? Json("mine") : r.at("parentId"),
+                                     Json::array({ msg("ui.profileDeleted", Json::object({ { "name", r.at("removed").at("name") } })) }), true);
+                              return true; } } },
+        // 274-287: the load button stands for a factory profile and an own profile (411)
+        { "loadProfile", { [](const Step& x) { return kindIs(x, { "factory", "profile" }); },
+                           [](Step& x) {
+                               const Chosen c = chosen(x.s, x.tree);
+                               if (c.kind == "factory") {
+                                   applyStyle(x.s, c.styleId);
+                                   x.applyLive(true, true);
+                                   say(x, Json::array({ msg("ui.profileLoaded") }));
+                                   return true;
+                               }
+                               const Json r = detail::applyParts(detail::readSession(x.s), c.node.at("parts"));
+                               if (r.at("ok") != true) { say(x, errorsOf(r.at("errors"))); return true; } // all or nothing; no input of the session is known to reach it
+                               writeSession(x.s, r.at("session"), x.pending);
+                               x.restartIfPlaying(false);
+                               say(x, Json::array({ msg("ui.profileLoaded") }));
+                               return true; } } },
+        // 290-295: the copy button stands for a factory profile (412); `name` is t(`style.${styleId}`) of the page
+        { "copyFactory", { [](const Step& x) { return kindIs(x, { "factory" }) && isName(field(x.a, "name")) && isNewId(field(x.a, "id"), idsOf(x.tree)); },
+                           [](Step& x) {
+                               std::vector<std::string> names;
+                               for (const Json& n : x.tree.at("items")) names.push_back(n.at("name").get<std::string>());
+                               const Json r = detail::addProfile(x.tree, Json(), Json(detail::freeName(names, x.a.at("name").get<std::string>())), detail::factoryParts(chosen(x.s, x.tree).styleId), given(x.a.at("id")));
+                               if (r.at("ok") != true) { say(x, Json::array({ msg("ui.profileErr." + r.at("code").get<std::string>()) })); return true; }
+                               commit(x, r.at("tree"), r.at("id"), Json::array({ msg("ui.profileSaved", Json::object({ { "name", r.at("name") } })) }), false);
+                               return true; } } },
+        // 342-368 (importRaw, the text button, the file input): the import box stands for the session, a folder and "mine" (426)
+        { "importProfile", { [](const Step& x) {
+                                 const Json& from = field(x.a, "from");
+                                 const Json& text = field(x.a, "text");
+                                 const bool source = (from == "text" && text.is_string()) || (from == "file" && (text.is_string() || isNullField(x.a, "text")) && isInt(field(x.a, "size"), 0, MAX_INT));
+                                 return source && kindIs(x, { "session", "folder", "mine" }) && isIdList(field(x.a, "ids"), idsOf(x.tree)); },
+                             [](Step& x) {
+                                 if (x.a.at("from") == "file" && (numberOf(x.a.at("size")) > detail::FILE_LIMIT || x.a.at("text").is_null())) { // 366-367
+                                     say(x, errorsOf(Json::parse(R"([{"code":"badProfile","params":{}}])")));
+                                     return true;
+                                 }
+                                 const Json r = detail::parseFile(x.a.at("text"));
+                                 if (r.at("ok") != true) { say(x, errorsOf(r.at("errors"))); return true; }
+                                 const Chosen c = chosen(x.s, x.tree);
+                                 const Json target = c.kind == "profile" ? c.parentId : c.kind == "folder" ? c.node.at("id") : Json();
+                                 const Json& ids = x.a.at("ids");
+                                 size_t next = 0;
+                                 Json added;
+                                 try {
+                                     added = detail::importNode(x.tree, target, r.at("node"), [&]() -> std::string { if (next >= ids.size()) throw OutOfIds(); return ids.at(next++).get<std::string>(); });
+                                 } catch (const OutOfIds&) { return false; }
+                                 if (added.at("ok") != true) { say(x, Json::array({ msg("ui.profileErr." + added.at("code").get<std::string>()) })); return true; }
+                                 const Json node = added.at("rootId").is_null() ? Json() : detail::find(added.at("tree"), added.at("rootId")).at("node");
+                                 const bool single = !node.is_null() && node.at("type") == "profile";
+                                 const double profiles = numberOf(added.at("profiles")), skipped = numberOf(r.at("skipped")), dropped = numberOf(added.at("dropped"));
+                                 const Json texts = Json::array({
+                                     single ? msg("ui.profileImported", Json::object({ { "name", node.at("name") } }))
+                                            : !node.is_null() ? count("ui.profileImportedFolder", profiles, Json::object({ { "name", node.at("name") } })) : count("ui.profileRestored", profiles),
+                                     skipped != 0 ? count("ui.profileSkipped", skipped) : Json(), dropped != 0 ? count("ui.profileDropped", dropped) : Json() });
+                                 const Json openNext = single ? x.win().at("open") : opened(x.win().at("open"), target.is_null() ? Json("mine") : target); // 351
+                                 commit(x, added.at("tree"), single ? added.at("rootId") : Json(), texts, true, &openNext);
+                                 return true; } } },
+        // 169-172: the button stands while there is something to undo (427)
+        { "undoProfile", { [](const Step& x) { return !x.undo.is_null(); },
+                           [](Step& x) { const Json u = x.undo; commit(x, u.at("tree"), u.at("selection"), Json::array({ msg("ui.profileUndone") }), false); return true; } } },
+        // app.js 153-157, 160: what stop() and pagehide remember while playing; the shell sends it then (PROTOKOLL.md section 3)
+        { "rememberSession", { [](const Step& x) { return isInt(field(x.a, "bar"), 0, MAX_INT) && isInt(field(x.a, "at"), 0, MAX_INT); }, [](Step& x) { remember(x, x.a); return true; } } },
+        // app.js 226-236 ("Weitermachen", shown with lastPlayed: 449): the entry as it is before stop() remembers the session that plays; the start of the playback is the shell's
+        { "resume", { [](const Step& x) { return !x.last.is_null() && (isNullField(x.a, "playing") || isPlaying(field(x.a, "playing"))); },
+                      [](Step& x) {
+                          const Json old = x.last;
+                          if (!x.a.at("playing").is_null()) remember(x, x.a.at("playing"));
+                          const Json r = detail::applyParts(detail::readSession(x.s), old.at("parts"));
+                          if (r.at("ok") != true) { x.s["errors"] = r.at("errors"); return true; } // 231; no stored entry is known to reach it
+                          writeSession(x.s, r.at("session"), x.pending);
+                          // 233: startWhenLoaded's bar, never past the end of the loop it restored
+                          x.s["resumed"] = Json::object({ { "bar", num(std::min(numberOf(old.at("bar")), loopBars(x.s) - 1)) } });
+                          x.restartIfPlaying(false);
+                          return true; } } },
+    };
+    return table;
+}
+
+// renderProfiles (393), at every render: a vanished selection goes back to the session
+void settleSelection(Json& s, const Json& tree) { if (chosen(s, tree).kind == "session") s["profiles"]["selection"] = "session"; }
+
+// state().profiles (PROTOKOLL.md section 4): the tree lightly, and what the window's building blocks read
+Json light(const Json& items) {
+    Json out = Json::array();
+    for (const Json& n : items) {
+        if (n.at("type") == "profile") out.push_back(Json::object({ { "id", n.at("id") }, { "type", "profile" }, { "name", n.at("name") }, { "parts", detail::partIdsOf(n.at("parts")) } }));
+        else out.push_back(Json::object({ { "id", n.at("id") }, { "type", "folder" }, { "name", n.at("name") }, { "items", light(n.at("items")) } }));
+    }
+    return out;
+}
+Json profilesView(const Json& s, const Json& tree, const Json& undo) {
+    const Json& win = s.at("profiles");
+    const Chosen c = chosen(s, tree);
+    Json targets = Json::array(); // profiles.js 395
+    if (!c.node.is_null()) for (const Json& t : detail::moveTargets(tree, c.node.at("id"))) if (t.at("id") != c.parentId) targets.push_back(t);
+    Json counts; // profile-parts-picker.js 19: everything inside, also deep
+    if (c.kind == "folder" || c.kind == "mine") {
+        const Json& items = c.kind == "mine" ? tree.at("items") : c.node.at("items");
+        const double all = detail::countNodes(Json::object({ { "items", items } })), profiles = detail::countProfiles(Json::object({ { "type", "folder" }, { "items", items } }));
+        counts = Json::object({ { "profiles", num(profiles) }, { "folders", num(all - profiles) } });
+    }
+    return Json::object({ { "items", light(tree.at("items")) }, { "nodes", num(detail::countNodes(tree)) }, { "factory", detail::factoryProfiles() }, { "selection", win.at("selection") },
+                          { "open", win.at("open") }, { "undo", !undo.is_null() }, { "message", win.at("message") }, { "targets", targets }, { "counts", counts } });
+}
+// what the box "Zuletzt gespielt" shows (app.js 450-459)
+Json lastView(const Json& entry) {
+    const Json& p = entry.at("parts");
+    Json out = Json::object({ { "bar", entry.at("bar") }, { "at", entry.at("at") }, { "root", p.at("harmony").at("key").at("root") }, { "scale", p.at("harmony").at("scale") },
+                              { "style", p.at("style").at("style") }, { "bpm", p.at("tempo").at("bpm") } });
+    if (const Json* seed = detail::member(p.at("variant"), "seed")) out["seed"] = *seed;
+    return out;
+}
+
+// a call of the shell's storage that throws counts as one that fails: nothing read, nothing written
+struct SafeStorage : Storage {
+    explicit SafeStorage(Storage& inner) : inner_(inner) {}
+    std::optional<std::string> read(const std::string& name) override { try { return inner_.read(name); } catch (...) { return std::nullopt; } }
+    bool write(const std::string& name, const std::string& text) override { try { return inner_.write(name, text); } catch (...) { return false; } }
+private:
+    Storage& inner_;
+};
+// the texts the constructor read, once, for the loaders of profiles.h
+struct Texts : Storage {
+    std::map<std::string, std::optional<std::string>> files;
+    std::optional<std::string> read(const std::string& name) override { const auto it = files.find(name); return it == files.end() ? std::nullopt : it->second; }
+    bool write(const std::string&, const std::string&) override { return false; }
+};
+// Where the web's loadTree calls defaultMakeId: "1", "2", ..., each no `id` of an object anywhere in the stored value (PROTOKOLL.md section 2). shortcut: the one place where
+// the core names ids itself, the constructor having no action that could bring them; the ids of repaired stored nodes are predictable, upgrade: if the shell should name them
+detail::MakeId freeIds(const std::optional<std::string>& text) {
+    const auto used = std::make_shared<std::set<std::string>>();
+    const std::function<void(const Json&)> walk = [&](const Json& v) {
+        if (v.is_array()) for (const Json& x : v) walk(x);
+        if (!v.is_object()) return;
+        if (const Json* id = detail::member(v, "id"); id != nullptr && id->is_string()) used->insert(id->get<std::string>());
+        for (auto it = v.begin(); it != v.end(); ++it) walk(it.value());
+    };
+    if (text) walk(detail::parsedText(*text));
+    const auto k = std::make_shared<long long>(0);
+    return [used, k] { std::string id; do id = std::to_string(++*k); while (used->count(id)); return id; };
+}
+
 std::string dump(const Json& j) { return j.dump(-1, ' ', false, Json::error_handler_t::replace); }
 
 } // namespace
 
-Session::Session(Storage& storage) : storage_(storage), state_(dump(startState(1))) {}
+struct Session::Memory {
+    Json state; // the state: the fields of state() (PROTOKOLL.md section 4) but the tree, the last session and what is derived, with the web's `errors`
+    Json tree;  // the profiles { items }
+    Json undo;  // what "Rückgängig" keeps: null or { tree, selection, message }
+    Json last;  // the last session: null or { parts, bar, at }
+};
+
+// PROTOKOLL.md section 2: the page load on the stored texts (state.js 58-90 with seed 1, app.js 153 and 484-486, profiles.js 41-47). It restores nothing and writes
+// nothing: the last session is only the offer of "Weitermachen", which is the action resume (app.js 226-236).
+Session::Session(Storage& storage) : storage_(storage), memory_(std::make_unique<Memory>()) {
+    Memory& m = *memory_;
+    m.state = startState(1);
+    m.state["profiles"] = Json::object({ { "selection", "session" }, { "open", Json::array({ "mine", "factory" }) }, { "message", nullptr } }); // profiles.js 42-47
+    SafeStorage safe(storage_);
+    Texts texts;
+    for (const char* name : { detail::MIX_NAME, detail::PROFILES_NAME, detail::SESSION_NAME }) texts.files[name] = safe.read(name);
+    // each of the four loaders is the web's and answers any text as it does, with its catch-all where the web has one (profiles.h): no text is known that makes one throw
+    m.state["mix"] = loadMix(texts.files.at(detail::MIX_NAME)); // state.js 84-85
+    m.state["pan"] = loadPan(texts.files.at(detail::MIX_NAME));
+    m.tree = detail::loadTree(texts, freeIds(texts.files.at(detail::PROFILES_NAME)));
+    m.undo = Json();
+    m.last = detail::loadLast(texts); // app.js 153
+}
+
+Session::~Session() = default;
 
 Session::Change Session::apply(const std::string& actionJson) {
     try {
@@ -550,20 +943,40 @@ Session::Change Session::apply(const std::string& actionJson) {
         const Json a = detail::parsedText(actionJson);
         if (!a.is_object() || !a.contains("action") || !a.at("action").is_string()) return {};
         const auto handler = handlers().find(a.at("action").get<std::string>());
-        if (handler == handlers().end()) return {};
-        Json s = Json::parse(state_);
-        if (!handler->second.valid(s, a)) return {};
-        if (handler->second.same && handler->second.same(s, a)) return {}; // the value the control shows: the web sends no event
+        const auto profile = profileHandlers().find(a.at("action").get<std::string>());
+        if (handler == handlers().end() && profile == profileHandlers().end()) return {};
+        Memory& m = *memory_;
+        Json s = m.state;
+        if (handler != handlers().end()) {
+            if (!handler->second.valid(s, a)) return {};
+            if (handler->second.same && handler->second.same(s, a)) return {}; // the value the control shows: the web sends no event
+        }
+        Json last = m.last;
         Change c;
         const std::string watched = voiceKeys(s.at("track").at("voices"));
         std::string pushed = detail::organTuning(s.at("organ")).dump();
-        Step step { s, a, c, pushed, s.at("track").at("length"), meterKey(s.at("track").at("meter")) };
-        handler->second.run(step);
-        // what render() does: hands the player the voices when one changed (voices-panel.js 89-93) and a changed tuning (organ-panel.js 62-64), clamps the selection
+        Step step { s, a, c, pushed, s.at("track").at("length"), meterKey(s.at("track").at("meter")), m.tree, m.undo, last };
+        s["resumed"] = nullptr; // the bar of a resume holds for the action that set it only
+        if (handler != handlers().end()) handler->second.run(step);
+        else if (!profile->second.valid(step) || !profile->second.run(step)) return {};
+        // what render() does: hands the player the voices when one changed (voices-panel.js 89-93) and a changed tuning (organ-panel.js 62-64), clamps the selections
         if (voiceKeys(s.at("track").at("voices")) != watched) c.voices = true;
         step.renderOrgan();
         clampSelection(s);
-        state_ = dump(s);
+        settleSelection(s, step.newTree ? *step.newTree : m.tree);
+        // the writes, in the order the web makes them, when everything else of the action is done: a tree that is not stored is not taken (Review Focus 3), the
+        // session's other texts are, as in the web, which goes on without them. shortcut: dropping the action for a failed profiles.json is all or nothing only while no
+        // action writes profiles.json and another name (none does: PROTOKOLL.md section 3a), upgrade: when one does, write the tree first and the others only after it held
+        SafeStorage safe(storage_);
+        for (const auto& [name, text] : step.pending.texts) {
+            if (safe.write(name, text) || name != detail::PROFILES_NAME) continue;
+            m.state["profiles"]["message"] = Json::array({ msg("ui.profileNotStored") });
+            m.state["resumed"] = nullptr; // a valid action all the same
+            return {};
+        }
+        m.state = std::move(s);
+        m.last = std::move(last);
+        if (step.newTree) { m.tree = std::move(*step.newTree); m.undo = std::move(*step.newUndo); }
         return c;
     } catch (...) { // a helper that throws where the web would coerce (harmony.h, form_internal.h): the action changes nothing
         return {};
@@ -572,18 +985,41 @@ Session::Change Session::apply(const std::string& actionJson) {
 
 // app.js 128, 191: the player gets { ...state.track, layers: ALL_LAYERS } and the mutes through setLayer (139, 200), so that switching a layer on sounds at once
 std::string Session::track() const {
-    Json t = Json::parse(state_).at("track");
+    Json t = memory_->state.at("track");
     Json all = Json::object();
     for (const std::string& layer : layerIds()) all[layer] = true; // state.js 21 ALL_LAYERS
     t["layers"] = all;
     return dump(t);
 }
-std::string Session::sound() const { return dump(detail::resolveTrackTimbre(Json::parse(state_).at("track"))); }
-std::string Session::tuning() const { return dump(detail::organTuning(Json::parse(state_).at("organ"))); }
+std::string Session::sound() const { return dump(detail::resolveTrackTimbre(memory_->state.at("track"))); }
+std::string Session::tuning() const { return dump(detail::organTuning(memory_->state.at("organ"))); }
 std::string Session::state() const {
-    Json s = Json::parse(state_);
-    s["errors"] = detail::trackErrors(detail::normalizedTrack(s.at("track"))); // validateTrack of index.js: normalizeTrack first
+    const Memory& m = *memory_;
+    Json s = m.state;
+    // a failed resume's errors (app.js 231), else validateTrack of index.js (normalizeTrack first), what a failed start shows
+    if (s.at("errors").empty()) s["errors"] = detail::trackErrors(detail::normalizedTrack(s.at("track")));
+    s["profiles"] = profilesView(m.state, m.tree, m.undo);
+    s["last"] = m.last.is_null() ? Json() : lastView(m.last);
     return dump(s);
+}
+
+// profiles.js 299-312 for a row's key; `name` stands for the translations the web takes for the session, a factory profile and "mine"
+std::string Session::exportFile(const std::string& key, const std::string& name) const {
+    try {
+        const Memory& m = *memory_;
+        Json data;
+        if (key == "session") data = detail::makeProfileFile(Json::object({ { "name", name }, { "parts", detail::captureParts(detail::readSession(m.state), Json()) } }));
+        else if (key == "mine") data = detail::makeFolderFile(Json::object({ { "name", name }, { "items", m.tree.at("items") }, { "backup", true } }));
+        else if (key.rfind("factory:", 0) == 0 && oneOf(Json(key.substr(8)), styleIds()))
+            data = detail::makeProfileFile(Json::object({ { "name", name }, { "parts", detail::factoryParts(key.substr(8)) } }));
+        else {
+            const Json f = detail::find(m.tree, Json(key));
+            if (f.is_null()) return ""; // no row, or "factory" (its exchange box is hidden: 425)
+            data = f.at("node").at("type") == "profile" ? detail::makeProfileFile(f.at("node")) : detail::makeFolderFile(f.at("node"));
+        }
+        if (data.at("format") == "backingtrack-folder" && data.at("items").empty()) return ""; // 312, 315: ui.profileNothing
+        return detail::stringify(data, 2);
+    } catch (...) { return ""; } // no input is known that reaches it
 }
 
 } // namespace btg

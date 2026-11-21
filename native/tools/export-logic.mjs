@@ -1015,16 +1015,76 @@ add('presetDrive', presetDrive, [...VOICES.chords.organ.variants, 'nope', '', nu
   const { formChoice } = await load('ui/state.js');
   const stats = Object.fromEntries(ref.ACTION_NAMES.map((name) => [name, { count: 0, refused: 0, repeat: 0 }]));
   let noAction = 0; // texts without the name of an action
-  const sequence = (texts) => {
+  const special = { failing: 0, restarts: 0, probes: 0 }; // Task 30b: steps whose storage fails, new sessions on the same storage, export probes
+  // what follows a new session: start, start and a resume that restores, start and a resume refused (no offer), a resume, something else
+  const afterRestart = { start: 0, 'start, resume': 0, 'start, resume refused': 0, resume: 0, other: 0 };
+  // Task 30b: a step is an action text; { action, fail: 'false' | 'throw' }, the action with a storage whose every write fails (the core's Storage returns false or
+  // throws; the web's setItem throws); { restart: true, stored?, failReads? }, a new session on the same storage (the reference loads as a fresh page), after `stored`
+  // (name -> text, null removes it) replaced the stored texts, with reads that fail if `failReads` ('none': nothing, 'throw'); { probe: [key, name] }, what exportFile gives.
+  const runStep = (step) => {
+    if (typeof step === 'string') return ref.apply(step);
+    if (step.probe) return 'probe';
+    if (step.restart) {
+      for (const [name, text] of Object.entries(step.stored ?? {})) ref.storage.set(name, text);
+      ref.storage.failReads(Boolean(step.failReads));
+      try { ref.reload(); } finally { ref.storage.failReads(false); }
+      return 'restart';
+    }
+    ref.storage.failWrites(true);
+    try { return ref.apply(step.action); } finally { ref.storage.failWrites(false); }
+  };
+  // FNV-1a, 64 bits, of the text's UTF-8 bytes, in hexadecimal (two halves of 32 bits: prime 2^40 + 0x1b3)
+  const fnv = (text) => {
+    let hi = 0xcbf29ce4, lo = 0x84222325;
+    for (const b of Buffer.from(text, 'utf8')) {
+      lo = (lo ^ b) >>> 0;
+      const p = lo * 0x1b3;
+      hi = (hi * 0x1b3 + lo * 0x100 + Math.floor(p / 4294967296)) >>> 0;
+      lo = p >>> 0;
+    }
+    return hi.toString(16).padStart(8, '0') + lo.toString(16).padStart(8, '0');
+  };
+  // every list of the tree in the order of sortItems (PROTOKOLL.md section 4 says state() gives the tree in the view's order)
+  const { sortItems } = await load('core/profile-tree.js');
+  const sorted = (items) => { const s = sortItems(items); return s.every((n, i) => n === items[i]) && items.every((n) => n.type !== 'folder' || sorted(n.items)); };
+  // Per step: { change, state, track, sound, tuning }, `writes` (the storage's writes of the step: [name, text, took]) if there were any, and what exportFile gives for the
+  // selected row with the name "Export" when it differs from what the step before had: the text, or for the session its fnv (its file is captureParts of what state()
+  // holds field by field; in full it would double the reference). A probe step has only { probe }. The test makes the same record by the same rules.
+  const nameOf = (step) => { try { return JSON.parse(typeof step === 'string' ? step : step.action ?? 'null')?.action; } catch { return undefined; } };
+  const sequence = (steps) => {
     ref.reset();
-    const out = texts.map((text) => {
-      const result = ref.apply(text);
-      let name;
-      try { name = JSON.parse(text)?.action; } catch { /* no JSON */ }
-      if (typeof name === 'string' && Object.hasOwn(stats, name)) { stats[name].count++; if (result !== 'applied') stats[name][result]++; } else noAction++;
-      return ref.record();
+    let shown = null;
+    const results = [];
+    const out = steps.map((step) => {
+      const result = runStep(step);
+      results.push(result);
+      const text = typeof step === 'string' ? step : step.action;
+      if (result === 'probe') { special.probes++; return { probe: ref.exportText(...step.probe) }; }
+      if (result === 'restart') special.restarts++;
+      else {
+        if (typeof step !== 'string') special.failing++;
+        let name;
+        try { name = JSON.parse(text)?.action; } catch { /* no JSON */ }
+        if (typeof name === 'string' && Object.hasOwn(stats, name)) { stats[name].count++; if (result !== 'applied') stats[name][result]++; } else noAction++;
+      }
+      if (!sorted(ref.current().tree.items)) throw new Error('a list of the tree is not in the order of sortItems');
+      const rec = ref.record();
+      const writes = ref.storage.takeWrites();
+      if (writes.length) rec.writes = writes;
+      const selection = rec.state.profiles.selection;
+      const file = ref.exportText(selection, 'Export');
+      if (file !== shown) {
+        shown = file;
+        if (selection === 'session') rec.exportHash = fnv(file); else rec.export = file;
+      }
+      return rec;
     });
-    cases.push({ fn: 'session', in: texts, out });
+    steps.forEach((step, i) => {
+      if (results[i] !== 'restart') return;
+      const [a, b] = [nameOf(steps[i + 1]), nameOf(steps[i + 2])];
+      afterRestart[a === 'start' ? (b === 'resume' ? (results[i + 2] === 'applied' ? 'start, resume' : 'start, resume refused') : 'start') : a === 'resume' ? 'resume' : 'other']++;
+    });
+    cases.push({ fn: 'session', in: steps, out });
   };
   const act = (action, fields = {}) => JSON.stringify({ action, ...fields });
   const st = () => ref.current().state;
@@ -1040,6 +1100,24 @@ add('presetDrive', presetDrive, [...VOICES.chords.organ.variants, 'nope', '', nu
   const R = createRng(2029).fork('session-sequences');
   const any = (list) => list[Math.floor(R.next() * list.length)];
   const between = (lo, hi) => lo + Math.floor(R.next() * (hi - lo + 1));
+  // Task 30b: what the draws of the profile actions need
+  const { PART_IDS } = await load('core/profile-parts.js');
+  const { parseFile } = await load('core/profile.js');
+  const { find, moveTargets, countNodes } = await load('core/profile-tree.js');
+  const NAME_POOL = ['Funk', 'funk', 'Rock', 'Übung', 'übung', 'Funk 2', 'Funk 02', 'Funk 10', 'A', 'a', '  Mitte  ', 'x'.repeat(60), 'Ordner', 'Ordner (2)', '__proto__', '', '   ', 'Straße', 'Strasse'];
+  const ownNodes = (items = ref.current().tree.items) => items.flatMap((n) => [n, ...(n.type === 'folder' ? ownNodes(n.items) : [])]);
+  let idCount = 0; // fresh ids of a sequence: the shell's crypto.randomUUID
+  // a fresh id mostly; now and then one the tree has, a reserved one or an empty one (`fresh` 1: always fresh)
+  const idDraw = (fresh = 0.94) => (R.next() < fresh || !ownNodes().length ? `id${++idCount}` : any(['', 'session', 'mine', 'factory', 'factory:x', any(ownNodes()).id]));
+  // the parts' boxes: none, all, a choice in their order; `form` only with a form (its box is disabled without), now and then without one anyway
+  const partsDraw = () => {
+    const r = R.next();
+    const ok = PART_IDS.filter((id) => id !== 'form' || st().track.form || R.next() < 0.1);
+    return r < 0.08 ? [] : r < 0.3 ? ok : ok.filter(() => R.next() < 0.5);
+  };
+  // damaged texts of a file: no JSON, cut off, another format, a newer version, no parts, the text of a list
+  const BROKEN_FILES = [() => 'kein JSON', (t) => t.slice(0, Math.floor(t.length / 2)), (t) => t.replace('backingtrack-', 'other-'), (t) => t.replace(/"version": \d+/, '"version": 99'),
+    (t) => t.replace('"parts"', '"teile"'), (t) => `[${t}]`, () => '{}', () => 'null'];
   const DRAW = {
     start: () => ({ variant: between(1, 9999) }),
     newVariant: () => ({ variant: between(1, 9999) }),
@@ -1088,6 +1166,36 @@ add('presetDrive', presetDrive, [...VOICES.chords.organ.variants, 'nope', '', nu
     resetTimbre: () => ({ group: R.next() < 0.7 && Object.keys(st().track.timbre).length ? any(Object.keys(st().track.timbre)) : any(GROUPS) }),
     setLeslie: () => ({ mode: any(LESLIE_MODES) }),
     setOrganDrive: () => ({ value: any([null, 0, 100, between(0, 100)]) }),
+    // Task 30b: the profile window and the last session (ids: fresh ones mostly, now and then one in use or reserved; names: a pool with ties of case and number)
+    profileSelect: () => ({ key: any(ref.current().rows).key }),
+    profileToggle: () => ({ key: any(ref.current().rows.filter((r) => r.expandable)).key }),
+    saveProfile: () => ({ name: any(NAME_POOL), folder: R.next() < 0.6 ? null : any([null, ...ownNodes().filter((n) => n.type === 'folder').map((n) => n.id)]), parts: partsDraw(), id: idDraw() }),
+    overwriteProfile: () => ({ parts: partsDraw() }),
+    renameNode: () => ({ name: any(NAME_POOL) }),
+    addFolder: () => ({ name: any(NAME_POOL), id: idDraw() }),
+    moveNode: () => {
+      const parentOf = (id) => find(ref.current().tree, id)?.parent?.id ?? null;
+      const movable = ownNodes().map((n) => ({ id: n.id, targets: moveTargets(ref.current().tree, n.id).map((t) => t.id).filter((t) => t !== parentOf(n.id)) })).filter((m) => m.targets.length);
+      if (movable.length && R.next() < 0.85) { const m = any(movable); return { id: m.id, target: any(m.targets) }; }
+      const node = any([...ownNodes(), { id: 'nope' }]);
+      return { id: node.id, target: any([null, parentOf(node.id), node.id, 'nope']) };
+    },
+    deleteNode: () => ({}),
+    loadProfile: () => ({}),
+    copyFactory: () => ({ name: any(['Funk-Rock', 'Psychedelic', 'Funk', 'Blues']), id: idDraw() }),
+    importProfile: () => {
+      const rows = ref.current().rows.map((r) => r.key).filter((k) => k !== 'factory');
+      const good = ref.exportText(any(rows), any(['Import', 'Funk', 'Sicherung']));
+      const text = R.next() < 0.8 ? good : any(BROKEN_FILES)(good);
+      const read = parseFile(text);
+      const need = read.ok ? (read.node.backup ? read.node.items.reduce((s, n) => s + 1 + (n.type === 'folder' ? countNodes(n) : 0), 0) : 1 + (read.node.type === 'folder' ? countNodes(read.node) : 0)) : 0;
+      const ids = Array.from({ length: Math.max(0, R.next() < 0.05 ? need - 1 : need + between(0, 3)) }, () => idDraw(1));
+      if (R.next() < 0.06) ids.splice(between(0, ids.length), 0, idDraw(0)); // one the tree has, a reserved or an empty one
+      return R.next() < 0.7 ? { from: 'text', text, ids } : { from: 'file', text, size: Buffer.byteLength(text, 'utf8'), ids };
+    },
+    undoProfile: () => ({}),
+    rememberSession: () => ({ bar: between(0, 400), at: 1700000000000 + between(0, 1e9) }),
+    resume: () => ({ playing: R.next() < 0.5 ? null : { bar: between(0, 400), at: 1700000000000 + between(0, 1e9) } }),
   };
   // the value the control shows (PROTOKOLL.md section 1): a repeat. Plain fields (no event in the web), and two derived ones (groove, rhythm knobs) that act as before
   const { grooveIdFor } = await load('core/grooves.js');
@@ -1118,10 +1226,19 @@ add('presetDrive', presetDrive, [...VOICES.chords.organ.variants, 'nope', '', nu
   };
   const NAMES = ref.ACTION_NAMES.filter((n) => n !== 'start');
   const FORM_ACTIONS = ['setFormFeel', 'releaseStructure', 'selectPart', 'editPart', 'toggleLock', 'deletePart', 'movePart', 'copyPart', 'addPart', 'rerollForm'];
+  // Task 30b: the window's buttons stand for one kind of row (PROTOKOLL.md section 3); a visible row of one of the kinds, after opening its folder if need be
+  const NEEDS = { saveProfile: ['session'], overwriteProfile: ['profile'], renameNode: ['profile', 'folder'], addFolder: ['folder', 'mine'], deleteNode: ['profile', 'folder'],
+    loadProfile: ['factory', 'profile'], copyFactory: ['factory'], importProfile: ['session', 'folder', 'mine'] };
+  const kindOf = (key) => (key === 'factory' ? 'factory-folder' : key.startsWith('factory:') ? 'factory' : ['session', 'mine'].includes(key) ? key : find(ref.current().tree, key)?.node.type);
+  const rowOf = (kinds) => { const rows = ref.current().rows.filter((r) => kinds.includes(kindOf(r.key))); return rows.length ? any(rows).key : null; };
+  const WRITING = ['saveProfile', 'overwriteProfile', 'renameNode', 'addFolder', 'moveNode', 'deleteNode', 'copyFactory', 'importProfile', 'undoProfile', 'loadProfile', 'rememberSession', 'resume',
+    'setLevel', 'setPan']; // the actions that write (PROTOKOLL.md section 3a)
   for (let n = 0; n < 200; n++) {
     ref.reset();
+    idCount = 0;
     const texts = [];
-    const push = (text) => { if (texts.length < 30) { texts.push(text); ref.apply(text); } }; // the draws read the state the sequence reaches; sequence() plays it again
+    // the draws read the state the sequence reaches; sequence() plays it again
+    const push = (step) => { if (texts.length < 30) { texts.push(step); runStep(step); ref.storage.takeWrites(); } };
     push(act('start', DRAW.start()));
     while (texts.length < 30) {
       const name = R.next() < 0.01 ? 'start' : any(NAMES);
@@ -1135,8 +1252,27 @@ add('presetDrive', presetDrive, [...VOICES.chords.organ.variants, 'nope', '', nu
       }
       // the strip's actions edit the selected part: mostly another one is chosen first, as a user would
       if (['editPart', 'toggleLock', 'deletePart', 'movePart', 'copyPart'].includes(name) && st().track.form && R.next() < 0.4) push(act('selectPart', DRAW.selectPart()));
+      // Task 30b: the row a button needs is mostly chosen first, its folder opened first if it is closed; "Weitermachen" needs a last session; an own entry to change or
+      // move is mostly made first, a folder to move into too
+      const save = () => { if (ref.current().kind !== 'session') push(act('profileSelect', { key: 'session' })); push(act('saveProfile', { ...DRAW.saveProfile(), id: idDraw(1) })); };
+      if (['overwriteProfile', 'renameNode', 'deleteNode', 'moveNode'].includes(name) && !ownNodes().length && R.next() < 0.8) save();
+      if (name === 'moveNode' && !ownNodes().some((n) => n.type === 'folder') && R.next() < 0.8) { push(act('profileSelect', { key: 'mine' })); push(act('addFolder', { name: any(NAME_POOL), id: idDraw(1) })); }
+      if (NEEDS[name] && !NEEDS[name].includes(ref.current().kind) && R.next() < 0.7) {
+        const closed = NEEDS[name].includes('factory') && !ref.current().open.includes('factory') ? 'factory' : !ref.current().open.includes('mine') && ownNodes().length ? 'mine' : null;
+        if (closed && R.next() < 0.8) push(act('profileToggle', { key: closed }));
+        const row = rowOf(NEEDS[name]);
+        if (row) push(act('profileSelect', { key: row }));
+      }
+      if (name === 'resume' && !ref.current().last && R.next() < 0.75) push(act('rememberSession', DRAW.rememberSession()));
       const action = { action: name, ...(SHOWN[name] && R.next() < 0.15 ? SHOWN[name]() : DRAW[name]()) };
-      push(R.next() < 0.125 ? spoil(action) : JSON.stringify(action));
+      const text = R.next() < 0.125 ? spoil(action) : JSON.stringify(action);
+      // the storage fails at this step: mostly where the action writes
+      push(R.next() < (WRITING.includes(name) ? 0.25 : 0.03) ? { action: text, fail: any(['false', 'throw']) } : text);
+      if (R.next() < 0.015) { // the app starts again on the same storage: the shell sends start, the user now and then "Weitermachen"
+        push({ restart: true, ...(R.next() < 0.2 ? { failReads: any(['none', 'throw']) } : {}) });
+        push(act('start', DRAW.start()));
+        if (R.next() < 0.5) push(act('resume', DRAW.resume()));
+      }
     }
     sequence(texts);
   }
@@ -1173,7 +1309,7 @@ add('presetDrive', presetDrive, [...VOICES.chords.organ.variants, 'nope', '', nu
       act('toggleTag', { category: 'drums', tag: 'nope' }), act('toggleTag', { category: 'nope', tag: 'dry' }), act('toggleTag', { category: 'bass', tag: 'dry' }), act('toggleTag', { category: 'drums' }), act('toggleTag', { tag: 'dry' })],
   };
   // the rest need the state on the way: built step by step
-  const build = (steps) => { const out = []; ref.reset(); for (const step of steps) for (const text of [].concat(typeof step === 'function' ? step() : step)) { out.push(text); ref.apply(text); } return out; };
+  const build = (steps) => { const out = []; ref.reset(); for (const step of steps) for (const text of [].concat(typeof step === 'function' ? step() : step)) { out.push(text); runStep(text); } return out; };
   LIMITS.addChord = build([...Array.from({ length: 6 }, () => () => { const c = chordsOf(); return act('addChord', c[(st().track.bars.length * 7) % c.length]); }),
     act('addChord', { root: 'H', quality: 'maj' }), act('addChord', { root: 'A', quality: 'nope' }), act('addChord', { root: 'A' }), act('addChord', { root: 'C#', quality: 'maj' }), act('addChord', { root: 5, quality: 'maj' }),
     () => act('addChord', chordsOf().at(-1)), act('setRoot', { root: 'F#', from: 'play' }), () => chordsOf().slice(0, 9).map((c) => act('addChord', c))]);
@@ -1250,8 +1386,148 @@ add('presetDrive', presetDrive, [...VOICES.chords.organ.variants, 'nope', '', nu
     act('setOrganDrive', { value: null }), act('setOrganDrive', { value: 100 }), act('setOrganDrive', { value: null }), ...on('setOrganDrive', [101, -1, 50.5, '50'], 'value'), act('setOrganDrive'),
     ...VOICES.chords.organ.variants.flatMap((variant) => [act('setVoice', { layer: 'chords', id: 'organ', variant }), act('setOrganDrive', { value: null }), act('setOrganDrive', { value: 35 }), act('setOrganDrive', { value: null })]),
     act('setLeslie', { mode: 'off' }), act('setOrganDrive', { value: null })]);
+  // Task 30b: the profile window and the last session at their limits, each change of the tree also with a storage that refuses and one that throws
+  let lid = 0;
+  const nid = () => `L${++lid}`;
+  const sel = (key) => act('profileSelect', { key });
+  const tog = (key) => act('profileToggle', { key });
+  const fail = (text, how = 'false') => ({ action: text, fail: how });
+  const probe = (key, name) => ({ probe: [key, name] });
+  const ALL = [...PART_IDS];
+  const save = (name, extra = {}) => act('saveProfile', { name, folder: null, parts: ALL, id: nid(), ...extra });
+  const folderAdd = (name, extra = {}) => act('addFolder', { name, id: nid(), ...extra });
+  const idsFor = (n) => Array.from({ length: n }, nid);
+  const imp = (text, n, extra = {}) => act('importProfile', { from: 'text', text, ids: idsFor(n), ...extra });
+  const idOf = (name) => ownNodes().find((n) => n.name === name)?.id ?? 'nope'; // an own entry by its name, in the reference's state on the way
+  const tiny = (name, seed = 1) => ({ type: 'profile', name, parts: { variant: { seed } } });
+  const backupText = (items) => JSON.stringify({ format: 'backingtrack-folder', version: 1, name: 'Sicherung', backup: true, items });
+  const folderText = (name, items) => JSON.stringify({ format: 'backingtrack-folder', version: 1, name, items });
+  const profileText = (name) => JSON.stringify({ format: 'backingtrack-profile', version: 2, name, parts: { tempo: { bpm: 120, meter: [4, 4] }, variant: { seed: 7, variety: true } } });
+  const chain = (n, inner) => (n === 0 ? inner : [{ type: 'folder', name: `T${n}`, items: chain(n - 1, inner) }]);
+  const MAX = Number.MAX_SAFE_INTEGER;
+  LIMITS.profileSelect = build([sel('session'), sel('factory'), sel('mine'), sel('factory:funk'), sel('factory:poppunk'), tog('factory'), sel('factory:funk'), tog('factory'),
+    ...on('profileSelect', ['nope', 'Session', '', 5, null, ['mine'], 'factory:nope'], 'key'), act('profileSelect'),
+    sel('session'), save('A'), () => sel(idOf('A')), sel('session'), tog('mine'), () => sel(idOf('A')), tog('mine'),
+    sel('mine'), folderAdd('F'), folderAdd('G'), () => tog(idOf('F')), () => sel(idOf('G')), () => tog(idOf('F')), () => sel(idOf('G')),
+    act('deleteNode'), sel('session'), sel('session'), act('undoProfile'), sel('mine')]);
+  LIMITS.profileToggle = build([tog('factory'), tog('factory'), tog('mine'), tog('mine'), ...on('profileToggle', ['session', 'factory:funk', 'nope', '', 5, null], 'key'), act('profileToggle'),
+    sel('mine'), folderAdd('F'), () => tog(idOf('F')), () => tog(idOf('F')), sel('session'), save('P'), () => tog(idOf('P')), tog('mine'), () => tog(idOf('F')), tog('mine'),
+    tog('factory'), tog('mine'), tog('factory')]);
+  // a save selects the new profile (and the session box is gone): the session is chosen again before each save that is meant to count
+  const ss = (name, extra) => [sel('session'), save(name, extra)];
+  LIMITS.saveProfile = build([save('Funk'), ...ss('funk'), ...ss(' Funk 2 '), ...ss('Funk 10'), ...ss('x'.repeat(60)), ...ss('y'.repeat(61)), save('a\nb'), save('a\rb'), save(''), save('   '),
+    save('P1', { parts: [] }), save('P2', { parts: ['tempo', 'harmony'] }), save('P3', { parts: ['tempo', 'tempo'] }), save('P4', { parts: ['nope'] }), save('P5', { parts: 'harmony' }),
+    save('P6', { parts: ['tempo'] }), ...ss('P7', { parts: ['mixer', 'variant'] }), sel('session'),
+    save('P8', { id: '' }), save('P8', { id: 'session' }), save('P8', { id: 'factory:x' }), save('P8', { id: 'mine' }), () => save('P8', { id: idOf('Funk') }), save('P8', { id: 5 }),
+    save('P9', { folder: 'nope' }), () => save('P9', { folder: idOf('Funk') }), act('saveProfile', { name: 'Q', parts: ALL, id: nid() }),
+    sel('mine'), folderAdd('Ordner'), save('Q'), sel('session'), () => save('Q', { folder: idOf('Ordner') }), sel('session'), () => save('q', { folder: idOf('Ordner') }), save('q'),
+    sel('session'), fail(save('Kaputt')), fail(save('Kaputt'), 'throw'), save('Kaputt'),
+    act('setFormTemplate', { template: 'off' }), sel('session'), save('R', { parts: ['harmony', 'form'] }), save('R', { parts: ALL.filter((p) => p !== 'form') }),
+    sel('mine'), ...Array.from({ length: 8 }, (_, i) => folderAdd(`D${i + 1}`)), sel('session'), () => save('Tief', { folder: idOf('D8'), parts: ['tempo'] }),
+    () => save('Tief', { folder: idOf('D7'), parts: ['tempo'] })]);
+  LIMITS.overwriteProfile = build([save('P', { parts: ['tempo'] }), act('overwriteProfile', { parts: [] }), act('setTempo', { bpm: 150, from: 'play' }), act('overwriteProfile', { parts: ['tempo', 'mixer'] }),
+    ...on('overwriteProfile', [['mixer', 'tempo'], ['nope'], 'tempo', null, ['tempo', 'tempo']], 'parts'), act('overwriteProfile'),
+    fail(act('overwriteProfile', { parts: ['variant'] })), act('undoProfile'), act('overwriteProfile', { parts: ALL }), act('undoProfile'),
+    sel('session'), act('overwriteProfile', { parts: ['tempo'] }), act('setFormTemplate', { template: 'off' }), () => sel(idOf('P')), act('overwriteProfile', { parts: ['form'] }),
+    act('overwriteProfile', { parts: ALL.filter((p) => p !== 'form') }), sel('mine'), folderAdd('F'), act('overwriteProfile', { parts: ['tempo'] })]);
+  LIMITS.renameNode = build([save('A'), act('renameNode', { name: '' }), act('renameNode', { name: '   ' }), act('renameNode', { name: 'B' }), act('renameNode', { name: 'b' }), sel('session'), save('C'),
+    act('renameNode', { name: 'B' }), act('renameNode', { name: ' b ' }), act('renameNode', { name: 'x'.repeat(60) }), act('renameNode', { name: 'x'.repeat(61) }), act('renameNode', { name: 'a\nb' }),
+    act('renameNode', { name: 5 }), act('renameNode'), fail(act('renameNode', { name: 'Z' })), fail(act('renameNode', { name: 'Z' }), 'throw'), act('renameNode', { name: 'Z' }),
+    sel('mine'), folderAdd('F'), act('renameNode', { name: 'Funk 10' }), sel('mine'), act('renameNode', { name: 'X' }), sel('session'), act('renameNode', { name: 'X' }), sel('factory:funk'), act('renameNode', { name: 'X' })]);
+  LIMITS.addFolder = build([sel('mine'), folderAdd('F'), folderAdd('f'), sel('mine'), folderAdd('f'), folderAdd(''), folderAdd('x'.repeat(61)), folderAdd('a\rb'),
+    folderAdd('G', { id: '' }), folderAdd('G', { id: 'factory' }), () => folderAdd('G', { id: idOf('F') }), act('addFolder', { name: 'G' }),
+    fail(folderAdd('G')), fail(folderAdd('G'), 'throw'), folderAdd('G'),
+    sel('mine'), ...Array.from({ length: 8 }, (_, i) => folderAdd(`D${i + 1}`)), folderAdd('D9'), sel('session'), folderAdd('S'), save('P'), folderAdd('S')]);
+  // "a" in F1 beside "A" at the top: A into F1 becomes "A (2)"
+  LIMITS.moveNode = build([save('A'), sel('mine'), folderAdd('F1'), folderAdd('F2'), sel('session'), () => save('a', { folder: idOf('F1') }),
+    () => act('moveNode', { id: idOf('A'), target: idOf('F1') }), () => act('moveNode', { id: idOf('A (2)'), target: idOf('F1') }), () => act('moveNode', { id: idOf('A (2)'), target: null }), () => act('moveNode', { id: idOf('F1'), target: idOf('F2') }), () => act('moveNode', { id: idOf('F1'), target: idOf('F1') }),
+    () => act('moveNode', { id: idOf('A (2)'), target: 'nope' }), act('moveNode', { id: 'nope', target: null }), () => act('moveNode', { id: idOf('A (2)') }),
+    () => act('moveNode', { id: idOf('A (2)'), target: idOf('A (2)') }), () => act('moveNode', { id: idOf('a'), target: null }),
+    act('moveNode', { id: 5, target: null }),
+    () => fail(act('moveNode', { id: idOf('F2'), target: null })), () => fail(act('moveNode', { id: idOf('F2'), target: null }), 'throw'), () => act('moveNode', { id: idOf('F2'), target: null }), act('undoProfile'),
+    sel('mine'), ...['C1', 'C2', 'C3', 'C4', 'C5'].map((n) => folderAdd(n)), sel('mine'), ...['E1', 'E2', 'E3', 'E4'].map((n) => folderAdd(n)),
+    () => act('moveNode', { id: idOf('C1'), target: idOf('E4') }), () => act('moveNode', { id: idOf('C1'), target: idOf('E3') }), act('undoProfile')]);
+  LIMITS.deleteNode = build([act('deleteNode'), save('P'), act('deleteNode'), act('undoProfile'), sel('mine'), folderAdd('F'), folderAdd('G'), sel('session'), () => save('Q', { folder: idOf('G') }),
+    () => sel(idOf('F')), act('deleteNode'), act('undoProfile'), () => sel(idOf('Q')), act('deleteNode'),
+    fail(act('deleteNode')), fail(act('deleteNode'), 'throw'), act('deleteNode'), act('undoProfile'), act('undoProfile'), sel('mine'), act('deleteNode'), sel('factory:funk'), act('deleteNode')]);
+  LIMITS.loadProfile = build([act('loadProfile'), save('Alles'), act('newVariant', { variant: 4321 }), act('setTempo', { bpm: 77, from: 'play' }), act('setMeter', { meter: '6/8' }),
+    act('setLevel', { channel: 'bass', value: 30 }), act('setPan', { layer: 'bass', value: -40 }), act('setVoice', { layer: 'chords', id: 'organ', variant: 'jazz' }), act('setLeslie', { mode: 'fast' }),
+    act('setFormTemplate', { template: 'jam' }), () => sel(idOf('Alles')), act('loadProfile'), fail(act('loadProfile')),
+    sel('session'), save('Tempo', { parts: ['tempo'] }), act('setMeter', { meter: '4/4' }), () => sel(idOf('Tempo')), act('loadProfile'),
+    sel('session'), save('Laenge', { parts: ['rhythm'] }), act('setFormTarget', { bars: 24 }), () => sel(idOf('Laenge')), act('loadProfile'), act('setFormTemplate', { template: 'off' }), act('loadProfile'),
+    ...STYLES.flatMap((style) => [sel(`factory:${style}`), act('loadProfile')]), act('setFormTemplate', { template: 'auto' }), sel('factory:dreamy'), act('loadProfile'),
+    sel('mine'), act('loadProfile'), sel('factory'), act('loadProfile')]);
+  LIMITS.copyFactory = build([sel('factory:funk'), act('copyFactory', { name: 'Funk-Rock', id: nid() }), sel('factory:funk'), act('copyFactory', { name: 'Funk-Rock', id: nid() }), sel('factory:funk'),
+    act('copyFactory', { name: 'funk-rock', id: nid() }), sel('factory:blues'), act('copyFactory', { name: '', id: nid() }), act('copyFactory', { name: 'x'.repeat(61), id: nid() }),
+    act('copyFactory', { name: 'B', id: 'session' }), act('copyFactory', { name: 'B' }),
+    fail(act('copyFactory', { name: 'Blues', id: nid() })), fail(act('copyFactory', { name: 'Blues', id: nid() }), 'throw'), act('copyFactory', { name: 'Blues', id: nid() }),
+    sel('session'), act('copyFactory', { name: 'X', id: nid() }), sel('factory'), act('copyFactory', { name: 'X', id: nid() }), tog('factory'), sel('factory:rock')]);
+  // an import of one profile selects it (and the import box is gone): "mine" is chosen again after each
+  LIMITS.importProfile = build([imp(profileText('Eins'), 1), sel('session'), imp(profileText('Eins'), 1),
+    sel('mine'), imp(folderText('Ordner', [tiny('a'), tiny('b'), { type: 'folder', name: 'Innen', items: [tiny('c')] }]), 5), imp(backupText([tiny('x'), tiny('y')]), 2),
+    imp('kein JSON', 1), imp('{"format":"other","version":1}', 1), imp(profileText('Neu').replace('"version":2', '"version":99'), 1), sel('mine'), imp(folderText('Leer', []), 1),
+    imp(JSON.stringify({ format: 'backingtrack-profile', version: 2, name: 'Teile', parts: { tempo: { bpm: 999 }, nope: 1, variant: { seed: 3 } } }), 1), sel('mine'),
+    imp(folderText('Tief', chain(9, [tiny('ganz unten')])), 12),
+    act('importProfile', { from: 'file', text: profileText('Datei'), size: Buffer.byteLength(profileText('Datei')), ids: idsFor(1) }), sel('mine'),
+    act('importProfile', { from: 'file', text: profileText('Gross'), size: 5000001, ids: idsFor(1) }), act('importProfile', { from: 'file', text: profileText('Genau'), size: 5000000, ids: idsFor(1) }),
+    sel('mine'), act('importProfile', { from: 'file', text: null, size: 10, ids: idsFor(1) }), act('importProfile', { from: 'text', text: null, ids: idsFor(1) }),
+    act('importProfile', { from: 'file', text: profileText('X'), ids: idsFor(1) }), act('importProfile', { from: 'url', text: profileText('X'), ids: idsFor(1) }), act('importProfile', { from: 'text', text: profileText('X') }),
+    act('importProfile', { from: 'text', text: profileText('X'), ids: ['', 'a'] }), act('importProfile', { from: 'text', text: profileText('X'), ids: ['d', 'd'] }),
+    act('importProfile', { from: 'text', text: profileText('X'), ids: ['session'] }), () => act('importProfile', { from: 'text', text: profileText('X'), ids: [idOf('Eins')] }),
+    act('importProfile', { from: 'text', text: profileText('X'), ids: idsFor(1001) }), imp(folderText('Kurz', [tiny('k1'), tiny('k2')]), 2),
+    fail(imp(profileText('Kaputt'), 1)), fail(imp(profileText('Kaputt'), 1), 'throw'), act('undoProfile'),
+    () => sel(idOf('Eins')), imp(profileText('Z'), 1), sel('factory:funk'), imp(profileText('Z'), 1), () => tog(idOf('Ordner')), () => sel(idOf('Innen')), imp(profileText('Hinein'), 1),
+    sel('mine'), () => imp(backupText(Array.from({ length: 1001 }, (_, i) => tiny(`N${i}`))), 1000 - countNodes(ref.current().tree)),
+    imp(profileText('Voll'), 1), sel('session'), save('Voll'), sel('mine'), folderAdd('Voll'), act('undoProfile')]);
+  LIMITS.undoProfile = build([act('undoProfile'), save('A'), act('undoProfile'), sel('mine'), folderAdd('F'), sel('session'), save('B'),
+    () => act('moveNode', { id: idOf('B'), target: idOf('F') }), act('undoProfile'), act('undoProfile'), () => sel(idOf('A')), act('deleteNode'), sel('session'), act('undoProfile'),
+    () => sel(idOf('A')), act('overwriteProfile', { parts: ['tempo'] }), act('renameNode', { name: 'A2' }), act('undoProfile'),
+    sel('mine'), imp(profileText('I'), 1), fail(act('undoProfile')), fail(act('undoProfile'), 'throw'), act('undoProfile'), sel('mine'), imp(profileText('J'), 1), { restart: true }, act('start', { variant: 5 }), act('undoProfile')]);
+  LIMITS.rememberSession = build([act('rememberSession', { bar: 0, at: 0 }), act('rememberSession', { bar: 95, at: 1 }), act('rememberSession', { bar: 96, at: 2 }), act('rememberSession', { bar: 1000003, at: MAX }),
+    ...on('rememberSession', [-1, 1.5, '3', null], 'bar', { at: 5 }), ...on('rememberSession', [-1, 2.5, '3', null], 'at', { bar: 5 }), act('rememberSession', { bar: 5 }), act('rememberSession', { at: 5 }),
+    act('setFormTemplate', { template: 'off' }), act('setFormTarget', { bars: 24 }), act('rememberSession', { bar: 50, at: 6 }), act('setFormTemplate', { template: 'blues' }), act('rememberSession', { bar: 50, at: 7 }),
+    // after the failed writes the offer is the last entry in memory, and the stored one after a restart
+    fail(act('rememberSession', { bar: 9, at: 8 })), fail(act('rememberSession', { bar: 10, at: 9 }), 'throw'), { restart: true }, act('start', { variant: 6 }), act('resume', { playing: null }),
+    act('rememberSession', { bar: 3, at: 10 }), { restart: true, failReads: 'throw' }, act('start', { variant: 7 }), act('resume', { playing: null }), { restart: true }]);
+  LIMITS.resume = build([act('resume', { playing: null }), act('rememberSession', { bar: 40, at: 100 }), act('newVariant', { variant: 222 }), act('setLevel', { channel: 'master', value: 20 }),
+    act('resume', { playing: null }), act('newVariant', { variant: 333 }), act('resume', { playing: { bar: 12, at: 200 } }), act('resume', { playing: null }),
+    ...on('resume', [5, 'x', [], {}, { bar: 1 }, { bar: -1, at: 1 }, { bar: 1, at: 1.5 }], 'playing'), act('resume'),
+    fail(act('resume', { playing: { bar: 7, at: 300 } })), fail(act('resume', { playing: null }), 'throw'), { restart: true }, act('resume', { playing: null }),
+    act('start', { variant: 8 }), act('newVariant', { variant: 9 }), act('resume', { playing: null }), act('newVariant', { variant: 10 })]);
   if (ref.ACTION_NAMES.some((name) => !LIMITS[name])) throw new Error(`no sequence at the limits for ${ref.ACTION_NAMES.filter((name) => !LIMITS[name])}`);
   for (const name of ref.ACTION_NAMES) sequence(LIMITS[name]);
+  // Task 30b: new sessions on the same storage: what the sequence wrote, an earlier text of the same sequence, texts that are missing, damaged or of the old format, reads that fail
+  let early = null, entry = null;
+  const OLD_TRACK = { key: { root: 'A', mode: 'minor' }, bpm: 96, bars: [['A', 'min'], ['D', 'min'], ['E', 'maj'], ['A', 'min']].map(([root, quality]) => ({ chord: { root, quality }, beats: 4 })),
+    tags: { development: ['fullFromStart'] }, timbre: { master: { echo: 0.2 } }, seed: 42, variety: true, length: 48, voices: { chords: { id: 'sample', variant: 'organ' } } };
+  const OLD_LIST = JSON.stringify([{ name: ' Alt ', profile: { format: 'backingtrack-profile', version: 1, track: OLD_TRACK, scale: 'blues', style: 'funk', chordColor: 'sevenths', chordColorFromStyle: false, mix: { drums: 0.5 } } },
+    { name: '', profile: { format: 'backingtrack-profile', version: 1, track: OLD_TRACK } }, { name: 'Kaputt', profile: 5 }, { name: 'Alt', profile: { format: 'backingtrack-profile', version: 1, track: OLD_TRACK } }]);
+  const TREES = ['kein JSON', '{"items":5}', '[]', 'null', '{"version":2,"items":[]}', OLD_LIST,
+    JSON.stringify({ version: 2, items: [tiny('Ohne Id'), { id: 'session', ...tiny('Reserviert', 2) }, { id: 'a', type: 'folder', name: 'Doppelt', items: [] }, { id: 'a', ...tiny('Doppelt', 3) },
+      { id: '', type: 'folder', name: '  ', items: [{ id: '1', ...tiny('Eins', 4) }, { id: 3, ...tiny('Zahl', 5) }] }, { id: '2', type: 'note', name: 'x' }, { type: 'profile', name: 'Leer', parts: {} },
+      { id: 'lang', ...tiny(`${'n'.repeat(70)}`, 6) }] }),
+    JSON.stringify({ version: 2, items: chain(9, [tiny('unten')]) }), JSON.stringify({ version: 2, items: Array.from({ length: 1001 }, (_, i) => ({ id: `k${i}`, ...tiny(`K${i}`) })) })];
+  const RESTARTS = [
+    build([save('Erst'), () => { early = ref.storage.text('profiles.json'); return sel('mine'); }, folderAdd('F'), sel('session'), save('Zweit'), act('setLevel', { channel: 'drums', value: 35 }),
+      act('setPan', { layer: 'lead', value: -60 }), act('newVariant', { variant: 77 }), act('rememberSession', { bar: 33, at: 1700000000000 }), act('newVariant', { variant: 78 }),
+      { restart: true }, act('start', { variant: 11 }), act('resume', { playing: null }), act('newVariant', { variant: 79 }), { restart: true, failReads: 'throw' }, act('start', { variant: 12 }),
+      act('resume', { playing: null }), { restart: true, failReads: 'none' }, { restart: true }, act('start', { variant: 13 }),
+      () => ({ restart: true, stored: { 'profiles.json': early } }), sel('mine'), folderAdd('G'), { restart: true, stored: { 'profiles.json': null, 'session.json': null, 'mix.json': null } },
+      act('start', { variant: 14 }), act('resume', { playing: null }), act('setLevel', { channel: 'bass', value: 10 }), { restart: true }, act('start', { variant: 15 })]),
+    build(TREES.flatMap((text, i) => [{ restart: true, stored: { 'profiles.json': text } }, act('start', { variant: 20 + i }), sel('mine'), folderAdd('Neu'), { restart: true }])),
+    build([act('setLevel', { channel: 'pad', value: 40 }), act('rememberSession', { bar: 20, at: 5 }), () => { entry = JSON.parse(ref.storage.text('session.json')); return act('newVariant', { variant: 5 }); },
+      // each stored entry: offered or not, then start and "Weitermachen" (a bar beyond the loop starts at its last bar, app.js 233; without an offer the resume is refused)
+      ...[(e) => ({ ...e, bar: 500 }), (e) => ({ ...e, bar: -1, at: 'x' }), (e) => ({ ...e, bar: 2.5, at: 1.5 }), (e) => ({ ...e, parts: { ...e.parts, harmony: { ...e.parts.harmony, scale: undefined } } })]
+        .flatMap((change, i) => [() => ({ restart: true, stored: { 'session.json': JSON.stringify(change(entry)) } }), act('start', { variant: 40 + i }), act('resume', { playing: null })]),
+      ...['x', '{"parts":{}}', JSON.stringify({ parts: { tempo: { bpm: 100 } }, bar: 3 }), 'null', '[]', '{"parts":5}']
+        .flatMap((text, i) => [{ restart: true, stored: { 'session.json': text } }, act('start', { variant: 50 + i }), act('resume', { playing: null })]),
+      ...['x', '[1,2]', '5', '{"bass":2,"drums":0.25,"pan":{"bass":-3,"lead":0.5}}', '{"master":0.5}', '{"pan":null}']
+        .flatMap((text, i) => [{ restart: true, stored: { 'mix.json': text, 'session.json': null } }, act('start', { variant: 60 + i })]),
+      { restart: true, stored: { 'mix.json': null } }, act('resume', { playing: null })]),
+    build([probe('session', 'Aktuelle Sitzung'), probe('mine', 'Meine Profile'), probe('factory', 'x'), probe('factory:funk', 'Funk-Rock'), probe('factory:nope', 'x'), probe('nope', 'x'), probe('', 'x'),
+      save('P'), () => probe(idOf('P'), 'egal'), sel('mine'), folderAdd('Leer'), () => probe(idOf('Leer'), 'x'), probe('mine', 'Meine Profile'), probe('session', 'Name mit "Zeichen" \\ und \n Zeile')]),
+  ];
+  for (const steps of RESTARTS) sequence(steps);
   // texts that are no action, and the reader's edges (track.cpp's Reader, JSON.parse's rules): a key twice (the last value), a field more (not read), a byte order
   // mark (no JSON), a lone surrogate in a field not read, a field nested so that the text is 64 levels deep (the reader's limit, see PROTOKOLL.md: deeper is no JSON there)
   sequence(['', ' ', 'x', '{', '}', '[]', '5', 'null', 'true', '"start"', '{}', '{"action":5}', '{"action":null}', '{"action":"nope"}', '{"action":"toString"}', '{"action":"__proto__"}', '{"action":"constructor"}',
@@ -1261,7 +1537,9 @@ add('presetDrive', presetDrive, [...VOICES.chords.organ.variants, 'nope', '', nu
     '﻿{"action":"setTempo","bpm":128,"from":"play"}', '{"action":"setTempo","bpm":129,"from":"play","x":"\\ud800"}', '{"action":"setTempo","bpm":130,"from":"\\ud800"}']);
   const total = Object.values(stats).reduce((n, s) => n + s.count, 0);
   const sum = (key) => Object.values(stats).reduce((n, s) => n + s[key], 0);
-  console.log(`session: ${cases.filter((c) => c.fn === 'session').length} sequences, ${total} actions (${sum('refused')} refused, ${sum('repeat')} repeats) and ${noAction} texts that name no action`);
+  console.log(`session: ${cases.filter((c) => c.fn === 'session').length} sequences, ${total} actions (${sum('refused')} refused, ${sum('repeat')} repeats) and ${noAction} texts that name no action;`
+    + ` ${special.failing} steps with a failing storage, ${special.restarts} new sessions on the same storage (followed by ${Object.entries(afterRestart).map(([k, n]) => `${k} ${n}`).join(', ')}),`
+    + ` ${special.probes} export probes`);
   for (const [name, s] of Object.entries(stats)) {
     console.log(`  ${name.padEnd(18)} ${String(s.count).padStart(5)}  refused ${String(s.refused).padStart(4)} (${Math.round((100 * s.refused) / Math.max(1, s.count))} %)  repeats ${String(s.repeat).padStart(4)}`);
   }

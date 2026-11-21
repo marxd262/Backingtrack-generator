@@ -8,13 +8,30 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const src = join(resolve(dirname(fileURLToPath(import.meta.url)), '../..'), 'src');
 const load = (file) => import(pathToFileURL(join(src, file)).href);
 
-// The one global state.js touches at import that node does not give as a browser does: localStorage (node's own warns and needs a file). An empty
-// store, as a browser that never saved: the mixer, the panorama and the layout start at their defaults. navigator and crypto are node's own.
+// The one global state.js touches at import that node does not give as a browser does: localStorage (node's own warns and needs a file). It starts empty,
+// as a browser that never saved. It is state.js's `layoutStorage`, through which the web writes the profiles, the last session and the mixer: at a step whose
+// storage fails it throws as a full or locked browser storage does, and every setItem is logged as the core's btg::Storage write is (the name the core uses for
+// the key, the text, whether it took). navigator and crypto are node's own.
+const NAMES = { 'backingtrack.profiles': 'profiles.json', 'backingtrack.session': 'session.json', 'backingtrack.mix': 'mix.json' };
+const KEYS = Object.fromEntries(Object.entries(NAMES).map(([key, name]) => [name, key]));
 const store = new Map();
+let writesFail = false, readsFail = false;
+let writes = [];
 Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
-  getItem: (key) => (store.has(key) ? store.get(key) : null), setItem: (key, value) => { store.set(key, String(value)); }, removeItem: (key) => { store.delete(key); } } });
+  getItem: (key) => { if (readsFail) throw new Error('locked'); return store.has(key) ? store.get(key) : null; },
+  setItem: (key, value) => { const text = String(value); writes.push([NAMES[key] ?? key, text, !writesFail]); if (writesFail) throw new Error('full'); store.set(key, text); },
+  removeItem: (key) => { store.delete(key); } } });
 
-const { state, ROOTS, ALL_LAYERS, preset, deriveBars, setChordColor, applyStyle, setMeter, formChoice, rollNewForm, setFormTemplate, setFormTarget, setFormFeel } = await load('ui/state.js');
+const { state, layoutStorage, ROOTS, ALL_LAYERS, preset, deriveBars, setChordColor, applyStyle, setMeter, formChoice, rollNewForm, setFormTemplate, setFormTarget, setFormFeel } = await load('ui/state.js');
+const { loadMix, loadPan, saveMix } = await load('ui/mix-state.js');
+const { loadTree, saveTree, isReservedId } = await load('ui/profile-store.js');
+const { saveLast, loadLast } = await load('ui/session-store.js');
+const { readSession, writeSession } = await load('ui/profile-session.js');
+const { factoryProfiles, factoryParts } = await load('ui/profile-factory.js');
+const { loopBars } = await load('ui/position.js');
+const { PART_IDS, captureParts, applyParts, partIdsOf } = await load('core/profile-parts.js');
+const { parseFile, makeProfileFile, makeFolderFile, FORMAT_FOLDER, LIMITS } = await load('core/profile.js');
+const { find, sortItems, addProfile, addFolder, renameNode, removeNode, overwriteParts, importNode, freeName, moveNode, moveTargets, countNodes, countProfiles } = await load('core/profile-tree.js');
 const { chooseRoot, chooseScale } = await load('ui/key-scale.js');
 const { toggleTag } = await load('ui/tags-ui.js');
 const { addChord } = await load('ui/progression-editor.js');
@@ -41,6 +58,9 @@ let selected; // form-strip.js 35: the selected part of the strip
 let change; // what the web app calls on a running player during the action (app.js applyLive, restartIfPlaying; the handlers; render)
 let pushed; // organ-panel.js 46: the tuning last handed to the player
 let player; // what the player plays (play.js 35-46): every action that changes its length or meter restarts it, so it is taken from the state before each action
+// the profile window (profiles.js 41-47) and the last session (app.js 153, the offer of "Weitermachen"); `resumed`: the bar the playback starts at after a resume that
+// restored (app.js 233), null after every other action (PROTOKOLL.md section 4)
+let tree, selection, open, message, undo, last, resumed;
 
 // play.js 35-46 for { ...state.track, layers: ALL_LAYERS } (app.js 128)
 function playerOf(trackInput) {
@@ -114,6 +134,74 @@ const STYLE_IDS = STYLE_PRESETS.map((p) => p.id);
 const FEEL_MAX = { structure: 1, dynamics: DYNAMICS_MAX, pauses: 1, randomness: 1 }; // form-panel.js 12, 43
 const pick = (list, r) => list[Math.floor(r * list.length)]; // app.js 209 with the draw from the action
 
+// ---------- the profile window (profiles.js) and the last session (app.js) ----------
+// The messages are the web's translation keys with their parameters, { key, params }: `t(key, params)` of profiles.js before it is translated.
+const msg = (key, params = {}) => ({ key, params });
+const count = (key, n, params = {}) => msg(n === 1 ? `${key}.one` : key, { ...params, n }); // profile-parts-picker.js 17
+const errorsOf = (errors) => errors.map((e) => msg(`err.${e.code}`, e.params)); // profiles.js 151
+const BAD = [{ code: 'badProfile', params: {} }]; // profiles.js 19
+const wanted = (name) => name.trim().slice(0, LIMITS.name).trim(); // profiles.js 24
+const FACTORY = 'factory:';
+const MAX_INT = Number.MAX_SAFE_INTEGER;
+// Date.now() as the action gives it (session-store.js 10 stamps the entry)
+const at = (time, fn) => { const real = Date.now; Date.now = () => time; try { return fn(); } finally { Date.now = real; } };
+
+// profiles.js 136-141 (`selected` there; the name is the form strip's here): { kind, styleId?, node?, parentId? }; a vanished own node counts as the session
+function chosen() {
+  if (['session', 'factory', 'mine'].includes(selection)) return { kind: selection === 'factory' ? 'factory-folder' : selection };
+  if (selection.startsWith(FACTORY)) return { kind: 'factory', styleId: selection.slice(FACTORY.length) };
+  const f = find(tree, selection);
+  return f ? { kind: f.node.type, node: f.node, parentId: f.parent?.id ?? null } : { kind: 'session' };
+}
+// profiles.js 144-148: select an own row and open its folders (a Set in the web: add keeps the place of a key it has)
+const opened = (list, key) => (list.includes(key) ? list : [...list, key]);
+function select(id) {
+  selection = id;
+  open = opened(open, 'mine');
+  for (let f = find(tree, id); f?.parent; f = find(tree, f.parent.id)) open = opened(open, f.parent.id);
+}
+// profiles.js 157-167. Review Focus 3, ruled (PROTOKOLL.md section 3): a write that fails changes nothing but the message, where the web keeps `next` until the
+// page is loaded again and adds the same key to its message. `openNext`: the open folders importRaw sets before its commit (351), kept only if the commit holds.
+function commit(next, selectId, texts, undoable = false, openNext = open) {
+  if (!saveTree(layoutStorage, next)) { message = [msg('ui.profileNotStored')]; return; }
+  undo = undoable ? { tree, selection } : null;
+  tree = next;
+  open = openNext;
+  if (selectId) select(selectId);
+  message = texts.filter(Boolean);
+  if (undo) undo.message = message;
+}
+// profiles.js 371-386: the visible rows of the tree view (key and whether it opens), in their order
+function rows() {
+  const out = [{ key: 'session', expandable: false }, { key: 'factory', expandable: true }];
+  if (open.includes('factory')) for (const f of factoryProfiles()) out.push({ key: f.key, expandable: false });
+  out.push({ key: 'mine', expandable: true });
+  const walk = (items) => {
+    for (const n of sortItems(items)) {
+      out.push({ key: n.id, expandable: n.type === 'folder' });
+      if (n.type === 'folder' && open.includes(n.id)) walk(n.items);
+    }
+  };
+  if (open.includes('mine')) walk(tree.items);
+  return out;
+}
+// renderProfiles (393), at every render: a vanished selection goes back to the session
+const settleSelection = () => { if (chosen().kind === 'session') selection = 'session'; };
+const idsOf = (items, out = new Set()) => { for (const n of items) { out.add(n.id); if (n.type === 'folder') idsOf(n.items, out); } return out; };
+// what the window's fields can send (PROTOKOLL.md section 1): a name of the input (maxLength 60, no line breaks), a new id, the checked parts in their order
+const isName = (v) => typeof v === 'string' && v.length <= LIMITS.name && !/[\n\r]/.test(v);
+const isNewId = (v, used = idsOf(tree.items)) => typeof v === 'string' && v !== '' && !isReservedId(v) && !used.has(v);
+const isIdList = (v) => { const used = idsOf(tree.items); return Array.isArray(v) && v.length <= LIMITS.nodes && v.every((id) => isNewId(id, used)) && new Set(v).size === v.length; };
+const isPartList = (v) => Array.isArray(v) && v.every((id, i) => PART_IDS.includes(id) && (i === 0 || PART_IDS.indexOf(id) > PART_IDS.indexOf(v[i - 1])))
+  && (Boolean(state.track.form) || !v.includes('form')); // profiles.js 440-442: without a form its box is disabled
+const isFolderId = (v) => typeof v === 'string' && find(tree, v)?.node.type === 'folder';
+const isPlaying = (v) => v !== null && typeof v === 'object' && !Array.isArray(v) && int(v.bar, 0, MAX_INT) && int(v.at, 0, MAX_INT);
+// app.js 154-155: the session that plays, at the bar it plays in its loop
+const remember = ({ bar, at: time }) => { last = at(time, () => saveLast(layoutStorage, readSession(state), bar % loopBars(state.track))); };
+// profiles.js 215-218
+const nameRefused = (code, value) => { message = [msg(`ui.profileErr.${code === 'nameTaken' ? 'nameTakenHere' : code}`, { name: wanted(value) })]; };
+class OutOfIds extends Error {}
+
 const ACTIONS = {
   start: {
     valid: (a) => isVariant(a.variant),
@@ -126,6 +214,7 @@ const ACTIONS = {
       selected = 0; // form-strip.js 35
       deriveBars(); // app.js 484
       setFormTemplate('auto'); // app.js 485
+      // the profile window, the tree and the last session stay (PROTOKOLL.md section 2)
       Object.assign(change, { events: true, sound: true, voices: true, tempo: true, mix: true });
     },
   },
@@ -257,14 +346,14 @@ const ACTIONS = {
       else restartIfPlaying({ inPlace: true });
     },
   },
-  // mixer.js 34-40, 54-59, 64 with app.js 198-200
+  // mixer.js 34-40, 54-59, 64 with app.js 198-200; save() is mixer.js 21
   setLevel: {
     valid: (a) => oneOf(a.channel, MIX_NAMES) && int(a.value, 0, 100), same: (a) => showsPercent(state.mix[a.channel], a.value),
-    run: (a) => { state.mix = { ...state.mix, [a.channel]: a.value / 100 }; change.mix = true; },
+    run: (a) => { state.mix = { ...state.mix, [a.channel]: a.value / 100 }; saveMix(layoutStorage, state.mix, state.pan); change.mix = true; },
   },
   setPan: {
     valid: (a) => oneOf(a.layer, LAYER_IDS) && int(a.value, -100, 100), same: (a) => showsPercent(state.pan[a.layer], a.value),
-    run: (a) => { state.pan = { ...state.pan, [a.layer]: a.value / 100 }; change.mix = true; },
+    run: (a) => { state.pan = { ...state.pan, [a.layer]: a.value / 100 }; saveMix(layoutStorage, state.mix, state.pan); change.mix = true; },
   },
   toggleMute: { valid: (a) => oneOf(a.layer, LAYER_IDS), run: (a) => { state.track.layers = { ...state.track.layers, [a.layer]: !state.track.layers[a.layer] }; change.mix = true; } },
   // mixer.js 79, voices-panel.js 48-52
@@ -313,6 +402,149 @@ const ACTIONS = {
       state.organ = { ...state.organ, drive: null };
     },
   },
+  // ---------- the profile window: profiles.js ----------
+  // 52 (onSelect) and 371-386: a click, Enter or Space on a visible row
+  profileSelect: { valid: (a) => typeof a.key === 'string' && rows().some((r) => r.key === a.key), run: (a) => { selection = a.key; message = undo?.message ?? null; } },
+  // 53-57 (onToggle): the twisty, ArrowRight on a closed row, ArrowLeft on an open one (profile-tree-view.js 81, 97, 101)
+  profileToggle: {
+    valid: (a) => typeof a.key === 'string' && rows().some((r) => r.key === a.key && r.expandable),
+    run: (a) => { open = open.includes(a.key) ? open.filter((k) => k !== a.key) : [...open, a.key]; },
+  },
+  // 175-185: the session box stands only for the session (410); the folder select is listFolders (436), '' the top level (178)
+  saveProfile: {
+    valid: (a) => chosen().kind === 'session' && isName(a.name) && (a.folder === null || isFolderId(a.folder)) && isPartList(a.parts) && isNewId(a.id),
+    run: (a) => {
+      if (!a.parts.length) { message = [msg('ui.profileNeedParts')]; return; }
+      const r = addProfile(tree, a.folder, a.name, captureParts(readSession(state), a.parts), () => a.id);
+      if (!r.ok) { message = [msg(`ui.profileErr.${r.code}`, { name: wanted(a.name) })]; return; }
+      commit(r.tree, r.id, [msg('ui.profileSaved', { name: r.name })]);
+    },
+  },
+  // 202-209: the overwrite button stands only for an own profile (413)
+  overwriteProfile: {
+    valid: (a) => chosen().kind === 'profile' && isPartList(a.parts),
+    run: (a) => {
+      if (!a.parts.length) { message = [msg('ui.profileNeedParts')]; return; }
+      const { node } = chosen();
+      const r = overwriteParts(tree, node.id, captureParts(readSession(state), a.parts));
+      if (!r.ok) { message = [msg(`ui.profileErr.${r.code}`)]; return; }
+      commit(r.tree, r.id, [msg('ui.profileOverwritten', { name: node.name })], true);
+    },
+  },
+  // 220-224 (doRename): rename stands for an own entry (416)
+  renameNode: {
+    valid: (a) => ['profile', 'folder'].includes(chosen().kind) && isName(a.name),
+    run: (a) => {
+      const r = renameNode(tree, chosen().node.id, a.name);
+      if (!r.ok) { nameRefused(r.code, a.name); return; }
+      commit(r.tree, r.id, [msg('ui.profileRenamed', { name: r.name })]);
+    },
+  },
+  // 226-231 (doSubfolder): the button stands for a folder and for "mine" (415)
+  addFolder: {
+    valid: (a) => ['folder', 'mine'].includes(chosen().kind) && isName(a.name) && isNewId(a.id),
+    run: (a) => {
+      const s = chosen();
+      const r = addFolder(tree, s.kind === 'mine' ? null : s.node.id, a.name, () => a.id);
+      if (!r.ok) { nameRefused(r.code, a.name); return; }
+      commit(r.tree, r.id, [msg('ui.profileFolderAdded', { name: r.name })]);
+    },
+  },
+  // 236-243 (move), reached from the move form (95: the selected entry, a target of `targets`, 395) and from a drag (246-254: any own row onto "mine" or an own
+  // folder that is not its own and canMove); both are the targets of moveTargets but the entry's folder
+  moveNode: {
+    valid: (a) => {
+      const f = typeof a.id === 'string' ? find(tree, a.id) : null;
+      return f !== null && (a.target === null || typeof a.target === 'string') && a.target !== (f.parent?.id ?? null) && moveTargets(tree, a.id).some((t) => t.id === a.target);
+    },
+    run: (a) => {
+      const { node } = find(tree, a.id);
+      const where = a.target === null ? null : find(tree, a.target)?.node.name;
+      const r = moveNode(tree, a.id, a.target);
+      if (!r.ok) { message = [msg(`ui.profileErr.${r.code}`)]; return; }
+      commit(r.tree, a.id, [msg(r.name === node.name ? 'ui.profileMoved' : 'ui.profileMovedRenamed', { name: node.name, folder: where ?? null, newName: r.name })], true);
+    },
+  },
+  // 257-261 (remove) after the question of 263-271, which is the page's
+  deleteNode: {
+    valid: () => ['profile', 'folder'].includes(chosen().kind),
+    run: () => {
+      const r = removeNode(tree, chosen().node.id);
+      if (!r.ok) { message = [msg(`ui.profileErr.${r.code}`)]; return; }
+      commit(r.tree, r.parentId ?? 'mine', [msg('ui.profileDeleted', { name: r.removed.name })], true);
+    },
+  },
+  // 274-287: the load button stands for a factory profile and an own profile (411)
+  loadProfile: {
+    valid: () => ['factory', 'profile'].includes(chosen().kind),
+    run: () => {
+      const s = chosen();
+      if (s.kind === 'factory') {
+        applyStyle(s.styleId);
+        applyLive({ patterns: true, tempo: true });
+        message = [msg('ui.profileLoaded')];
+        return;
+      }
+      const r = applyParts(readSession(state), s.node.parts);
+      if (!r.ok) { message = errorsOf(r.errors); return; }
+      writeSession(state, r.session);
+      restartIfPlaying();
+      message = [msg('ui.profileLoaded')];
+    },
+  },
+  // 290-295: the copy button stands for a factory profile (412); `name` is t(`style.${styleId}`) of the page
+  copyFactory: {
+    valid: (a) => chosen().kind === 'factory' && isName(a.name) && isNewId(a.id),
+    run: (a) => {
+      const { styleId } = chosen();
+      const r = addProfile(tree, null, freeName(tree.items.map((n) => n.name), a.name), factoryParts(styleId), () => a.id);
+      if (!r.ok) { message = [msg(`ui.profileErr.${r.code}`)]; return; }
+      commit(r.tree, r.id, [msg('ui.profileSaved', { name: r.name })]);
+    },
+  },
+  // 342-368 (importRaw, the text button, the file input): the import box stands for the session, a folder and "mine" (426). A list of ids shorter than the nodes the
+  // import makes is the shell's mistake: the action is refused (nothing has changed when importNode asks for one more)
+  importProfile: {
+    valid: (a) => ['session', 'folder', 'mine'].includes(chosen().kind) && isIdList(a.ids)
+      && ((a.from === 'text' && typeof a.text === 'string') || (a.from === 'file' && (typeof a.text === 'string' || a.text === null) && int(a.size, 0, MAX_INT))),
+    run: (a) => {
+      if (a.from === 'file' && (a.size > LIMITS.file || a.text === null)) { message = errorsOf(BAD); return; } // 366-367
+      const r = parseFile(a.text);
+      if (!r.ok) { message = errorsOf(r.errors); return; }
+      const s = chosen();
+      const target = s.kind === 'profile' ? s.parentId : s.kind === 'folder' ? s.node.id : null;
+      let n = 0;
+      let added;
+      try { added = importNode(tree, target, r.node, () => { if (n >= a.ids.length) throw new OutOfIds(); return a.ids[n++]; }); } catch (e) { if (e instanceof OutOfIds) return 'refused'; throw e; }
+      if (!added.ok) { message = [msg(`ui.profileErr.${added.code}`)]; return; }
+      const node = added.rootId === null ? null : find(added.tree, added.rootId).node;
+      const single = node?.type === 'profile';
+      commit(added.tree, single ? added.rootId : null, [
+        single ? msg('ui.profileImported', { name: node.name })
+          : node ? count('ui.profileImportedFolder', added.profiles, { name: node.name }) : count('ui.profileRestored', added.profiles),
+        r.skipped ? count('ui.profileSkipped', r.skipped) : '',
+        added.dropped ? count('ui.profileDropped', added.dropped) : '',
+      ], true, single ? open : opened(open, target ?? 'mine'));
+    },
+  },
+  // 169-172: the button stands while there is something to undo (427)
+  undoProfile: { valid: () => undo !== null, run: () => { const u = undo; commit(u.tree, u.selection, [msg('ui.profileUndone')]); } },
+  // ---------- the last session: app.js ----------
+  // 153-157, 160: what stop() and pagehide remember while playing; the shell sends it then (PROTOKOLL.md section 3)
+  rememberSession: { valid: (a) => int(a.bar, 0, MAX_INT) && int(a.at, 0, MAX_INT), run: (a) => remember(a) },
+  // 226-236 ("Weitermachen", shown with lastPlayed: 449): the entry as it is before stop() remembers the session that plays; the start of the playback is the shell's
+  resume: {
+    valid: (a) => last !== null && (a.playing === null || isPlaying(a.playing)),
+    run: (a) => {
+      const old = last;
+      if (a.playing) remember(a.playing);
+      const r = applyParts(readSession(state), old.parts);
+      if (!r.ok) { state.errors = r.errors; return; }
+      writeSession(state, r.session);
+      resumed = { bar: Math.min(old.bar, loopBars(state.track) - 1) }; // 233: startWhenLoaded's bar, never past the end of the loop it restored
+      restartIfPlaying();
+    },
+  },
 };
 
 export const ACTION_NAMES = Object.keys(ACTIONS);
@@ -332,13 +564,75 @@ export function apply(text) {
   const watched = voiceKeys();
   pushed = JSON.stringify(organTuning(state.organ));
   player = state.track.bars.length ? playerOf({ ...state.track, layers: ALL_LAYERS }) : null; // no bars: the state as imported, before the first start (which calls no applyLive)
-  def.run(action);
-  // render(): voices-panel.js 89-93, organ-panel.js 62-64, form-strip.js 241
+  const before = resumed;
+  resumed = null; // the bar of a resume holds for the action that set it only
+  if (def.run(action) === 'refused') { resumed = before; return 'refused'; } // found only on the way (importProfile), before anything changed
+  // render(): voices-panel.js 89-93, organ-panel.js 62-64, form-strip.js 241, profiles.js 393
   if (voiceKeys() !== watched) change.voices = true;
   renderOrgan();
   renderStrip();
+  settleSelection();
   return 'applied';
 }
+
+// ---------- loading the page (state.js 58-90, app.js 153 and 484-486, profiles.js 41-47): the session's constructor; the ids of a repaired tree are the session's own ----------
+// The ids the session's constructor gives where loadTree calls defaultMakeId (PROTOKOLL.md section 2): "1", "2", ... skipping every `id` of an object in the stored value
+const storedIds = (v, out = new Set()) => {
+  if (Array.isArray(v)) for (const x of v) storedIds(x, out);
+  else if (v !== null && typeof v === 'object') { if (typeof v.id === 'string') out.add(v.id); for (const x of Object.values(v)) storedIds(x, out); }
+  return out;
+};
+function loadTreeWithIds() {
+  let used = new Set();
+  try { used = storedIds(JSON.parse(layoutStorage.getItem(KEYS['profiles.json']))); } catch { /* loadTree gives the empty tree then */ }
+  let k = 0;
+  const real = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+  Object.defineProperty(globalThis, 'crypto', { configurable: true, value: { randomUUID: () => { do k++; while (used.has(String(k))); return String(k); } } }); // defaultMakeId asks it
+  try { return loadTree(layoutStorage); } finally { Object.defineProperty(globalThis, 'crypto', real); }
+}
+/** A fresh page on the store (the session's constructor): the state literal with seed 1 and the stored mixer, the tree, the last session as the offer of "Weitermachen". */
+export function reload() {
+  for (const key of Object.keys(state)) delete state[key];
+  Object.assign(state, structuredClone(initial), { mix: loadMix(layoutStorage), pan: loadPan(layoutStorage) }); // state.js 84-85
+  state.track.seed = 1;
+  touched = { key: false, style: false, tempo: false, variant: false };
+  selected = 0;
+  deriveBars();
+  setFormTemplate('auto');
+  tree = loadTreeWithIds();
+  selection = 'session';
+  open = ['mine', 'factory'];
+  message = null;
+  undo = null;
+  last = loadLast(layoutStorage); // only the offer: the web applies it on the click (226-236), that is resume
+  resumed = null;
+  change = { events: false, sound: false, voices: false, tempo: false, mix: false, restart: false, inPlace: false }; // a new session has called nothing
+  renderStrip();
+}
+
+// ---------- the export (profiles.js 299-312) for a row's key; `name` stands for the translations the web takes for the session, a factory profile and "mine" ----------
+export function exportText(key, name) {
+  let data;
+  if (key === 'session') data = makeProfileFile({ name, parts: captureParts(readSession(state)) });
+  else if (key === 'mine') data = makeFolderFile({ name, items: tree.items, backup: true });
+  else if (key.startsWith(FACTORY) && factoryProfiles().some((f) => f.key === key)) data = makeProfileFile({ name, parts: factoryParts(key.slice(FACTORY.length)) });
+  else {
+    const f = find(tree, key);
+    if (!f) return ''; // no row, or "factory" (its exchange box is hidden: 425)
+    data = f.node.type === 'profile' ? makeProfileFile(f.node) : makeFolderFile(f.node);
+  }
+  if (data.format === FORMAT_FOLDER && !data.items.length) return ''; // 312, 315: ui.profileNothing
+  return JSON.stringify(data, null, 2);
+}
+
+/** The storage for the export's steps: whether writes (and the page's reads) fail, the log of the writes, the stored texts by the core's names. */
+export const storage = {
+  failWrites: (on) => { writesFail = on; },
+  failReads: (on) => { readsFail = on; },
+  takeWrites: () => { const out = writes; writes = []; return out; },
+  text: (name) => (store.has(KEYS[name]) ? store.get(KEYS[name]) : null),
+  set: (name, text) => { if (text === null) store.delete(KEYS[name]); else store.set(KEYS[name], text); },
+};
 
 /**
  * What the core's session must give after the action: the flags, state() (with errors as app.js reports them, validateTrack of index.js), track() (what app.js 128 and
@@ -350,18 +644,35 @@ export function record() {
     state: {
       track: state.track, formTarget: state.formTarget, formSalt: state.formSalt, formFeel: state.formFeel, scale: state.scale, chordColor: state.chordColor,
       chordColorFromStyle: state.chordColorFromStyle, style: state.style, mix: state.mix, pan: state.pan, organ: state.organ, tempoRef: state.tempoRef ?? null, touched,
-      selectedPart: selected, errors: validateTrack(state.track),
+      selectedPart: selected, errors: state.errors.length ? state.errors : validateTrack(state.track), // app.js 231 after a failed resume; else what a failed start shows
+      profiles: profilesView(),
+      last: last && lastView(last),
+      resumed,
     },
     track: { ...state.track, layers: ALL_LAYERS },
     sound: resolveTrackTimbre(state.track),
     tuning: organTuning(state.organ),
   }));
 }
+// state().profiles (PROTOKOLL.md section 4): the tree lightly, and what the window's building blocks read
+function profilesView() {
+  const light = (items) => items.map((n) => (n.type === 'profile' ? { id: n.id, type: n.type, name: n.name, parts: partIdsOf(n.parts) } : { id: n.id, type: n.type, name: n.name, items: light(n.items) }));
+  const s = chosen();
+  const inside = (folder) => { const all = countNodes({ items: folder.items }); const profiles = countProfiles({ type: 'folder', items: folder.items }); return { profiles, folders: all - profiles }; }; // profile-parts-picker.js 19
+  return {
+    items: light(tree.items), nodes: countNodes(tree), factory: factoryProfiles(), selection, open, undo: undo !== null, message,
+    targets: s.node ? moveTargets(tree, s.node.id).filter((f) => f.id !== s.parentId) : [], // profiles.js 395
+    counts: s.kind === 'folder' || s.kind === 'mine' ? inside(s.node ?? tree) : null, // 407, 461
+  };
+}
+// what the box "Zuletzt gespielt" shows (app.js 450-459)
+const lastView = (entry) => ({ bar: entry.bar, at: entry.at, root: entry.parts.harmony.key.root, scale: entry.parts.harmony.scale, style: entry.parts.style.style, bpm: entry.parts.tempo.bpm, seed: entry.parts.variant.seed });
 
 /** The reference's state, read only, for the export's draws. */
-export const current = () => ({ state, touched, selected });
-/** Back to what the core's constructor gives (the start state of variant 1, the mixer's defaults), before each sequence. */
+export const current = () => ({ state, touched, selected, tree, selection, open, undo, last, rows: rows(), kind: chosen().kind });
+/** Back to what the core's constructor gives on an empty storage (the start state of variant 1, the mixer's defaults, no profiles), before each sequence. */
 export const reset = () => {
-  Object.assign(state, { mix: structuredClone(initial.mix), pan: structuredClone(initial.pan) });
-  apply(JSON.stringify({ action: 'start', variant: 1 }));
+  store.clear();
+  writes = [];
+  reload();
 };

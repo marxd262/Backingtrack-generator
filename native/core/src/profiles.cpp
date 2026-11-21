@@ -21,7 +21,7 @@ extern const unsigned int btg_grooves_json_size;
 namespace btg::detail {
 namespace {
 
-constexpr size_t NAME_LIMIT = 60, DEPTH_LIMIT = 8, NODE_LIMIT = 1000, FILE_LIMIT = 5000000, MAX_BARS = 512;
+constexpr size_t MAX_BARS = 512;
 constexpr double MAX_SEED = 4294967295.0;
 
 const Json& music() { return musicTable(); }
@@ -68,15 +68,26 @@ bool isJsSpace(char32_t c) {
 
 // ---------- values ----------
 
-const Json* member(const Json& object, const std::string& key) { // an own field of an object; nullptr: not there (the web's undefined) or no object
+bool isObject(const Json& v) { return v.is_object(); }                          // typeof 'object', not null, no array (the profile files' isObject)
+bool isNumber(const Json* v) { return v != nullptr && v->is_number(); }
+bool isInteger(const Json* v) { return isNumber(v) && std::isfinite(v->get<double>()) && std::floor(v->get<double>()) == v->get<double>(); } // Number.isInteger
+bool num01(const Json& v) { return v.is_number() && v.get<double>() >= 0 && v.get<double>() <= 1; }                                           // NaN and Infinity fall through
+bool isFiniteNumber(const Json* v) { return isNumber(v) && std::isfinite(v->get<double>()); }
+const std::vector<std::string>& partIds() { static const std::vector<std::string> ids { "harmony", "tempo", "rhythm", "style", "sound", "voices", "layers", "mixer", "variant", "form" }; return ids; }
+const std::vector<std::string>& chordColors() { static const std::vector<std::string> ids = keysOf(music().at("chordColors").at("table")); return ids; } // CHORD_COLORS
+const Json& meterGrid() { return music().at("meterGrid"); }
+
+} // namespace
+
+// ---------- shared (profiles.h) ----------
+
+const Json* member(const Json& object, const std::string& key) {
     if (!object.is_object()) return nullptr;
     const auto found = object.find(key);
     return found == object.end() ? nullptr : &*found;
 }
-const Json NULL_JSON;
-const Json& orNull(const Json* v) { return v == nullptr ? NULL_JSON : *v; }
-bool isObject(const Json& v) { return v.is_object(); }                          // typeof 'object', not null, no array (the profile files' isObject)
-bool truthy(const Json& v) { // JavaScript truthiness of a JSON value
+const Json& orNull(const Json* v) { static const Json none; return v == nullptr ? none : *v; }
+bool truthy(const Json& v) {
     switch (v.type()) {
     case Json::value_t::null: return false;
     case Json::value_t::boolean: return v.get<bool>();
@@ -86,28 +97,36 @@ bool truthy(const Json& v) { // JavaScript truthiness of a JSON value
     }
 }
 Json num(double v) { return std::floor(v) == v && std::fabs(v) < 9007199254740992.0 ? Json(static_cast<std::int64_t>(v)) : Json(v); }
-bool isNumber(const Json* v) { return v != nullptr && v->is_number(); }
-bool isInteger(const Json* v) { return isNumber(v) && std::isfinite(v->get<double>()) && std::floor(v->get<double>()) == v->get<double>(); } // Number.isInteger
-bool num01(const Json& v) { return v.is_number() && v.get<double>() >= 0 && v.get<double>() <= 1; }                                           // NaN and Infinity fall through
-bool isFiniteNumber(const Json* v) { return isNumber(v) && std::isfinite(v->get<double>()); }
-double numberOf(const Json& v) { // shortcut: a number is read where the web may coerce a text or a list (a length is a number: sanitizeParts), upgrade: if a caller hands another kind
+double numberOf(const Json& v) {
     if (!v.is_number()) throw std::invalid_argument("a number is expected");
     return v.get<double>();
 }
 bool oneOf(const Json& v, const std::vector<std::string>& list) { return v.is_string() && std::find(list.begin(), list.end(), v.get_ref<const std::string&>()) != list.end(); }
-
 std::vector<std::string> keysOf(const Json& object) {
     std::vector<std::string> out;
     for (auto it = object.begin(); it != object.end(); ++it) out.push_back(it.key());
     return out;
 }
-const std::vector<std::string>& partIds() { static const std::vector<std::string> ids { "harmony", "tempo", "rhythm", "style", "sound", "voices", "layers", "mixer", "variant", "form" }; return ids; }
-const std::vector<std::string>& layerIds() { static const std::vector<std::string> ids = keysOf(music().at("layers")); return ids; }          // LAYER_IDS
-const std::vector<std::string>& voiceLayers() { static const std::vector<std::string> ids = keysOf(music().at("voices")); return ids; }     // VOICE_LAYERS
+const std::vector<std::string>& layerIds() { static const std::vector<std::string> ids = keysOf(music().at("layers")); return ids; }
+const std::vector<std::string>& voiceLayers() { static const std::vector<std::string> ids = keysOf(music().at("voices")); return ids; }
 const std::vector<std::string>& mixNames() { static const std::vector<std::string> ids = [] { std::vector<std::string> out = layerIds(); out.push_back("master"); return out; }(); return ids; }
-const std::vector<std::string>& scaleNames() { static const std::vector<std::string> ids = keysOf(music().at("scaleModes")); return ids; }  // SCALE_NAMES
-const std::vector<std::string>& chordColors() { static const std::vector<std::string> ids = keysOf(music().at("chordColors").at("table")); return ids; } // CHORD_COLORS
+const std::vector<std::string>& scaleNames() { static const std::vector<std::string> ids = keysOf(music().at("scaleModes")); return ids; }
 const std::vector<std::string>& styleIds() { static const std::vector<std::string> ids = [] { std::vector<std::string> out; for (const Json& p : music().at("styles")) out.push_back(p.at("id")); return out; }(); return ids; }
+std::string meterKey(const Json& meter) {
+    constexpr double SAFE = 9007199254740991.0;
+    if (!meter.is_array() || meter.size() != 2 || !isInteger(&meter[0]) || !isInteger(&meter[1])) return "";
+    if (std::fabs(meter[0].get<double>()) > SAFE || std::fabs(meter[1].get<double>()) > SAFE) return "";
+    return std::to_string(static_cast<std::int64_t>(meter[0].get<double>())) + "/" + std::to_string(static_cast<std::int64_t>(meter[1].get<double>()));
+}
+double convertTempo(double bpm, const std::string& fromKey, const std::string& toKey) {
+    if (!meterGrid().contains(fromKey) || !meterGrid().contains(toKey)) return bpm;
+    const int from = meterGrid().at(fromKey).at("sub").get<int>(), to = meterGrid().at(toKey).at("sub").get<int>();
+    if (from == to) return bpm;
+    return std::min(200.0, std::max(40.0, jsRound(bpm * (to == 3 ? 2.0 / 3.0 : 3.0 / 2.0))));
+}
+
+namespace {
+
 const std::vector<std::string>& leslieModes() { static const std::vector<std::string> ids = music().at("organ").at("leslieModes").get<std::vector<std::string>>(); return ids; }
 const std::vector<std::string>& templateIds() { static const std::vector<std::string> ids = music().at("form").at("templateIds").get<std::vector<std::string>>(); return ids; }
 const std::vector<std::string>& timbreGroups() { // DEFAULT_TIMBRE's groups, in order
@@ -129,22 +148,7 @@ bool hasGroove(const std::string& id) {
     static const Json grooves = Json::parse(btg_grooves_json, btg_grooves_json + btg_grooves_json_size);
     return grooves.contains(id);
 }
-const Json& meterGrid() { return music().at("meterGrid"); }
-// grooves.js meterKey: '6/8' for [6, 8], '' for anything that is no pair of integers. shortcut: an integer beyond 2^53 gives '' (the web prints it); it is no key of METERS either
-// way, and the key is only looked up there, upgrade: if a caller prints it
-std::string meterKey(const Json& meter) {
-    constexpr double SAFE = 9007199254740991.0;
-    if (!meter.is_array() || meter.size() != 2 || !isInteger(&meter[0]) || !isInteger(&meter[1])) return "";
-    if (std::fabs(meter[0].get<double>()) > SAFE || std::fabs(meter[1].get<double>()) > SAFE) return "";
-    return std::to_string(static_cast<std::int64_t>(meter[0].get<double>())) + "/" + std::to_string(static_cast<std::int64_t>(meter[1].get<double>()));
-}
 bool isMeter(const Json& meter) { return meterGrid().contains(meterKey(meter)); }
-double convertTempo(double bpm, const std::string& fromKey, const std::string& toKey) { // grooves.js: the tempo of another meter's pulse
-    if (!meterGrid().contains(fromKey) || !meterGrid().contains(toKey)) return bpm;
-    const int from = meterGrid().at(fromKey).at("sub").get<int>(), to = meterGrid().at(toKey).at("sub").get<int>();
-    if (from == to) return bpm;
-    return std::min(200.0, std::max(40.0, jsRound(bpm * (to == 3 ? 2.0 / 3.0 : 3.0 / 2.0))));
-}
 // voices.js isVoice: `variant` null pointer is the web's undefined
 bool isVoice(const std::string& layer, const Json* id, const Json* variant) {
     if (!music().at("voices").contains(layer) || id == nullptr || !id->is_string() || !music().at("voices").at(layer).contains(id->get_ref<const std::string&>())) return false;
@@ -518,45 +522,69 @@ std::string jsSlice(const std::string& text, size_t units) {
     }
     return out;
 }
-std::string stringify(const Json& v) {
+namespace {
+void quoteInto(std::string& out, const std::string& text) {
+    static const char* HEX = "0123456789abcdef";
+    out += '"';
+    for (const char32_t cp : decode(text)) {
+        if (cp == '"') out += "\\\"";
+        else if (cp == '\\') out += "\\\\";
+        else if (cp == '\b') out += "\\b";
+        else if (cp == '\f') out += "\\f";
+        else if (cp == '\n') out += "\\n";
+        else if (cp == '\r') out += "\\r";
+        else if (cp == '\t') out += "\\t";
+        else if (cp < 0x20 || (cp >= 0xD800 && cp < 0xE000)) { out += "\\u"; for (int shift = 12; shift >= 0; shift -= 4) out += HEX[(cp >> shift) & 0xF]; }
+        else encode(out, cp);
+    }
+    out += '"';
+}
+// JSON.stringify's SerializeJSONProperty with `gap` (empty: no line breaks) at the indentation `indent`
+void stringifyInto(std::string& out, const Json& v, const std::string& gap, const std::string& indent) {
     switch (v.type()) {
-    case Json::value_t::null: return "null";
-    case Json::value_t::boolean: return v.get<bool>() ? "true" : "false";
+    case Json::value_t::null: out += "null"; return;
+    case Json::value_t::boolean: out += v.get<bool>() ? "true" : "false"; return;
     case Json::value_t::number_integer: case Json::value_t::number_unsigned: case Json::value_t::number_float:
-        return std::isfinite(v.get<double>()) ? jsStringOf(&v) : "null";
-    case Json::value_t::string: {
-        static const char* HEX = "0123456789abcdef";
-        std::string out = "\"";
-        const std::vector<char32_t> cps = decode(v.get_ref<const std::string&>());
-        for (const char32_t cp : cps) {
-            if (cp == '"') out += "\\\"";
-            else if (cp == '\\') out += "\\\\";
-            else if (cp == '\b') out += "\\b";
-            else if (cp == '\f') out += "\\f";
-            else if (cp == '\n') out += "\\n";
-            else if (cp == '\r') out += "\\r";
-            else if (cp == '\t') out += "\\t";
-            else if (cp < 0x20 || (cp >= 0xD800 && cp < 0xE000)) { out += "\\u"; for (int shift = 12; shift >= 0; shift -= 4) out += HEX[(cp >> shift) & 0xF]; }
-            else encode(out, cp);
-        }
-        return out + "\"";
-    }
+        out += std::isfinite(v.get<double>()) ? jsStringOf(&v) : "null";
+        return;
+    case Json::value_t::string: quoteInto(out, v.get_ref<const std::string&>()); return;
     case Json::value_t::array: {
-        std::string out = "[";
-        for (size_t i = 0; i < v.size(); ++i) out += (i ? "," : "") + (v[i].is_discarded() ? std::string("null") : stringify(v[i]));
-        return out + "]";
+        if (v.empty()) { out += "[]"; return; }
+        const std::string inner = indent + gap;
+        out += '[';
+        for (size_t i = 0; i < v.size(); ++i) {
+            if (i) out += ',';
+            if (!gap.empty()) { out += '\n'; out += inner; }
+            if (v[i].is_discarded()) out += "null"; else stringifyInto(out, v[i], gap, inner);
+        }
+        if (!gap.empty()) { out += '\n'; out += indent; }
+        out += ']';
+        return;
     }
-    default: { // object
-        std::string out = "{";
+    default: { // object; a discarded value (undefined) is left out
+        const std::string inner = indent + gap;
         bool first = true;
+        out += '{';
         for (auto it = v.begin(); it != v.end(); ++it) {
             if (it.value().is_discarded()) continue;
-            out += (first ? "" : ",") + stringify(Json(it.key())) + ":" + stringify(it.value());
+            if (!first) out += ',';
+            if (!gap.empty()) { out += '\n'; out += inner; }
+            quoteInto(out, it.key());
+            out += gap.empty() ? ":" : ": ";
+            stringifyInto(out, it.value(), gap, inner);
             first = false;
         }
-        return out + "}";
+        if (!first && !gap.empty()) { out += '\n'; out += indent; }
+        out += '}';
     }
     }
+}
+} // namespace
+
+std::string stringify(const Json& v, size_t indent) {
+    std::string out;
+    stringifyInto(out, v, std::string(std::min<size_t>(indent, 10), ' '), "");
+    return out;
 }
 
 // ---------- profile-parts.js ----------
@@ -844,7 +872,7 @@ void writeSession(Json& state, const Json& session) {
         state["formTarget"] = num(nearestSize(length->get<double>()));
     }
     for (const std::string& k : sessionFields()) { if (const Json* v = member(session, k)) state[k] = *v; else state.erase(k); }
-    // not here: saveMix(layoutStorage, state.mix, state.pan), the browser's memory of the mixer; the session of Task 30b decides what the core does with it
+    // not here: saveMix(layoutStorage, state.mix, state.pan), the browser's memory of the mixer; the session writes it after this (session.cpp, mix.json)
     state["notice"] = nullptr;
     state["errors"] = Json::array();
 }

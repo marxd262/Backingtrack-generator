@@ -15,8 +15,6 @@ extern const unsigned int btg_collation_json_size;
 namespace btg::detail {
 namespace {
 
-constexpr size_t NAME_LIMIT = 60, DEPTH_LIMIT = 8, NODE_LIMIT = 1000;
-
 // ---------- the order and the case of names ----------
 
 struct Collation {
@@ -106,13 +104,6 @@ namespace {
 
 // ---------- reading the tree ----------
 
-const Json NULL_JSON;
-const Json* member(const Json& object, const char* key) {
-    if (!object.is_object()) return nullptr;
-    const auto found = object.find(key);
-    return found == object.end() ? nullptr : &*found;
-}
-const Json& orNull(const Json* v) { return v == nullptr ? NULL_JSON : *v; }
 bool isFolder(const Json& n) { const Json* type = member(n, "type"); return type != nullptr && *type == "folder"; }
 const Json& itemsOfNode(const Json& n) { // the list of a folder or of a tree
     const Json* items = member(n, "items");
@@ -136,7 +127,6 @@ void sortInPlace(Json& items) {
 }
 Json arrayOf(std::vector<Json>&& list) { Json out = Json::array(); out.get_ref<Json::array_t&>() = std::move(list); return out; }
 Json fail(const char* code) { return Json::object({ { "ok", false }, { "code", code } }); }
-Json num(double v) { return std::floor(v) == v && std::fabs(v) < 9007199254740992.0 ? Json(static_cast<std::int64_t>(v)) : Json(v); }
 std::string callId(const MakeId& makeId) {
     if (!makeId) throw std::invalid_argument("no makeId");
     return makeId();

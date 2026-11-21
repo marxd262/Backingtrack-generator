@@ -39,6 +39,27 @@ namespace btg::detail {
 
 using MakeId = std::function<std::string()>;
 
+// ---------- shared with profile_tree.cpp and session.cpp (defined in profiles.cpp) ----------
+
+inline constexpr size_t NAME_LIMIT = 60, DEPTH_LIMIT = 8, NODE_LIMIT = 1000, FILE_LIMIT = 5000000; // profile.js LIMITS
+const Json* member(const Json& object, const std::string& key); // an own field of an object; nullptr: not there (the web's undefined) or no object
+const Json& orNull(const Json* v);                               // the field, or null for nullptr
+bool truthy(const Json& v);                                      // JavaScript truthiness of a JSON value
+Json num(double v);                                              // a number as the web holds it: a whole one an integer (as JSON.stringify writes it), any other a double
+// shortcut: a number is read where the web may coerce a text or a list (a length is a number: sanitizeParts), upgrade: if a caller hands another kind
+double numberOf(const Json& v);                                  // throws std::invalid_argument for what is no number
+bool oneOf(const Json& v, const std::vector<std::string>& list); // a text of the list
+std::vector<std::string> keysOf(const Json& object);
+const std::vector<std::string>& layerIds();                      // LAYER_IDS
+const std::vector<std::string>& voiceLayers();                   // VOICE_LAYERS
+const std::vector<std::string>& mixNames();                      // audio/mix.js MIX_NAMES: the layers and master
+const std::vector<std::string>& scaleNames();                    // SCALE_NAMES
+const std::vector<std::string>& styleIds();                      // the ids of STYLE_PRESETS
+// grooves.js meterKey: '6/8' for [6, 8], '' for anything that is no pair of integers. shortcut: an integer beyond 2^53 gives '' (the web prints it); it is no key of METERS
+// either way, and the key is only looked up there, upgrade: if a caller prints it
+std::string meterKey(const Json& meter);
+double convertTempo(double bpm, const std::string& fromKey, const std::string& toKey); // grooves.js: the tempo of another meter's pulse
+
 // ---------- text helpers (the JavaScript's string methods on UTF-8 / WTF-8) ----------
 
 std::vector<char32_t> codePoints(const std::string& text);       // the code points of a text; a lone surrogate keeps its value, a byte that starts no sequence is U+FFFD
@@ -47,7 +68,8 @@ size_t utf16Length(const std::string& text);                     // text.length
 std::string jsTrim(const std::string& text);                     // text.trim()
 std::string jsTrimEnd(const std::string& text);                  // text.trimEnd()
 std::string jsSlice(const std::string& text, size_t units);      // text.slice(0, units): a cut inside an astral character leaves its high surrogate
-std::string stringify(const Json& value);                        // JSON.stringify(value), byte for byte (numbers as the JavaScript prints them, a lone surrogate as \udXXX)
+// JSON.stringify(value), byte for byte (numbers as the JavaScript prints them, a lone surrogate as \udXXX); with `indent`, JSON.stringify(value, null, indent)
+std::string stringify(const Json& value, size_t indent = 0);
 
 // ---------- profile-parts.js ----------
 
@@ -85,12 +107,13 @@ Json factoryProfiles();                                          // [{ key: "fac
 Json factoryParts(const std::string& styleId);
 Json readSession(const Json& state);                             // the session fields of a state (a field the state has not is left out)
 // Domain: `state` the state of PROTOKOLL.md (track an object), `session` the result of applyParts. Changes `state` as the web's writeSession does, except that it does NOT
-// remember the mix in the browser's layout storage (saveMix): there is none in the core, the session of Task 30b decides.
+// remember the mix (saveMix): the session writes mix.json itself after it (session.cpp).
 void writeSession(Json& state, const Json& session);
 
-// the names under which the shell stores them (the web: the keys backingtrack.profiles and backingtrack.session)
+// the names under which the shell stores them (the web: the keys backingtrack.profiles, backingtrack.session and backingtrack.mix; the mixer's is session.cpp's)
 inline constexpr const char* PROFILES_NAME = "profiles.json";
 inline constexpr const char* SESSION_NAME = "session.json";
+inline constexpr const char* MIX_NAME = "mix.json";
 // Domain: `session` as captureParts, `bar` and `at` numbers (the web: Date.now(); the core has no clock, the caller gives it). Writes { parts, bar, at } as JSON text; a write that
 // fails is ignored (the web: no storage); returns the entry.
 Json saveLast(Storage& storage, const Json& session, const Json& bar, const Json& at);
