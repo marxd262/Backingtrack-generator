@@ -1680,5 +1680,577 @@
       "bVII",
       "VII"
     ]
+  },
+  "styles": [
+    {
+      "id": "funk",
+      "bpm": 100,
+      "tags": {
+        "drums": [
+          "driving",
+          "dry"
+        ],
+        "bass": [
+          "bouncy"
+        ],
+        "synths": [],
+        "rhythm": [
+          "funky",
+          "syncopated"
+        ],
+        "mood": [],
+        "development": [
+          "buildsSlowly"
+        ],
+        "drumSound": [
+          "punchy",
+          "snappy"
+        ],
+        "bassSound": [
+          "plucky"
+        ],
+        "chordSound": [
+          "biting"
+        ],
+        "padSound": []
+      },
+      "voices": {
+        "bass": {
+          "id": "sample",
+          "variant": "finger"
+        },
+        "chords": {
+          "id": "sample",
+          "variant": "funk"
+        },
+        "drums": {
+          "id": "sample",
+          "variant": "standard"
+        }
+      }
+    },
+    {
+      "id": "psych",
+      "bpm": 112,
+      "tags": {
+        "drums": [
+          "driving"
+        ],
+        "bass": [
+          "deepFat"
+        ],
+        "synths": [
+          "arpeggio",
+          "widePad",
+          "shimmering"
+        ],
+        "rhythm": [
+          "straight"
+        ],
+        "mood": [
+          "psychedelic"
+        ],
+        "development": [
+          "buildsSlowly"
+        ],
+        "drumSound": [],
+        "bassSound": [
+          "fuzz"
+        ],
+        "chordSound": [
+          "chorused"
+        ],
+        "padSound": [
+          "swelling",
+          "glassy"
+        ]
+      },
+      "voices": {
+        "bass": {
+          "id": "sample",
+          "variant": "finger"
+        },
+        "chords": {
+          "id": "sample",
+          "variant": "twelve"
+        },
+        "drums": {
+          "id": "sample",
+          "variant": "standard"
+        }
+      }
+    },
+    {
+      "id": "dreamy",
+      "bpm": 80,
+      "tags": {
+        "drums": [
+          "halftime",
+          "loose"
+        ],
+        "bass": [
+          "calm"
+        ],
+        "synths": [
+          "widePad",
+          "warm"
+        ],
+        "rhythm": [],
+        "mood": [
+          "dreamy"
+        ],
+        "development": [
+          "buildsSlowly"
+        ],
+        "drumSound": [
+          "roomy"
+        ],
+        "bassSound": [
+          "round"
+        ],
+        "chordSound": [
+          "mellow"
+        ],
+        "padSound": [
+          "airy",
+          "swelling"
+        ]
+      },
+      "voices": {
+        "bass": {
+          "id": "sample",
+          "variant": "finger"
+        },
+        "chords": {
+          "id": "sample",
+          "variant": "epiano"
+        },
+        "drums": {
+          "id": "sample",
+          "variant": "brushes"
+        }
+      }
+    },
+    {
+      "id": "blues",
+      "bpm": 88,
+      "tags": {
+        "drums": [
+          "loose"
+        ],
+        "bass": [
+          "bouncy"
+        ],
+        "synths": [
+          "warm"
+        ],
+        "rhythm": [
+          "swing"
+        ],
+        "mood": [],
+        "development": [
+          "fullFromStart"
+        ],
+        "drumSound": [
+          "roomy"
+        ],
+        "bassSound": [
+          "round"
+        ],
+        "chordSound": [
+          "mellow"
+        ],
+        "padSound": []
+      },
+      "voices": {
+        "bass": {
+          "id": "sample",
+          "variant": "finger"
+        },
+        "chords": {
+          "id": "sample",
+          "variant": "jazz"
+        },
+        "drums": {
+          "id": "sample",
+          "variant": "jazz"
+        }
+      }
+    },
+    {
+      "id": "rock",
+      "bpm": 124,
+      "tags": {
+        "drums": [
+          "driving",
+          "heavy"
+        ],
+        "bass": [
+          "gritty"
+        ],
+        "synths": [],
+        "rhythm": [
+          "straight"
+        ],
+        "mood": [
+          "bright"
+        ],
+        "development": [
+          "fullFromStart"
+        ],
+        "drumSound": [
+          "punchy",
+          "snappy"
+        ],
+        "bassSound": [
+          "resonant"
+        ],
+        "chordSound": [
+          "biting"
+        ],
+        "padSound": [
+          "thick"
+        ]
+      },
+      "voices": {
+        "bass": {
+          "id": "sample",
+          "variant": "pick"
+        },
+        "chords": {
+          "id": "sample",
+          "variant": "guitar"
+        },
+        "drums": {
+          "id": "sample",
+          "variant": "standard"
+        }
+      }
+    },
+    {
+      "id": "hardrock",
+      "bpm": 148,
+      "tags": {
+        "drums": [
+          "driving",
+          "heavy"
+        ],
+        "bass": [
+          "deepFat",
+          "gritty"
+        ],
+        "synths": [
+          "deepSynths"
+        ],
+        "rhythm": [
+          "straight"
+        ],
+        "mood": [
+          "dark"
+        ],
+        "development": [
+          "fullFromStart"
+        ],
+        "drumSound": [
+          "boomy"
+        ],
+        "bassSound": [
+          "fuzz"
+        ],
+        "chordSound": [
+          "biting",
+          "ringing"
+        ],
+        "padSound": []
+      },
+      "voices": {
+        "bass": {
+          "id": "sample",
+          "variant": "pick"
+        },
+        "chords": {
+          "id": "sample",
+          "variant": "muted"
+        },
+        "drums": {
+          "id": "sample",
+          "variant": "standard"
+        }
+      }
+    },
+    {
+      "id": "reggae",
+      "bpm": 76,
+      "tags": {
+        "drums": [
+          "halftime",
+          "loose"
+        ],
+        "bass": [
+          "calm",
+          "deepFat"
+        ],
+        "synths": [
+          "warm"
+        ],
+        "rhythm": [
+          "syncopated"
+        ],
+        "mood": [],
+        "development": [
+          "fullFromStart"
+        ],
+        "drumSound": [
+          "roomy"
+        ],
+        "bassSound": [
+          "sub",
+          "round"
+        ],
+        "chordSound": [
+          "biting"
+        ],
+        "padSound": []
+      },
+      "voices": {
+        "bass": {
+          "id": "sample",
+          "variant": "finger"
+        },
+        "chords": {
+          "id": "sample",
+          "variant": "muted"
+        },
+        "drums": {
+          "id": "sample",
+          "variant": "rimshot"
+        }
+      }
+    },
+    {
+      "id": "country",
+      "bpm": 112,
+      "tags": {
+        "drums": [
+          "dry"
+        ],
+        "bass": [
+          "bouncy"
+        ],
+        "synths": [],
+        "rhythm": [
+          "straight"
+        ],
+        "mood": [
+          "bright"
+        ],
+        "development": [
+          "fullFromStart"
+        ],
+        "drumSound": [
+          "crisp"
+        ],
+        "bassSound": [
+          "plucky"
+        ],
+        "chordSound": [
+          "ringing"
+        ],
+        "padSound": [
+          "airy"
+        ]
+      },
+      "voices": {
+        "bass": {
+          "id": "sample",
+          "variant": "upright"
+        },
+        "chords": {
+          "id": "sample",
+          "variant": "steel"
+        },
+        "drums": {
+          "id": "sample",
+          "variant": "brushes"
+        }
+      }
+    },
+    {
+      "id": "poppunk",
+      "bpm": 172,
+      "tags": {
+        "drums": [
+          "driving",
+          "heavy"
+        ],
+        "bass": [
+          "bouncy"
+        ],
+        "synths": [],
+        "rhythm": [
+          "straight"
+        ],
+        "mood": [
+          "bright"
+        ],
+        "development": [
+          "fullFromStart"
+        ],
+        "drumSound": [
+          "crisp",
+          "snappy"
+        ],
+        "bassSound": [
+          "plucky"
+        ],
+        "chordSound": [
+          "biting"
+        ],
+        "padSound": [
+          "thick"
+        ]
+      },
+      "voices": {
+        "bass": {
+          "id": "sample",
+          "variant": "pick"
+        },
+        "chords": {
+          "id": "sample",
+          "variant": "muted"
+        },
+        "drums": {
+          "id": "sample",
+          "variant": "standard"
+        }
+      }
+    }
+  ],
+  "meterGrid": {
+    "4/4": {
+      "beats": 4,
+      "sub": 4
+    },
+    "3/4": {
+      "beats": 3,
+      "sub": 4
+    },
+    "6/8": {
+      "beats": 2,
+      "sub": 3
+    },
+    "12/8": {
+      "beats": 4,
+      "sub": 3
+    },
+    "5/4": {
+      "beats": 5,
+      "sub": 4
+    }
+  },
+  "scaleModes": {
+    "minorPentatonic": "minor",
+    "majorPentatonic": "major",
+    "blues": "minor",
+    "majorBlues": "major",
+    "major": "major",
+    "minor": "minor",
+    "harmonicMinor": "minor",
+    "dorian": "dorian",
+    "phrygian": "phrygian",
+    "lydian": "lydian",
+    "mixolydian": "mixolydian"
+  },
+  "roots": [
+    "C",
+    "Db",
+    "D",
+    "Eb",
+    "E",
+    "F",
+    "F#",
+    "G",
+    "Ab",
+    "A",
+    "Bb",
+    "B"
+  ],
+  "voiceKinds": {
+    "drums": {
+      "synth": {
+        "kind": "synth",
+        "hidden": false
+      },
+      "sample": {
+        "kind": "sample",
+        "hidden": false
+      }
+    },
+    "bass": {
+      "synth": {
+        "kind": "synth",
+        "hidden": false
+      },
+      "string": {
+        "kind": "model",
+        "hidden": true
+      },
+      "sample": {
+        "kind": "sample",
+        "hidden": false
+      }
+    },
+    "chords": {
+      "synth": {
+        "kind": "synth",
+        "hidden": false
+      },
+      "string": {
+        "kind": "model",
+        "hidden": true
+      },
+      "epiano": {
+        "kind": "synth",
+        "hidden": false
+      },
+      "organ": {
+        "kind": "synth",
+        "hidden": false
+      },
+      "sample": {
+        "kind": "sample",
+        "hidden": false
+      }
+    },
+    "pad": {
+      "synth": {
+        "kind": "synth",
+        "hidden": false
+      },
+      "sample": {
+        "kind": "sample",
+        "hidden": false
+      }
+    },
+    "lead": {
+      "synth": {
+        "kind": "synth",
+        "hidden": false
+      },
+      "sample": {
+        "kind": "sample",
+        "hidden": false
+      }
+    },
+    "percussion": {
+      "synth": {
+        "kind": "synth",
+        "hidden": false
+      },
+      "sample": {
+        "kind": "sample",
+        "hidden": false
+      }
+    }
   }
 }

@@ -770,6 +770,7 @@ bool isObjectPrototypeNameOf(const std::string& name) { return isObjectPrototype
 Json spreadValue(const Json& source) { Json out = Json::object(); spread(out, &source); return out; }
 Json normalizedTrack(const Json& track) { return normalizeTrackValue(track); }
 Json trackErrors(const Json& track) { return validateTrackValue(track); }
+Json parsedText(const std::string& text) { return parseTrack(text); }
 
 } // namespace btg::detail
 

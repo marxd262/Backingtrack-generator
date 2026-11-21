@@ -47,5 +47,6 @@ bool isObjectPrototypeNameOf(const std::string& name); // 'toString', 'construct
 Json spreadValue(const Json& source);                // {...source}
 Json normalizedTrack(const Json& track);             // track.js normalizeTrack
 Json trackErrors(const Json& track);                 // track.js validateTrack: the list of errors
+Json parsedText(const std::string& text);            // JSON.parse as track.cpp reads a track's text (see its Reader); text that is no JSON, or nests deeper than 64 levels, is null
 
 } // namespace btg::detail

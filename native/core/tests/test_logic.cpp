@@ -17,6 +17,7 @@
 #include "../src/string_model.h"
 #include "../src/timbre.h"
 #include "../src/track_internal.h"
+#include "btg/session.h"
 #include "btg/track.h"
 #include "json_compare.h"
 
@@ -86,6 +87,35 @@ Json patchOf(const Json& patch) {
     Json out = patch;
     if (out.is_object()) for (auto it = out.begin(); it != out.end(); ++it) it.value() = undefinedOf(it.value());
     return out;
+}
+
+// Task 29: the session reads and writes nothing yet (Task 30 does); every call is counted, and main() fails on any
+struct CountingStorage : btg::Storage {
+    int calls = 0;
+    std::optional<std::string> read(const std::string&) override { ++calls; return std::nullopt; }
+    bool write(const std::string&, const std::string&) override { ++calls; return false; }
+};
+CountingStorage sessionStorage;
+// A case is a sequence: `in` the action texts, `out` per action { change, state, track, sound, tuning }; `track` is what the web hands its player.
+json playSession(const json& actions) {
+    btg::Session session(sessionStorage);
+    json out = json::array();
+    for (const json& action : actions) {
+        const btg::Session::Change c = session.apply(action.get<std::string>());
+        out.push_back({ { "change", { { "events", c.events }, { "sound", c.sound }, { "voices", c.voices }, { "tempo", c.tempo }, { "mix", c.mix }, { "restart", c.restart }, { "inPlace", c.inPlace } } },
+                        { "state", json::parse(session.state()) }, { "track", json::parse(session.track()) }, { "sound", json::parse(session.sound()) }, { "tuning", json::parse(session.tuning()) } });
+    }
+    return out;
+}
+// where a sequence first differs: the step, its action and the field
+void printSessionStep(const json& c, const json& got) {
+    for (size_t k = 0; k < c.at("out").size() && k < got.size(); ++k) {
+        btg::test::Compare step;
+        step.value("record", c.at("out")[k], got[k]);
+        if (step.result == btg::test::Match::identical) continue;
+        std::printf("session: first difference at step %zu (%s), field %s\n", k, c.at("in")[k].get<std::string>().c_str(), step.field.c_str());
+        return;
+    }
 }
 
 const std::map<std::string, std::function<json(const json&)>> FUNCTIONS {
@@ -187,6 +217,8 @@ const std::map<std::string, std::function<json(const json&)>> FUNCTIONS {
     { "tagEffect", [](const json& in) { const Json o = ordered(in); return plain(tagEffect(argument(o, "tag"), argument(o, "track"))); } },
     { "organTuning", [](const json& in) { return plain(organTuning(ordered(in))); } },
     { "presetDrive", [](const json& in) { return json(presetDrive(ordered(in))); } },
+    // Task 29: the session, one case per sequence of actions (playSession above)
+    { "session", playSession },
 };
 
 } // namespace
@@ -248,6 +280,7 @@ int main(int argc, char** argv) {
                     continue;
                 }
                 if (compare.result == btg::test::Match::close) { ++close; std::printf("close: %s #%zu %s by %.3g\n", c.at("fn").get<std::string>().c_str(), i, compare.field.c_str(), compare.delta); continue; }
+                if (different < 20 && c.at("fn") == "session") printSessionStep(c, got);
                 if (++different <= 20) std::printf("different: %s #%zu %s: in %s, want %s, got %s\n", c.at("fn").get<std::string>().c_str(), i, compare.field.c_str(),
                                                    c.at("in").dump().c_str(), c.at("out").dump().c_str(), got.dump().c_str());
             } catch (const std::exception& error) { // a case that is no case, or a function that throws what the web's does not
@@ -308,6 +341,7 @@ int main(int argc, char** argv) {
         }
         std::printf("form: %d of %zu checks wrong\n", formWrong, mustThrow.size());
     }
+    std::printf("storage: %d calls of the session (it reads and writes nothing before Task 30)\n", sessionStorage.calls);
     int untested = 0; // a function of the table that the file brings no case for was not checked
     for (const auto& entry : FUNCTIONS) if (!seen.count(entry.first)) { std::printf("no case for %s in %s\n", entry.first.c_str(), argv[1]); ++untested; }
     std::printf("logic: functions %zu, cases %zu, identical %lld, close %lld, different %lld\n", FUNCTIONS.size(), read, identical, close, different);
@@ -315,5 +349,5 @@ int main(int argc, char** argv) {
     // A close is a difference in the last bits (possibly another platform's math library): it fails too. An exception has to be ruled
     // by the owner and named here (function and field, from the line above), not passed.
     if (close) std::printf("FAIL: %lld case(s) are only close, not bit for bit: a difference in the last bits, possibly another platform's math library; ruled exceptions are named in this test\n", close);
-    return different || untested || close || deepWrong || seedWrong || formWrong ? 1 : 0;
+    return different || untested || close || deepWrong || seedWrong || formWrong || sessionStorage.calls ? 1 : 0;
 }

@@ -76,6 +76,7 @@ add_library(btg_core STATIC
     src/form_roll.cpp
     src/form_edit.cpp
     src/timbre.cpp
+    src/session.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/grooves_bytes.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/sound_bytes.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/music_bytes.cpp)

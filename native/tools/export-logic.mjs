@@ -999,6 +999,274 @@ add('organTuning', organTuning, [DEFAULT_ORGAN, {}, null, 0, 'x', true, [], [DEF
   ...LESLIES.flatMap((leslie) => DRIVES.map((drive) => ({ leslie, drive })))]);
 add('presetDrive', presetDrive, [...VOICES.chords.organ.variants, 'nope', '', null, 5, true, 'toString', 'Jazz', ['rock'], ['gospel', 'x'], {}, [], 'chords/organ/jazz', '__proto__']);
 
+// Task 29: the session (native/core/src/session.cpp) against session-reference.mjs (state.js itself and the handlers' rules, native/PROTOKOLL.md). One case per
+// sequence of actions: `in` the action texts, `out` per action { change, state, track, sound, tuning } (`track`: what the web hands its player). 1. 200 sequences of
+// 30 actions from a fixed seed, each beginning with start; the draws look at the reference's state so that most actions are valid (a part of the form, a chord of the
+// key, an organ to set), about one in eight is spoiled (a field missing, of another type or out of range, an unknown name, no JSON), and now and then an action sends
+// the value its control shows (a repeat). 2. One sequence per action at its limits, and one of texts that are no action. The export prints how often each action came,
+// how many of them the reference refused and how many were repeats.
+{
+  const ref = await import(new URL('./session-reference.mjs', import.meta.url).href);
+  const { SCALE_NAMES } = await load('core/music.js');
+  const { METERS, meterKey, groovesFor } = await load('core/grooves.js');
+  const { jobsFor, LAYER_IDS, completeJobs } = await load('core/layers.js');
+  const { MIX_NAMES } = await load('audio/mix.js');
+  const { VOICE_LAYERS } = await load('core/voices.js');
+  const { formChoice } = await load('ui/state.js');
+  const stats = Object.fromEntries(ref.ACTION_NAMES.map((name) => [name, { count: 0, refused: 0, repeat: 0 }]));
+  let noAction = 0; // texts without the name of an action
+  const sequence = (texts) => {
+    ref.reset();
+    const out = texts.map((text) => {
+      const result = ref.apply(text);
+      let name;
+      try { name = JSON.parse(text)?.action; } catch { /* no JSON */ }
+      if (typeof name === 'string' && Object.hasOwn(stats, name)) { stats[name].count++; if (result !== 'applied') stats[name][result]++; } else noAction++;
+      return ref.record();
+    });
+    cases.push({ fn: 'session', in: texts, out });
+  };
+  const act = (action, fields = {}) => JSON.stringify({ action, ...fields });
+  const st = () => ref.current().state;
+  const parts = () => st().track.form?.sections?.length ?? 0;
+  const part = () => st().track.form?.sections?.[ref.current().selected]; // the selected part
+  const FROM = ['start', 'play'];
+  const STYLES = STYLE_PRESETS.map((p) => p.id);
+  const FEEL_TOP = { structure: 100, dynamics: 130, pauses: 100, randomness: 100 };
+  const GROUPS = Object.keys(DEFAULT_TIMBRE);
+  const shown = (layer) => Object.keys(VOICES[layer]).filter((id) => !VOICES[layer][id].hidden);
+
+  // 1. the random sequences
+  const R = createRng(2029).fork('session-sequences');
+  const any = (list) => list[Math.floor(R.next() * list.length)];
+  const between = (lo, hi) => lo + Math.floor(R.next() * (hi - lo + 1));
+  const DRAW = {
+    start: () => ({ variant: between(1, 9999) }),
+    newVariant: () => ({ variant: between(1, 9999) }),
+    stepVariant: () => ({ dir: any([-1, 1]) }),
+    enterVariant: () => ({ variant: any([1, 9999, between(1, 9999)]) }),
+    setRoot: () => ({ root: any(ROOTS), from: any(FROM) }),
+    setScale: () => ({ scale: any(SCALE_NAMES), from: any(FROM) }),
+    setStyle: () => ({ style: any(STYLES), from: any(FROM) }),
+    setTempo: () => ({ bpm: any([40, 200, between(40, 200)]), from: any(FROM) }),
+    surprise: () => ({ variant: between(1, 9999), style: R.next(), tempo: R.next(), scale: R.next(), root: R.next() }),
+    toggleTag: () => { const c = any(TAG_CATEGORIES); return { category: c.id, tag: any(c.tags) }; },
+    addChord: () => { const o = any(chordOptions(st().track.key)); return { root: o.root, quality: any(o.qualities) }; },
+    removeChord: () => ({ index: between(0, st().track.bars.length - 1) }),
+    setChordColor: () => ({ color: any(CHORD_COLORS) }),
+    setMeter: () => ({ meter: any(Object.keys(METERS)) }),
+    setGroove: () => ({ groove: any(R.next() < 0.85 ? groovesFor(meterKey(st().track.meter)) : Object.keys(GROOVES)) }),
+    setRhythmKnob: () => ({ knob: any(['complexity', 'loose', 'ornaments']), value: any([0, 100, between(0, 100)]) }),
+    setFormTemplate: () => ({ template: any(['auto', 'auto', ...TEMPLATE_IDS, 'off']) }),
+    setFormTarget: () => ({ bars: any(TARGET_SIZES) }),
+    setFormFeel: () => { const knob = any(Object.keys(FEEL_TOP)); return { knob, value: any([0, FEEL_TOP[knob], between(0, FEEL_TOP[knob])]) }; },
+    releaseStructure: () => ({}),
+    selectPart: () => ({ index: between(0, Math.max(0, parts() - 1)) }),
+    editPart: () => {
+      const bars = part()?.bars ?? 8;
+      const field = any(['type', 'transition', 'crash', 'level', 'density', 'bars']);
+      const value = { type: () => any(PART_TYPES), transition: () => any(TRANSITIONS), crash: () => any([true, false]), level: () => any([-24, 0, between(-24, 0), null]),
+        density: () => any([-100, 100, between(-100, 100), null]), bars: () => any([1, 64, between(1, 16), bars - 1, bars + 1]) }[field]();
+      return { field, value };
+    },
+    toggleLock: () => ({}),
+    deletePart: () => ({}),
+    movePart: () => ({ dir: any([-1, 1]) }),
+    copyPart: () => ({}),
+    addPart: () => ({}),
+    rerollForm: () => ({}),
+    setLevel: () => ({ channel: any(MIX_NAMES), value: any([0, 100, between(0, 100)]) }),
+    setPan: () => ({ layer: any(LAYER_IDS), value: any([-100, 100, between(-100, 100)]) }),
+    toggleMute: () => ({ layer: any(LAYER_IDS) }),
+    toggleAllVoices: () => ({}),
+    setVoice: () => {
+      const layer = any(VOICE_LAYERS), id = layer === 'chords' && R.next() < 0.5 ? 'organ' : any(shown(layer));
+      return { layer, id, variant: any(VOICES[layer][id].variants) };
+    },
+    setJob: () => { const layer = any(['lead', 'percussion']); return { layer, job: any(jobsFor(layer)) }; },
+    setTimbre: () => { const group = any(GROUPS); return { group, field: any(Object.keys(DEFAULT_TIMBRE[group])), value: any([0, 100, between(0, 100)]) }; },
+    resetTimbre: () => ({ group: R.next() < 0.7 && Object.keys(st().track.timbre).length ? any(Object.keys(st().track.timbre)) : any(GROUPS) }),
+    setLeslie: () => ({ mode: any(LESLIE_MODES) }),
+    setOrganDrive: () => ({ value: any([null, 0, 100, between(0, 100)]) }),
+  };
+  // the value the control shows (PROTOKOLL.md section 1): a repeat. Plain fields (no event in the web), and two derived ones (groove, rhythm knobs) that act as before
+  const { grooveIdFor } = await load('core/grooves.js');
+  const SHOWN = {
+    setRoot: () => ({ root: st().track.key.root, from: 'play' }),
+    setScale: () => ({ scale: st().scale, from: 'play' }),
+    setStyle: () => ({ style: st().style, from: 'play' }),
+    setTempo: () => ({ bpm: st().track.bpm, from: any(FROM) }),
+    setFormTemplate: () => ({ template: formChoice() }),
+    setFormTarget: () => ({ bars: st().track.form ? st().formTarget : st().track.length }),
+    setFormFeel: () => { const knob = any(Object.keys(FEEL_TOP)); return { knob, value: Math.round((st().track.form?.feel ?? st().formFeel)[knob] * 100) }; },
+    editPart: () => { const field = any(['type', 'bars']); return { field, value: part()?.[field] ?? 8 }; },
+    setLevel: () => { const channel = any(MIX_NAMES); return { channel, value: Math.round(st().mix[channel] * 100) }; },
+    setPan: () => { const layer = any(LAYER_IDS); return { layer, value: Math.round(st().pan[layer] * 100) }; },
+    setVoice: () => { const layer = any(VOICE_LAYERS); return { layer, id: st().track.voices[layer].id, variant: st().track.voices[layer].variant }; },
+    setJob: () => { const layer = any(['lead', 'percussion']); return { layer, job: completeJobs(st().track.jobs)[layer] }; },
+    setLeslie: () => ({ mode: st().organ.leslie }),
+    setGroove: () => ({ groove: grooveIdFor(st().track) }),
+    setRhythmKnob: () => { const knob = any(['complexity', 'loose', 'ornaments']); return { knob, value: Math.round((st().track[knob] ?? 0.5) * 100) }; },
+  };
+  const BAD = [null, 'nope', -1, 10000, 0.5, 1.5, true, [], {}, '1', 101, -101, 1e9];
+  const spoil = (action) => {
+    const text = JSON.stringify(action), keys = Object.keys(action).filter((k) => k !== 'action'), how = R.next();
+    if (how < 0.35 && keys.length) { const copy = { ...action }; delete copy[any(keys)]; return JSON.stringify(copy); }
+    if (how < 0.75 && keys.length) return JSON.stringify({ ...action, [any(keys)]: any(BAD) });
+    if (how < 0.85) return JSON.stringify({ ...action, action: any(['nope', action.action.toLowerCase(), `${action.action}s`, 5, null]) });
+    return any([text.slice(0, Math.floor(text.length / 2)), `[${text}]`, `${text}x`, '', 'null', JSON.stringify(action.action)]);
+  };
+  const NAMES = ref.ACTION_NAMES.filter((n) => n !== 'start');
+  const FORM_ACTIONS = ['setFormFeel', 'releaseStructure', 'selectPart', 'editPart', 'toggleLock', 'deletePart', 'movePart', 'copyPart', 'addPart', 'rerollForm'];
+  for (let n = 0; n < 200; n++) {
+    ref.reset();
+    const texts = [];
+    const push = (text) => { if (texts.length < 30) { texts.push(text); ref.apply(text); } }; // the draws read the state the sequence reaches; sequence() plays it again
+    push(act('start', DRAW.start()));
+    while (texts.length < 30) {
+      const name = R.next() < 0.01 ? 'start' : any(NAMES);
+      // an organ action finds the organ (a form action a form) only after the right choice: mostly make that first, as a user would
+      if ((name === 'setLeslie' || name === 'setOrganDrive') && st().track.voices.chords.id !== 'organ' && R.next() < 0.75) push(act('setVoice', { layer: 'chords', id: 'organ', variant: any(VOICES.chords.organ.variants) }));
+      else if (FORM_ACTIONS.includes(name) && !st().track.form && R.next() < 0.6) push(act('setFormTemplate', { template: 'auto' }));
+      else if (FORM_ACTIONS.includes(name) && st().track.form && R.next() < 0.03) push(act('setFormTemplate', { template: 'off' })); // now and then the form is gone
+      else if (name === 'resetTimbre' && !Object.keys(st().track.timbre).length && R.next() < 0.75) {
+        const group = any(['bass', 'chords', 'pad', 'lead', 'master']); // knobs every voice uses: the distortion chain, the master group
+        push(act('setTimbre', { group, field: group === 'master' ? any(Object.keys(DEFAULT_TIMBRE.master)) : 'fuzz', value: between(0, 100) }));
+      }
+      // the strip's actions edit the selected part: mostly another one is chosen first, as a user would
+      if (['editPart', 'toggleLock', 'deletePart', 'movePart', 'copyPart'].includes(name) && st().track.form && R.next() < 0.4) push(act('selectPart', DRAW.selectPart()));
+      const action = { action: name, ...(SHOWN[name] && R.next() < 0.15 ? SHOWN[name]() : DRAW[name]()) };
+      push(R.next() < 0.125 ? spoil(action) : JSON.stringify(action));
+    }
+    sequence(texts);
+  }
+
+  // 2. one sequence per action at its limits
+  const on = (name, values, field, extra = {}) => values.map((v) => act(name, { ...extra, [field]: v }));
+  const chordsOf = () => chordOptions(st().track.key).flatMap((o) => o.qualities.map((quality) => ({ root: o.root, quality })));
+  const LIMITS = {
+    start: [...on('start', [1, 9999, 0, 10000, -1, 2.5, '7', null, true], 'variant'), act('start'), act('start', { variant: 5000 })],
+    newVariant: [...on('newVariant', [1, 9999, 0, 10000, -1, 2.5, null, '5'], 'variant'), act('newVariant')],
+    stepVariant: [act('stepVariant', { dir: -1 }), act('stepVariant', { dir: 1 }), act('stepVariant', { dir: 1 }), ...on('stepVariant', [0, 2, -2, '1', null, 0.5], 'dir'), act('stepVariant'),
+      act('start', { variant: 9999 }), act('stepVariant', { dir: 1 }), act('stepVariant', { dir: -1 })],
+    enterVariant: [...on('enterVariant', [1, 9999, 0, 10000, -5, 3.0, 4.5, '12', true, null], 'variant'), act('enterVariant')],
+    // the last root is B from the play page: B again from there is a repeat (the own chord stays), from the start page it derives the progression anew
+    setRoot: [...ROOTS.map((root, i) => act('setRoot', { root, from: FROM[i % 2] })), ...on('setRoot', ['H', 'c', 'A#', 5, null], 'root', { from: 'play' }),
+      ...on('setRoot', ['x', 'Start', null], 'from', { root: 'A' }), act('setRoot', { root: 'A' }), act('setRoot', { from: 'play' }),
+      act('addChord', { root: 'B', quality: 'min' }), act('setRoot', { root: 'B', from: 'play' }), act('setRoot', { root: 'B', from: 'start' })],
+    setScale: [...SCALE_NAMES.map((scale, i) => act('setScale', { scale, from: FROM[i % 2] })), ...on('setScale', ['nope', 'Major', 7, null], 'scale', { from: 'play' }), act('setScale', { scale: 'major' }),
+      act('setScale', { scale: SCALE_NAMES.at(-1), from: 'play' }), act('setScale', { scale: SCALE_NAMES.at(-1), from: 'start' })],
+    setStyle: [...STYLES.flatMap((style) => FROM.map((from) => act('setStyle', { style, from }))), ...on('setStyle', ['nope', 'Funk', 3, null], 'style', { from: 'play' }), act('setStyle', { style: 'rock' }),
+      act('toggleTag', { category: 'mood', tag: 'dark' }), act('setStyle', { style: STYLES.at(-1), from: 'play' }), act('setStyle', { style: STYLES.at(-1), from: 'start' })],
+    // the last tempo is 120: from the start page again it is a repeat (no mark), so surprise still draws the tempo
+    setTempo: [...FROM.flatMap((from) => on('setTempo', [40, 200, 39, 201, 100.5, '100', null, 120], 'bpm', { from })), act('setTempo', { bpm: 90 }), act('setTempo', { bpm: 120, from: 'start' }),
+      act('surprise', { variant: 7, style: 0.5, tempo: 0.5, scale: 0.5, root: 0.5 })],
+    surprise: [act('surprise', { variant: 1, style: 0, tempo: 0, scale: 0, root: 0 }), act('surprise', { variant: 9999, style: 0.9999999999999999, tempo: 0.9999999999999999, scale: 0.9999999999999999, root: 0.9999999999999999 }),
+      ...['style', 'tempo', 'scale', 'root'].flatMap((field) => [1, -0.1, '0.5', null].map((v) => act('surprise', { variant: 5, style: 0.5, tempo: 0.5, scale: 0.5, root: 0.5, [field]: v }))),
+      act('surprise', { variant: 0, style: 0.5, tempo: 0.5, scale: 0.5, root: 0.5 }), act('surprise', { variant: 5, style: 0.5, tempo: 0.5, scale: 0.5 }),
+      act('setRoot', { root: 'E', from: 'play' }), act('surprise', { variant: 17, style: 0.3, tempo: 0.7, scale: 0.2, root: 0.8 }), // a choice of the play page is no mark
+      act('setRoot', { root: 'E', from: 'start' }), act('surprise', { variant: 18, style: 0.3, tempo: 0.7, scale: 0.2, root: 0.8 }), act('setStyle', { style: 'blues', from: 'start' }),
+      act('surprise', { variant: 19, style: 0.6, tempo: 0.1, scale: 0.9, root: 0.1 }), act('setTempo', { bpm: 61, from: 'start' }), act('surprise', { variant: 20, style: 0.6, tempo: 0.1, scale: 0.9, root: 0.1 }),
+      act('enterVariant', { variant: 4242 }), act('surprise', { variant: 21, style: 0.6, tempo: 0.1, scale: 0.9, root: 0.1 }), act('setMeter', { meter: '6/8' }),
+      act('surprise', { variant: 22, style: 0.6, tempo: 0.99, scale: 0.9, root: 0.1 })],
+    toggleTag: [...TAG_CATEGORIES.flatMap((c) => c.tags.map((tag) => act('toggleTag', { category: c.id, tag }))), ...TAG_CATEGORIES.flatMap((c) => c.tags.map((tag) => act('toggleTag', { category: c.id, tag }))).reverse(),
+      act('toggleTag', { category: 'drums', tag: 'nope' }), act('toggleTag', { category: 'nope', tag: 'dry' }), act('toggleTag', { category: 'bass', tag: 'dry' }), act('toggleTag', { category: 'drums' }), act('toggleTag', { tag: 'dry' })],
+  };
+  // the rest need the state on the way: built step by step
+  const build = (steps) => { const out = []; ref.reset(); for (const step of steps) for (const text of [].concat(typeof step === 'function' ? step() : step)) { out.push(text); ref.apply(text); } return out; };
+  LIMITS.addChord = build([...Array.from({ length: 6 }, () => () => { const c = chordsOf(); return act('addChord', c[(st().track.bars.length * 7) % c.length]); }),
+    act('addChord', { root: 'H', quality: 'maj' }), act('addChord', { root: 'A', quality: 'nope' }), act('addChord', { root: 'A' }), act('addChord', { root: 'C#', quality: 'maj' }), act('addChord', { root: 5, quality: 'maj' }),
+    () => act('addChord', chordsOf().at(-1)), act('setRoot', { root: 'F#', from: 'play' }), () => chordsOf().slice(0, 9).map((c) => act('addChord', c))]);
+  LIMITS.removeChord = build([() => act('removeChord', { index: st().track.bars.length }), act('removeChord', { index: -1 }), act('removeChord', { index: '0' }), act('removeChord', { index: 0.5 }), act('removeChord'),
+    () => act('removeChord', { index: st().track.bars.length - 1 }), ...Array.from({ length: 8 }, () => act('removeChord', { index: 0 }))]);
+  LIMITS.setChordColor = build([...CHORD_COLORS.map((color) => act('setChordColor', { color })), () => act('addChord', chordsOf()[1]), ...CHORD_COLORS.map((color) => act('setChordColor', { color })),
+    act('setStyle', { style: 'hardrock', from: 'play' }), act('newVariant', { variant: 77 }), act('setChordColor', { color: 'extended' }), act('newVariant', { variant: 78 }), ...on('setChordColor', ['nope', 'Triads', 1, null], 'color')]);
+  LIMITS.setMeter = build([...['3/4', '6/8', '12/8', '5/4', '4/4', '4/4', '6/8'].map((meter) => act('setMeter', { meter })), act('setTempo', { bpm: 77, from: 'play' }),
+    ...['4/4', '12/8', '3/4', '6/8'].map((meter) => act('setMeter', { meter })), act('setTempo', { bpm: 40, from: 'play' }), act('setMeter', { meter: '4/4' }), act('setTempo', { bpm: 200, from: 'play' }), act('setMeter', { meter: '12/8' }),
+    act('setMeter', { meter: '4/4' }), ...on('setMeter', ['7/8', '4/4 ', 4, ['4', '4'], null], 'meter'), act('setStyle', { style: 'poppunk', from: 'play' }), act('setMeter', { meter: '6/8' }), act('setStyle', { style: 'dreamy', from: 'start' })]);
+  LIMITS.setGroove = build([...Object.keys(METERS).flatMap((meter) => [act('setMeter', { meter }), ...groovesFor(meter).map((groove) => act('setGroove', { groove }))]),
+    act('setGroove', { groove: 'straight' }), ...on('setGroove', ['nope', 5, null], 'groove'), act('setMeter', { meter: '3/4' }), act('setGroove', { groove: 'waltzRock' })]);
+  LIMITS.setRhythmKnob = build(['complexity', 'loose', 'ornaments'].flatMap((knob) => on('setRhythmKnob', [0, 100, 50, 101, -1, 50.5, '50', null], 'value', { knob })).concat(act('setRhythmKnob', { knob: 'nope', value: 5 })));
+  // repeats: 'auto' at the start and the second 'off'; 'jam' again after a lock and after a reroll keeps the lock and formSalt
+  LIMITS.setFormTemplate = build([...['auto', ...TEMPLATE_IDS, 'off', 'off', 'auto', 'jam'].map((template) => act('setFormTemplate', { template })), ...on('setFormTemplate', ['nope', 'Auto', 5, null], 'template'),
+    act('toggleLock'), act('setFormTemplate', { template: 'jam' }), act('rerollForm'), act('setFormTemplate', { template: 'jam' }), act('setFormTemplate', { template: 'pop' })]);
+  // repeats: 96 at the start, 192 without a form (the length), 24 with the blues form
+  LIMITS.setFormTarget = build([act('setFormTarget', { bars: 96 }), ...TARGET_SIZES.map((bars) => act('setFormTarget', { bars })), act('setFormTemplate', { template: 'off' }), act('setFormTarget', { bars: 192 }),
+    ...TARGET_SIZES.map((bars) => act('setFormTarget', { bars })), ...on('setFormTarget', [100, '96', 0, null], 'bars'), act('setFormTemplate', { template: 'blues' }), act('setFormTarget', { bars: 24 }), act('setFormTarget', { bars: 24 })]);
+  LIMITS.setFormFeel = build([...Object.entries(FEEL_TOP).flatMap(([knob, top]) => on('setFormFeel', [0, top, top + 1, -1, 50.5, '5', null, 37, 37], 'value', { knob })), act('setFormFeel', { knob: 'nope', value: 5 }),
+    act('releaseStructure'), act('setFormTemplate', { template: 'off' }), act('setFormFeel', { knob: 'dynamics', value: 80 }), act('setFormTemplate', { template: 'pop' })]);
+  LIMITS.releaseStructure = build([...[0, 100, 30, 60].flatMap((value) => [act('setFormFeel', { knob: 'structure', value }), act('releaseStructure')]), act('setFormTemplate', { template: 'off' }), act('releaseStructure'),
+    act('setFormTemplate', { template: 'rock' }), act('releaseStructure')]);
+  const last = () => parts() - 1;
+  const select = (index) => act('selectPart', { index });
+  // the selection: every part, out of range and of other types; kept when the form goes and clamped when a form with fewer parts comes; a click on it again
+  LIMITS.selectPart = build([select(0), () => select(last()), () => select(parts()), select(-1), select('0'), select(1.5), act('selectPart'), act('setFormTarget', { bars: 192 }), () => select(last()),
+    act('setFormTarget', { bars: 24 }), act('setFormTarget', { bars: 192 }), () => select(3), act('setFormTemplate', { template: 'off' }), select(0), act('setFormTemplate', { template: 'jam' }), () => select(last()),
+    act('setFormTemplate', { template: 'off' }), act('setFormTarget', { bars: 24 }), act('setFormTemplate', { template: 'pop' }), select(0), select(0), act('newVariant', { variant: 1234 }), () => select(last()),
+    act('surprise', { variant: 3, style: 0.1, tempo: 0.1, scale: 0.1, root: 0.1 }), act('start', { variant: 77 })]);
+  LIMITS.editPart = build([select(0),
+    ...[[-24, 0, -25, 1, -3.5, '0', null, null], [-100, 100, 101, -101, 0.5, '1', null, null]].flatMap((values, k) => values.map((value) => act('editPart', { field: k ? 'density' : 'level', value }))),
+    () => act('editPart', { field: 'type', value: part().type }), ...PART_TYPES.map((value) => act('editPart', { field: 'type', value })), act('editPart', { field: 'type', value: PART_TYPES.at(-1) }),
+    () => select(last()), ...TRANSITIONS.map((value) => act('editPart', { field: 'transition', value })), select(0),
+    ...[true, false, 'true', null].map((value) => act('editPart', { field: 'crash', value })), ...[1, 1, 64, 0, 65, 2.5, '8', null, 8, 8].map((value) => act('editPart', { field: 'bars', value })),
+    act('editPart', { field: 'locked', value: true }), act('editPart', { field: 'bars' }), act('editPart', { index: 3, field: 'bars', value: 5 }), // an index is no field of editPart: the selected part
+    () => Array.from({ length: parts() }, (_, index) => [select(index), act('editPart', { field: 'bars', value: 64 })]).flat(), select(0), act('editPart', { field: 'bars', value: 63 }), act('editPart', { field: 'bars', value: 64 }),
+    act('setFormTemplate', { template: 'off' }), act('editPart', { field: 'bars', value: 4 })]);
+  LIMITS.toggleLock = build([act('toggleLock'), () => select(last()), act('toggleLock'), select(0), act('toggleLock'), act('toggleLock', { index: 2 }), act('setFormTemplate', { template: 'off' }), act('toggleLock')]);
+  LIMITS.deletePart = build([() => select(last()), act('deletePart'), act('deletePart'), select(1), ...Array.from({ length: 12 }, () => act('deletePart')), act('setFormTemplate', { template: 'pop' }), () => select(last()),
+    act('deletePart'), select(0), act('deletePart'), act('setFormTemplate', { template: 'off' }), act('deletePart')]);
+  LIMITS.movePart = build([select(0), act('movePart', { dir: -1 }), act('movePart', { dir: 1 }), act('movePart', { dir: 1 }), act('movePart', { dir: 1 }), () => select(last()), act('movePart', { dir: 1 }),
+    act('movePart', { dir: -1 }), act('movePart', { dir: -1 }), ...on('movePart', [2, 0, '1', null], 'dir'), act('movePart')]);
+  LIMITS.copyPart = build([select(0), act('editPart', { field: 'bars', value: 64 }), ...Array.from({ length: 9 }, () => act('copyPart')), () => select(last()), act('copyPart'),
+    act('setFormTemplate', { template: 'jam' }), act('setFormTarget', { bars: 24 }), select(0), act('editPart', { field: 'bars', value: 1 }), ...Array.from({ length: 70 }, () => act('copyPart'))]);
+  LIMITS.addPart = build([...Array.from({ length: 70 }, () => act('addPart')), act('setFormTarget', { bars: 24 }), select(0), act('editPart', { field: 'bars', value: 1 }), ...Array.from({ length: 70 }, () => act('addPart'))]);
+  LIMITS.rerollForm = build([act('rerollForm'), act('rerollForm'), act('rerollForm'), act('newVariant', { variant: 3 }), act('rerollForm'), () => Array.from({ length: parts() }, (_, index) => [select(index), act('toggleLock')]).flat(),
+    act('rerollForm'), select(0), act('toggleLock'), act('rerollForm'), act('setFormTemplate', { template: 'off' }), act('rerollForm')]);
+  // repeats: 100 % at the start, the last value again; the panorama's defaults (chords 30 %), the last value again
+  LIMITS.setLevel = build([act('setLevel', { channel: 'master', value: 100 }), ...MIX_NAMES.flatMap((channel) => on('setLevel', [0, 100, 100], 'value', { channel })),
+    ...on('setLevel', [101, -1, 50.5, '5', null], 'value', { channel: 'bass' }), ...on('setLevel', ['nope', 5], 'channel', { value: 5 })]);
+  LIMITS.setPan = build([act('setPan', { layer: 'chords', value: 30 }), ...LAYER_IDS.flatMap((layer) => on('setPan', [-100, 100, 0, 0], 'value', { layer })), ...on('setPan', [101, -101, 0.5, '5', null], 'value', { layer: 'pad' }),
+    act('setPan', { layer: 'master', value: 5 })]);
+  LIMITS.toggleMute = build([...LAYER_IDS.flatMap((layer) => [act('toggleMute', { layer }), act('toggleMute', { layer })]), ...LAYER_IDS.map((layer) => act('toggleMute', { layer })), act('toggleMute', { layer: 'master' }), act('toggleMute')]);
+  LIMITS.toggleAllVoices = build([act('toggleAllVoices'), act('toggleAllVoices'), act('toggleAllVoices'), act('setVoice', { layer: 'chords', id: 'sample', variant: 'guitar' }), act('toggleAllVoices'),
+    act('setVoice', { layer: 'pad', id: 'synth', variant: 'classic' }), act('toggleAllVoices'), act('toggleAllVoices')]);
+  LIMITS.setVoice = build([() => act('setVoice', { layer: 'drums', ...st().track.voices.drums }), // a repeat
+    ...VOICE_LAYERS.flatMap((layer) => Object.keys(VOICES[layer]).flatMap((id) => VOICES[layer][id].variants.map((variant) => act('setVoice', { layer, id, variant })))),
+    () => act('setVoice', { layer: 'percussion', ...st().track.voices.percussion }),
+    act('setVoice', { layer: 'chords', id: 'sample', variant: 'organ' }), act('setVoice', { layer: 'bass', id: 'sample', variant: 'nope' }), act('setVoice', { layer: 'master', id: 'synth', variant: 'classic' }),
+    act('setVoice', { layer: 'bass', id: 'toString', variant: 'classic' }), act('setVoice', { layer: 'bass', id: 'synth' })]);
+  LIMITS.setJob = build([act('setJob', { layer: 'lead', job: jobsFor('lead')[0] }), ...['lead', 'percussion'].flatMap((layer) => jobsFor(layer).map((job) => act('setJob', { layer, job }))),
+    act('setJob', { layer: 'percussion', job: jobsFor('percussion').at(-1) }), act('setJob', { layer: 'drums', job: 'off' }), act('setJob', { layer: 'lead', job: 'nope' }), act('setJob', { layer: 'lead' })]);
+  LIMITS.setTimbre = build([...[0, 100].flatMap((value) => GROUPS.flatMap((group) => Object.keys(DEFAULT_TIMBRE[group]).map((field) => act('setTimbre', { group, field, value })))), act('toggleAllVoices'),
+    ...[0, 100].flatMap((value) => GROUPS.flatMap((group) => Object.keys(DEFAULT_TIMBRE[group]).map((field) => act('setTimbre', { group, field, value })))),
+    ...on('setTimbre', [101, -1, 50.5, '5', null], 'value', { group: 'master', field: 'echo' }), act('setTimbre', { group: 'nope', field: 'echo', value: 5 }), act('setTimbre', { group: 'master', field: 'nope', value: 5 }),
+    act('setTimbre', { group: 'percussion', field: 'room', value: 5 }), act('setTimbre', { group: 'master', field: 'toString', value: 5 })]);
+  LIMITS.resetTimbre = build([...GROUPS.map((group) => act('resetTimbre', { group })), act('toggleAllVoices'), ...GROUPS.map((group) => act('setTimbre', { group, field: Object.keys(DEFAULT_TIMBRE[group])[0], value: 20 })),
+    ...GROUPS.map((group) => act('resetTimbre', { group })), ...GROUPS.map((group) => act('resetTimbre', { group })), act('resetTimbre', { group: 'nope' }), act('resetTimbre')]);
+  LIMITS.setLeslie = build([act('setLeslie', { mode: 'fast' }), act('setVoice', { layer: 'chords', id: 'organ', variant: 'jazz' }), act('setLeslie', { mode: 'auto' }), ...LESLIE_MODES.map((mode) => act('setLeslie', { mode })),
+    act('setLeslie', { mode: LESLIE_MODES.at(-1) }),
+    ...on('setLeslie', ['x', 'Fast', 1, null], 'mode'), act('setVoice', { layer: 'chords', id: 'sample', variant: 'guitar' }), act('setLeslie', { mode: 'slow' })]);
+  LIMITS.setOrganDrive = build([act('setOrganDrive', { value: 50 }), act('setVoice', { layer: 'chords', id: 'organ', variant: 'rock' }), act('setOrganDrive', { value: null }), act('setOrganDrive', { value: 0 }),
+    act('setOrganDrive', { value: null }), act('setOrganDrive', { value: 100 }), act('setOrganDrive', { value: null }), ...on('setOrganDrive', [101, -1, 50.5, '50'], 'value'), act('setOrganDrive'),
+    ...VOICES.chords.organ.variants.flatMap((variant) => [act('setVoice', { layer: 'chords', id: 'organ', variant }), act('setOrganDrive', { value: null }), act('setOrganDrive', { value: 35 }), act('setOrganDrive', { value: null })]),
+    act('setLeslie', { mode: 'off' }), act('setOrganDrive', { value: null })]);
+  if (ref.ACTION_NAMES.some((name) => !LIMITS[name])) throw new Error(`no sequence at the limits for ${ref.ACTION_NAMES.filter((name) => !LIMITS[name])}`);
+  for (const name of ref.ACTION_NAMES) sequence(LIMITS[name]);
+  // texts that are no action, and the reader's edges (track.cpp's Reader, JSON.parse's rules): a key twice (the last value), a field more (not read), a byte order
+  // mark (no JSON), a lone surrogate in a field not read, a field nested so that the text is 64 levels deep (the reader's limit, see PROTOKOLL.md: deeper is no JSON there)
+  sequence(['', ' ', 'x', '{', '}', '[]', '5', 'null', 'true', '"start"', '{}', '{"action":5}', '{"action":null}', '{"action":"nope"}', '{"action":"toString"}', '{"action":"__proto__"}', '{"action":"constructor"}',
+    '{"action":"Start","variant":1}', '{"action":"setTempo","bpm":"x","bpm":120,"from":"play"}', '{"action":"setTempo","bpm":121,"from":"play","extra":[1,{"a":2}]}', '{"action":"setTempo","bpm":1.22e2,"from":"play"}',
+    '{"action":"setTempo","bpm":123,"from":"play"}x', ' {"action":"setTempo","bpm":124,"from":"play"} ', '{"action":"setTempo","bpm":125,"from":"pl\\u0061y"}', `${'['.repeat(5000)}${']'.repeat(5000)}`,
+    `{"action":"setTempo","bpm":126,"from":"play","deep":${'['.repeat(63)}${']'.repeat(63)}}`, '{"action":"setTempo","bpm":127,"from":"play",}', '{"action":"setTempo","bpm":1e999,"from":"play"}',
+    '﻿{"action":"setTempo","bpm":128,"from":"play"}', '{"action":"setTempo","bpm":129,"from":"play","x":"\\ud800"}', '{"action":"setTempo","bpm":130,"from":"\\ud800"}']);
+  const total = Object.values(stats).reduce((n, s) => n + s.count, 0);
+  const sum = (key) => Object.values(stats).reduce((n, s) => n + s[key], 0);
+  console.log(`session: ${cases.filter((c) => c.fn === 'session').length} sequences, ${total} actions (${sum('refused')} refused, ${sum('repeat')} repeats) and ${noAction} texts that name no action`);
+  for (const [name, s] of Object.entries(stats)) {
+    console.log(`  ${name.padEnd(18)} ${String(s.count).padStart(5)}  refused ${String(s.refused).padStart(4)} (${Math.round((100 * s.refused) / Math.max(1, s.count))} %)  repeats ${String(s.repeat).padStart(4)}`);
+  }
+}
+
 // The cases go to chunk files (logic-001.json, ...: each a JSON list of cases, a new one begun once the current passes CHUNK_BYTES), so that the
 // test never holds the whole reference; logic.json is the manifest: { total, chunks: [{ file, count }] } in the order of the cases.
 const CHUNK_BYTES = 16e6;

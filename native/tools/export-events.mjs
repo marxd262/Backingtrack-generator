@@ -86,7 +86,7 @@ if (isMain && (process.argv.includes('--data') || dataOnly >= 0)) {
   const { PART_TYPES, TRANSITIONS, FORM_LIMITS, FEEL_DEFAULTS, DYNAMICS_MAX } = await load('core/form-types.js');
   const { TEMPLATE_IDS, STYLE_TEMPLATE, TARGET_SIZES, DEV_FACTORS } = await load('core/form-roll.js');
   const { PROGRESSION_TEMPLATES } = await load('core/progressions.js');
-  const { SCALES } = await load('core/music.js');
+  const { SCALES, SCALE_MODE } = await load('core/music.js');
   const { STANDARD_TUNING, FRETS } = await load('core/fretboard.js');
   const music = {
     voices: Object.fromEntries(VOICE_LAYERS.map((layer) => [layer, Object.fromEntries(Object.entries(VOICES[layer]).map(([id, v]) => [id, v.variants]))])),
@@ -109,6 +109,13 @@ if (isMain && (process.argv.includes('--data') || dataOnly >= 0)) {
     styleColors: Object.fromEntries(STYLE_PRESETS.map((p) => [p.id, { ...(p.chordColor !== undefined && { chordColor: p.chordColor }), ...(p.chordColorAlt !== undefined && { chordColorAlt: p.chordColorAlt }) }])),
     scales: SCALES,
     fretboard: { standardTuning: STANDARD_TUNING, frets: FRETS, degrees: readLiteral('core/fretboard.js', 'DEGREES'), roman: readLiteral('core/fretboard.js', 'ROMAN') },
+    // what the session reads (ui/state.js, app.js, the panels): the style presets in order, the meters' grid, the scales' modes in order, the roots of
+    // the key chips, and each voice's kind and whether the voice select hides it
+    styles: STYLE_PRESETS.map((p) => ({ id: p.id, bpm: p.bpm, tags: p.tags, voices: p.voices })),
+    meterGrid: METERS,
+    scaleModes: SCALE_MODE,
+    roots: readLiteral('ui/state.js', 'ROOTS'),
+    voiceKinds: Object.fromEntries(VOICE_LAYERS.map((layer) => [layer, Object.fromEntries(Object.entries(VOICES[layer]).map(([id, v]) => [id, { kind: v.kind, hidden: v.hidden === true }]))])),
   };
   const dir = dataOnly >= 0 ? resolve(process.argv[dataOnly + 1]) : join(repo, 'native/core/data');
   mkdirSync(dir, { recursive: true });
