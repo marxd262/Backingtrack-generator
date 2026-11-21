@@ -1,0 +1,511 @@
+{
+  "voices": {
+    "drums": {
+      "synth": [
+        "classic"
+      ],
+      "sample": [
+        "standard",
+        "brushes",
+        "rimshot",
+        "jazz",
+        "electronic",
+        "808",
+        "muldjord",
+        "legacy"
+      ]
+    },
+    "bass": {
+      "synth": [
+        "classic"
+      ],
+      "string": [
+        "finger"
+      ],
+      "sample": [
+        "finger",
+        "pick",
+        "upright"
+      ]
+    },
+    "chords": {
+      "synth": [
+        "classic"
+      ],
+      "string": [
+        "electric"
+      ],
+      "epiano": [
+        "rhodes"
+      ],
+      "organ": [
+        "jazz",
+        "rock",
+        "gospel",
+        "ballad"
+      ],
+      "sample": [
+        "guitar",
+        "epiano",
+        "muted",
+        "jazz",
+        "funk",
+        "steel",
+        "nylon",
+        "twelve",
+        "freepats",
+        "freepatsjazz"
+      ]
+    },
+    "pad": {
+      "synth": [
+        "classic"
+      ],
+      "sample": [
+        "strings",
+        "warm"
+      ]
+    },
+    "lead": {
+      "synth": [
+        "classic"
+      ],
+      "sample": [
+        "flute",
+        "sax",
+        "synth",
+        "guitar"
+      ]
+    },
+    "percussion": {
+      "synth": [
+        "classic"
+      ],
+      "sample": [
+        "studio"
+      ]
+    }
+  },
+  "movedVoices": {
+    "chords": {
+      "sample/organ": {
+        "id": "organ",
+        "variant": "jazz"
+      }
+    }
+  },
+  "layers": {
+    "drums": {
+      "defaultOn": true,
+      "jobs": []
+    },
+    "bass": {
+      "defaultOn": true,
+      "jobs": []
+    },
+    "chords": {
+      "defaultOn": true,
+      "jobs": []
+    },
+    "pad": {
+      "defaultOn": true,
+      "jobs": []
+    },
+    "lead": {
+      "defaultOn": true,
+      "jobs": [
+        "off",
+        "fills",
+        "arpeggio",
+        "melody",
+        "callResponse",
+        "riff"
+      ]
+    },
+    "percussion": {
+      "defaultOn": false,
+      "jobs": [
+        "mixed",
+        "shaker",
+        "tambourine",
+        "congas",
+        "bongos",
+        "claves",
+        "cowbell"
+      ]
+    }
+  },
+  "chords": {
+    "maj": {
+      "symbol": "",
+      "on": [
+        "maj"
+      ]
+    },
+    "min": {
+      "symbol": "m",
+      "on": [
+        "min"
+      ]
+    },
+    "dim": {
+      "symbol": "dim",
+      "on": [
+        "dim"
+      ]
+    },
+    "aug": {
+      "symbol": "aug",
+      "on": [
+        "maj"
+      ]
+    },
+    "sus2": {
+      "symbol": "sus2",
+      "on": [
+        "maj",
+        "min"
+      ]
+    },
+    "sus4": {
+      "symbol": "sus4",
+      "on": [
+        "maj",
+        "min"
+      ]
+    },
+    "power": {
+      "symbol": "5",
+      "on": [
+        "maj",
+        "min",
+        "dim"
+      ]
+    },
+    "dom7": {
+      "symbol": "7",
+      "on": [
+        "maj"
+      ]
+    },
+    "maj7": {
+      "symbol": "maj7",
+      "on": [
+        "maj"
+      ]
+    },
+    "min7": {
+      "symbol": "m7",
+      "on": [
+        "min"
+      ]
+    },
+    "m7b5": {
+      "symbol": "m7b5",
+      "on": [
+        "dim"
+      ]
+    },
+    "dim7": {
+      "symbol": "dim7",
+      "on": [
+        "dim"
+      ]
+    },
+    "maj6": {
+      "symbol": "6",
+      "on": [
+        "maj"
+      ]
+    },
+    "min6": {
+      "symbol": "m6",
+      "on": [
+        "min"
+      ]
+    },
+    "add9": {
+      "symbol": "add9",
+      "on": [
+        "maj"
+      ]
+    },
+    "dom9": {
+      "symbol": "9",
+      "on": [
+        "maj"
+      ]
+    },
+    "min9": {
+      "symbol": "m9",
+      "on": [
+        "min"
+      ]
+    }
+  },
+  "modes": {
+    "minor": {
+      "steps": [
+        0,
+        2,
+        3,
+        5,
+        7,
+        8,
+        10
+      ],
+      "qualities": [
+        "min",
+        "dim",
+        "maj",
+        "min",
+        "min",
+        "maj",
+        "maj"
+      ],
+      "parentMajor": 3
+    },
+    "major": {
+      "steps": [
+        0,
+        2,
+        4,
+        5,
+        7,
+        9,
+        11
+      ],
+      "qualities": [
+        "maj",
+        "min",
+        "min",
+        "maj",
+        "maj",
+        "min",
+        "dim"
+      ],
+      "parentMajor": 0
+    },
+    "dorian": {
+      "steps": [
+        0,
+        2,
+        3,
+        5,
+        7,
+        9,
+        10
+      ],
+      "qualities": [
+        "min",
+        "min",
+        "maj",
+        "maj",
+        "min",
+        "dim",
+        "maj"
+      ],
+      "parentMajor": -2
+    },
+    "phrygian": {
+      "steps": [
+        0,
+        1,
+        3,
+        5,
+        7,
+        8,
+        10
+      ],
+      "qualities": [
+        "min",
+        "maj",
+        "maj",
+        "min",
+        "dim",
+        "maj",
+        "min"
+      ],
+      "parentMajor": -4
+    },
+    "lydian": {
+      "steps": [
+        0,
+        2,
+        4,
+        6,
+        7,
+        9,
+        11
+      ],
+      "qualities": [
+        "maj",
+        "maj",
+        "min",
+        "dim",
+        "maj",
+        "min",
+        "min"
+      ],
+      "parentMajor": -5
+    },
+    "mixolydian": {
+      "steps": [
+        0,
+        2,
+        4,
+        5,
+        7,
+        9,
+        10
+      ],
+      "qualities": [
+        "maj",
+        "min",
+        "dim",
+        "maj",
+        "min",
+        "min",
+        "maj"
+      ],
+      "parentMajor": 5
+    }
+  },
+  "meters": [
+    "4/4",
+    "3/4",
+    "6/8",
+    "12/8",
+    "5/4"
+  ],
+  "tags": [
+    {
+      "id": "drums",
+      "tags": [
+        "driving",
+        "loose",
+        "halftime",
+        "dry",
+        "heavy"
+      ]
+    },
+    {
+      "id": "bass",
+      "tags": [
+        "deepFat",
+        "bouncy",
+        "calm",
+        "gritty"
+      ]
+    },
+    {
+      "id": "synths",
+      "tags": [
+        "deepSynths",
+        "shimmering",
+        "arpeggio",
+        "widePad",
+        "warm"
+      ]
+    },
+    {
+      "id": "rhythm",
+      "tags": [
+        "funky",
+        "straight",
+        "swing",
+        "syncopated"
+      ]
+    },
+    {
+      "id": "mood",
+      "tags": [
+        "dreamy",
+        "dark",
+        "bright",
+        "psychedelic"
+      ]
+    },
+    {
+      "id": "development",
+      "tags": [
+        "buildsSlowly",
+        "fullFromStart",
+        "withBreakouts"
+      ]
+    },
+    {
+      "id": "drumSound",
+      "tags": [
+        "punchy",
+        "boomy",
+        "snappy",
+        "crisp",
+        "roomy"
+      ]
+    },
+    {
+      "id": "bassSound",
+      "tags": [
+        "sub",
+        "fuzz",
+        "plucky",
+        "round",
+        "resonant"
+      ]
+    },
+    {
+      "id": "chordSound",
+      "tags": [
+        "mellow",
+        "biting",
+        "chorused",
+        "tremolo",
+        "ringing"
+      ]
+    },
+    {
+      "id": "padSound",
+      "tags": [
+        "swelling",
+        "airy",
+        "glassy",
+        "thick",
+        "moving"
+      ]
+    }
+  ],
+  "form": {
+    "partTypes": [
+      "intro",
+      "verse",
+      "build",
+      "chorus",
+      "bridge",
+      "break",
+      "outro"
+    ],
+    "transitions": [
+      "none",
+      "fill",
+      "roll",
+      "stop"
+    ],
+    "limits": {
+      "parts": 64,
+      "bars": 64,
+      "length": 512,
+      "levelMin": -24,
+      "levelMax": 0,
+      "densityMin": -1,
+      "densityMax": 1
+    },
+    "feelDefaults": {
+      "structure": 0.6,
+      "dynamics": 0.6,
+      "pauses": 0.4,
+      "randomness": 0.5
+    },
+    "dynamicsMax": 1.3
+  }
+}

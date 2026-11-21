@@ -1,13 +1,15 @@
 // Writes the reference for the C++ generator from the web app in the working tree (src/, read only).
 //   node native/tools/export-events.mjs <outDir>           -> <outDir>/cases.json (tracks and their events)
-//   node native/tools/export-events.mjs <outDir> --data    -> also rewrites native/core/data/grooves.json and sound.json
-//   node native/tools/export-events.mjs --data-only <dir>  -> writes only grooves.json and sound.json, into <dir>
+//   node native/tools/export-events.mjs <outDir> --data    -> also rewrites native/core/data/grooves.json, sound.json and music.json
+//   node native/tools/export-events.mjs --data-only <dir>  -> writes only grooves.json, sound.json and music.json, into <dir>
 // The first groups switch on drums and bass only; the groups of the other layers follow them.
+// Imported (by export-logic.mjs) it writes nothing and gives `parityTracks`, the tracks of cases.json.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+const isMain = process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 const out = resolve(process.argv[2] ?? join(repo, 'native/build/parity'));
 
 const load = (file) => import(pathToFileURL(join(repo, 'src', file)).href);
@@ -35,8 +37,22 @@ function readKitPan() {
 
 // The data the core embeds (native/core/data): --data writes it there, --data-only <dir> writes it into <dir> and stops
 // (the check in native/core/CMakeLists.txt compares that copy with the checked-in files).
-const dataOnly = process.argv.indexOf('--data-only');
-if (process.argv.includes('--data') || dataOnly >= 0) {
+// A table that src/ keeps to itself ("const NAME = [deepFreeze(]{...}"): its literal, read out of the text like KIT_PAN and evaluated.
+function readLiteral(file, name) {
+  const text = readFileSync(join(repo, 'src', file), 'utf8');
+  const at = text.indexOf(`const ${name} = `);
+  const open = at < 0 ? -1 : text.indexOf('{', at);
+  if (open < 0) throw new Error(`${name}: no "const ${name} = {...}" found in src/${file}`);
+  let depth = 0, end = open;
+  for (; end < text.length; end++) { // the literals hold no braces inside strings
+    if (text[end] === '{') depth++;
+    else if (text[end] === '}' && --depth === 0) break;
+  }
+  return new Function(`return (${text.slice(open, end + 1)});`)();
+}
+
+const dataOnly = isMain ? process.argv.indexOf('--data-only') : -1;
+if (isMain && (process.argv.includes('--data') || dataOnly >= 0)) {
   const { TUNABLES, MIX_TUNABLES } = await load('audio/voices/tunables.js');
   const { packIdFor, hitKeysFor } = await load('audio/voices/index.js');
   const { HIT_KEYS } = await load('audio/voices/sample-hits.js');
@@ -51,10 +67,27 @@ if (process.argv.includes('--data') || dataOnly >= 0) {
     // the timbre knobs each voice id of each layer uses (the core's ownsChorus reads them, synth.js 231)
     uses: Object.fromEntries(VOICE_LAYERS.map((layer) => [layer, Object.fromEntries(Object.entries(VOICES[layer]).map(([id, v]) => [id, v.uses]))])),
   };
+  // what the track check reads (track.js, voices.js, layers.js, form.js, form-types.js, music.js, chords.js, tags.js); the order of the
+  // registers is part of it (chordOptions lists the qualities in register order), so the core reads this file with its keys in order
+  const { LAYERS, LAYER_IDS } = await load('core/layers.js');
+  const { CHORDS } = await load('core/chords.js');
+  const { TAG_CATEGORIES } = await load('core/tags.js');
+  const { PART_TYPES, TRANSITIONS, FORM_LIMITS, FEEL_DEFAULTS, DYNAMICS_MAX } = await load('core/form-types.js');
+  const music = {
+    voices: Object.fromEntries(VOICE_LAYERS.map((layer) => [layer, Object.fromEntries(Object.entries(VOICES[layer]).map(([id, v]) => [id, v.variants]))])),
+    movedVoices: readLiteral('core/voices.js', 'MOVED'), // "<id>/<variant>" of a removed voice -> its successor
+    layers: Object.fromEntries(LAYER_IDS.map((id) => [id, { defaultOn: LAYERS[id].defaultOn, jobs: LAYERS[id].jobs ?? [] }])),
+    chords: Object.fromEntries(Object.entries(CHORDS).map(([id, c]) => [id, { symbol: c.symbol, on: c.on }])),
+    modes: Object.fromEntries(Object.entries(readLiteral('core/music.js', 'MODES')).map(([id, m]) => [id, { steps: m.steps, qualities: m.qualities, parentMajor: m.parentMajor }])),
+    meters: Object.keys(METERS),
+    tags: TAG_CATEGORIES,
+    form: { partTypes: PART_TYPES, transitions: TRANSITIONS, limits: FORM_LIMITS, feelDefaults: FEEL_DEFAULTS, dynamicsMax: DYNAMICS_MAX },
+  };
   const dir = dataOnly >= 0 ? resolve(process.argv[dataOnly + 1]) : join(repo, 'native/core/data');
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'grooves.json'), `${JSON.stringify(GROOVES)}\n`);
   writeFileSync(join(dir, 'sound.json'), `${JSON.stringify(sound, null, 2)}\n`);
+  writeFileSync(join(dir, 'music.json'), `${JSON.stringify(music, null, 2)}\n`);
   if (dataOnly >= 0) process.exit(0);
 }
 
@@ -268,7 +301,12 @@ for (const [s, style] of STYLE_PRESETS.entries()) {
 edge(STYLE_PRESETS[0], 'bars512', 99, { length: 512 });
 edge(STYLE_PRESETS[0], 'bars512form', 98, { length: 512, form: rollForm({ template: 'auto', style: STYLE_PRESETS[0].id, targetBars: 512, seed: 98, tags: STYLE_PRESETS[0].tags }) });
 
-mkdirSync(out, { recursive: true });
-writeFileSync(join(out, 'cases.json'), JSON.stringify(cases));
-const total = cases.reduce((n, c) => n + c.events.length, 0);
-console.log(`${cases.length} tracks, ${total} events -> ${join(out, 'cases.json')}`);
+/** The tracks of cases.json as the core gets them (normalised, voices filled in); export-logic.mjs checks and normalises them again. */
+export const parityTracks = cases.map((c) => c.track);
+
+if (isMain) {
+  mkdirSync(out, { recursive: true });
+  writeFileSync(join(out, 'cases.json'), JSON.stringify(cases));
+  const total = cases.reduce((n, c) => n + c.events.length, 0);
+  console.log(`${cases.length} tracks, ${total} events -> ${join(out, 'cases.json')}`);
+}

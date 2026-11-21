@@ -11,6 +11,8 @@
 #include "../src/sound_data.h"
 #include "../src/sound_model.h"
 #include "../src/string_model.h"
+#include "../src/track_internal.h"
+#include "btg/track.h"
 #include "json_compare.h"
 
 #include <cmath>
@@ -59,6 +61,16 @@ Engine::Layer layerOf(const std::string& name) {
 }
 json toJson(const LayerFx& p) { return { { "ref", p.ref }, { "trim", { { "od", p.trim.od }, { "dist", p.trim.dist }, { "fuzz", p.trim.fuzz } } }, { "odSlope", p.odSlope },
     { "distHp", p.distHp }, { "toneHz", p.toneHz }, { "cabHp", p.cabHp }, { "cabLp", p.cabLp }, { "cabPeakHz", p.cabPeakHz }, { "cabPeakDb", p.cabPeakDb } }; }
+
+// Task 25: the track check. The helpers work on ordered_json (the order of keys is the text's); the comparison does not look at the order of an object's keys.
+Json ordered(const json& j) { return Json::parse(j.dump()); }
+json plain(const Json& j) { return json::parse(j.dump()); }
+// the web's `undefined` is { undefined: true }, a value { value }; a helper that throws in the web throws std::invalid_argument here: { threw: true }
+json thrown(const std::function<Json()>& call) {
+    try { return plain(call()); } catch (const std::invalid_argument&) { return json { { "threw", true } }; }
+}
+// the text of the track functions: their `in` is the track's text, their output a text
+json parsed(const std::string& text) { return json::parse(text, nullptr, false); }
 
 const std::map<std::string, std::function<json(const json&)>> FUNCTIONS {
     { "completeTimbre", [](const json& in) { return toJson(completeTimbre(in.dump())); } },
@@ -113,6 +125,20 @@ const std::map<std::string, std::function<json(const json&)>> FUNCTIONS {
         for (const json& i : in.at("at")) at[std::to_string(i.get<size_t>())] = out[i.get<size_t>()];
         return json { { "length", out.size() }, { "sumSquares", sumSquares }, { "at", at } };
     } },
+    { "normalizeTrack", [](const json& in) { return parsed(btg::normalizeTrack(in.get<std::string>())); } },
+    { "validateTrack", [](const json& in) { return parsed(btg::validateTrack(in.get<std::string>())); } },
+    { "completeVoices", [](const json& in) { return plain(completeVoices(ordered(in))); } },
+    { "completeJobs", [](const json& in) { return plain(completeJobs(ordered(in))); } },
+    { "checkForm", [](const json& in) {
+        json found = json::array();
+        checkForm(ordered(in), [&](const char* code, Json params) { found.push_back(json { { "code", code }, { "params", plain(params) } }); });
+        return found; } },
+    { "normalizeForm", [](const json& in) {
+        const Json form = normalizeForm(ordered(in));
+        return form.is_discarded() ? json { { "undefined", true } } : json { { "value", plain(form) } }; } },
+    { "allowedChords", [](const json& in) { return thrown([&] { return allowedChords(ordered(in)); }); } },
+    { "chordOptions", [](const json& in) { return thrown([&] { return chordOptions(ordered(in)); }); } },
+    { "chordName", [](const json& in) { return thrown([&] { return chordName(ordered(in)); }); } },
 };
 
 } // namespace
@@ -121,28 +147,53 @@ int main(int argc, char** argv) {
     if (argc < 2) { std::printf("usage: btg_logic_tests <logic.json>\n"); return 2; }
     std::ifstream file(argv[1], std::ios::binary);
     if (!file) { std::printf("cannot open %s\n", argv[1]); return 2; }
-    const json cases = json::parse(file);
+    const json cases = json::parse(file, nullptr, false);
+    if (cases.is_discarded()) { std::printf("%s is not valid JSON (cut off?): nothing was checked\n", argv[1]); return 1; }
     if (!cases.is_array() || cases.empty()) { std::printf("%s has no case: nothing was checked\n", argv[1]); return 1; } // a gate must not pass on nothing
     long long identical = 0, close = 0, different = 0, closeString = 0;
     std::map<std::string, int> seen; // cases per function in the file
     for (size_t i = 0; i < cases.size(); ++i) {
-        const json& c = cases[i];
-        ++seen[c.at("fn").get<std::string>()];
-        const auto fn = FUNCTIONS.find(c.at("fn").get<std::string>());
-        btg::test::Compare compare;
-        json got;
-        if (fn == FUNCTIONS.end()) compare.fail("fn");
-        else { got = fn->second(c.at("in")); compare.value("out", c.at("out"), got); }
-        if (compare.result == btg::test::Match::identical) { ++identical; continue; }
-        if (compare.result == btg::test::Match::close && c.at("fn") == "renderString") { // the ruled exception (above): passes, counted
-            ++closeString;
-            std::printf("close (renderString, ruled): #%zu %s by %.3g\n", i, compare.field.c_str(), compare.delta);
-            continue;
+        try {
+            const json& c = cases[i];
+            ++seen[c.at("fn").get<std::string>()];
+            const auto fn = FUNCTIONS.find(c.at("fn").get<std::string>());
+            btg::test::Compare compare;
+            json got;
+            if (fn == FUNCTIONS.end()) compare.fail("fn");
+            else { got = fn->second(c.at("in")); compare.value("out", c.at("out"), got); }
+            if (compare.result == btg::test::Match::identical) { ++identical; continue; }
+            if (compare.result == btg::test::Match::close && c.at("fn") == "renderString") { // the ruled exception (above): passes, counted
+                ++closeString;
+                std::printf("close (renderString, ruled): #%zu %s by %.3g\n", i, compare.field.c_str(), compare.delta);
+                continue;
+            }
+            if (compare.result == btg::test::Match::close) { ++close; std::printf("close: %s #%zu %s by %.3g\n", c.at("fn").get<std::string>().c_str(), i, compare.field.c_str(), compare.delta); continue; }
+            if (++different <= 20) std::printf("different: %s #%zu %s: in %s, want %s, got %s\n", c.at("fn").get<std::string>().c_str(), i, compare.field.c_str(),
+                                               c.at("in").dump().c_str(), c.at("out").dump().c_str(), got.dump().c_str());
+        } catch (const std::exception& error) { // a case that is no case, or a function that throws what the web's does not
+            if (++different <= 20) std::printf("different: #%zu threw: %s\n", i, error.what());
         }
-        if (compare.result == btg::test::Match::close) { ++close; std::printf("close: %s #%zu %s by %.3g\n", c.at("fn").get<std::string>().c_str(), i, compare.field.c_str(), compare.delta); continue; }
-        if (++different <= 20) std::printf("different: %s #%zu %s: in %s, want %s, got %s\n", c.at("fn").get<std::string>().c_str(), i, compare.field.c_str(),
-                                           c.at("in").dump().c_str(), c.at("out").dump().c_str(), got.dump().c_str());
     }
+    // The reader of track.cpp takes 64 levels of nesting (MAX_DEPTH) and counts deeper text as `null`; the web's validateTrack answers on such text,
+    // so no case of the file can hold it (the file has one at exactly 64): here the answer must be the one for `null`, and the program fails if not.
+    int deepWrong = 0;
+    const auto nestedText = [](int levels, bool arrays) { // a field of a track nested so that the text is `levels` deep (the track's object is the first)
+        std::string open, close;
+        for (int i = 1; i < levels; ++i) { open += arrays ? "[" : "{\"a\":"; close += arrays ? "]" : "}"; }
+        return "{\"bpm\":100,\"extra\":" + open + "1" + close + "}";
+    };
+    for (const bool arrays : { true, false }) {
+        const std::string text = nestedText(65, arrays);
+        if (btg::validateTrack(text) != btg::validateTrack("null") || btg::normalizeTrack(text) != btg::normalizeTrack("null")) {
+            std::printf("FAIL: a track nested 65 levels deep (%s) is not answered as `null`\n", arrays ? "arrays" : "objects");
+            ++deepWrong;
+        }
+        if (btg::validateTrack(nestedText(64, arrays)) == btg::validateTrack("null")) { // the other side of the cap: 64 levels are read
+            std::printf("FAIL: a track nested 64 levels deep (%s) is answered as `null`\n", arrays ? "arrays" : "objects");
+            ++deepWrong;
+        }
+    }
+    std::printf("depth: %d of 4 checks wrong\n", deepWrong);
     int untested = 0; // a function of the table that the file brings no case for was not checked
     for (const auto& entry : FUNCTIONS) if (!seen.count(entry.first)) { std::printf("no case for %s in %s\n", entry.first.c_str(), argv[1]); ++untested; }
     std::printf("logic: functions %zu, cases %zu, identical %lld, close %lld, different %lld\n", FUNCTIONS.size(), cases.size(), identical, close, different);
@@ -150,5 +201,5 @@ int main(int argc, char** argv) {
     // A close is a difference in the last bits (possibly another platform's math library): it fails too. An exception has to be ruled
     // by the owner and named here (function and field, from the line above), not passed.
     if (close) std::printf("FAIL: %lld case(s) are only close, not bit for bit: a difference in the last bits, possibly another platform's math library; ruled exceptions are named in this test\n", close);
-    return different || untested || close ? 1 : 0;
+    return different || untested || close || deepWrong ? 1 : 0;
 }
