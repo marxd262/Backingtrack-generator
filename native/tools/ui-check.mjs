@@ -156,6 +156,16 @@ try {
     if (state.muted !== 'false') problems.push(`${layer}: could not be switched on`);
     else if (!(state.peak > 0)) problems.push(`${layer}: switched on, but its level stays 0`);
   }
+  // ownBeat, where the steps below play the page's own song: the first beat from 64 on (else from 0 on) after which its track starts a drum
+  // hit, a bass note and a chord note inside the 2 s restorePage measures (0.5 to 2.5 s after the `play`). A rolled song's form can rest
+  // drums and bass at beat 64; a fixed 64 then failed every such step on the song alone (Phase 5's fix wave, the controller's first run).
+  const lastBeat = Math.ceil((Math.max(...events.map((e) => e.t)) * sentTrack.bpm) / 60);
+  const plays = (layer, beat) => events.some((e) => e.layer === layer && (e.type === 'note' || e.type === 'hit') && e.t >= (beat * 60) / sentTrack.bpm + 0.5 && e.t < (beat * 60) / sentTrack.bpm + 2.5);
+  const ownBeat = [...Array(Math.max(0, lastBeat - 63)).keys()].map((i) => 64 + i).concat([...Array(Math.min(64, lastBeat)).keys()])
+    .find((beat) => ['drums', 'bass', 'chords'].every((layer) => plays(layer, beat)));
+  if (ownBeat === undefined) problems.push("the page's song has no beat after which drums, bass and chords all start a note within 0.5 to 2.5 s");
+  result.ownBeat = ownBeat ?? 64;
+  await page.evaluate((beat) => { window.ownBeat = beat; }, result.ownBeat);
   // a voice change while playing: the chords switch to another sample guitar, the engine reports it ready, no error
   result.voiceChange = await page.evaluate(async () => {
     const select = document.getElementById('voice-chords');
@@ -174,7 +184,7 @@ try {
   if (afterBand.load > 0.25) problems.push(`engine load ${(100 * afterBand.load).toFixed(1)} % (limit 25 %)`);
   // Every layer effect (Tasks 18 and 19): fuzz, overdrive, distortion, vibrato and chorus of bass, chords, pad and lead at 1, so every chain
   // is built and computes each frame; 4 s of play: the load stays under the plan's 25 %, no dropout, the bass keeps a level. That the effects
-  // reach the engine: the same 4 s from beat 64 (each pass begins with a `play` there, so both play the same notes) first with the page's
+  // reach the engine: the same 4 s from ownBeat (each pass begins with a `play` there, so both play the same notes) first with the page's
   // own timbre, then with every effect on; the largest change of an fx layer's peak between the passes must be at least 1.5 dB (measured
   // in two runs, whose songs differ: bass -3.5 and -2.6, chords -2.2 and +0.2, lead -2.7 and -4.6 dB; with the knobs left at the page's
   // values every layer's change is 0.00 dB). Then the page's own timbre again.
@@ -182,9 +192,9 @@ try {
     const before = window.sent.findLast((s) => s.type === 'timbre').json, timbre = JSON.parse(before);
     for (const layer of ['bass', 'chords', 'pad', 'lead']) Object.assign(timbre[layer], { fuzz: 1, overdrive: 1, distortion: 1, vibrato: 1, chorus: 1 });
     const bpm = window.sent.findLast((s) => s.type === 'play').bpm;
-    const pass = async (json) => { // 4 s from beat 64, the layers' peaks
+    const pass = async (json) => { // 4 s from ownBeat, the layers' peaks
       window.bridge('timbre', { json });
-      window.bridge('play', { startBeats: 64, bpm });
+      window.bridge('play', { startBeats: window.ownBeat, bpm });
       window.engineLog.length = 0;
       await new Promise((r) => setTimeout(r, 4000));
       return Object.fromEntries(['bass', 'chords', 'pad', 'lead'].map((l) => [l, +Math.max(0, ...window.engineLog.map((m) => m.peaks?.[l] ?? 0)).toFixed(3)]));
@@ -239,14 +249,14 @@ try {
       for (const l of ['bass', 'chords', 'pad', 'lead']) Object.assign(every[l], { fuzz: 1, overdrive: 1, distortion: 1, vibrato: 1, chorus: 1 });
       return every;
     };
-    // the page's own track, voices, tuning and sound again (`own` from pageOwn), shown by a play from beat 64: the `voices` event of the
+    // the page's own track, voices, tuning and sound again (`own` from pageOwn), shown by a play from ownBeat: the `voices` event of the
     // page's voices and the page's drums' peak over 2 s of it
     window.restorePage = async (own) => {
       window.bridge('track', { json: own.track });
       const restored = await window.voicesReported(() => window.bridge('voices', { json: own.voices }));
       window.bridge('tuning', { json: own.tuning });
       window.bridge('timbre', { json: own.timbre });
-      window.bridge('play', { startBeats: 64, bpm: window.sent.findLast((s) => s.type === 'play').bpm });
+      window.bridge('play', { startBeats: window.ownBeat, bpm: window.sent.findLast((s) => s.type === 'play').bpm });
       await window.wait(500);
       window.engineLog.length = 0;
       await window.wait(2000);
@@ -254,13 +264,13 @@ try {
     };
   });
   // The e-piano (Task 21): the page's chords voice set to chords/epiano/rhodes through the bridge, as the page sends `voices` (the voices it
-  // sent last, the chords changed); the engine's `voices` event reports the chords ready, 4 s of play from beat 64 give them a level; then
+  // sent last, the chords changed); the engine's `voices` event reports the chords ready, 4 s of play from ownBeat give them a level; then
   // the page's own voices again. Red when the core has no voice for the key (the chords stay silent).
   result.epiano = await page.evaluate(async () => {
     const own = window.pageOwn().voices;
     const chords = async (send) => (await window.voicesReported(send))?.chords ?? 'no voices event';
     const status = await chords(() => window.bridge('voices', { json: JSON.stringify({ ...JSON.parse(own), chords: { id: 'epiano', variant: 'rhodes' } }) }));
-    window.bridge('play', { startBeats: 64, bpm: window.sent.findLast((s) => s.type === 'play').bpm });
+    window.bridge('play', { startBeats: window.ownBeat, bpm: window.sent.findLast((s) => s.type === 'play').bpm });
     window.engineLog.length = 0;
     await window.wait(4000);
     const peak = window.peakOf(window.engineLog, 'chords', 3), load = +window.lastEngine().load.toFixed(3);
@@ -296,7 +306,7 @@ try {
   // LFOs' first quantum; the core played as the app plays it (the lead, blocks of 480, takePeak: t20-r1-lead-probe.cpp) gives these figures
   // to four digits. The measure, fixed before measuring: the chords' largest reported peak with drive 1
   // against drive 0 differs by at least 1.5 dB, both have a level, the drums none (the track has no drums). Red when the core ignores the
-  // drive (both passes play the preset's 0.5). Then the page's own track, voices, tuning and sound again, shown by a play from beat 64 in
+  // drive (both passes play the preset's 0.5). Then the page's own track, voices, tuning and sound again, shown by a play from ownBeat in
   // which the page's drums have a level.
   const organCase = JSON.parse(readFileSync(join(repo, 'native/tools/sound-cases/organ.json'), 'utf8')).find((c) => c.name === 'organ-rock-drive-0');
   result.organ = await page.evaluate(async ([track, sound]) => {
@@ -324,7 +334,7 @@ try {
   // changed): the engine's `voices` event reports all four ready, and a play from beat 0 up to the engine's first report of beat 8 (the
   // reports from beat 0.2 on, as the organ's) gives each of the four a level. Red when the core has no voice for one of the keys (that layer
   // is reported silent and has no level). Then the page's own track, voices,
-  // tuning and sound again, shown by a play from beat 64 in which the page's drums have a level.
+  // tuning and sound again, shown by a play from ownBeat in which the page's drums have a level.
   const bandCase = JSON.parse(readFileSync(join(repo, 'native/tools/sound-cases/band.json'), 'utf8')).find((c) => c.name === 'band-funk');
   result.classic = await page.evaluate(async ([track, sound]) => {
     const LAYERS = ['bass', 'chords', 'pad', 'lead'];
@@ -353,7 +363,7 @@ try {
   // have no level). Then the page's voices of before the step chosen again through its voice selects (#voice-<layer>, a change event each,
   // as the user chooses a voice; the key would choose DEFAULT_VOICES): the `voices` message the page sends last must name them on all six
   // layers, a problem line of its own when it does not (a voice the selects do not offer cannot be chosen back). Then the page's own track,
-  // voices, tuning and sound of before the step (restorePage), shown by a play from beat 64 in which the page's drums have a level.
+  // voices, tuning and sound of before the step (restorePage), shown by a play from ownBeat in which the page's drums have a level.
   const SIX = ['drums', 'bass', 'chords', 'pad', 'lead', 'percussion'];
   const synthCase = JSON.parse(readFileSync(join(repo, 'native/tools/sound-cases/band-synth.json'), 'utf8')).find((c) => c.name === 'band-synth-funk');
   result.allSynth = await page.evaluate(async ([track, sound, layers]) => {
