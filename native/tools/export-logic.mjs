@@ -138,7 +138,7 @@ const { parityTracks } = await import(new URL('./export-events.mjs', import.meta
 const { normalizeTrack, validateTrack } = await load('core/track.js');
 const { completeVoices } = await load('core/voices.js');
 const { completeJobs, LAYERS } = await load('core/layers.js');
-const { normalizeForm, checkForm } = await load('core/form.js');
+const { normalizeForm, checkForm, chordIndex } = await load('core/form.js');
 const { allowedChords, chordOptions } = await load('core/music.js');
 const { chordName, CHORDS } = await load('core/chords.js');
 const { GROOVES } = await load('core/grooves.js');
@@ -355,6 +355,192 @@ const chordInputs = [...Object.keys(CHORDS).flatMap((quality) => ['A', 'C#', 'Bb
   ...['toString', 'constructor', '__proto__', 'hasOwnProperty', 'valueOf', 'isPrototypeOf', 'propertyIsEnumerable', 'toLocaleString', '__defineGetter__', '__lookupSetter__'].map((quality) => ({ root: 'A', quality })),
   null, 0, 'x', [], {}, [1, 2], { root: 'A', quality: 'maj', extra: 1 }, { root: 1e21, quality: 'min7' }, { root: 0.1, quality: 'maj' }, { root: '', quality: 'min' }, { root: 'Cb', quality: 'maj7' }];
 add('chordName', attempt(chordName), chordInputs);
+
+// Task 26: harmony and the data of the displays (progressions.js, harmony.js, tags.js, timeline.js, fretboard.js). A function that throws in
+// the web has the output { threw: true } (attempt); an argument that a case leaves out is undefined in the web, null in the core.
+const { progressionFor } = await load('core/progressions.js');
+const { colorChord, colorProgression, CHORD_COLORS } = await load('core/harmony.js');
+const { STYLE_PRESETS, styleChordColor } = await load('core/tags.js');
+const { chordTimeline } = await load('core/timeline.js');
+const { fretboardNotes, nextDistinctChord, progressionRoles, romanDegree, beatsUntilChange, degreeLabel } = await load('core/fretboard.js');
+const { SCALES } = await load('core/music.js');
+
+const ROOTS = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B']; // naturals, flats and a sharp: every pitch class, both spellings
+const SEEDS = Array.from({ length: 50 }, (_, i) => i + 1);
+const ALL_KEYS = ROOTS.flatMap((root) => MODE_IDS.map((mode) => ({ root, mode })));
+const A_MINOR = { root: 'A', mode: 'minor' };
+const bar = (root, quality, beats = 4) => ({ chord: { root, quality }, beats });
+const BAD_KEYS = [null, 0, 'A', [], {}, { root: 'A' }, { mode: 'minor' }, { root: 'H', mode: 'minor' }, { root: 'A', mode: 'nope' }, { root: 'A', mode: 'toString' }, { root: 'a', mode: 'minor' }, { root: ['A'], mode: 'minor' }];
+
+// progressionFor: 12 roots times 6 modes times seeds 1 to 50; the seed beyond what a 32-bit integer holds (>>> 0), a fraction, below zero, left out; keys it throws for
+add('progressionFor', attempt(({ key, seed }) => progressionFor(key, seed)), [
+  ...ALL_KEYS.flatMap((key) => SEEDS.map((seed) => ({ key, seed }))),
+  ...[0, -1, 1.5, 2 ** 32 + 7, 2 ** 32 - 1, 2 ** 53].map((seed) => ({ key: A_MINOR, seed })), { key: A_MINOR },
+  // a mode that is a list of one text is a mode for the key's lookups but not for `mode === 'minor'`: no dominant added, and a degree 7 is no chord ({...undefined})
+  ...SEEDS.slice(0, 12).map((seed) => ({ key: { root: 'A', mode: ['minor'] }, seed })),
+  ...BAD_KEYS.map((key) => ({ key, seed: 1 }))]);
+
+// colorProgression: each of those results in each of the four colours, with beats and one more field that stay; then what its map and spread do with odd bars
+const barsOf = (chords, seed) => chords.map((chord, i) => ({ chord, beats: [4, 2, 6, 3][(seed + i) % 4], ...(seed % 7 === 0 && { note: 'x' }) }));
+const GOOD_BARS = [bar('A', 'min'), bar('E', 'maj7'), { chord: { root: 'D', quality: 'min', extra: 1 }, beats: 2, label: 'x' }];
+add('colorProgression', attempt(({ bars, color, key }) => colorProgression(bars, color, key)), [
+  ...ALL_KEYS.flatMap((key) => SEEDS.flatMap((seed) => { const bars = barsOf(progressionFor(key, seed), seed); return CHORD_COLORS.map((color) => ({ bars, color, key })); })),
+  ...[null, 0, 'x', true, {}, { 0: bar('A', 'min'), length: 1 }].map((bars) => ({ bars, color: 'triads', key: A_MINOR })), { color: 'triads', key: A_MINOR },
+  ...[[], [null], [0], [5], [true], ['ab'], [[1]], [[]], [{}], [{ chord: null }], [{ beats: 4 }], [{ chord: 5 }], [{ chord: 'Am' }], [{ chord: [] }], [bar('A', 'min'), null], [null, bar('A', 'min')],
+    [{ chord: { root: 'A', quality: 'min' }, beats: 4, chord2: 1 }], GOOD_BARS].flatMap((bars) => ['sevenths', 'power'].map((color) => ({ bars, color, key: A_MINOR }))),
+  ...['nope', '', 'toString', null, 5].map((color) => ({ bars: GOOD_BARS, color, key: A_MINOR })),
+  ...BAD_KEYS.map((key) => ({ bars: GOOD_BARS, color: 'extended', key })), { bars: GOOD_BARS, color: 'extended' }]);
+
+// colorChord alone: every quality of the register, in every colour, in a key of each mode (and spellings), on the roots of the key (the dominant too),
+// on roots that are no step or are the same step spelled the other way (C# and Db), and on one that is no note; then the guards
+const COLOR_KEYS = [A_MINOR, { root: 'C', mode: 'major' }, { root: 'D', mode: 'dorian' }, { root: 'E', mode: 'phrygian' }, { root: 'F', mode: 'lydian' }, { root: 'G', mode: 'mixolydian' },
+  { root: 'Bb', mode: 'major' }, { root: 'F#', mode: 'minor' }, { root: 'Eb', mode: 'dorian' }];
+const colorCases = COLOR_KEYS.flatMap((key) => [...new Set([...allowedChords(key).map((c) => c.root), 'C#', 'Gb', 'H'])]
+  .flatMap((root) => Object.keys(CHORDS).flatMap((quality) => CHORD_COLORS.map((color) => ({ chord: { root, quality }, color, key })))));
+const CHORD_GUARDS = [null, 0, 5, 'x', 'Am', [], [1], {}, { root: 'E' }, { quality: 'maj' }, { root: 'E', quality: 'nope' }, { root: 'E', quality: 'toString' }, { root: 'E', quality: '__proto__' },
+  { root: 'E', quality: 'constructor' }, { root: 'E', quality: 5 }, { root: 'E', quality: null }, { root: 'E', quality: ['maj'] }, { root: 'E', quality: ['dom7'] }, { root: 'E', quality: {} }, { root: 'E', quality: true },
+  { root: 'H', quality: 'maj' }, { root: 'e', quality: 'maj' }, { root: 5, quality: 'maj' }, { root: null, quality: 'maj' }, { root: ['E'], quality: 'maj' }, { root: '', quality: 'maj' }, { root: 'Ex', quality: 'maj' },
+  { root: 'E', quality: 'maj', extra: 1, voicing: [1, 2] }, { root: 'E', quality: 'dom7', extra: 1 }, { root: 'F#', quality: 'power', extra: 1 }, { root: 'B', quality: 'dim', beats: 4 }];
+add('colorChord', attempt(({ chord, color, key }) => colorChord(chord, color, key)), [
+  ...colorCases,
+  ...CHORD_GUARDS.flatMap((chord) => ['triads', 'sevenths', 'extended', 'power'].flatMap((color) => [A_MINOR, { root: 'C', mode: 'major' }].map((key) => ({ chord, color, key })))),
+  ...['nope', '', 'toString', '__proto__', 'constructor', 'hasOwnProperty', 'TRIADS', 5, null, true, [], ['sevenths'], ['nope'], {}].map((color) => ({ chord: { root: 'E', quality: 'maj' }, color, key: A_MINOR })),
+  { chord: { root: 'E', quality: 'maj' }, key: A_MINOR },
+  ...BAD_KEYS.flatMap((key) => [{ chord: { root: 'E', quality: 'maj' }, color: 'sevenths', key }, { chord: { root: 'A', quality: 'min' }, color: 'power', key }]),
+  { chord: { root: 'E', quality: 'maj' }, color: 'sevenths' }, { color: 'sevenths', key: A_MINOR },
+  ...['minor', 'major', 'dorian'].flatMap((mode) => [{ chord: { root: 'E', quality: 'maj' }, color: 'extended', key: { root: 'A', mode: [mode] } }, { chord: { root: 'E', quality: 'maj' }, color: 'extended', key: { root: 'A', mode } }])]);
+
+// styleChordColor: every style and one that is none, seeds 1 to 50, without and with variety; seeds the 32-bit conversion touches
+const STYLE_IDS = [...STYLE_PRESETS.map((p) => p.id), 'nope', 'toString', null];
+add('styleChordColor', attempt(({ style, seed, variety }) => styleChordColor(STYLE_PRESETS.find((p) => p.id === style), seed, variety)), [
+  ...STYLE_IDS.flatMap((style) => SEEDS.flatMap((seed) => [false, true].map((variety) => ({ style, seed, variety })))),
+  ...['blues', 'hardrock', 'funk'].flatMap((style) => [0, -1, 1.5, 2 ** 32 + 7, 2 ** 32 - 1].map((seed) => ({ style, seed, variety: true }))), { style: 'blues', variety: true }, { style: 'blues', seed: 3 }]);
+
+// chordTimeline: a spread of the parity tracks (each of the ten combinations of meter and form: the first, the middle and the last; the shortest and the
+// longest, the slowest and the fastest tempo, the bars of unequal length, every 40th), the guards of checkedTrack by hand and the mutation corpus on two of them
+const pickIndex = new Set();
+const combos = {};
+parityTracks.forEach((t, i) => { (combos[`${t.meter}|${!!t.form}`] ??= []).push(i); });
+for (const list of Object.values(combos)) [list[0], list[Math.floor(list.length / 2)], list.at(-1)].forEach((i) => pickIndex.add(i));
+const argBy = (f, sign) => parityTracks.reduce((best, t, i) => (sign * f(t) > sign * f(parityTracks[best]) ? i : best), 0);
+[...[1, -1].flatMap((s) => [argBy((t) => t.length, s), argBy((t) => t.bpm, s)]), ...parityTracks.map((t, i) => i).filter((i) => parityTracks[i].bars.some((b) => b.beats !== parityTracks[i].bars[0].beats)).slice(0, 4),
+  ...parityTracks.map((t, i) => i).filter((i) => parityTracks[i].length === 512), ...parityTracks.map((t, i) => i).filter((i) => i % 40 === 0)].forEach((i) => pickIndex.add(i));
+const TL = { key: A_MINOR, bpm: 100, length: 8, bars: [bar('A', 'min'), bar('D', 'min7'), bar('E', 'dom7')] };
+const TL_FORM = { sections: [{ type: 'intro', bars: 2 }, { type: 'verse', bars: 6 }, { type: 'chorus', bars: 4 }] };
+const tlWith = (fields) => ({ ...TL, ...fields });
+const timelineHand = [
+  null, 0, 'x', true, [], [1, 2, 3], {}, TL, { ...TL, extra: 1, seed: null, tags: null }, tlWith({ length: 1 }), tlWith({ length: 3 }), tlWith({ length: 512 }), tlWith({ length: 513 }), tlWith({ length: 0 }), tlWith({ length: 1.5 }), tlWith({ length: null }),
+  tlWith({ length: undefined }), ...[19.99, 20, 20.5, 399.9, 400, 400.01, '100', null, 0].map((bpm) => tlWith({ bpm })),
+  ...[[3, 4], [6, 8], [12, 8], [5, 4], [4, 4], [2, 4], [7, 8], null, 'x'].map((meter) => tlWith({ meter })),
+  tlWith({ bars: [bar('A', 'min', 1), bar('D', 'min7', 16), bar('E', 'dom7', 3)] }), tlWith({ bars: [bar('A', 'min', 0)] }), tlWith({ bars: [bar('A', 'min', 17)] }), tlWith({ bars: [bar('A', 'min', 1.5)] }),
+  tlWith({ bars: [] }), tlWith({ bars: [bar('A', 'nope')] }), tlWith({ bars: [bar('F#', 'maj')] }), tlWith({ bars: [bar('H', 'min')] }), tlWith({ bars: [null] }), tlWith({ bars: [bar('A', 'min')], length: 5 }),
+  tlWith({ bars: [{ chord: { root: 'A', quality: 'min', extra: 1, voicing: [3, 4] }, beats: 4 }, bar('E', 'maj')] }), tlWith({ key: { root: 'H', mode: 'minor' } }), tlWith({ key: undefined }),
+  tlWith({ form: TL_FORM }), tlWith({ form: TL_FORM, length: 99 }), tlWith({ form: { sections: [{ type: 'verse', bars: 8 }] } }), tlWith({ form: { sections: [{ type: 'verse', bars: 1 }, { type: 'chorus', bars: 1 }] }, bars: [bar('A', 'min'), bar('D', 'min7'), bar('E', 'dom7')] }),
+  tlWith({ form: { sections: [{ type: 'verse', bars: 2 }, { type: 'chorus', bars: 7 }] }, bars: [bar('A', 'min', 2), bar('D', 'min7', 6), bar('E', 'dom7', 3)], meter: [6, 8], bpm: 63.7 }),
+  tlWith({ form: null }), tlWith({ form: {} }), tlWith({ form: { sections: [] } }), tlWith({ form: { sections: [{ type: 'nope', bars: 4 }] } }), tlWith({ form: 'x' }), tlWith({ form: [] }),
+  { ...TL, voices: { drums: 'sample' }, tags: { drums: ['driving'] }, jobs: { lead: 'riff' }, layers: [true, false], groove: 'nope' }, { ...TL, groove: 'waltz', meter: [4, 4] }, { ...TL, complexity: 2 },
+  { ...TL, bars: [bar('A', 'min', 7), bar('E', 'dom7', 9), bar('D', 'min7', 11)], bpm: 133.3, length: 11 },
+];
+add('chordTimeline', attempt(chordTimeline), [...[...pickIndex].sort((a, b) => a - b).map((i) => parityTracks[i]), ...timelineHand, ...mutations(plain), ...mutations(formed)]);
+
+// fretboardNotes: A minor, all 17 scales with every chord of the key as the current one (no next chord), as the next one (no current chord) and
+// as the current one with the following chord next, in the standard tuning and in drop D, with the standard 22 frets and with 12; four more keys
+// (the spellings, a mode each) with the following chord next; every quality of the register as the current chord; then the guards
+const CHORDS_A = allowedChords(A_MINOR);
+const DROP_D = [62, 59, 55, 50, 45, 38], BASS = [43, 38, 33, 28];
+const SCALE_IDS = Object.keys(SCALES);
+const noteCases = (key, setups, scales = SCALE_IDS) => scales.flatMap((scale) => allowedChords(key).flatMap((chord, i, list) => setups.flatMap((setup) => [
+  { key, scale, current: chord, ...setup }, { key, scale, next: chord, ...setup }, { key, scale, current: chord, next: list[(i + 1) % list.length], ...setup }])));
+const fretCases = [
+  // all scales on the standard board (every scale's pitch classes, every chord as current and next: the flags scale, current, next, root); the tuning and the fret count change
+  // only the pitch offset and the loop bound, no branch, so the drop D tuning and 12 frets run on two scales (a pentatonic one and the widest, altered)
+  ...noteCases(A_MINOR, [{}]),
+  ...noteCases(A_MINOR, [{ frets: 12 }, { tuning: DROP_D }, { tuning: DROP_D, frets: 12 }], ['minorPentatonic', 'altered']),
+  ...[{ root: 'C', mode: 'major' }, { root: 'Bb', mode: 'dorian' }, { root: 'F#', mode: 'lydian' }, { root: 'Eb', mode: 'mixolydian' }, { root: 'E', mode: 'phrygian' }]
+    .flatMap((key) => SCALE_IDS.flatMap((scale) => allowedChords(key).map((chord, i, list) => ({ key, scale, current: chord, next: list[(i + 1) % list.length] })))),
+  ...['A', 'C#', 'F'].flatMap((root) => Object.keys(CHORDS).flatMap((quality) => [{ key: A_MINOR, scale: 'minorPentatonic', current: { root, quality }, next: { root: 'E', quality } }])),
+];
+const NOTE_BASE = { key: A_MINOR, scale: 'minor', current: { root: 'A', quality: 'min' }, next: { root: 'D', quality: 'min' } };
+const fretGuards = [
+  null, 5, 'x', [], ...BAD_KEYS.map((key) => ({ ...NOTE_BASE, key })), { ...NOTE_BASE, key: undefined }, { scale: 'minor' }, {},
+  ...['nope', '', 'toString', '__proto__', 'constructor', 5, null, true, ['major'], ['nope'], {}, 'Minor'].map((scale) => ({ ...NOTE_BASE, scale })), { ...NOTE_BASE, scale: undefined },
+  ...[null, 0, 5, 'x', 'Am', [], {}, { root: 'A' }, { quality: 'min' }, { root: 'H', quality: 'min' }, { root: 'A', quality: 'nope' }, { root: 'A', quality: 'toString' }, { root: 5, quality: 'min' }, { root: ['A'], quality: 'min' }, { root: 'A', quality: ['min'] },
+    { root: 'Gb', quality: 'min' }, { root: 'C#', quality: 'maj' }, { root: 'A', quality: 'min', extra: 1 }].flatMap((chord) => [{ ...NOTE_BASE, current: chord }, { ...NOTE_BASE, next: chord }]),
+  { key: A_MINOR, scale: 'minor' }, { key: A_MINOR, scale: 'minor', current: null, next: null },
+  ...[[], [40], [64, 59, 55, 50, 45, 40, 35], BASS, [100, -5, 12, 0], [64, 64], undefined, null, 'abc', 5, {}, true].flatMap((tuning) => [{ ...NOTE_BASE, tuning }, { ...NOTE_BASE, tuning, frets: 5 }]),
+  ...[0, 1, 5, 11, 12, 13, 24, 36, -1, 2.5, 0.5, null, undefined].map((frets) => ({ ...NOTE_BASE, frets })),
+];
+add('fretboardNotes', attempt(fretboardNotes), [...fretCases, ...fretGuards]);
+
+// nextDistinctChord and progressionRoles: bars that change at the start, in the middle, at the last bar, never (one chord, the same chord twice, the same
+// chord under two spellings), by the quality only; with a bar that is no chord or has an unusable root; each with lengths below, at and above the bars,
+// every barIndex, no form, a form (the parts start again), a form that is not valid and what is no form
+const BARSETS = [
+  [bar('A', 'min'), bar('D', 'min'), bar('E', 'maj'), bar('A', 'min')], [bar('A', 'min')], [bar('A', 'min'), bar('A', 'min')], [bar('A', 'min'), bar('A', 'min'), bar('A', 'min'), bar('E', 'maj')],
+  [bar('E', 'maj'), bar('A', 'min'), bar('A', 'min'), bar('A', 'min')], [bar('C#', 'min'), bar('Db', 'min'), bar('F', 'maj')], [bar('A', 'min'), bar('A', 'min7'), bar('A', 'min')],
+  [bar('A', 'min'), bar('H', 'min')], [bar('A', 'min'), { beats: 4 }], [{ beats: 4 }], [bar('A', 'nope'), bar('A', 'nope'), bar('A', 'toString')], [bar('A', 'min'), bar('F#', 'dim'), bar('B', 'maj'), bar('C', 'maj'), bar('G', 'maj')],
+  [bar('A', 'min'), null, bar('E', 'maj')], [bar('A', 'min', 2), bar('D', 'min', 6), bar('E', 'maj', 3)],
+  // a quality that is not there (the same, undefined === undefined) and one that is an object (two of them are two objects, a bar met again is the same one)
+  [{ chord: { root: 'A' }, beats: 4 }, { chord: { root: 'A' }, beats: 4 }, bar('A', 'min')], [{ chord: { root: 'A', quality: {} }, beats: 4 }, { chord: { root: 'A', quality: {} }, beats: 4 }],
+  [{ chord: { root: 'A', quality: null }, beats: 4 }, { chord: { root: 'A', quality: null }, beats: 4 }, { chord: { root: 'A', quality: 1 }, beats: 4 }, { chord: { root: 'A', quality: 1.0 }, beats: 4 }],
+];
+const FORMS = [undefined, null, { sections: [{ type: 'verse', bars: 3 }, { type: 'chorus', bars: 5 }] }, { sections: [{ type: 'verse', bars: 8 }] }, { sections: [{ type: 'verse', bars: 2 }, { type: 'bridge', bars: 2 }, { type: 'chorus', bars: 7 }] },
+  { sections: [] }, { sections: [{ type: 'nope', bars: 3 }] }, 'x', []];
+// (the full product of the usual lengths, indexes and the forms that are valid; then the odd lengths and indexes with every kind of form)
+const LENGTHS = [1, 2, 3, 4, 5, 8, 9, 16], ODD_LENGTHS = [0, 1.5, -1, '4', null, undefined];
+const INDEXES = [null, 0, 1, 2, 3, 4, 7, 8, 15, 100], ODD_INDEXES = [undefined, -1, 1.5, '1', 1e9];
+const product = (...lists) => lists.reduce((rows, list) => rows.flatMap((row) => list.map((v) => [...row, v])), [[]]);
+add('nextDistinctChord', attempt(({ bars, length, barIndex, form }) => nextDistinctChord(bars, length, barIndex, form)), [
+  ...product(BARSETS, LENGTHS, INDEXES, [undefined, FORMS[2], FORMS[3]]).map(([bars, length, barIndex, form]) => ({ bars, length, barIndex, form })),
+  ...product(BARSETS, ODD_LENGTHS, [1], FORMS).map(([bars, length, barIndex, form]) => ({ bars, length, barIndex, form })),
+  ...product(BARSETS, [4], ODD_INDEXES, FORMS).map(([bars, length, barIndex, form]) => ({ bars, length, barIndex, form })),
+  ...[null, undefined, {}, 'abc', 5, [], true].map((bars) => ({ bars, length: 4, barIndex: 1 })), { length: 4, barIndex: 1 }]);
+const PLAYED = [undefined, null, 0, 1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 100, -1, -3, 1.5];
+add('progressionRoles', attempt(({ track, bar }) => progressionRoles(track, bar)), [
+  ...product(BARSETS, [undefined, 1, 3, 4, 5, 8, 16], FORMS.slice(0, 5), PLAYED).map(([bars, length, form, at]) => ({ track: { bars, length, form }, bar: at })),
+  ...product(BARSETS.slice(0, 6), [0, 2, 9, null], [undefined, FORMS[2], FORMS[6]], [null, 0, 3, 8]).map(([bars, length, form, at]) => ({ track: { bars, length, form }, bar: at })),
+  ...[null, undefined, 0, 'x', {}, { length: 4 }, { bars: null }, { bars: {} }, { bars: 'abc', length: 4 }, { bars: [], length: 4 }, { bars: [], length: 1 }, { bars: [], length: 0 }].map((track) => ({ track, bar: 0 })), { bar: 1 }]);
+
+// romanDegree and degreeLabel: every quality on every root in keys of every mode and spelling; the guards: chords outside the key (that is the same here), roots that are no note,
+// the names every object has (CHORDS['toString'] is not undefined: the web throws), no chord, no key. degreeLabel: 12 keys, pitch classes from -13 to 25
+const ROMAN_KEYS = [A_MINOR, { root: 'C', mode: 'major' }, { root: 'D', mode: 'dorian' }, { root: 'F#', mode: 'phrygian' }, { root: 'Bb', mode: 'lydian' }, { root: 'Eb', mode: 'mixolydian' }];
+add('romanDegree', attempt(({ key, chord }) => romanDegree(key, chord)), [
+  ...ROMAN_KEYS.flatMap((key) => ROOTS.concat(['C#', 'D#', 'G#', 'A#', 'Cb', 'E#']).flatMap((root) => Object.keys(CHORDS).map((quality) => ({ key, chord: { root, quality } })))),
+  ...[...CHORD_GUARDS, { root: 'A', quality: 'hasOwnProperty' }, { root: 'A', quality: 'valueOf' }, { root: 'A', quality: 'isPrototypeOf' }, { root: 'A', quality: '__defineGetter__' }, { root: 'A', quality: 'propertyIsEnumerable' }, { root: 'A', quality: 'toLocaleString' },
+    { root: 'A', quality: ['min7'] }, { root: 'A', quality: ['toString'] }, { root: 'A', quality: 'min7', extra: 1 }].map((chord) => ({ key: A_MINOR, chord })),
+  ...BAD_KEYS.map((key) => ({ key, chord: { root: 'A', quality: 'min' } })), { chord: { root: 'A', quality: 'min' } }, { key: A_MINOR }, {}]);
+add('degreeLabel', attempt(({ key, pc }) => degreeLabel(key, pc)), [
+  ...ROOTS.concat(['C#', 'F#', 'A#', 'E#', 'Cb']).flatMap((root) => Array.from({ length: 39 }, (_, i) => ({ key: { root, mode: 'major' }, pc: i - 13 }))),
+  ...[0, 5, 11, 12, -12, 24, 1e9, -1e9].map((pc) => ({ key: { root: 'A', mode: 'nope' }, pc })),
+  ...BAD_KEYS.map((key) => ({ key, pc: 3 })), { pc: 3 }, { key: { root: 'A' }, pc: 3 }]);
+
+// beatsUntilChange: the tracks of the display (bars of unequal length, a form, a change at the first and at the last bar, one chord throughout, a length that is no
+// multiple of the bars), at tempos from 20 to 400; times before 0, at 0, around every bar's start (a hair before and after: the rounding up has a slack of 1e-9),
+// inside the bars, after the end, over several loops; then what throws (no bars, no length)
+const BT = (bars, length, bpm, form) => ({ bars, length, bpm, ...(form && { form }) });
+const FORM_3_5 = { sections: [{ type: 'verse', bars: 3 }, { type: 'chorus', bars: 5 }] };
+const BTRACKS = [
+  BT(BARSETS[0], 4, 100), BT(BARSETS[0], 8, 120.5), BT(BARSETS[0], 6, 20), BT(BARSETS[0], 7, 400), BT(BARSETS[1], 4, 100), BT(BARSETS[1], 1, 100), BT(BARSETS[2], 5, 77), BT(BARSETS[3], 4, 90), BT(BARSETS[3], 9, 90.25),
+  BT(BARSETS[4], 4, 140), BT(BARSETS[4], 3, 140), BT(BARSETS[5], 3, 100), BT(BARSETS[6], 6, 64), BT(BARSETS[11], 5, 133.3), BT(BARSETS[11], 12, 61), BT(BARSETS[13], 4, 100), BT(BARSETS[13], 10, 150), BT(BARSETS[13], 3, 99),
+  BT(BARSETS[0], 8, 100, FORM_3_5), BT(BARSETS[13], 8, 110, FORM_3_5), BT(BARSETS[3], 8, 100, FORM_3_5), BT(BARSETS[1], 8, 100, FORM_3_5), BT(BARSETS[0], 14, 123, FORMS[4]), BT(BARSETS[11], 10, 77, FORMS[3]),
+  BT(BARSETS[0], 8, 100, FORMS[5]), BT(BARSETS[0], 8, 100, FORMS[8]),
+];
+const OFFSETS = [-1e-10, 0, 1e-10, 0.3, 1, 1.5, 2.0000000004, 2.9999999994]; // in beats from a bar's start
+const timesOf = (t) => { // the starts of the bars as the function sums them
+  const dur = (i) => (t.bars[chordIndex(t, i)].beats * 60) / t.bpm;
+  let start = 0;
+  const starts = Array.from({ length: t.length + 1 }, (_, i) => { const s = start; start += i < t.length ? dur(i) : 0; return s; });
+  return { starts, loop: starts.at(-1) };
+};
+const untilCases = BTRACKS.flatMap((track) => {
+  const { starts, loop } = timesOf(track);
+  const secs = [-loop * 0.5, -0.001, -loop, 0, 1e-12, loop, loop * 2.5, 1e6, ...starts.flatMap((s) => OFFSETS.map((o) => s + (o * 60) / track.bpm))];
+  return [...new Set([...secs, ...[-1, 2, 7].flatMap((k) => starts.slice(1, 4).map((s) => s + k * loop))])].map((songSec) => ({ track, songSec }));
+});
+add('beatsUntilChange', attempt(({ track, songSec }) => beatsUntilChange(track, songSec)), [...untilCases,
+  ...[null, undefined, {}, { length: 4, bpm: 100 }, { bars: [], length: 4, bpm: 100 }, { bars: BARSETS[0], length: 0, bpm: 100 }, { bars: BARSETS[0], length: -1, bpm: 100 }, { bars: BARSETS[7], length: 4, bpm: 100 },
+    { bars: BARSETS[8], length: 4, bpm: 100 }, { bars: BARSETS[9], length: 2, bpm: 100 }, { bars: BARSETS[0], bpm: 100 }, { bars: BARSETS[0], length: null, bpm: 100 },
+    ...[0.5, 1, 1.5, 2.5, 4.5, 5].map((length) => ({ bars: BARSETS[0], length, bpm: 100 })), { bars: [], length: 0, bpm: 100 }].flatMap((track) => [0, 3.3, 5].map((songSec) => ({ track, songSec })))]);
 
 mkdirSync(outDir, { recursive: true });
 writeFileSync(join(outDir, 'logic.json'), JSON.stringify(cases));

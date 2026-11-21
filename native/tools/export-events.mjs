@@ -37,16 +37,20 @@ function readKitPan() {
 
 // The data the core embeds (native/core/data): --data writes it there, --data-only <dir> writes it into <dir> and stops
 // (the check in native/core/CMakeLists.txt compares that copy with the checked-in files).
-// A table that src/ keeps to itself ("const NAME = [deepFreeze(]{...}"): its literal, read out of the text like KIT_PAN and evaluated.
+// A table that src/ keeps to itself ("const NAME = [deepFreeze(]{...}" or "const NAME = [...]"): its literal, read out of the text like
+// KIT_PAN and evaluated.
 function readLiteral(file, name) {
   const text = readFileSync(join(repo, 'src', file), 'utf8');
-  const at = text.indexOf(`const ${name} = `);
-  const open = at < 0 ? -1 : text.indexOf('{', at);
-  if (open < 0) throw new Error(`${name}: no "const ${name} = {...}" found in src/${file}`);
+  const head = `const ${name} = `;
+  const at = text.indexOf(head);
+  const found = at < 0 ? -1 : text.slice(at + head.length).search(/[[{]/);
+  const open = found < 0 ? -1 : at + head.length + found;
+  if (open < 0) throw new Error(`${name}: no "const ${name} = {...}" or "[...]" found in src/${file}`);
+  const [opening, closing] = text[open] === '[' ? ['[', ']'] : ['{', '}'];
   let depth = 0, end = open;
-  for (; end < text.length; end++) { // the literals hold no braces inside strings
-    if (text[end] === '{') depth++;
-    else if (text[end] === '}' && --depth === 0) break;
+  for (; end < text.length; end++) { // the literals hold no brackets inside strings
+    if (text[end] === opening) depth++;
+    else if (text[end] === closing && --depth === 0) break;
   }
   return new Function(`return (${text.slice(open, end + 1)});`)();
 }
@@ -73,15 +77,24 @@ if (isMain && (process.argv.includes('--data') || dataOnly >= 0)) {
   const { CHORDS } = await load('core/chords.js');
   const { TAG_CATEGORIES } = await load('core/tags.js');
   const { PART_TYPES, TRANSITIONS, FORM_LIMITS, FEEL_DEFAULTS, DYNAMICS_MAX } = await load('core/form-types.js');
+  const { PROGRESSION_TEMPLATES } = await load('core/progressions.js');
+  const { SCALES } = await load('core/music.js');
+  const { STANDARD_TUNING, FRETS } = await load('core/fretboard.js');
   const music = {
     voices: Object.fromEntries(VOICE_LAYERS.map((layer) => [layer, Object.fromEntries(Object.entries(VOICES[layer]).map(([id, v]) => [id, v.variants]))])),
     movedVoices: readLiteral('core/voices.js', 'MOVED'), // "<id>/<variant>" of a removed voice -> its successor
     layers: Object.fromEntries(LAYER_IDS.map((id) => [id, { defaultOn: LAYERS[id].defaultOn, jobs: LAYERS[id].jobs ?? [] }])),
-    chords: Object.fromEntries(Object.entries(CHORDS).map(([id, c]) => [id, { symbol: c.symbol, on: c.on }])),
-    modes: Object.fromEntries(Object.entries(readLiteral('core/music.js', 'MODES')).map(([id, m]) => [id, { steps: m.steps, qualities: m.qualities, parentMajor: m.parentMajor }])),
+    chords: Object.fromEntries(Object.entries(CHORDS).map(([id, c]) => [id, { symbol: c.symbol, on: c.on, intervals: c.intervals }])),
+    modes: Object.fromEntries(Object.entries(readLiteral('core/music.js', 'MODES')).map(([id, m]) => [id, { steps: m.steps, qualities: m.qualities, parentMajor: m.parentMajor, dominant: m.dominant }])),
     meters: Object.keys(METERS),
     tags: TAG_CATEGORIES,
     form: { partTypes: PART_TYPES, transitions: TRANSITIONS, limits: FORM_LIMITS, feelDefaults: FEEL_DEFAULTS, dynamicsMax: DYNAMICS_MAX },
+    // what the harmony functions read (progressions.js, harmony.js, tags.js, fretboard.js, music.js SCALES)
+    progressions: PROGRESSION_TEMPLATES,
+    chordColors: { table: readLiteral('core/harmony.js', 'TABLE'), dominant: readLiteral('core/harmony.js', 'DOMINANT') },
+    styleColors: Object.fromEntries(STYLE_PRESETS.map((p) => [p.id, { ...(p.chordColor !== undefined && { chordColor: p.chordColor }), ...(p.chordColorAlt !== undefined && { chordColorAlt: p.chordColorAlt }) }])),
+    scales: SCALES,
+    fretboard: { standardTuning: STANDARD_TUNING, frets: FRETS, degrees: readLiteral('core/fretboard.js', 'DEGREES'), roman: readLiteral('core/fretboard.js', 'ROMAN') },
   };
   const dir = dataOnly >= 0 ? resolve(process.argv[dataOnly + 1]) : join(repo, 'native/core/data');
   mkdirSync(dir, { recursive: true });

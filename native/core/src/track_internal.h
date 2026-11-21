@@ -35,4 +35,16 @@ Json chordOptions(const Json& key);
 // Throws std::invalid_argument for a quality the register does not have.
 Json chordName(const Json& chord);
 
+// What harmony.cpp takes from the helpers of track.cpp; each answers as the JavaScript's does.
+int noteToPcOf(const Json& name);                    // music.js noteToPc (generator_internal.h has a lenient one of its own); throws std::invalid_argument for what is no note name
+bool isValidKeyValue(const Json& key);               // music.js isValidKey
+const char* const* spelledNames(const Json& key);    // music.js spelling: the twelve names of the key's spelling; throws like diatonicChords
+bool isValidFormValue(const Json& form);             // form.js isValidForm
+double formLengthOf(const Json& form);               // form.js formLength
+std::string jsStringOf(const Json* v);               // String(v); a null pointer is undefined
+bool isObjectPrototypeNameOf(const std::string& name); // 'toString', 'constructor' ...: a name every object has, which `CHORDS[name]` finds although the register has no such entry
+Json spreadValue(const Json& source);                // {...source}
+Json normalizedTrack(const Json& track);             // track.js normalizeTrack
+Json trackErrors(const Json& track);                 // track.js validateTrack: the list of errors
+
 } // namespace btg::detail

@@ -140,24 +140,44 @@
       "symbol": "",
       "on": [
         "maj"
+      ],
+      "intervals": [
+        0,
+        4,
+        7
       ]
     },
     "min": {
       "symbol": "m",
       "on": [
         "min"
+      ],
+      "intervals": [
+        0,
+        3,
+        7
       ]
     },
     "dim": {
       "symbol": "dim",
       "on": [
         "dim"
+      ],
+      "intervals": [
+        0,
+        3,
+        6
       ]
     },
     "aug": {
       "symbol": "aug",
       "on": [
         "maj"
+      ],
+      "intervals": [
+        0,
+        4,
+        8
       ]
     },
     "sus2": {
@@ -165,6 +185,11 @@
       "on": [
         "maj",
         "min"
+      ],
+      "intervals": [
+        0,
+        2,
+        7
       ]
     },
     "sus4": {
@@ -172,6 +197,11 @@
       "on": [
         "maj",
         "min"
+      ],
+      "intervals": [
+        0,
+        5,
+        7
       ]
     },
     "power": {
@@ -180,66 +210,132 @@
         "maj",
         "min",
         "dim"
+      ],
+      "intervals": [
+        0,
+        7
       ]
     },
     "dom7": {
       "symbol": "7",
       "on": [
         "maj"
+      ],
+      "intervals": [
+        0,
+        4,
+        7,
+        10
       ]
     },
     "maj7": {
       "symbol": "maj7",
       "on": [
         "maj"
+      ],
+      "intervals": [
+        0,
+        4,
+        7,
+        11
       ]
     },
     "min7": {
       "symbol": "m7",
       "on": [
         "min"
+      ],
+      "intervals": [
+        0,
+        3,
+        7,
+        10
       ]
     },
     "m7b5": {
       "symbol": "m7b5",
       "on": [
         "dim"
+      ],
+      "intervals": [
+        0,
+        3,
+        6,
+        10
       ]
     },
     "dim7": {
       "symbol": "dim7",
       "on": [
         "dim"
+      ],
+      "intervals": [
+        0,
+        3,
+        6,
+        9
       ]
     },
     "maj6": {
       "symbol": "6",
       "on": [
         "maj"
+      ],
+      "intervals": [
+        0,
+        4,
+        7,
+        9
       ]
     },
     "min6": {
       "symbol": "m6",
       "on": [
         "min"
+      ],
+      "intervals": [
+        0,
+        3,
+        7,
+        9
       ]
     },
     "add9": {
       "symbol": "add9",
       "on": [
         "maj"
+      ],
+      "intervals": [
+        0,
+        4,
+        7,
+        14
       ]
     },
     "dom9": {
       "symbol": "9",
       "on": [
         "maj"
+      ],
+      "intervals": [
+        0,
+        4,
+        7,
+        10,
+        14
       ]
     },
     "min9": {
       "symbol": "m9",
       "on": [
         "min"
+      ],
+      "intervals": [
+        0,
+        3,
+        7,
+        10,
+        14
       ]
     }
   },
@@ -263,7 +359,8 @@
         "maj",
         "maj"
       ],
-      "parentMajor": 3
+      "parentMajor": 3,
+      "dominant": 4
     },
     "major": {
       "steps": [
@@ -284,7 +381,8 @@
         "min",
         "dim"
       ],
-      "parentMajor": 0
+      "parentMajor": 0,
+      "dominant": 4
     },
     "dorian": {
       "steps": [
@@ -305,7 +403,8 @@
         "dim",
         "maj"
       ],
-      "parentMajor": -2
+      "parentMajor": -2,
+      "dominant": 3
     },
     "phrygian": {
       "steps": [
@@ -326,7 +425,8 @@
         "maj",
         "min"
       ],
-      "parentMajor": -4
+      "parentMajor": -4,
+      "dominant": 2
     },
     "lydian": {
       "steps": [
@@ -347,7 +447,8 @@
         "min",
         "min"
       ],
-      "parentMajor": -5
+      "parentMajor": -5,
+      "dominant": 1
     },
     "mixolydian": {
       "steps": [
@@ -368,7 +469,8 @@
         "min",
         "maj"
       ],
-      "parentMajor": 5
+      "parentMajor": 5,
+      "dominant": 0
     }
   },
   "meters": [
@@ -507,5 +609,471 @@
       "randomness": 0.5
     },
     "dynamicsMax": 1.3
+  },
+  "progressions": {
+    "minor": [
+      {
+        "name": "i-i-iv-V",
+        "degrees": [
+          0,
+          0,
+          3,
+          7
+        ]
+      },
+      {
+        "name": "i-VI-III-VII",
+        "degrees": [
+          0,
+          5,
+          2,
+          6
+        ]
+      },
+      {
+        "name": "i-VII-VI-VII",
+        "degrees": [
+          0,
+          6,
+          5,
+          6
+        ]
+      },
+      {
+        "name": "i-iv-i-V",
+        "degrees": [
+          0,
+          3,
+          0,
+          7
+        ]
+      }
+    ],
+    "major": [
+      {
+        "name": "I-V-vi-IV",
+        "degrees": [
+          0,
+          4,
+          5,
+          3
+        ]
+      },
+      {
+        "name": "I-IV-V-IV",
+        "degrees": [
+          0,
+          3,
+          4,
+          3
+        ]
+      },
+      {
+        "name": "I-vi-IV-V",
+        "degrees": [
+          0,
+          5,
+          3,
+          4
+        ]
+      },
+      {
+        "name": "I-I-IV-V",
+        "degrees": [
+          0,
+          0,
+          3,
+          4
+        ]
+      }
+    ],
+    "dorian": [
+      {
+        "name": "i-IV-i-VII",
+        "degrees": [
+          0,
+          3,
+          0,
+          6
+        ]
+      },
+      {
+        "name": "i-IV-VII-IV",
+        "degrees": [
+          0,
+          3,
+          6,
+          3
+        ]
+      },
+      {
+        "name": "i-VII-IV-i",
+        "degrees": [
+          0,
+          6,
+          3,
+          0
+        ]
+      },
+      {
+        "name": "i-i-IV-i",
+        "degrees": [
+          0,
+          0,
+          3,
+          0
+        ]
+      }
+    ],
+    "phrygian": [
+      {
+        "name": "i-bII-i-bII",
+        "degrees": [
+          0,
+          1,
+          0,
+          1
+        ]
+      },
+      {
+        "name": "i-bII-bIII-bII",
+        "degrees": [
+          0,
+          1,
+          2,
+          1
+        ]
+      },
+      {
+        "name": "i-bvii-bII-i",
+        "degrees": [
+          0,
+          6,
+          1,
+          0
+        ]
+      },
+      {
+        "name": "i-i-bII-i",
+        "degrees": [
+          0,
+          0,
+          1,
+          0
+        ]
+      }
+    ],
+    "lydian": [
+      {
+        "name": "I-II-I-II",
+        "degrees": [
+          0,
+          1,
+          0,
+          1
+        ]
+      },
+      {
+        "name": "I-II-vii-I",
+        "degrees": [
+          0,
+          1,
+          6,
+          0
+        ]
+      },
+      {
+        "name": "I-II-I-vii",
+        "degrees": [
+          0,
+          1,
+          0,
+          6
+        ]
+      },
+      {
+        "name": "I-I-II-I",
+        "degrees": [
+          0,
+          0,
+          1,
+          0
+        ]
+      }
+    ],
+    "mixolydian": [
+      {
+        "name": "I-bVII-IV-I",
+        "degrees": [
+          0,
+          6,
+          3,
+          0
+        ]
+      },
+      {
+        "name": "I-bVII-I-bVII",
+        "degrees": [
+          0,
+          6,
+          0,
+          6
+        ]
+      },
+      {
+        "name": "I-IV-bVII-IV",
+        "degrees": [
+          0,
+          3,
+          6,
+          3
+        ]
+      },
+      {
+        "name": "I-I-bVII-IV",
+        "degrees": [
+          0,
+          0,
+          6,
+          3
+        ]
+      }
+    ]
+  },
+  "chordColors": {
+    "table": {
+      "triads": {
+        "maj": "maj",
+        "min": "min",
+        "dim": "dim"
+      },
+      "sevenths": {
+        "maj": "maj7",
+        "min": "min7",
+        "dim": "m7b5"
+      },
+      "extended": {
+        "maj": "add9",
+        "min": "min9",
+        "dim": "dim7"
+      },
+      "power": {
+        "maj": "power",
+        "min": "power",
+        "dim": "power"
+      }
+    },
+    "dominant": {
+      "sevenths": "dom7",
+      "extended": "dom9"
+    }
+  },
+  "styleColors": {
+    "funk": {},
+    "psych": {},
+    "dreamy": {},
+    "blues": {
+      "chordColor": "sevenths",
+      "chordColorAlt": "extended"
+    },
+    "rock": {},
+    "hardrock": {
+      "chordColor": "power",
+      "chordColorAlt": "triads"
+    },
+    "reggae": {},
+    "country": {},
+    "poppunk": {
+      "chordColor": "power",
+      "chordColorAlt": "triads"
+    }
+  },
+  "scales": {
+    "minorPentatonic": [
+      0,
+      3,
+      5,
+      7,
+      10
+    ],
+    "majorPentatonic": [
+      0,
+      2,
+      4,
+      7,
+      9
+    ],
+    "blues": [
+      0,
+      3,
+      5,
+      6,
+      7,
+      10
+    ],
+    "majorBlues": [
+      0,
+      2,
+      3,
+      4,
+      7,
+      9
+    ],
+    "major": [
+      0,
+      2,
+      4,
+      5,
+      7,
+      9,
+      11
+    ],
+    "minor": [
+      0,
+      2,
+      3,
+      5,
+      7,
+      8,
+      10
+    ],
+    "harmonicMinor": [
+      0,
+      2,
+      3,
+      5,
+      7,
+      8,
+      11
+    ],
+    "melodicMinor": [
+      0,
+      2,
+      3,
+      5,
+      7,
+      9,
+      11
+    ],
+    "dorian": [
+      0,
+      2,
+      3,
+      5,
+      7,
+      9,
+      10
+    ],
+    "phrygian": [
+      0,
+      1,
+      3,
+      5,
+      7,
+      8,
+      10
+    ],
+    "lydian": [
+      0,
+      2,
+      4,
+      6,
+      7,
+      9,
+      11
+    ],
+    "mixolydian": [
+      0,
+      2,
+      4,
+      5,
+      7,
+      9,
+      10
+    ],
+    "locrian": [
+      0,
+      1,
+      3,
+      5,
+      6,
+      8,
+      10
+    ],
+    "phrygianDominant": [
+      0,
+      1,
+      4,
+      5,
+      7,
+      8,
+      10
+    ],
+    "wholeTone": [
+      0,
+      2,
+      4,
+      6,
+      8,
+      10
+    ],
+    "diminished": [
+      0,
+      1,
+      3,
+      4,
+      6,
+      7,
+      9,
+      10
+    ],
+    "altered": [
+      0,
+      1,
+      3,
+      4,
+      6,
+      8,
+      10
+    ]
+  },
+  "fretboard": {
+    "standardTuning": [
+      64,
+      59,
+      55,
+      50,
+      45,
+      40
+    ],
+    "frets": 22,
+    "degrees": [
+      "1",
+      "b2",
+      "2",
+      "b3",
+      "3",
+      "4",
+      "b5",
+      "5",
+      "b6",
+      "6",
+      "b7",
+      "7"
+    ],
+    "roman": [
+      "I",
+      "bII",
+      "II",
+      "bIII",
+      "III",
+      "IV",
+      "bV",
+      "V",
+      "bVI",
+      "VI",
+      "bVII",
+      "VII"
+    ]
   }
 }

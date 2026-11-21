@@ -274,20 +274,34 @@ const Mode* modeOf(Val mode) {
 }
 bool isValidKey(Val key) { return isObject(key) && isNoteName(own(*key, "root")) && isString(own(*key, "mode")) && modeOf(own(*key, "mode")) != nullptr; }
 
+// the names every object inherits (Object.prototype): CHORDS[name] is no entry of the register, and not undefined either
+bool isObjectPrototypeName(const std::string& name) {
+    static const char* const INHERITED[] { "constructor", "__defineGetter__", "__defineSetter__", "hasOwnProperty", "__lookupGetter__", "__lookupSetter__",
+                                           "isPrototypeOf", "propertyIsEnumerable", "toString", "valueOf", "__proto__", "toLocaleString" };
+    return std::find(std::begin(INHERITED), std::end(INHERITED), name) != std::end(INHERITED);
+}
+
 using NamedChord = std::pair<std::string, std::string>; // root, quality
 
-std::vector<NamedChord> diatonicChords(const Json& key) {
+// music.js spelling: the twelve names of the key; a sign on the root counts, else the signature of the parent major key
+const char* const* spelling(const Json& key, int root, const Mode* mode) {
     static const char* const SHARP_NAMES[12] { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
     static const char* const FLAT_NAMES[12] { "C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B" };
     static const int FLAT_MAJOR_PCS[6] { 5, 10, 3, 8, 1, 6 }; // F, Bb, Eb, Ab, Db, Gb
+    const char last = own(key, "root")->get_ref<const std::string&>().back();
+    if (last == '#') return SHARP_NAMES;
+    if (last == 'b') return FLAT_NAMES;
+    if (mode == nullptr) throw std::invalid_argument("Unknown mode"); // MODES[key.mode].parentMajor
+    return std::find(std::begin(FLAT_MAJOR_PCS), std::end(FLAT_MAJOR_PCS), (root + mode->parentMajor + 12) % 12) != std::end(FLAT_MAJOR_PCS) ? FLAT_NAMES : SHARP_NAMES;
+}
+
+std::vector<NamedChord> diatonicChords(const Json& key) {
     const int root = noteToPc(own(key, "root"));
     const Mode* mode = modeOf(own(key, "mode"));
     if (mode == nullptr) throw std::invalid_argument("Unknown mode");
-    // spelling: a sign on the root counts, else the signature of the parent major key
-    const char last = own(key, "root")->get_ref<const std::string&>().back();
-    const bool flats = last == '#' ? false : last == 'b' ? true : std::find(std::begin(FLAT_MAJOR_PCS), std::end(FLAT_MAJOR_PCS), (root + mode->parentMajor + 12) % 12) != std::end(FLAT_MAJOR_PCS);
+    const char* const* names = spelling(key, root, mode);
     std::vector<NamedChord> chords;
-    for (size_t i = 0; i < mode->steps.size(); ++i) chords.emplace_back((flats ? FLAT_NAMES : SHARP_NAMES)[(root + mode->steps[i]) % 12], mode->qualities[i]);
+    for (size_t i = 0; i < mode->steps.size(); ++i) chords.emplace_back(names[(root + mode->steps[i]) % 12], mode->qualities[i]);
     return chords;
 }
 
@@ -735,11 +749,21 @@ Json chordName(const Json& chord) {
     const std::string quality = jsString(own(chord, "quality")); // CHORDS[quality]: the key is the quality as a text
     for (const ChordSpec& c : music().chords) if (c.id == quality) return jsString(root) + c.symbol;
     // the names every object has (Object.prototype) give no symbol: root + undefined is a text for a text, an array and an object, else NaN (null in JSON)
-    static const char* const INHERITED[] { "constructor", "__defineGetter__", "__defineSetter__", "hasOwnProperty", "__lookupGetter__", "__lookupSetter__",
-                                           "isPrototypeOf", "propertyIsEnumerable", "toString", "valueOf", "__proto__", "toLocaleString" };
-    if (std::find(std::begin(INHERITED), std::end(INHERITED), quality) == std::end(INHERITED)) throw std::invalid_argument("Unknown chord quality");
+    if (!isObjectPrototypeName(quality)) throw std::invalid_argument("Unknown chord quality");
     return isString(root) || isObject(root) ? Json(jsString(root) + "undefined") : Json();
 }
+
+// what harmony.cpp takes from the helpers above
+int noteToPcOf(const Json& name) { return noteToPc(&name); }
+bool isValidKeyValue(const Json& key) { return isValidKey(&key); }
+const char* const* spelledNames(const Json& key) { return spelling(key, noteToPc(own(key, "root")), modeOf(own(key, "mode"))); }
+bool isValidFormValue(const Json& form) { return isValidForm(form); }
+double formLengthOf(const Json& form) { return formLength(&form); }
+std::string jsStringOf(const Json* v) { return jsString(v); }
+bool isObjectPrototypeNameOf(const std::string& name) { return isObjectPrototypeName(name); }
+Json spreadValue(const Json& source) { Json out = Json::object(); spread(out, &source); return out; }
+Json normalizedTrack(const Json& track) { return normalizeTrackValue(track); }
+Json trackErrors(const Json& track) { return validateTrackValue(track); }
 
 } // namespace btg::detail
 

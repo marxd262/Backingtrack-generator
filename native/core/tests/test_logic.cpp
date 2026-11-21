@@ -8,6 +8,7 @@
 // one case close on MSVC (task-24-report.md) differs from the web because one sin returns the other neighbour of a value that lies within
 // 1.2e-20 of the midpoint of two doubles, and with V8's results in place of the C runtime's the core's samples are the web's bit for bit.
 #include "../src/convolver.h"
+#include "../src/harmony.h"
 #include "../src/sound_data.h"
 #include "../src/sound_model.h"
 #include "../src/string_model.h"
@@ -71,6 +72,8 @@ json thrown(const std::function<Json()>& call) {
 }
 // the text of the track functions: their `in` is the track's text, their output a text
 json parsed(const std::string& text) { return json::parse(text, nullptr, false); }
+// Task 26: the argument of a case, null where the case leaves it out (the web's undefined)
+Json argument(const Json& in, const char* name) { const auto found = in.find(name); return found == in.end() ? Json() : *found; }
 
 const std::map<std::string, std::function<json(const json&)>> FUNCTIONS {
     { "completeTimbre", [](const json& in) { return toJson(completeTimbre(in.dump())); } },
@@ -139,6 +142,19 @@ const std::map<std::string, std::function<json(const json&)>> FUNCTIONS {
     { "allowedChords", [](const json& in) { return thrown([&] { return allowedChords(ordered(in)); }); } },
     { "chordOptions", [](const json& in) { return thrown([&] { return chordOptions(ordered(in)); }); } },
     { "chordName", [](const json& in) { return thrown([&] { return chordName(ordered(in)); }); } },
+    // Task 26: harmony. An argument the case leaves out is null; where the web throws the output is { threw: true }.
+    { "progressionFor", [](const json& in) { const Json o = ordered(in); return thrown([&] { return progressionFor(argument(o, "key"), argument(o, "seed")); }); } },
+    { "colorChord", [](const json& in) { const Json o = ordered(in); return thrown([&] { return colorChord(argument(o, "chord"), argument(o, "color"), argument(o, "key")); }); } },
+    { "colorProgression", [](const json& in) { const Json o = ordered(in); return thrown([&] { return colorProgression(argument(o, "bars"), argument(o, "color"), argument(o, "key")); }); } },
+    { "styleChordColor", [](const json& in) { const Json o = ordered(in); return thrown([&] { return Json(styleChordColor(argument(o, "style"), argument(o, "seed"), argument(o, "variety") == true)); }); } },
+    { "chordTimeline", [](const json& in) { return thrown([&] { return chordTimeline(ordered(in)); }); } },
+    { "fretboardNotes", [](const json& in) { return thrown([&] { return fretboardNotes(ordered(in)); }); } },
+    { "nextDistinctChord", [](const json& in) { const Json o = ordered(in);
+        return thrown([&] { return nextDistinctChord(argument(o, "bars"), argument(o, "length"), argument(o, "barIndex"), argument(o, "form")); }); } },
+    { "progressionRoles", [](const json& in) { const Json o = ordered(in); return thrown([&] { return progressionRoles(argument(o, "track"), argument(o, "bar")); }); } },
+    { "romanDegree", [](const json& in) { const Json o = ordered(in); return thrown([&] { return Json(romanDegree(argument(o, "key"), argument(o, "chord"))); }); } },
+    { "beatsUntilChange", [](const json& in) { const Json o = ordered(in); return thrown([&] { return beatsUntilChange(argument(o, "track"), o.at("songSec").get<double>()); }); } },
+    { "degreeLabel", [](const json& in) { const Json o = ordered(in); return thrown([&] { return Json(degreeLabel(argument(o, "key"), o.at("pc").get<double>())); }); } },
 };
 
 } // namespace
@@ -194,6 +210,16 @@ int main(int argc, char** argv) {
         }
     }
     std::printf("depth: %d of 4 checks wrong\n", deepWrong);
+    // Task 26 fix round 1: a seed that is no number throws in the core where the web's `seed >>> 0` takes 5, 1, 5 (the ruling: no coercions that no caller needs).
+    // The two sides differ on purpose, so these are no cases of the file. styleChordColor reads the seed only for a style with an alternative colour, with variety.
+    int seedWrong = 0;
+    for (const Json& seed : { Json("5"), Json(true), Json::array({ 5 }), Json::object(), Json::array() }) {
+        const auto throws = [](const std::function<void()>& call) { try { call(); } catch (const std::invalid_argument&) { return true; } return false; };
+        const Json key = Json::object({ { "root", "A" }, { "mode", "minor" } });
+        if (!throws([&] { progressionFor(key, seed); })) { std::printf("FAIL: progressionFor takes %s as a seed\n", seed.dump().c_str()); ++seedWrong; }
+        if (!throws([&] { styleChordColor("blues", seed, true); })) { std::printf("FAIL: styleChordColor takes %s as a seed\n", seed.dump().c_str()); ++seedWrong; }
+    }
+    std::printf("seed: %d of 10 checks wrong\n", seedWrong);
     int untested = 0; // a function of the table that the file brings no case for was not checked
     for (const auto& entry : FUNCTIONS) if (!seen.count(entry.first)) { std::printf("no case for %s in %s\n", entry.first.c_str(), argv[1]); ++untested; }
     std::printf("logic: functions %zu, cases %zu, identical %lld, close %lld, different %lld\n", FUNCTIONS.size(), cases.size(), identical, close, different);
@@ -201,5 +227,5 @@ int main(int argc, char** argv) {
     // A close is a difference in the last bits (possibly another platform's math library): it fails too. An exception has to be ruled
     // by the owner and named here (function and field, from the line above), not passed.
     if (close) std::printf("FAIL: %lld case(s) are only close, not bit for bit: a difference in the last bits, possibly another platform's math library; ruled exceptions are named in this test\n", close);
-    return different || untested || close || deepWrong ? 1 : 0;
+    return different || untested || close || deepWrong || seedWrong ? 1 : 0;
 }
