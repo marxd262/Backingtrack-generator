@@ -16,8 +16,25 @@
 #include "track_internal.h"
 
 #include <cstdint>
+#include <optional>
 
 namespace btg::detail {
+
+// form.js sectionAt(form, bar): the part the bar lies in, its index and the bar within it; none outside the form, for a bar that is no integer of at least 0, and for a part
+// whose `bars` is no integer of at least 1 on the way. Never throws.
+struct SectionHit { size_t index; double barInSection; };
+std::optional<SectionHit> sectionAt(const Json& form, double bar);
+// form.js chordIndex({ bars, form }, barIndex) for one track: the entry of `bars` for the bar; with a valid form every part starts the progression again. A number that is
+// no index (below 0, or NaN) comes out as the JavaScript's does. The form is checked (isValidForm) and its parts' ends are summed once, when it is made, not for every bar
+// (the session's position asks for hundreds of bars 30 times a second). Never throws.
+class ChordIndex {
+public:
+    ChordIndex(const Json& bars, const Json& form);
+    double operator()(double barIndex) const;
+private:
+    double count_;             // bars.length
+    std::vector<double> ends_; // with a valid form, where each part ends (sectionAt's `start + section.bars`); empty without one
+};
 
 // rng.js createRng: `seed >>> 0`. A number of any value (a fraction, a negative one, beyond 2^32, not finite); null counts as 0. A seed that is a text, a boolean, a list or
 // an object throws std::invalid_argument (the web takes 5, 1, 5 of them): see the shortcut comment in harmony.cpp.

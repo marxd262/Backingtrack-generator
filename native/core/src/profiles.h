@@ -156,7 +156,14 @@ bool isReservedId(const std::string& id);
 // or unusable text gives an empty tree; an old flat list is taken over. Takes an id for each node that has none, a reserved or a repeated one, and one for each profile of an old
 // list. The stored text is read by the reader of track.cpp: limits 1 to 3 above apply (a stored id with invalid UTF-8 bytes is kept as it is); limit 4 applies to the sort of names.
 Json loadTree(Storage& storage, const MakeId& makeId);
+// loadTree on the value of a stored text that was read already (no JSON is null): the tree, or nothing when the value holds none (neither a list, the old flat list, nor an
+// object with a list `items`): the session calls such a text damaged (PROTOKOLL.md section 3a). Unlike loadTree it has no catch-all: what throws inside (no input is known)
+// goes to the caller.
+std::optional<Json> treeOf(const Json& raw, const MakeId& makeId);
 // true if the text was written; false if the storage refused (nothing changes then, in memory and on the disk).
 bool saveTree(Storage& storage, const Json& tree);
+
+// tests only (test_logic.cpp): how often a Session has built the view that profiles() gives (session.cpp); control thread only
+size_t& profilesViewBuilds();
 
 } // namespace btg::detail

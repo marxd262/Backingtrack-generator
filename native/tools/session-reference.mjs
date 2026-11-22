@@ -12,13 +12,14 @@ const load = (file) => import(pathToFileURL(join(src, file)).href);
 // as a browser that never saved. It is state.js's `layoutStorage`, through which the web writes the profiles, the last session and the mixer: at a step whose
 // storage fails it throws as a full or locked browser storage does, and every setItem is logged as the core's btg::Storage write is (the name the core uses for
 // the key, the text, whether it took). navigator and crypto are node's own.
-const NAMES = { 'backingtrack.profiles': 'profiles.json', 'backingtrack.session': 'session.json', 'backingtrack.mix': 'mix.json' };
+// 'backingtrack.profiles.damaged' is no key of the web: the session keeps a damaged profiles.json under it (PROTOKOLL.md section 3a, below at `commit`).
+const NAMES = { 'backingtrack.profiles': 'profiles.json', 'backingtrack.session': 'session.json', 'backingtrack.mix': 'mix.json', 'backingtrack.profiles.damaged': 'profiles.damaged.json' };
 const KEYS = Object.fromEntries(Object.entries(NAMES).map(([key, name]) => [name, key]));
 const store = new Map();
-let writesFail = false, readsFail = false;
+let writesFail = false, readsFail = false; // readsFail: false, 'none' (nothing is stored: getItem gives null) or 'throw' (the storage cannot be read)
 let writes = [];
 Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
-  getItem: (key) => { if (readsFail) throw new Error('locked'); return store.has(key) ? store.get(key) : null; },
+  getItem: (key) => { if (readsFail === 'throw') throw new Error('locked'); if (readsFail) return null; return store.has(key) ? store.get(key) : null; },
   setItem: (key, value) => { const text = String(value); writes.push([NAMES[key] ?? key, text, !writesFail]); if (writesFail) throw new Error('full'); store.set(key, text); },
   removeItem: (key) => { store.delete(key); } } });
 
@@ -31,7 +32,7 @@ const { factoryProfiles, factoryParts } = await load('ui/profile-factory.js');
 const { loopBars } = await load('ui/position.js');
 const { PART_IDS, captureParts, applyParts, partIdsOf } = await load('core/profile-parts.js');
 const { parseFile, makeProfileFile, makeFolderFile, FORMAT_FOLDER, LIMITS } = await load('core/profile.js');
-const { find, sortItems, addProfile, addFolder, renameNode, removeNode, overwriteParts, importNode, freeName, moveNode, moveTargets, countNodes, countProfiles } = await load('core/profile-tree.js');
+const { newTree, find, sortItems, addProfile, addFolder, renameNode, removeNode, overwriteParts, importNode, freeName, moveNode, moveTargets, countNodes, countProfiles } = await load('core/profile-tree.js');
 const { chooseRoot, chooseScale } = await load('ui/key-scale.js');
 const { toggleTag } = await load('ui/tags-ui.js');
 const { addChord } = await load('ui/progression-editor.js');
@@ -44,7 +45,9 @@ const { CHORD_COLORS } = await load('core/harmony.js');
 const { METERS, meterKey, convertTempo, groovesFor } = await load('core/grooves.js');
 const { TEMPLATE_IDS, TARGET_SIZES } = await load('core/form-roll.js');
 const { PART_TYPES, TRANSITIONS, FORM_LIMITS, DYNAMICS_MAX } = await load('core/form-types.js');
-const { formLength, isValidForm, chordIndex } = await load('core/form.js');
+const { formLength, isValidForm, chordIndex, sectionAt } = await load('core/form.js');
+const { nextDistinctChord, progressionRoles, romanDegree, fretboardNotes, beatsUntilChange } = await load('core/fretboard.js');
+const { chordName } = await load('core/chords.js');
 const { normalizeTrack } = await load('core/track.js');
 const { VOICES, VOICE_LAYERS, completeVoices, setAllVoices, voiceKind, usesTimbreField } = await load('core/voices.js');
 const { LAYER_IDS, jobsFor, completeJobs } = await load('core/layers.js');
@@ -61,6 +64,10 @@ let player; // what the player plays (play.js 35-46): every action that changes 
 // the profile window (profiles.js 41-47) and the last session (app.js 153, the offer of "Weitermachen"); `resumed`: the bar the playback starts at after a resume that
 // restored (app.js 233), null after every other action (PROTOKOLL.md section 4)
 let tree, selection, open, message, undo, last, resumed;
+let refusals; // progression-editor.js 11: how often addChord found the progression full (not exported: counted here where the real addChord refuses)
+let rollNote; // form-strip.js 37: "Neu würfeln" found every part locked
+// PROTOKOLL.md section 3a (ruled, the web has none of it): what is wrong with the storage per name, state().storage, and the damaged text of profiles.json until it is kept
+let problems, damagedText;
 
 // play.js 35-46 for { ...state.track, layers: ALL_LAYERS } (app.js 128)
 function playerOf(trackInput) {
@@ -105,6 +112,7 @@ const commitFeel = (before) => (state.track.length === before ? applyLive({ patt
 // form-strip.js 39, 49-62 (liveSoon is applyLive({ patterns: true }) one frame later)
 const formNow = () => (isValidForm(state.track.form) ? state.track.form : null);
 function commitPart(result) {
+  rollNote = false; // 50
   if (result) {
     const before = state.track.length;
     state.track.form = result.form;
@@ -162,7 +170,17 @@ function select(id) {
 }
 // profiles.js 157-167. Review Focus 3, ruled (PROTOKOLL.md section 3): a write that fails changes nothing but the message, where the web keeps `next` until the
 // page is loaded again and adds the same key to its message. `openNext`: the open folders importRaw sets before its commit (351), kept only if the commit holds.
+// PROTOKOLL.md section 3a, ruled against the web (whose storage never fails to read, and whose next save writes over a tree it could not use): after a profiles.json that
+// could not be read, every commit is refused and changes nothing (REFUSED, caught in apply), so that a text the session could not read is never written over; after a
+// damaged one, the first commit keeps its text under profiles.damaged.json before it writes the tree, and a failing write of that is the failing write of the tree.
+const REFUSED = new Error('refused');
 function commit(next, selectId, texts, undoable = false, openNext = open) {
+  if (problems.profiles === 'unreadable') throw REFUSED;
+  if (problems.profiles === 'damaged') {
+    try { layoutStorage.setItem(KEYS['profiles.damaged.json'], damagedText); } catch { message = [msg('ui.profileNotStored')]; return; }
+    problems.profiles = 'damagedKept'; // once: it holds for the session, also if the tree's write fails below
+    damagedText = null;
+  }
   if (!saveTree(layoutStorage, next)) { message = [msg('ui.profileNotStored')]; return; }
   undo = undoable ? { tree, selection } : null;
   tree = next;
@@ -212,6 +230,8 @@ const ACTIONS = {
       state.track.seed = a.variant; // state.js 68: seed: rollVariant()
       touched = { key: false, style: false, tempo: false, variant: false }; // app.js 205
       selected = 0; // form-strip.js 35
+      refusals = 0; // progression-editor.js 11
+      rollNote = false; // form-strip.js 37
       deriveBars(); // app.js 484
       setFormTemplate('auto'); // app.js 485
       // the profile window, the tree and the last session stay (PROTOKOLL.md section 2)
@@ -270,7 +290,7 @@ const ACTIONS = {
   // progression-editor.js 55 (the chips: a root of chordOptions, then one of its qualities) and tuning.js 85 (the wheel: allowedChords); changed() is tuning.js 19
   addChord: {
     valid: (a) => typeof a.root === 'string' && typeof a.quality === 'string' && chordOptions(state.track.key).some((o) => o.root === a.root && o.qualities.includes(a.quality)),
-    run: (a) => { if (addChord({ root: a.root, quality: a.quality })) restartIfPlaying(); },
+    run: (a) => { if (addChord({ root: a.root, quality: a.quality })) restartIfPlaying(); else refusals++; }, // progression-editor.js 16: addChord counts its refusals
   },
   // progression-editor.js 24-28 (removeChord, not exported), 83-85; the button is disabled at one chord (102)
   removeChord: {
@@ -307,7 +327,7 @@ const ACTIONS = {
   // form-panel.js 55-61
   releaseStructure: { valid: () => Boolean(state.track.form), run: () => { const before = state.track.length; rollNewForm(); commitFeel(before); } },
   // form-strip.js 66-77, 104-112: a click on a part, or a key that moves the selection (to a part of the strip, 108)
-  selectPart: { valid: (a) => partIndex(a.index), run: (a) => { selected = a.index; } },
+  selectPart: { valid: (a) => partIndex(a.index), run: (a) => { rollNote = false; selected = a.index; } }, // choose, 67
   // form-strip.js 63, 114-123: one field per control, on the selected part; the resets are disabled while the part has no value of its own (208); level and density
   // are the knobs' ranges. `same`: the type select shows the part's type (195), the grip sends a length only when it differs (94)
   editPart: {
@@ -339,7 +359,8 @@ const ACTIONS = {
   rerollForm: {
     valid: () => formNow() !== null,
     run: () => {
-      if (formNow().sections.every((s) => s.locked)) return;
+      if (formNow().sections.every((s) => s.locked)) { rollNote = true; return; } // 133
+      rollNote = false; // 136
       const before = state.track.length;
       rollNewForm({ reroll: true });
       if (state.track.length === before) applyLive({ patterns: true });
@@ -529,6 +550,17 @@ const ACTIONS = {
   },
   // 169-172: the button stands while there is something to undo (427)
   undoProfile: { valid: () => undo !== null, run: () => { const u = undo; commit(u.tree, u.selection, [msg('ui.profileUndone')]); } },
+  // PROTOKOLL.md section 3a, ruled; the web has no such button (its storage never fails to read): while profiles.json is unreadable, "Erneut lesen" reads it again as the
+  // page load does; a read that fails again changes nothing
+  reloadProfiles: {
+    valid: () => problems.profiles === 'unreadable',
+    run: () => {
+      const stored = readStored('profiles.json');
+      if (stored.problem) return;
+      ({ tree, problem: problems.profiles, damaged: damagedText } = loadProfiles(stored));
+      undo = null;
+    },
+  },
   // ---------- the last session: app.js ----------
   // 153-157, 160: what stop() and pagehide remember while playing; the shell sends it then (PROTOKOLL.md section 3)
   rememberSession: { valid: (a) => int(a.bar, 0, MAX_INT) && int(a.at, 0, MAX_INT), run: (a) => remember(a) },
@@ -554,7 +586,7 @@ export const ACTION_NAMES = Object.keys(ACTIONS);
  * the first two change nothing and leave every flag false.
  */
 export function apply(text) {
-  change = { events: false, sound: false, voices: false, tempo: false, mix: false, restart: false, inPlace: false };
+  change = { events: false, sound: false, voices: false, tempo: false, mix: false, restart: false, inPlace: false, profiles: false };
   let action;
   try { action = JSON.parse(text); } catch { return 'refused'; }
   if (action === null || typeof action !== 'object' || Array.isArray(action) || typeof action.action !== 'string' || !Object.hasOwn(ACTIONS, action.action)) return 'refused';
@@ -562,17 +594,61 @@ export function apply(text) {
   if (!def.valid(action)) return 'refused';
   if (def.same?.(action)) return 'repeat';
   const watched = voiceKeys();
+  const view = JSON.stringify(profilesView()); // Change.profiles: what profiles() gives, before and after
+  const written = writes.length;
   pushed = JSON.stringify(organTuning(state.organ));
   player = state.track.bars.length ? playerOf({ ...state.track, layers: ALL_LAYERS }) : null; // no bars: the state as imported, before the first start (which calls no applyLive)
   const before = resumed;
   resumed = null; // the bar of a resume holds for the action that set it only
-  if (def.run(action) === 'refused') { resumed = before; return 'refused'; } // found only on the way (importProfile), before anything changed
+  let result;
+  try { result = def.run(action); } catch (e) { if (e !== REFUSED) throw e; result = 'refused'; }
+  if (result === 'refused') { resumed = before; return 'refused'; } // found only on the way (importProfile, a commit after an unreadable read), before anything changed
   // render(): voices-panel.js 89-93, organ-panel.js 62-64, form-strip.js 241, profiles.js 393
   if (voiceKeys() !== watched) change.voices = true;
   renderOrgan();
   renderStrip();
   settleSelection();
+  change.profiles = JSON.stringify(profilesView()) !== view;
+  // PROTOKOLL.md section 3a, ruled (the web takes a failing write of these two in silence): state().storage names the last write of each, until one holds
+  for (const [name, , took] of writes.slice(written)) if (name === 'session.json' || name === 'mix.json') problems[name === 'session.json' ? 'session' : 'mix'] = took ? null : 'notStored';
   return 'applied';
+}
+
+/**
+ * What the displays show at the playback's position (PROTOKOLL.md section 4, `position(beats)`): `beats` of the transport, wrapped around the loop. The bar is the one
+ * the player reports with onBar at that place (play.js: each bar `bars[chordIndex(track, i)].beats` long, counted as beatsUntilChange counts them), in the loop: the web's
+ * onBar counts on across loops, which shows the roles of a progression without a form at the wrong entry after the first loop when the length is no multiple of the
+ * chords (PROTOKOLL.md section 4). Then the web's own functions, as the displays call them.
+ */
+export function position(beats) {
+  const { track } = state;
+  const length = loopBars(track);
+  const dur = (i) => track.bars[chordIndex(track, i)].beats;
+  let loop = 0;
+  for (let i = 0; i < length; i++) loop += dur(i);
+  const pos = ((beats % loop) + loop) % loop;
+  let bar = 0, start = 0;
+  while (bar < length - 1 && start + dur(bar) <= pos) start += dur(bar++);
+  const index = chordIndex(track, bar);
+  const chord = track.bars[index].chord; // chordAtBar (position.js 9), what onBar brings
+  const next = nextDistinctChord(track.bars, track.length, bar, track.form); // tuning.js 41
+  const roles = progressionRoles(track, bar); // progression-editor.js 95, tuning.js 75
+  // app.js 113-119 (partLabel) and form-strip.js 243
+  const total = formLength(track.form);
+  const hit = total > 0 ? sectionAt(track.form, bar % total) : null;
+  return {
+    bar,
+    beat: Math.floor(beats + 1e-6), // app.js 104
+    chord,
+    name: chordName(chord),
+    next,
+    nextName: next ? chordName(next) : null,
+    index,
+    progression: track.bars.map((b, i) => ({ name: chordName(b.chord), degree: romanDegree(track.key, b.chord), role: roles[i] })),
+    fretboard: fretboardNotes({ key: track.key, scale: state.scale, current: chord, next }), // tuning.js 60-64
+    part: hit ? { index: hit.index, type: hit.section.type, n: track.form.sections.slice(0, hit.index + 1).filter((s) => s.type === hit.section.type).length } : null,
+    countdown: beatsUntilChange(track, (beats * 60) / track.bpm), // app.js 102: the song's seconds at the track's tempo
+  };
 }
 
 // ---------- loading the page (state.js 58-90, app.js 153 and 484-486, profiles.js 41-47): the session's constructor; the ids of a repaired tree are the session's own ----------
@@ -582,31 +658,59 @@ const storedIds = (v, out = new Set()) => {
   else if (v !== null && typeof v === 'object') { if (typeof v.id === 'string') out.add(v.id); for (const x of Object.values(v)) storedIds(x, out); }
   return out;
 };
-function loadTreeWithIds() {
+function loadTreeWithIds(text) {
   let used = new Set();
-  try { used = storedIds(JSON.parse(layoutStorage.getItem(KEYS['profiles.json']))); } catch { /* loadTree gives the empty tree then */ }
+  try { used = storedIds(JSON.parse(text)); } catch { /* no JSON: loadTree gives the empty tree then */ }
   let k = 0;
   const real = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
   Object.defineProperty(globalThis, 'crypto', { configurable: true, value: { randomUUID: () => { do k++; while (used.has(String(k))); return String(k); } } }); // defaultMakeId asks it
-  try { return loadTree(layoutStorage); } finally { Object.defineProperty(globalThis, 'crypto', real); }
+  try { return loadTree(storeOf('profiles.json', text)); } finally { Object.defineProperty(globalThis, 'crypto', real); }
+}
+// PROTOKOLL.md section 3a, ruled against the web: there localStorage never throws on a read, and loadTree, loadLast, loadMix and loadPan take a failed read, and every
+// text they cannot use, for "nothing stored". On a disk a read can fail once (a locked file) and a byte can be damaged, so the session tells three cases apart per name:
+// absent (nothing stored), unreadable (the read throws, or the text is above 20,000,000 bytes: it is not parsed), damaged (a text came, and nothing of it is of use). The
+// loaders are the web's, on the text that was read.
+const STORED_LIMIT = 20e6;
+function readStored(name) {
+  let text;
+  try { text = localStorage.getItem(KEYS[name]); } catch { return { text: null, problem: 'unreadable' }; }
+  return text !== null && Buffer.byteLength(text, 'utf8') > STORED_LIMIT ? { text: null, problem: 'unreadable' } : { text, problem: null };
+}
+const storeOf = (name, text) => ({ getItem: (key) => (key === KEYS[name] ? text : null) }); // the text that was read, for a loader of the web
+const parsedOrNone = (text) => { try { return { value: JSON.parse(text) }; } catch { return null; } };
+const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+// profiles.json is damaged when it is no JSON, or neither a list (the old flat list, taken over even when it is empty) nor an object with a list `items` (profile-store.js 57-58)
+function loadProfiles({ text, problem }) {
+  if (problem) return { tree: newTree(), problem, damaged: null };
+  const raw = text === null ? null : parsedOrNone(text);
+  if (text !== null && !(raw && (Array.isArray(raw.value) || (isObject(raw.value) && Array.isArray(raw.value.items))))) return { tree: newTree(), problem: 'damaged', damaged: text };
+  return { tree: loadTreeWithIds(text), problem: null, damaged: null };
 }
 /** A fresh page on the store (the session's constructor): the state literal with seed 1 and the stored mixer, the tree, the last session as the offer of "Weitermachen". */
 export function reload() {
+  const mix = readStored('mix.json'), profiles = readStored('profiles.json'), session = readStored('session.json');
+  problems = { profiles: null, session: null, mix: null };
   for (const key of Object.keys(state)) delete state[key];
-  Object.assign(state, structuredClone(initial), { mix: loadMix(layoutStorage), pan: loadPan(layoutStorage) }); // state.js 84-85
+  Object.assign(state, structuredClone(initial), { mix: loadMix(storeOf('mix.json', mix.text)), pan: loadPan(storeOf('mix.json', mix.text)) }); // state.js 84-85
   state.track.seed = 1;
   touched = { key: false, style: false, tempo: false, variant: false };
   selected = 0;
+  refusals = 0;
+  rollNote = false;
   deriveBars();
   setFormTemplate('auto');
-  tree = loadTreeWithIds();
+  ({ tree, problem: problems.profiles, damaged: damagedText } = loadProfiles(profiles));
   selection = 'session';
   open = ['mine', 'factory'];
   message = null;
   undo = null;
-  last = loadLast(layoutStorage); // only the offer: the web applies it on the click (226-236), that is resume
+  last = loadLast(storeOf('session.json', session.text)); // only the offer: the web applies it on the click (226-236), that is resume
+  // damaged: a text from which loadLast reads no entry; a mixer text that is no JSON or no object (a list too), from which loadMix and loadPan read no value
+  const mixRaw = mix.text === null ? null : parsedOrNone(mix.text);
+  problems.session = session.problem ?? (session.text !== null && last === null ? 'damaged' : null);
+  problems.mix = mix.problem ?? (mix.text !== null && !(mixRaw && isObject(mixRaw.value)) ? 'damaged' : null);
   resumed = null;
-  change = { events: false, sound: false, voices: false, tempo: false, mix: false, restart: false, inPlace: false }; // a new session has called nothing
+  change = { events: false, sound: false, voices: false, tempo: false, mix: false, restart: false, inPlace: false, profiles: false }; // a new session has called nothing
   renderStrip();
 }
 
@@ -625,18 +729,18 @@ export function exportText(key, name) {
   return JSON.stringify(data, null, 2);
 }
 
-/** The storage for the export's steps: whether writes (and the page's reads) fail, the log of the writes, the stored texts by the core's names. */
+/** The storage for the export's steps: whether writes fail, whether reads find nothing ('none') or throw ('throw'), the log of the writes, the stored texts by the core's names. */
 export const storage = {
   failWrites: (on) => { writesFail = on; },
-  failReads: (on) => { readsFail = on; },
+  failReads: (mode) => { readsFail = mode; },
   takeWrites: () => { const out = writes; writes = []; return out; },
   text: (name) => (store.has(KEYS[name]) ? store.get(KEYS[name]) : null),
   set: (name, text) => { if (text === null) store.delete(KEYS[name]); else store.set(KEYS[name], text); },
 };
 
 /**
- * What the core's session must give after the action: the flags, state() (with errors as app.js reports them, validateTrack of index.js), track() (what app.js 128 and
- * 191 hand the player: every layer on), sound(), tuning().
+ * What the core's session must give after the action: the flags, state() (with errors as app.js reports them, validateTrack of index.js), profiles(), track() (what app.js
+ * 128 and 191 hand the player: every layer on), sound(), tuning().
  */
 export function record() {
   return JSON.parse(JSON.stringify({
@@ -645,16 +749,19 @@ export function record() {
       track: state.track, formTarget: state.formTarget, formSalt: state.formSalt, formFeel: state.formFeel, scale: state.scale, chordColor: state.chordColor,
       chordColorFromStyle: state.chordColorFromStyle, style: state.style, mix: state.mix, pan: state.pan, organ: state.organ, tempoRef: state.tempoRef ?? null, touched,
       selectedPart: selected, errors: state.errors.length ? state.errors : validateTrack(state.track), // app.js 231 after a failed resume; else what a failed start shows
-      profiles: profilesView(),
       last: last && lastView(last),
       resumed,
+      loopBars: loopBars(state.track),
+      storage: problems,
+      notice: state.notice ?? null, refusals, rollNote,
     },
+    profiles: profilesView(),
     track: { ...state.track, layers: ALL_LAYERS },
     sound: resolveTrackTimbre(state.track),
     tuning: organTuning(state.organ),
   }));
 }
-// state().profiles (PROTOKOLL.md section 4): the tree lightly, and what the window's building blocks read
+// profiles() (PROTOKOLL.md section 4): the tree lightly, and what the window's building blocks read
 function profilesView() {
   const light = (items) => items.map((n) => (n.type === 'profile' ? { id: n.id, type: n.type, name: n.name, parts: partIdsOf(n.parts) } : { id: n.id, type: n.type, name: n.name, items: light(n.items) }));
   const s = chosen();
@@ -669,7 +776,7 @@ function profilesView() {
 const lastView = (entry) => ({ bar: entry.bar, at: entry.at, root: entry.parts.harmony.key.root, scale: entry.parts.harmony.scale, style: entry.parts.style.style, bpm: entry.parts.tempo.bpm, seed: entry.parts.variant.seed });
 
 /** The reference's state, read only, for the export's draws. */
-export const current = () => ({ state, touched, selected, tree, selection, open, undo, last, rows: rows(), kind: chosen().kind });
+export const current = () => ({ state, touched, selected, tree, selection, open, undo, last, rows: rows(), kind: chosen().kind, problems });
 /** Back to what the core's constructor gives on an empty storage (the start state of variant 1, the mixer's defaults, no profiles), before each sequence. */
 export const reset = () => {
   store.clear();

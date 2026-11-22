@@ -364,9 +364,9 @@ void checkJobs(Val jobs, const Add& add) {
 // the defaults, over them the given jobs (null counts as missing); anything that is not an object stays, for validateTrack to report
 Json normalizeJobs(Val jobs) {
     if (!isNullish(jobs) && !isRecord(jobs)) return *jobs;
-    Json out = completeJobs(Json());
-    if (isRecord(jobs)) for (const Entry& e : entries(*jobs)) if (!e.value->is_null()) out[*e.key] = *e.value;
-    return out;
+    ObjectBuilder out(completeJobs(Json())); // linear in the number of keys (operator[] searches them one by one)
+    if (isRecord(jobs)) for (const Entry& e : entries(*jobs)) if (!e.value->is_null()) out.set(*e.key, *e.value);
+    return out.build();
 }
 
 Json validateTrackValue(const Json& track) {
@@ -570,7 +570,8 @@ private:
             if (!digits()) return false;
         }
         // The grammar is checked; the value is the library's (exact, and independent of the C locale's decimal point, which the C library's own conversion is not). It
-        // refuses only a number that overflows: that is Infinity by the sign. A number below the smallest is 0, and -0 keeps its sign here.
+        // refuses only a number that overflows: that is Infinity by the sign. A number below the smallest is 0. -0 is read with its sign, but number() stores it as the
+        // integer 0: JSON.stringify prints -0 as 0, so the texts are the web's, and no rule of the logic reads the sign of a zero.
         const std::string token = s.substr(start, at - start);
         const Json parsed = Json::parse(token, nullptr, false);
         double v = parsed.is_discarded() ? (token[0] == '-' ? -HUGE_VAL : HUGE_VAL) : parsed.get<double>();

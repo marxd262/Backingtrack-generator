@@ -126,17 +126,38 @@ std::string fnv(const std::string& text) {
     return out;
 }
 json changeOf(const btg::Session::Change& c) {
-    return { { "events", c.events }, { "sound", c.sound }, { "voices", c.voices }, { "tempo", c.tempo }, { "mix", c.mix }, { "restart", c.restart }, { "inPlace", c.inPlace } };
+    return { { "events", c.events }, { "sound", c.sound }, { "voices", c.voices }, { "tempo", c.tempo }, { "mix", c.mix }, { "restart", c.restart }, { "inPlace", c.inPlace },
+             { "profiles", c.profiles } };
 }
-// A case is a sequence of steps (export-logic.mjs, Task 29 and 30b): an action text; { action, fail }, the action with writes that fail; { restart, stored?, failReads? }, a new
-// session on the same storage after `stored` replaced texts (null removes one); { probe: [key, name] }, exportFile only. `out` per step { change, state, track, sound, tuning },
-// `writes` if the step wrote, and the export of the selected row with the name "Export" when it differs from the step before: `export`, for the session `exportHash`.
-json playSession(const json& steps) {
+// the order of an object's keys at every level, as export-logic.mjs `keyOrder` writes it: {"key":<order of its value>,...}, [<order of each entry>], nothing for a value
+std::string keyOrder(const Json& v) {
+    std::string out;
+    if (v.is_array()) {
+        out += '[';
+        for (size_t i = 0; i < v.size(); ++i) out += (i ? "," : "") + keyOrder(v[i]);
+        return out + ']';
+    }
+    if (!v.is_object()) return out;
+    out += '{';
+    for (auto it = v.begin(); it != v.end(); ++it) out += (it == v.begin() ? "" : ",") + stringify(Json(it.key())) + ":" + keyOrder(it.value());
+    return out + '}';
+}
+// A case is { steps, at } (export-logic.mjs, Task 29 and 30b, the fix wave of Phase 6; a plain list is the steps without places): a step is an action text; { action, fail?,
+// failReads? }, the action with writes that fail or reads that throw; { restart, stored?, failReads? }, a new session on the same storage after `stored` replaced texts (null
+// removes one); { probe: [key, name] }, exportFile only. `at` per step the places of the playback to ask position for. `out` per step { change, state, track, sound, tuning,
+// keys, position }: `keys` the order of the keys of track() and state().track (read in the order of their texts), `position` per place the fnv of position's text;
+// `profiles` when its text differs from the step before, `writes` if the step wrote, and the export of the selected row with the name "Export" when it differs from the
+// step before: `export`, for the session `exportHash`.
+json playSession(const json& in) {
+    const json& steps = in.is_array() ? in : in.at("steps");
     SequenceStorage storage;
     auto session = std::make_unique<btg::Session>(storage);
     json out = json::array();
     std::optional<std::string> shown;
-    for (const json& step : steps) {
+    std::string viewText; // profiles() as text: recorded when it is another than the step before had (a tree of 1,000 nodes is 170 KB)
+    json view;
+    for (size_t k = 0; k < steps.size(); ++k) {
+        const json& step = steps[k];
         storage.log = json::array();
         btg::Session::Change c;
         if (step.is_string()) c = session->apply(step.get<std::string>());
@@ -148,15 +169,26 @@ json playSession(const json& steps) {
             session = std::make_unique<btg::Session>(storage);
             storage.failReads.clear();
         } else {
-            storage.failWrites = step.at("fail").get<std::string>();
+            storage.failWrites = step.value("fail", std::string());
+            storage.failReads = step.value("failReads", std::string());
             c = session->apply(step.at("action").get<std::string>());
             storage.failWrites.clear();
+            storage.failReads.clear();
         }
-        json record = { { "change", changeOf(c) }, { "state", json::parse(session->state()) }, { "track", json::parse(session->track()) }, { "sound", json::parse(session->sound()) },
-                        { "tuning", json::parse(session->tuning()) } };
+        const std::string stateText = session->state(), trackText = session->track();
+        json record = { { "change", changeOf(c) }, { "state", json::parse(stateText) }, { "track", json::parse(trackText) },
+                        { "sound", json::parse(session->sound()) }, { "tuning", json::parse(session->tuning()) },
+                        { "keys", { { "track", keyOrder(Json::parse(trackText)) }, { "state", keyOrder(Json::parse(stateText).at("track")) } } } };
+        if (std::string now = session->profiles(); now != viewText || view.is_null()) {
+            view = json::parse(now);
+            viewText = std::move(now);
+            record["profiles"] = view;
+        }
+        json places = json::array();
+        if (!in.is_array()) for (const json& beats : in.at("at").at(k)) places.push_back(fnv(session->position(beats.get<double>())));
+        record["position"] = places;
         if (!storage.log.empty()) record["writes"] = storage.log;
-        const json& profiles = record.at("state").value("profiles", json::object());
-        const std::string selection = profiles.value("selection", std::string("session"));
+        const std::string selection = view.value("selection", std::string("session"));
         const std::string file = session->exportFile(selection, "Export");
         if (!shown || *shown != file) {
             shown = file;
@@ -172,7 +204,7 @@ void printSessionStep(const json& c, const json& got) {
         btg::test::Compare step;
         step.value("record", c.at("out")[k], got[k]);
         if (step.result == btg::test::Match::identical) continue;
-        const json& in = c.at("in")[k];
+        const json& in = (c.at("in").is_array() ? c.at("in") : c.at("in").at("steps"))[k];
         const std::string text = in.is_string() ? in.get<std::string>() : in.dump();
         std::printf("session: first difference at step %zu (%.300s), field %s\n", k, text.c_str(), step.field.c_str());
         return;
@@ -501,6 +533,7 @@ int main(int argc, char** argv) {
     try {
         const auto check = [&](bool ok, const std::string& what) { ++storageChecks; if (!ok) { std::printf("FAIL: %s\n", what.c_str()); ++storageWrong; } };
         const auto stateOf = [](const btg::Session& s) { return json::parse(s.state()); };
+        const auto profilesOf = [](const btg::Session& s) { return json::parse(s.profiles()); };
         const auto run = [](btg::Session& s, const std::vector<json>& actions) { for (const json& a : actions) s.apply(a.dump()); };
         const auto sel = [](const char* key) { return json { { "action", "profileSelect" }, { "key", key } }; };
         const json notStored = json::parse(R"([{"key":"ui.profileNotStored","params":{}}])"), bad = json::parse(R"([{"key":"err.badProfile","params":{}}])");
@@ -526,15 +559,17 @@ int main(int argc, char** argv) {
                 btg::Session s(st);
                 run(s, tree);
                 run(s, before);
-                const json was = stateOf(s).at("profiles");
+                const json was = profilesOf(s);
                 const std::string stored = st.files.at("profiles.json");
                 st.log = json::array();
                 st.failWrites = mode;
                 const btg::Session::Change c = s.apply(change.dump());
                 st.failWrites.clear();
-                const json now = stateOf(s).at("profiles");
+                const json now = profilesOf(s);
+                btg::Session::Change named;
+                named.profiles = was.at("message") != notStored; // only the message changes: the window says so
                 check(now.at("items") == was.at("items") && now.at("selection") == was.at("selection") && now.at("open") == was.at("open") && now.at("undo") == was.at("undo")
-                          && st.files.at("profiles.json") == stored && st.log.size() == 1 && now.at("message") == notStored && changeOf(c) == changeOf({}),
+                          && st.files.at("profiles.json") == stored && st.log.size() == 1 && now.at("message") == notStored && changeOf(c) == changeOf(named),
                       std::string("a write that fails (") + mode + ") at " + change.at("action").get<std::string>() + " changes the tree, the stored text or is not named");
             }
         // damaged files: nothing changes, nothing is written, the reason is named
@@ -549,13 +584,13 @@ int main(int argc, char** argv) {
             btg::Session s(st);
             run(s, tree);
             run(s, { sel("mine") });
-            const json was = stateOf(s).at("profiles");
+            const json was = profilesOf(s);
             st.log = json::array();
             json action = fields;
             action["action"] = "importProfile";
             action["ids"] = json::array({ "i1", "i2" });
             s.apply(action.dump());
-            const json now = stateOf(s).at("profiles");
+            const json now = profilesOf(s);
             check(now.at("items") == was.at("items") && st.log.empty() && now.at("message") == bad, std::string("an import of ") + what + " changes the tree, writes or is not named");
         }
         // what the web reads of a file in part (ruled): a newer version as far as its fields are known, nine levels and 1,001 nodes as far as they fit
@@ -566,29 +601,30 @@ int main(int argc, char** argv) {
             std::string newer = goodFile;
             newer.replace(newer.find("\"version\":2"), 11, "\"version\":99");
             s.apply(json { { "action", "importProfile" }, { "from", "text" }, { "text", newer }, { "ids", json::array({ "v1" }) } }.dump());
-            check(stateOf(s).at("profiles").at("items").size() == 1 && stateOf(s).at("profiles").at("message").at(0).at("key") == "ui.profileImported", "a file of version 99 is not read");
+            check(profilesOf(s).at("items").size() == 1 && profilesOf(s).at("message").at(0).at("key") == "ui.profileImported", "a file of version 99 is not read");
             std::string deep = "{\"type\":\"profile\",\"name\":\"p\",\"parts\":{\"tempo\":{\"bpm\":100}}}";
             for (int i = 0; i < 9; ++i) deep = "{\"type\":\"folder\",\"name\":\"T\",\"items\":[" + deep + "]}";
             run(s, { sel("mine") });
             json ids = json::array();
             for (int i = 0; i < 12; ++i) ids.push_back("d" + std::to_string(i));
             s.apply(json { { "action", "importProfile" }, { "from", "text" }, { "text", "{\"format\":\"backingtrack-folder\",\"version\":1,\"name\":\"Tief\",\"items\":[" + deep + "]}" }, { "ids", ids } }.dump());
-            const json deepState = stateOf(s).at("profiles");
+            const json deepState = profilesOf(s);
             // the file's folder and seven of its nine are kept (eight levels), the eighth of them is skipped with its content
             check(deepState.at("nodes") == 9 && deepState.at("message").size() == 2 && deepState.at("message").at(1).at("key") == "ui.profileSkipped.one", "a folder nine levels deep does not keep what fits");
             std::string many = "{\"format\":\"backingtrack-folder\",\"version\":1,\"name\":\"B\",\"backup\":true,\"items\":[";
             for (int i = 0; i < 1001; ++i) many += std::string(i ? "," : "") + "{\"type\":\"profile\",\"name\":\"N" + std::to_string(i) + "\",\"parts\":{\"variant\":{\"seed\":1}}}";
             many += "]}";
-            const int room = 1000 - stateOf(s).at("profiles").at("nodes").get<int>();
+            const int room = 1000 - profilesOf(s).at("nodes").get<int>();
             json more = json::array();
             for (int i = 0; i < room; ++i) more.push_back("m" + std::to_string(i));
             run(s, { sel("mine") });
             s.apply(json { { "action", "importProfile" }, { "from", "text" }, { "text", many }, { "ids", more } }.dump());
-            const json full = stateOf(s).at("profiles");
+            const json full = profilesOf(s);
             // the file keeps 1,000 (one skipped), the tree takes what it has room for (the rest dropped)
             check(full.at("nodes") == 1000 && full.at("message").back().at("key") == "ui.profileDropped" && full.at("message").back().at("params").at("n") == 1000 - room, "1,001 nodes do not keep what fits");
         }
         // a damaged or unreadable storage: a session all the same, without a throw and without a write (the page load writes nothing: app.js 153, 484-486)
+        // `ok` gets { state, profiles } of the new session
         const auto start = [&](std::map<std::string, std::string> files, const std::string& reads, const std::string& what, const std::function<bool(const json&)>& ok) {
             try {
                 SequenceStorage st;
@@ -596,14 +632,33 @@ int main(int argc, char** argv) {
                 st.failReads = reads;
                 btg::Session s(st);
                 st.failReads.clear();
-                check(st.log.empty() && st.files == files && ok(stateOf(s)), what);
+                check(st.log.empty() && st.files == files && ok(json { { "state", stateOf(s) }, { "profiles", profilesOf(s) } }), what);
             } catch (const std::exception& error) { check(false, what + " throws: " + error.what()); }
         };
-        start({ { "profiles.json", "kein JSON" } }, "", "a stored tree that is no JSON", [](const json& s) { return s.at("profiles").at("items").empty(); });
-        start({ { "profiles.json", R"({"items":5})" } }, "", "a stored tree without a list", [](const json& s) { return s.at("profiles").at("items").empty(); });
-        start({ { "session.json", R"({"parts":5})" } }, "", "a stored last session that is damaged", [](const json& s) { return s.at("resumed").is_null() && s.at("last").is_null(); });
-        start({ { "mix.json", "[1,2]" } }, "", "a stored mixer that is damaged", [](const json& s) { return s.at("mix").at("master") == 1; });
-        start({ { "profiles.json", R"({"version":2,"items":[]})" } }, "throw", "a storage whose reads throw", [](const json& s) { return s.at("profiles").at("items").empty() && s.at("last").is_null(); });
+        // the fix wave of Phase 6 (F1, PROTOKOLL.md section 3a): per name absent, unreadable (the read throws, the text is above 20,000,000 bytes) or damaged, and state().storage names it
+        const auto problems = [](const json& s, const char* profiles, const char* session, const char* mix) {
+            const auto is = [](const json& v, const char* want) { return want == nullptr ? v.is_null() : v == want; };
+            const json& p = s.at("state").at("storage");
+            return is(p.at("profiles"), profiles) && is(p.at("session"), session) && is(p.at("mix"), mix);
+        };
+        start({ { "profiles.json", "kein JSON" } }, "", "a stored tree that is no JSON", [&](const json& s) { return s.at("profiles").at("items").empty() && problems(s, "damaged", nullptr, nullptr); });
+        start({ { "profiles.json", R"({"items":5})" } }, "", "a stored tree without a list", [&](const json& s) { return s.at("profiles").at("items").empty() && problems(s, "damaged", nullptr, nullptr); });
+        start({ { "profiles.json", "null" }, { "session.json", "[]" }, { "mix.json", "5" } }, "", "null, a list and a number", [&](const json& s) { return problems(s, "damaged", "damaged", "damaged"); });
+        start({ { "profiles.json", "[]" }, { "mix.json", "{}" } }, "", "an empty old list and an empty mixer (not damaged)", [&](const json& s) { return problems(s, nullptr, nullptr, nullptr); });
+        start({ { "profiles.json", R"({"version":2,"items":[{"type":"note"}]})" } }, "", "a tree of nothing usable (the format, not damaged)", [&](const json& s) { return s.at("profiles").at("items").empty() && problems(s, nullptr, nullptr, nullptr); });
+        start({ { "session.json", R"({"parts":5})" } }, "", "a stored last session that is damaged", [&](const json& s) { return s.at("state").at("resumed").is_null() && s.at("state").at("last").is_null() && problems(s, nullptr, "damaged", nullptr); });
+        start({ { "mix.json", "[1,2]" } }, "", "a stored mixer that is damaged", [&](const json& s) { return s.at("state").at("mix").at("master") == 1 && problems(s, nullptr, nullptr, "damaged"); });
+        start({ { "profiles.json", R"({"version":2,"items":[]})" } }, "throw", "a storage whose reads throw", [&](const json& s) {
+            return s.at("profiles").at("items").empty() && s.at("state").at("last").is_null() && problems(s, "unreadable", "unreadable", "unreadable"); });
+        start({ { "profiles.json", R"({"version":2,"items":[]})" } }, "none", "a storage that finds nothing", [&](const json& s) { return problems(s, nullptr, nullptr, nullptr); });
+        {
+            const std::string tree = R"({"version":2,"items":[{"id":"a","type":"profile","name":"A","parts":{"variant":{"seed":1}}}]})", mix = R"({"master":0.5})";
+            const auto padded = [](std::string text, size_t bytes) { text.resize(bytes, ' '); return text; }; // JSON with white space after it, `bytes` long
+            start({ { "profiles.json", padded(tree, 20000000) }, { "mix.json", padded(mix, 20000000) } }, "", "texts of 20,000,000 bytes (read)", [&](const json& s) {
+                return s.at("profiles").at("items").size() == 1 && s.at("state").at("mix").at("master") == 0.5 && problems(s, nullptr, nullptr, nullptr); });
+            start({ { "profiles.json", padded(tree, 20000001) }, { "mix.json", padded(mix, 20000001) }, { "session.json", std::string(20000001, ' ') } }, "", "texts of 20,000,001 bytes (not read)",
+                  [&](const json& s) { return s.at("profiles").at("items").empty() && s.at("state").at("mix").at("master") == 1 && problems(s, "unreadable", "unreadable", "unreadable"); });
+        }
         // a stored last session is only offered: the mixer is the stored one, not the session's, nothing is resumed or written
         SequenceStorage played;
         {
@@ -611,8 +666,9 @@ int main(int argc, char** argv) {
             s.apply(R"({"action":"rememberSession","bar":3,"at":4})");
             s.apply(R"({"action":"setLevel","channel":"drums","value":30})");
         }
-        start(played.files, "", "a stored last session that is offered", [](const json& s) {
-            return s.at("last").at("bar") == 3 && s.at("resumed").is_null() && s.at("mix").at("drums") == 0.3 && s.at("track").at("seed") == 1; });
+        start(played.files, "", "a stored last session that is offered", [&](const json& s) {
+            const json& state = s.at("state");
+            return state.at("last").at("bar") == 3 && state.at("resumed").is_null() && state.at("mix").at("drums") == 0.3 && state.at("track").at("seed") == 1 && problems(s, nullptr, nullptr, nullptr); });
         // "Weitermachen" while playing writes session.json, then mix.json (PROTOKOLL.md section 3a); each holds or fails by itself, and the session keeps both new values
         for (const char* failing : { "", "session.json", "mix.json" }) {
             SequenceStorage st;
@@ -627,10 +683,137 @@ int main(int argc, char** argv) {
             const bool stored = (st.files.at("session.json") == entry) == (std::string(failing) == "session.json") && (st.files.at("mix.json") == mix) == (std::string(failing) == "mix.json");
             check(order && stored && now.at("last").at("bar") == 7 && now.at("mix").at("drums") == 1 && now.at("resumed") == json { { "bar", 5 } },
                   std::string("resume while playing with ") + (*failing ? failing : "no write") + " failing does not write both in order or does not keep both values");
+            const json& named = now.at("storage");
+            check(named.at("session") == (std::string(failing) == "session.json" ? json("notStored") : json()) && named.at("mix") == (std::string(failing) == "mix.json" ? json("notStored") : json()),
+                  std::string("resume while playing with ") + (*failing ? failing : "no write") + " failing does not name what was not stored");
+        }
+        const auto allFalse = [](const btg::Session::Change& c) { return changeOf(c) == changeOf({}); };
+        // an unreadable profiles.json: the tree is empty and no action writes profiles.json (each that would change the tree is refused and changes nothing; what changes no
+        // tree acts as always), until reloadProfiles reads it; a read that throws again changes nothing
+        {
+            SequenceStorage st;
+            {
+                btg::Session first(st);
+                run(first, tree);
+            }
+            const std::map<std::string, std::string> stored = st.files;
+            st.failReads = "throw";
+            btg::Session s(st);
+            st.failReads.clear();
+            check(profilesOf(s).at("items").empty() && stateOf(s).at("storage").at("profiles") == "unreadable", "an unreadable profiles.json is not named");
+            const std::vector<std::pair<json, json>> changesOfTree {
+                { sel("session"), json::parse(R"({"action":"saveProfile","name":"N","folder":null,"parts":["tempo"],"id":"n1"})") },
+                { sel("mine"), json::parse(R"({"action":"addFolder","name":"G","id":"g1"})") },
+                { sel("factory:funk"), json::parse(R"({"action":"copyFactory","name":"Funk","id":"c1"})") },
+                { sel("mine"), json { { "action", "importProfile" }, { "from", "text" }, { "text", goodFile }, { "ids", json::array({ "i1" }) } } },
+                { sel("session"), json { { "action", "importProfile" }, { "from", "file" }, { "text", goodFile }, { "size", goodFile.size() }, { "ids", json::array({ "i2" }) } } },
+            };
+            for (const auto& [before, change] : changesOfTree) {
+                s.apply(before.dump());
+                const std::string view = s.profiles();
+                st.log = json::array();
+                const btg::Session::Change c = s.apply(change.dump());
+                check(allFalse(c) && s.profiles() == view && st.log.empty() && st.files == stored, "after an unreadable read, " + change.at("action").get<std::string>() + " is not refused");
+            }
+            for (const char* name : { "overwriteProfile", "renameNode", "deleteNode", "undoProfile" }) // no own row: not valid
+                check(allFalse(s.apply(json { { "action", name }, { "name", "X" }, { "parts", json::array({ "tempo" }) } }.dump())), std::string("after an unreadable read, ") + name + " is valid");
+            run(s, { sel("session") });
+            const btg::Session::Change needParts = s.apply(R"({"action":"saveProfile","name":"N","folder":null,"parts":[],"id":"n2"})");
+            check(needParts.profiles && profilesOf(s).at("message").at(0).at("key") == "ui.profileNeedParts", "after an unreadable read, a save without parts does not say so");
+            check(st.files == stored, "after an unreadable read, a text of profiles.json was replaced");
+            st.failReads = "throw";
+            const btg::Session::Change again = s.apply(R"({"action":"reloadProfiles"})");
+            st.failReads.clear();
+            check(allFalse(again) && profilesOf(s).at("items").empty() && stateOf(s).at("storage").at("profiles") == "unreadable", "reloadProfiles on a storage that still throws changes something");
+            const btg::Session::Change reloaded = s.apply(R"({"action":"reloadProfiles"})");
+            check(reloaded.profiles && profilesOf(s).at("nodes") == 3 && stateOf(s).at("storage").at("profiles").is_null() && st.files == stored, "reloadProfiles does not load the tree or writes");
+            check(allFalse(s.apply(R"({"action":"reloadProfiles"})")), "reloadProfiles is valid without a problem");
+            run(s, { sel("session"), json::parse(R"({"action":"saveProfile","name":"N","folder":null,"parts":["tempo"],"id":"n3"})") });
+            check(profilesOf(s).at("nodes") == 4 && st.files.at("profiles.json") != stored.at("profiles.json"), "after reloadProfiles, saving does not work");
+        }
+        // a damaged profiles.json: kept once, byte for byte, as profiles.damaged.json before the first write of the tree; a failing write of it refuses the change as a failing
+        // write of the tree does; once kept, it stays kept also if the tree's write then fails
+        {
+            const std::string damaged = "{\"version\":2,\"items\":[ kaputt \xC3\xA4";
+            SequenceStorage st;
+            st.files["profiles.json"] = damaged;
+            btg::Session s(st);
+            check(stateOf(s).at("storage").at("profiles") == "damaged" && st.log.empty(), "a damaged profiles.json is not named or written at load");
+            const json save = json::parse(R"({"action":"saveProfile","name":"N","folder":null,"parts":["tempo"],"id":"d1"})");
+            st.failWrites = "false";
+            btg::Session::Change c = s.apply(save.dump());
+            st.failWrites.clear();
+            check(st.log.size() == 1 && st.log.at(0).at(0) == "profiles.damaged.json" && !st.files.count("profiles.damaged.json") && st.files.at("profiles.json") == damaged
+                      && profilesOf(s).at("message") == notStored && profilesOf(s).at("items").empty() && c.profiles && stateOf(s).at("storage").at("profiles") == "damaged",
+                  "a failing write of profiles.damaged.json does not refuse the change");
+            st.log = json::array();
+            st.failName = "profiles.json";
+            c = s.apply(save.dump());
+            st.failName.clear();
+            check(st.log.size() == 2 && st.files.at("profiles.damaged.json") == damaged && st.files.at("profiles.json") == damaged && profilesOf(s).at("items").empty()
+                      && stateOf(s).at("storage").at("profiles") == "damagedKept", "a kept text with a failing write of the tree is not kept, or the change is taken");
+            st.log = json::array();
+            run(s, { save, sel("session"), json::parse(R"({"action":"saveProfile","name":"M","folder":null,"parts":["tempo"],"id":"d2"})") });
+            bool once = st.log.size() == 2;
+            for (const json& w : st.log) once = once && w.at(0) == "profiles.json";
+            check(once && st.files.at("profiles.damaged.json") == damaged && profilesOf(s).at("nodes") == 2 && stateOf(s).at("storage").at("profiles") == "damagedKept",
+                  "profiles.damaged.json is written more than once, or saving does not work after it");
+        }
+        // a write of session.json or mix.json that fails is named until one holds; the memory keeps the new value
+        {
+            SequenceStorage st;
+            btg::Session s(st);
+            st.failName = "mix.json";
+            s.apply(R"({"action":"setLevel","channel":"drums","value":30})");
+            st.failName = "session.json";
+            s.apply(R"({"action":"rememberSession","bar":3,"at":4})");
+            st.failName.clear();
+            json now = stateOf(s);
+            check(now.at("storage").at("mix") == "notStored" && now.at("storage").at("session") == "notStored" && now.at("mix").at("drums") == 0.3 && now.at("last").at("bar") == 3,
+                  "a failing write of mix.json or session.json is not named, or the new value is not kept");
+            s.apply(R"({"action":"setLevel","channel":"drums","value":31})");
+            s.apply(R"({"action":"rememberSession","bar":4,"at":5})");
+            now = stateOf(s);
+            check(now.at("storage").at("mix").is_null() && now.at("storage").at("session").is_null(), "a write of mix.json or session.json that holds does not end the problem");
         }
     } catch (const std::exception& error) { std::printf("FAIL: the checks of Review Focus 3 threw: %s\n", error.what()); ++storageWrong; }
-    std::printf("storage: %d of %d checks wrong (a damaged file or a write that fails leaves the tree and the stored texts as they were and is named; a damaged storage gives a session)\n",
+    std::printf("storage: %d of %d checks wrong (a damaged file or a write that fails leaves the tree and the stored texts as they were and is named; a damaged storage gives a session;"
+                " an unreadable, damaged or not stored text is named, an unreadable profiles.json is never written over, a damaged one is kept once)\n",
                 storageWrong, storageChecks);
+    // The fix wave of Phase 6 (F2): profiles() is built when what it shows changes (Change.profiles), not per call: 300 knob moves on a tree of 1,000 nodes with an own profile
+    // selected build it no time, and a change of the tree builds it once, however often it is asked for then
+    int viewWrong = 0, viewChecks = 0;
+    try {
+        const auto check = [&](bool ok, const char* what) { ++viewChecks; if (!ok) { std::printf("FAIL: %s\n", what); ++viewWrong; } };
+        SequenceStorage st;
+        std::string items;
+        for (int f = 0; f < 100; ++f) {
+            items += std::string(f ? "," : "") + "{\"id\":\"f" + std::to_string(f) + "\",\"type\":\"folder\",\"name\":\"Ordner " + std::to_string(f) + "\",\"items\":[";
+            for (int p = 0; p < 9; ++p)
+                items += std::string(p ? "," : "") + "{\"id\":\"p" + std::to_string(f) + "-" + std::to_string(p) + "\",\"type\":\"profile\",\"name\":\"Profil " + std::to_string(p) + "\",\"parts\":{\"variant\":{\"seed\":1}}}";
+            items += "]}";
+        }
+        st.files["profiles.json"] = "{\"version\":2,\"items\":[" + items + "]}";
+        btg::Session s(st);
+        s.apply(R"({"action":"start","variant":7})");
+        const btg::Session::Change opened = s.apply(R"({"action":"profileToggle","key":"f50"})");
+        const btg::Session::Change chosen = s.apply(R"({"action":"profileSelect","key":"p50-4"})");
+        check(opened.profiles && chosen.profiles && json::parse(s.profiles()).at("nodes") == 1000, "the tree of 1,000 nodes is not loaded, or a change of the window is not flagged");
+        const size_t before = profilesViewBuilds();
+        bool quiet = true;
+        for (int i = 0; i < 300; ++i) {
+            quiet = !s.apply(std::string(R"({"action":"setTimbre","group":"master","field":"reverb","value":)") + (i % 2 ? "40}" : "60}")).profiles && quiet;
+            s.state();
+            s.profiles();
+        }
+        check(quiet && profilesViewBuilds() == before, "300 knob moves build the view of profiles() or flag it");
+        const bool renamed = s.apply(R"({"action":"renameNode","name":"Neu"})").profiles;
+        const std::string view = s.profiles();
+        check(renamed && profilesViewBuilds() == before + 1 && view.find("\"Neu\"") != std::string::npos, "a change of the tree does not build the view once");
+        s.profiles();
+        check(profilesViewBuilds() == before + 1, "a second call of profiles() builds the view again");
+    } catch (const std::exception& error) { std::printf("FAIL: the check of the view threw: %s\n", error.what()); ++viewWrong; }
+    std::printf("view: %d of %d checks wrong (profiles() is built once per change of what it shows, not per action or call)\n", viewWrong, viewChecks);
     // Task 30a: where the core is NOT the web's, so these are no cases of the file (profile_tree.cpp, track.cpp: the `shortcut:` comments). 1. A character that collation.json
     // does not hold (Greek, Cyrillic, CJK, an emoji) sorts after every covered character, and such characters among themselves by code point, where the web orders them by ICU.
     // 2. A file whose text nests deeper than 64 levels counts as no JSON, where the web reads it.
@@ -676,5 +859,5 @@ int main(int argc, char** argv) {
     // A close is a difference in the last bits (possibly another platform's math library): it fails too. An exception has to be ruled
     // by the owner and named here (function and field, from the line above), not passed.
     if (close) std::printf("FAIL: %lld case(s) are only close, not bit for bit: a difference in the last bits, possibly another platform's math library; ruled exceptions are named in this test\n", close);
-    return different || untested || close || deepWrong || seedWrong || formWrong || storageWrong || outsideWrong || profileDepthWrong ? 1 : 0;
+    return different || untested || close || deepWrong || seedWrong || formWrong || storageWrong || viewWrong || outsideWrong || profileDepthWrong ? 1 : 0;
 }

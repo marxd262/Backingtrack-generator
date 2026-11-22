@@ -1015,23 +1015,25 @@ add('presetDrive', presetDrive, [...VOICES.chords.organ.variants, 'nope', '', nu
   const { formChoice } = await load('ui/state.js');
   const stats = Object.fromEntries(ref.ACTION_NAMES.map((name) => [name, { count: 0, refused: 0, repeat: 0 }]));
   let noAction = 0; // texts without the name of an action
-  const special = { failing: 0, restarts: 0, probes: 0 }; // Task 30b: steps whose storage fails, new sessions on the same storage, export probes
+  const special = { failing: 0, restarts: 0, probes: 0, places: 0 }; // Task 30b: steps whose storage fails, new sessions on the same storage, export probes; places asked of position
   // what follows a new session: start, start and a resume that restores, start and a resume refused (no offer), a resume, something else
   const afterRestart = { start: 0, 'start, resume': 0, 'start, resume refused': 0, resume: 0, other: 0 };
-  // Task 30b: a step is an action text; { action, fail: 'false' | 'throw' }, the action with a storage whose every write fails (the core's Storage returns false or
-  // throws; the web's setItem throws); { restart: true, stored?, failReads? }, a new session on the same storage (the reference loads as a fresh page), after `stored`
-  // (name -> text, null removes it) replaced the stored texts, with reads that fail if `failReads` ('none': nothing, 'throw'); { probe: [key, name] }, what exportFile gives.
+  // Task 30b: a step is an action text; { action, fail?: 'false' | 'throw', failReads?: 'throw' }, the action with a storage whose every write fails (the core's Storage
+  // returns false or throws; the web's setItem throws) or whose every read throws; { restart: true, stored?, failReads? }, a new session on the same storage (the
+  // reference loads as a fresh page), after `stored` (name -> text, null removes it) replaced the stored texts, with reads that find nothing ('none') or throw ('throw')
+  // if `failReads`; { probe: [key, name] }, what exportFile gives.
   const runStep = (step) => {
     if (typeof step === 'string') return ref.apply(step);
     if (step.probe) return 'probe';
     if (step.restart) {
       for (const [name, text] of Object.entries(step.stored ?? {})) ref.storage.set(name, text);
-      ref.storage.failReads(Boolean(step.failReads));
+      ref.storage.failReads(step.failReads ?? false);
       try { ref.reload(); } finally { ref.storage.failReads(false); }
       return 'restart';
     }
-    ref.storage.failWrites(true);
-    try { return ref.apply(step.action); } finally { ref.storage.failWrites(false); }
+    ref.storage.failWrites(Boolean(step.fail));
+    ref.storage.failReads(step.failReads ?? false);
+    try { return ref.apply(step.action); } finally { ref.storage.failWrites(false); ref.storage.failReads(false); }
   };
   // FNV-1a, 64 bits, of the text's UTF-8 bytes, in hexadecimal (two halves of 32 bits: prime 2^40 + 0x1b3)
   const fnv = (text) => {
@@ -1047,19 +1049,46 @@ add('presetDrive', presetDrive, [...VOICES.chords.organ.variants, 'nope', '', nu
   // every list of the tree in the order of sortItems (PROTOKOLL.md section 4 says state() gives the tree in the view's order)
   const { sortItems } = await load('core/profile-tree.js');
   const sorted = (items) => { const s = sortItems(items); return s.every((n, i) => n === items[i]) && items.every((n) => n.type !== 'folder' || sorted(n.items)); };
-  // Per step: { change, state, track, sound, tuning }, `writes` (the storage's writes of the step: [name, text, took]) if there were any, and what exportFile gives for the
-  // selected row with the name "Export" when it differs from what the step before had: the text, or for the session its fnv (its file is captureParts of what state()
-  // holds field by field; in full it would double the reference). A probe step has only { probe }. The test makes the same record by the same rules.
+  // Fix wave of Phase 6 (M5): the order of an object's keys at every level, as a text ({"key":<order of its value>,...}, [<order of each entry>], nothing for a value),
+  // of track() and state().track: the generator sums the tags' effects in the order of the keys of the track's text.
+  const keyOrder = (v) => (Array.isArray(v) ? `[${v.map(keyOrder).join(',')}]`
+    : v !== null && typeof v === 'object' ? `{${Object.keys(v).map((k) => `${JSON.stringify(k)}:${keyOrder(v[k])}`).join(',')}}` : '');
+  // Fix wave of Phase 6 (I3): the places of the playback at which the step asks position(beats), from the reference's state: the start of a bar and a place inside it
+  // (another bar at each step, the first at the first step), the last beat before the next change of chord and a hair before it (where the countdown's slack of 1e-9
+  // decides), beyond the loop's end, and a negative place.
+  const { loopBars } = await load('ui/position.js');
+  const { chordIndex } = await load('core/form.js');
+  const { noteToPc } = await load('core/music.js');
+  const placesOf = (k) => {
+    const { track } = ref.current().state;
+    const length = loopBars(track);
+    const starts = [0];
+    for (let i = 0; i < length; i++) starts.push(starts[i] + track.bars[chordIndex(track, i)].beats);
+    const loop = starts[length];
+    const b = (k * 7) % length;
+    const chordAt = (i) => track.bars[chordIndex(track, i % length)].chord;
+    const same = (x, y) => noteToPc(x.root) === noteToPc(y.root) && x.quality === y.quality;
+    let change = null;
+    for (let step = 1; step < length && change === null; step++) if (!same(chordAt(b), chordAt(b + step))) change = b + step < length ? starts[b + step] : loop + starts[b + step - length];
+    return [starts[b], starts[b] + 0.5, ...(change === null ? [] : [change - 1, change - 1 - 1e-12]), loop + starts[b] + 0.25, -1.5];
+  };
+  // Per step: { change, state, track, sound, tuning, keys, position }, `profiles` (what profiles() gives) when it differs from what the step before had (as the page reads
+  // it only when it changed: with 1,000 nodes it is 170 KB), `writes` (the storage's writes of the step: [name, text, took]) if there were any, and what exportFile gives
+  // for the selected row with the name "Export" when it differs from what the step before had: the text, or for the session its fnv (its file is captureParts of what
+  // state() holds field by field; in full it would double the reference). `keys`: the order of the keys of track() and state().track; `position`: per place of the step
+  // (the case's `at`) the fnv of JSON.stringify of what position gives (in full the fretboard alone would double the reference). A probe step has only { probe }. The
+  // case is { in: { steps, at } }. The test makes the same record by the same rules.
   const nameOf = (step) => { try { return JSON.parse(typeof step === 'string' ? step : step.action ?? 'null')?.action; } catch { return undefined; } };
   const sequence = (steps) => {
     ref.reset();
-    let shown = null;
+    let shown = null, shownView = null;
     const results = [];
-    const out = steps.map((step) => {
+    const at = [];
+    const out = steps.map((step, k) => {
       const result = runStep(step);
       results.push(result);
       const text = typeof step === 'string' ? step : step.action;
-      if (result === 'probe') { special.probes++; return { probe: ref.exportText(...step.probe) }; }
+      if (result === 'probe') { special.probes++; at.push([]); return { probe: ref.exportText(...step.probe) }; }
       if (result === 'restart') special.restarts++;
       else {
         if (typeof step !== 'string') special.failing++;
@@ -1069,9 +1098,15 @@ add('presetDrive', presetDrive, [...VOICES.chords.organ.variants, 'nope', '', nu
       }
       if (!sorted(ref.current().tree.items)) throw new Error('a list of the tree is not in the order of sortItems');
       const rec = ref.record();
+      rec.keys = { track: keyOrder(rec.track), state: keyOrder(rec.state.track) };
+      at.push(placesOf(k));
+      rec.position = at[k].map((beats) => fnv(JSON.stringify(ref.position(beats))));
+      special.places += at[k].length;
       const writes = ref.storage.takeWrites();
       if (writes.length) rec.writes = writes;
-      const selection = rec.state.profiles.selection;
+      const selection = rec.profiles.selection;
+      const view = JSON.stringify(rec.profiles);
+      if (view === shownView) delete rec.profiles; else shownView = view;
       const file = ref.exportText(selection, 'Export');
       if (file !== shown) {
         shown = file;
@@ -1084,7 +1119,7 @@ add('presetDrive', presetDrive, [...VOICES.chords.organ.variants, 'nope', '', nu
       const [a, b] = [nameOf(steps[i + 1]), nameOf(steps[i + 2])];
       afterRestart[a === 'start' ? (b === 'resume' ? (results[i + 2] === 'applied' ? 'start, resume' : 'start, resume refused') : 'start') : a === 'resume' ? 'resume' : 'other']++;
     });
-    cases.push({ fn: 'session', in: steps, out });
+    cases.push({ fn: 'session', in: { steps, at }, out });
   };
   const act = (action, fields = {}) => JSON.stringify({ action, ...fields });
   const st = () => ref.current().state;
@@ -1194,6 +1229,7 @@ add('presetDrive', presetDrive, [...VOICES.chords.organ.variants, 'nope', '', nu
       return R.next() < 0.7 ? { from: 'text', text, ids } : { from: 'file', text, size: Buffer.byteLength(text, 'utf8'), ids };
     },
     undoProfile: () => ({}),
+    reloadProfiles: () => ({}),
     rememberSession: () => ({ bar: between(0, 400), at: 1700000000000 + between(0, 1e9) }),
     resume: () => ({ playing: R.next() < 0.5 ? null : { bar: between(0, 400), at: 1700000000000 + between(0, 1e9) } }),
   };
@@ -1264,10 +1300,13 @@ add('presetDrive', presetDrive, [...VOICES.chords.organ.variants, 'nope', '', nu
         if (row) push(act('profileSelect', { key: row }));
       }
       if (name === 'resume' && !ref.current().last && R.next() < 0.75) push(act('rememberSession', DRAW.rememberSession()));
+      // "Erneut lesen" stands only after profiles.json could not be read: mostly a new session on a storage whose reads throw comes first
+      if (name === 'reloadProfiles' && ref.current().problems.profiles !== 'unreadable' && R.next() < 0.6) { push({ restart: true, failReads: 'throw' }); push(act('start', DRAW.start())); }
       const action = { action: name, ...(SHOWN[name] && R.next() < 0.15 ? SHOWN[name]() : DRAW[name]()) };
       const text = R.next() < 0.125 ? spoil(action) : JSON.stringify(action);
-      // the storage fails at this step: mostly where the action writes
-      push(R.next() < (WRITING.includes(name) ? 0.25 : 0.03) ? { action: text, fail: any(['false', 'throw']) } : text);
+      // the storage fails at this step: mostly where the action writes; "Erneut lesen" now and then on a storage that still cannot be read
+      if (name === 'reloadProfiles' && R.next() < 0.3) push({ action: text, failReads: 'throw' });
+      else push(R.next() < (WRITING.includes(name) ? 0.25 : 0.03) ? { action: text, fail: any(['false', 'throw']) } : text);
       if (R.next() < 0.015) { // the app starts again on the same storage: the shell sends start, the user now and then "Weitermachen"
         push({ restart: true, ...(R.next() < 0.2 ? { failReads: any(['none', 'throw']) } : {}) });
         push(act('start', DRAW.start()));
@@ -1483,6 +1522,19 @@ add('presetDrive', presetDrive, [...VOICES.chords.organ.variants, 'nope', '', nu
     () => act('moveNode', { id: idOf('B'), target: idOf('F') }), act('undoProfile'), act('undoProfile'), () => sel(idOf('A')), act('deleteNode'), sel('session'), act('undoProfile'),
     () => sel(idOf('A')), act('overwriteProfile', { parts: ['tempo'] }), act('renameNode', { name: 'A2' }), act('undoProfile'),
     sel('mine'), imp(profileText('I'), 1), fail(act('undoProfile')), fail(act('undoProfile'), 'throw'), act('undoProfile'), sel('mine'), imp(profileText('J'), 1), { restart: true }, act('start', { variant: 5 }), act('undoProfile')]);
+  // Fix wave of Phase 6 (F1, PROTOKOLL.md section 3a): after a profiles.json that could not be read every change of the tree is refused and writes nothing (what does not
+  // change it acts as always) until "Erneut lesen" reads it; a damaged one is kept once as profiles.damaged.json before the first write of the tree, and a failing write of
+  // that refuses the change; damaged and unreadable session.json and mix.json, writes of them that fail and then hold; reads that find nothing
+  LIMITS.reloadProfiles = build([act('reloadProfiles'), save('A'), sel('mine'), folderAdd('F'), { restart: true, failReads: 'throw' }, act('start', { variant: 3 }),
+    sel('session'), save('B'), sel('mine'), folderAdd('G'), sel('factory:funk'), act('copyFactory', { name: 'Funk', id: nid() }), sel('mine'), imp(profileText('I'), 1),
+    sel('session'), save('Leer', { parts: [] }), act('setLevel', { channel: 'bass', value: 20 }), act('rememberSession', { bar: 2, at: 3 }),
+    { action: act('reloadProfiles'), failReads: 'throw' }, sel('session'), save('C'), act('reloadProfiles', { extra: 1 }), act('reloadProfiles'),
+    sel('session'), save('D'), () => sel(idOf('A')), act('deleteNode'), act('undoProfile'),
+    { restart: true, stored: { 'profiles.json': 'kaputt' } }, act('start', { variant: 4 }), sel('session'), fail(save('E')), fail(save('E'), 'throw'), save('E'), sel('session'), save('F'),
+    { restart: true, stored: { 'profiles.json': '{"items":5}', 'session.json': '{"parts":5}', 'mix.json': '[1]' } }, act('start', { variant: 5 }), act('resume', { playing: null }),
+    sel('mine'), folderAdd('H'), fail(act('setLevel', { channel: 'drums', value: 30 })), act('setLevel', { channel: 'drums', value: 31 }), fail(act('rememberSession', { bar: 1, at: 2 }), 'throw'),
+    act('rememberSession', { bar: 1, at: 3 }), { restart: true, failReads: 'none' }, act('start', { variant: 6 }), act('reloadProfiles'),
+    { restart: true, failReads: 'throw' }, act('rememberSession', { bar: 4, at: 5 }), { action: act('reloadProfiles'), failReads: 'none' }, sel('mine'), folderAdd('K')]);
   LIMITS.rememberSession = build([act('rememberSession', { bar: 0, at: 0 }), act('rememberSession', { bar: 95, at: 1 }), act('rememberSession', { bar: 96, at: 2 }), act('rememberSession', { bar: 1000003, at: MAX }),
     ...on('rememberSession', [-1, 1.5, '3', null], 'bar', { at: 5 }), ...on('rememberSession', [-1, 2.5, '3', null], 'at', { bar: 5 }), act('rememberSession', { bar: 5 }), act('rememberSession', { at: 5 }),
     act('setFormTemplate', { template: 'off' }), act('setFormTarget', { bars: 24 }), act('rememberSession', { bar: 50, at: 6 }), act('setFormTemplate', { template: 'blues' }), act('rememberSession', { bar: 50, at: 7 }),
@@ -1528,6 +1580,28 @@ add('presetDrive', presetDrive, [...VOICES.chords.organ.variants, 'nope', '', nu
       save('P'), () => probe(idOf('P'), 'egal'), sel('mine'), folderAdd('Leer'), () => probe(idOf('Leer'), 'x'), probe('mine', 'Meine Profile'), probe('session', 'Name mit "Zeichen" \\ und \n Zeile')]),
   ];
   for (const steps of RESTARTS) sequence(steps);
+  // Fix wave of Phase 6 (F4): the web's two notices, fields of state() now. "Folge voll" (notice, refusals): set by addChord at 8 chords, kept by the actions that do not
+  // clear it and by a repeat, cleared by each action that clears it in the web. "alle gesperrt" (rollNote): set by "Neu würfeln" with every part locked, kept by the
+  // others (also a new form whose locks fell), cleared by each action of the strip (also one form-ui.js gives no result for) and by "Neu würfeln" when it rolls.
+  const fill = () => () => { const c = chordsOf(); return Array.from({ length: Math.max(0, 8 - st().track.bars.length) }, (_, i) => act('addChord', c[(i * 5) % c.length])); };
+  const full = () => [fill(), () => act('addChord', chordsOf()[0])];
+  const other = (list, now) => list.find((x) => x !== now);
+  const lockAll = () => () => (st().track.form?.sections ?? []).flatMap((s, i) => (s.locked ? [] : [act('selectPart', { index: i }), act('toggleLock')]));
+  const NOTICES = [
+    build([...full(), () => act('addChord', chordsOf()[1]), act('setTempo', { bpm: 101, from: 'play' }), act('toggleTag', { category: TAG_CATEGORIES[0].id, tag: TAG_CATEGORIES[0].tags[0] }),
+      () => act('setRoot', { root: st().track.key.root, from: 'play' }), () => act('setRoot', { root: other(ROOTS, st().track.key.root), from: 'play' }),
+      ...full(), () => act('setScale', { scale: other(SCALE_NAMES, st().scale), from: 'play' }), ...full(), act('newVariant', { variant: 31 }), ...full(), act('stepVariant', { dir: 1 }),
+      ...full(), act('enterVariant', { variant: 32 }), ...full(), act('surprise', { variant: 33, style: 0.1, tempo: 0.2, scale: 0.3, root: 0.4 }), ...full(), act('start', { variant: 34 }),
+      ...full(), act('setChordColor', { color: CHORD_COLORS[1] }), ...full(), () => act('setStyle', { style: other(STYLES, st().style), from: 'play' }), ...full(), act('removeChord', { index: 0 }),
+      ...full(), sel('factory:funk'), act('loadProfile'), sel('session'), save('N'), ...full(), () => sel(idOf('N')), act('loadProfile'),
+      act('rememberSession', { bar: 1, at: 2 }), ...full(), act('resume', { playing: null })]),
+    build([lockAll(), act('rerollForm'), act('setTempo', { bpm: 99, from: 'play' }), act('setFormFeel', { knob: 'dynamics', value: 40 }), act('rerollForm'), act('selectPart', { index: 0 }),
+      act('rerollForm'), () => act('editPart', { field: 'type', value: part().type }), () => act('editPart', { field: 'type', value: other(PART_TYPES, part().type) }),
+      lockAll(), act('rerollForm'), act('movePart', { dir: -1 }), lockAll(), act('rerollForm'), act('copyPart'), lockAll(), act('rerollForm'), act('addPart'),
+      lockAll(), act('rerollForm'), act('deletePart'), lockAll(), act('rerollForm'), act('toggleLock'), lockAll(), act('rerollForm'),
+      () => act('setFormTarget', { bars: other(TARGET_SIZES, st().formTarget) }), act('rerollForm'), lockAll(), act('rerollForm'), act('start', { variant: 35 })]),
+  ];
+  for (const steps of NOTICES) sequence(steps);
   // texts that are no action, and the reader's edges (track.cpp's Reader, JSON.parse's rules): a key twice (the last value), a field more (not read), a byte order
   // mark (no JSON), a lone surrogate in a field not read, a field nested so that the text is 64 levels deep (the reader's limit, see PROTOKOLL.md: deeper is no JSON there)
   sequence(['', ' ', 'x', '{', '}', '[]', '5', 'null', 'true', '"start"', '{}', '{"action":5}', '{"action":null}', '{"action":"nope"}', '{"action":"toString"}', '{"action":"__proto__"}', '{"action":"constructor"}',
@@ -1539,7 +1613,7 @@ add('presetDrive', presetDrive, [...VOICES.chords.organ.variants, 'nope', '', nu
   const sum = (key) => Object.values(stats).reduce((n, s) => n + s[key], 0);
   console.log(`session: ${cases.filter((c) => c.fn === 'session').length} sequences, ${total} actions (${sum('refused')} refused, ${sum('repeat')} repeats) and ${noAction} texts that name no action;`
     + ` ${special.failing} steps with a failing storage, ${special.restarts} new sessions on the same storage (followed by ${Object.entries(afterRestart).map(([k, n]) => `${k} ${n}`).join(', ')}),`
-    + ` ${special.probes} export probes`);
+    + ` ${special.probes} export probes, ${special.places} places asked of position`);
   for (const [name, s] of Object.entries(stats)) {
     console.log(`  ${name.padEnd(18)} ${String(s.count).padStart(5)}  refused ${String(s.refused).padStart(4)} (${Math.round((100 * s.refused) / Math.max(1, s.count))} %)  repeats ${String(s.repeat).padStart(4)}`);
   }

@@ -110,34 +110,44 @@ bool strictEqual(const Json* a, const Json* b) {
 // fretboard.js sameChord
 bool sameChord(const Json* a, const Json* b) { return rootPc(a) == rootPc(b) && strictEqual(own(a, "quality"), own(b, "quality")); }
 
+} // namespace
+
 // ---------- form.js: chordIndex and sectionAt on JSON ----------
 
-// sectionAt(form, bar).barInSection; none outside the form or for a part that is unusable
-std::optional<double> barInSection(const Json& form, double bar) {
+std::optional<SectionHit> sectionAt(const Json& form, double bar) {
     const Json* sections = own(form, "sections");
     if (sections == nullptr || !sections->is_array() || !isIntegerNumber(bar) || bar < 0) return std::nullopt;
     double start = 0;
-    for (const Json& section : *sections) {
-        const Json* bars = own(section, "bars");
+    for (size_t index = 0; index < sections->size(); ++index) {
+        const Json* bars = own((*sections)[index], "bars");
         if (bars == nullptr || !isInteger(*bars) || bars->get<double>() < 1) return std::nullopt;
-        if (bar < start + bars->get<double>()) return bar - start;
+        if (bar < start + bars->get<double>()) return SectionHit { index, bar - start };
         start += bars->get<double>();
     }
     return std::nullopt;
 }
-// chordIndex({ bars, form }, barIndex): an index into bars; a number that is no index (below 0, or NaN) comes out as the JavaScript's does
-double chordIndex(const Json& bars, const Json& form, double barIndex) {
-    const double n = static_cast<double>(bars.size());
-    if (!isValidFormValue(form)) return jsMod(barIndex, n);
-    const double total = formLengthOf(form);
-    const std::optional<double> hit = total > 0 ? barInSection(form, jsMod(barIndex, total)) : std::nullopt;
-    return hit ? jsMod(*hit, n) : jsMod(barIndex, n);
+
+ChordIndex::ChordIndex(const Json& bars, const Json& form) : count_(static_cast<double>(bars.size())) {
+    if (!isValidFormValue(form)) return;
+    double start = 0; // a valid form's parts all have whole bars of at least 1, so sectionAt meets no part that stops it
+    for (const Json& section : form.at("sections")) ends_.push_back(start += section.at("bars").get<double>());
 }
+
+double ChordIndex::operator()(double barIndex) const {
+    if (ends_.empty()) return jsMod(barIndex, count_); // no valid form (a valid one has at least one part)
+    const double bar = jsMod(barIndex, ends_.back()); // formLength: the end of the last part
+    if (isIntegerNumber(bar) && bar >= 0)              // sectionAt: none for what is no index
+        for (size_t i = 0; i < ends_.size(); ++i) if (bar < ends_[i]) return jsMod(bar - (i ? ends_[i - 1] : 0), count_);
+    return jsMod(barIndex, count_);
+}
+
+namespace {
+
 // bars[i], or none where that is undefined
 const Json* barAt(const Json& bars, double i) { return isIntegerNumber(i) && i >= 0 && i < static_cast<double>(bars.size()) ? &bars[static_cast<size_t>(i)] : nullptr; }
 // bars[chordIndex(track, i)].chord, where bars[...] must exist (the web app's TypeError otherwise); the chord itself may be undefined
-const Json* chordOfBar(const Json& bars, const Json& form, double i) {
-    const Json* bar = barAt(bars, chordIndex(bars, form, i));
+const Json* chordOfBar(const Json& bars, const ChordIndex& index, double i) {
+    const Json* bar = barAt(bars, index(i));
     if (bar == nullptr || bar->is_null()) thrown("Cannot read properties of undefined (reading 'chord')");
     return own(*bar, "chord");
 }
@@ -196,7 +206,7 @@ Json colorChord(const Json& chord, const Json& color, const Json& key) {
             dominant = rootPc(&chord) == noteToPcOf(allowedChords(key).at(static_cast<size_t>(data().dominant.at(mode))).at("root"));
         }
         return Json::object({ { "root", valueOf(own(chord, "root")) }, { "quality", dominant ? data().dominantColors.at(colorName) : table->second.at(*base) } });
-    } catch (const std::invalid_argument&) {
+    } catch (const std::exception&) { // the web's guards: whatever the lookups throw leaves the chord as it is
         return spreadValue(chord);
     }
 }
@@ -240,10 +250,11 @@ Json chordTimeline(const Json& input) {
     const Json& bars = track.at("bars");
     const Json form = formOf(track);
     const double bpm = track.at("bpm").get<double>(), length = track.at("length").get<double>();
+    const ChordIndex chordIndex(bars, form);
     double startBeat = 0;
     Json out = Json::array();
     for (double index = 0; index < length; ++index) {
-        const Json& bar = *barAt(bars, chordIndex(bars, form, index));
+        const Json& bar = *barAt(bars, chordIndex(index));
         const double beats = bar.at("beats").get<double>();
         out.push_back(Json::object({ { "time", r6((startBeat * 60) / bpm) }, { "bar", static_cast<size_t>(index) },{ "chord", spreadValue(bar.at("chord")) }, { "durationSec", r6((beats * 60) / bpm) } }));
         startBeat += beats;
@@ -314,8 +325,21 @@ Json fretboardNotes(const Json& options) {
             const double pc = mod12(tuning[string] + fret);
             const bool inScale = includes(scaleSet, pc), isCur = includes(cur, pc), isNext = includes(nxt, pc);
             if (!inScale && !isCur && !isNext) continue;
-            notes.push_back(Json::object({ { "string", string }, { "fret", fret }, { "pc", pc }, { "name", names[static_cast<size_t>(pc)] }, { "degree", degreeLabel(key, pc) },
-                                           { "scale", inScale }, { "current", isCur }, { "next", isNext }, { "root", isCur && pc == curRoot } }));
+            std::string degree = degreeLabel(key, pc); // throws for a pitch class that is no whole number, so `pc` below is one
+            // built in place (as ObjectBuilder::build does), not with Json::object({ ... }), which is several times slower: the session asks for the notes 30 times a second
+            Json note = Json::object();
+            auto& members = static_cast<std::vector<std::pair<const std::string, Json>>&>(*note.get_ptr<Json::object_t*>());
+            members.reserve(9);
+            members.emplace_back("string", string);
+            members.emplace_back("fret", fret);
+            members.emplace_back("pc", static_cast<int>(pc)); // whole: a text of the notes writes it without a fraction
+            members.emplace_back("name", names[static_cast<size_t>(pc)]);
+            members.emplace_back("degree", std::move(degree));
+            members.emplace_back("scale", inScale);
+            members.emplace_back("current", isCur);
+            members.emplace_back("next", isNext);
+            members.emplace_back("root", isCur && pc == curRoot);
+            notes.push_back(std::move(note));
         }
     }
     return notes;
@@ -326,12 +350,13 @@ Json nextDistinctChord(const Json& bars, const Json& length, const Json& barInde
     const double count = length.get<double>();
     const double start = isInteger(barIndex) && barIndex.get<double>() > 0 ? jsMod(barIndex.get<double>(), count) : 0;
     try { // a bar that is no chord: no result instead of an exception
-        const Json* cur = chordOfBar(bars, form, start);
+        const ChordIndex index(bars, form);
+        const Json* cur = chordOfBar(bars, index, start);
         for (double step = 1; step < count; ++step) {
-            const Json* c = chordOfBar(bars, form, jsMod(start + step, count));
+            const Json* c = chordOfBar(bars, index, jsMod(start + step, count));
             if (!sameChord(cur, c)) return *c;
         }
-    } catch (const std::invalid_argument&) {
+    } catch (const std::exception&) { // the web's catch-all
     }
     return Json();
 }
@@ -345,13 +370,14 @@ Json progressionRoles(const Json& track, const Json& bar) {
     if (!bar.is_null() && !bar.is_number()) thrown("bar is a number or null");
     const double from = bar.is_null() ? 0 : bar.get<double>();
     std::vector<std::string> roles(bars.size(), "later");
-    const double nowIdx = chordIndex(bars, form, from);
+    const ChordIndex chordIndex(bars, form);
+    const double nowIdx = chordIndex(from);
     if (barAt(bars, nowIdx) != nullptr) roles[static_cast<size_t>(nowIdx)] = "now"; // another property of the array is no entry of the list
     const Json* length = own(track, "length");
     if (length != nullptr && !length->is_null() && !length->is_number()) thrown("length is a number");
     const double total = length == nullptr ? NAN : length->is_null() ? 1 : jsMax(length->get<double>(), 1);
     for (double step = 1; step < total; ++step) {
-        const double i = chordIndex(bars, form, jsMod(from + step, total));
+        const double i = chordIndex(jsMod(from + step, total));
         if (i == nowIdx) continue; // the same entry (a single chord): stays now
         if (barAt(bars, i) == nullptr || barAt(bars, nowIdx) == nullptr) thrown("Cannot read properties of undefined (reading 'chord')");
         if (!sameChord(own(*barAt(bars, i), "chord"), own(*barAt(bars, nowIdx), "chord"))) {
@@ -386,8 +412,9 @@ Json beatsUntilChange(const Json& track, double songSec) {
     if ((lengthValue != nullptr && !lengthValue->is_null() && !lengthValue->is_number()) || bpmValue == nullptr || !bpmValue->is_number()) thrown("length and bpm are numbers");
     // no length (undefined or null) makes no bars, and every comparison with it is false: the same as NaN
     const double length = lengthValue == nullptr || lengthValue->is_null() ? NAN : lengthValue->get<double>(), bpm = bpmValue->get<double>();
+    const ChordIndex index(bars, form);
     const auto dur = [&](double i) {
-        const Json* bar = barAt(bars, chordIndex(bars, form, i));
+        const Json* bar = barAt(bars, index(i));
         const Json* beats = own(bar, "beats");
         if (beats == nullptr || !beats->is_number()) thrown("Cannot read properties of undefined (reading 'beats')");
         return (beats->get<double>() * 60) / bpm;
@@ -398,11 +425,11 @@ Json beatsUntilChange(const Json& track, double songSec) {
     const double pos = jsMod(jsMod(songSec, loopSec) + loopSec, loopSec);
     double bar = 0, start = 0;
     while (bar < length - 1 && start + dur(bar) <= pos) start += dur(bar++);
-    const Json* cur = chordOfBar(bars, form, bar);
+    const Json* cur = chordOfBar(bars, index, bar);
     double end = start + dur(bar);
     for (double step = 1; step < length; ++step) {
         const double i = jsMod(bar + step, length);
-        if (!sameChord(cur, chordOfBar(bars, form, i))) return jsMax(1, std::ceil(((end - pos) * bpm) / 60 - 1e-9));
+        if (!sameChord(cur, chordOfBar(bars, index, i))) return jsMax(1, std::ceil(((end - pos) * bpm) / 60 - 1e-9));
         end += dur(i);
     }
     return Json();

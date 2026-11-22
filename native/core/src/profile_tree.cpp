@@ -117,13 +117,21 @@ const std::string& nameOf(const Json& n) { // shortcut: a name is a text (the tr
 }
 bool hasId(const Json& n, const Json& id) { const Json* v = member(n, "id"); return v != nullptr && *v == id; } // n.id === id
 // folders first, then by name; the sort is stable, as the JavaScript's. In place: a list of a thousand nodes with their parts is not copied for it.
+bool sortsBefore(const Json& a, const Json& b) {
+    const bool folderA = isFolder(a), folderB = isFolder(b);
+    if (folderA != folderB) return folderA;
+    return compareNames(nameOf(a), nameOf(b)) < 0;
+}
 void sortInPlace(Json& items) {
     std::vector<Json>& list = items.get_ref<Json::array_t&>();
-    std::stable_sort(list.begin(), list.end(), [](const Json& a, const Json& b) {
-        const bool folderA = isFolder(a), folderB = isFolder(b);
-        if (folderA != folderB) return folderA;
-        return compareNames(nameOf(a), nameOf(b)) < 0;
-    });
+    std::stable_sort(list.begin(), list.end(), sortsBefore);
+}
+// the nodes of a list in the order of sortItems, without copying them
+std::vector<const Json*> sortedNodes(const Json& items) {
+    std::vector<const Json*> list;
+    for (const Json& n : items) list.push_back(&n);
+    std::stable_sort(list.begin(), list.end(), [](const Json* a, const Json* b) { return sortsBefore(*a, *b); });
+    return list;
 }
 Json arrayOf(std::vector<Json>&& list) { Json out = Json::array(); out.get_ref<Json::array_t&>() = std::move(list); return out; }
 Json fail(const char* code) { return Json::object({ { "ok", false }, { "code", code } }); }
@@ -342,10 +350,10 @@ double countNodes(const Json& tree) {
 Json listFolders(const Json& tree) {
     Json out = Json::array({ Json::object({ { "id", nullptr }, { "label", "" }, { "depth", 0 } }) });
     const std::function<void(const Json&, int)> walk = [&](const Json& items, int depth) {
-        for (const Json& n : sortItems(items)) {
-            if (!isFolder(n)) continue;
-            out.push_back(Json::object({ { "id", orNull(member(n, "id")) }, { "label", nameOf(n) }, { "depth", depth } }));
-            walk(itemsOfNode(n), depth + 1);
+        for (const Json* n : sortedNodes(items)) {
+            if (!isFolder(*n)) continue;
+            out.push_back(Json::object({ { "id", orNull(member(*n, "id")) }, { "label", nameOf(*n) }, { "depth", depth } }));
+            walk(itemsOfNode(*n), depth + 1);
         }
     };
     walk(itemsOfNode(tree), 1);
@@ -424,7 +432,7 @@ bool canMove(const Json& tree, const Json& id, const Json& targetId) { return mo
 
 Json moveTargets(const Json& tree, const Json& id) {
     Json out = Json::array();
-    if (find(tree, id).is_null()) return out;
+    if (pathTo(tree, id).empty()) return out;
     for (const Json& t : listFolders(tree)) if (canMove(tree, id, t.at("id"))) out.push_back(t);
     return out;
 }
@@ -528,16 +536,21 @@ Json importNode(const Json& tree, const Json& parentId, const Json& node, const 
 
 bool isReservedId(const std::string& id) { return id == "session" || id == "mine" || id == "factory" || id.rfind("factory:", 0) == 0; }
 
+std::optional<Json> treeOf(const Json& raw, const MakeId& makeId) {
+    if (raw.is_array()) return migrate(raw, makeId);
+    const Json* items = member(raw, "items");
+    if (raw.is_object() && items != nullptr && items->is_array()) {
+        Loaded st;
+        return Json::object({ { "items", readItems(*items, 1, st, makeId) } });
+    }
+    return std::nullopt;
+}
+
 Json loadTree(Storage& storage, const MakeId& makeId) {
     try { // mirrors the JavaScript's try/catch at this place; no input known that reaches it
         const std::optional<std::string> text = storage.read(PROFILES_NAME);
-        const Json raw = text ? parsedText(*text) : Json(); // a text that is no JSON counts as null: an empty tree (the web: JSON.parse throws, and the answer is the same)
-        if (raw.is_array()) return migrate(raw, makeId);
-        const Json* items = member(raw, "items");
-        if (raw.is_object() && items != nullptr && items->is_array()) {
-            Loaded st;
-            return Json::object({ { "items", readItems(*items, 1, st, makeId) } });
-        }
+        // a text that is no JSON counts as null: an empty tree (the web: JSON.parse throws, and the answer is the same)
+        if (std::optional<Json> tree = treeOf(text ? parsedText(*text) : Json(), makeId)) return std::move(*tree);
     } catch (const std::exception&) { /* the empty tree below */ }
     return newTree();
 }
