@@ -577,7 +577,9 @@ Beginnt erst, wenn die Phasen 1 bis 8 auf `develop` liegen und der Nutzer die A/
 
 ### Task 36: Referenzen einfrieren
 
-**Files:** Create `native/core/tests/golden/` (Tracks der Gleichheitsprüfung, je Track Anzahl und Prüfsumme der Ereignisse; `logic.json`; je Klang-Fall Pegel und Oktavbänder des Kerns); Modify `test_parity.cpp`, `test_logic.cpp`, `sound-compare.mjs`, `CMakeLists.txt`.
+**Files:** Create `native/core/tests/golden/` (Tracks der Gleichheitsprüfung, je Track Anzahl und Prüfsumme der Ereignisse; für die Logik je Fall die Eingabe und eine Prüfsumme des Ergebnisses, nicht `logic.json` selbst; je Klang-Fall Pegel und Oktavbänder des Kerns); Modify `test_parity.cpp`, `test_logic.cpp`, `sound-compare.mjs`, `CMakeLists.txt`.
+
+**Geändert am 2026-11-22 mit Zustimmung des Nutzers:** Die Vergleichsdaten der Logik haben nach Phase 6 rund 310 MB (drei Viertel der Fälle sind Vergleiche der Namens-Sortierung) und werden nicht als Dateien eingefroren. Eingefroren wird je Fall die Eingabe (oder ihr Erzeuger mit Seed) und eine Prüfsumme des Ergebnisses; für die Sortierung wird die Tabelle `collation.json` Quelle, mit einigen hundert Paaren als Fälle. Die eigenen Tabellen des Generators (Akkord-Intervalle, Wirkungen der Schlagworte auf das Spiel) bekommen dabei einen Vergleich gegen `music.json`, weil die Gleichheitsprüfung gegen die Web-Version sie danach nicht mehr zusammenhält.
 
 **Inhalt:** Ein letzter Lauf gegen die Web-Version muss vollständig bestehen; aus genau diesem Lauf entstehen die eingefrorenen Werte. Danach prüfen die Tests den Kern gegen diese Werte statt gegen JavaScript. `sound.json` und `music.json` sind ab hier Quelle statt Erzeugnis. Eine gewollte Änderung am Generator oder Klang ändert die Werte ab jetzt bewusst, mit einem eigenen Commit.
 
