@@ -94,6 +94,11 @@ try {
     input.dispatchEvent(new Event('input', { bubbles: true }));
     input.dispatchEvent(new Event('change', { bubbles: true }));
   }, [id, String(value)]);
+  // The page's song is fixed, not rolled: the variant typed into the page's own field (default 5; BTG_UI_VARIANT gives another). A rolled
+  // song decided some figures below and failed runs on the song alone. Variant 5 has all six layers and drums from beat 0; variant 12 rests
+  // drums and bass at beat 64 and is the song for trying ownBeat (below): BTG_UI_VARIANT=12 node native/tools/ui-check.mjs
+  const variant = Number(process.env.BTG_UI_VARIANT ?? 5);
+  await setRange('variant', variant);
   const result = { requests, idle: await engine(1000) };
 
   await page.evaluate(() => { // the lead's default job plays nothing: give it a melody, as the user does with the job menu
@@ -157,13 +162,16 @@ try {
     else if (!(state.peak > 0)) problems.push(`${layer}: switched on, but its level stays 0`);
   }
   // ownBeat, where the steps below play the page's own song: the first beat from 64 on (else from 0 on) after which its track starts a drum
-  // hit, a bass note and a chord note inside the 2 s restorePage measures (0.5 to 2.5 s after the `play`). A rolled song's form can rest
-  // drums and bass at beat 64; a fixed 64 then failed every such step on the song alone (Phase 5's fix wave, the controller's first run).
+  // hit, a bass note and a chord note 0.6 to 1.6 s into the song from there. restorePage measures the reports 0.5 to 2.5 s after it sent
+  // `play`, and the song starts later than that message by the lead (0.15 s) and by the messages queued before it, so a hit near 2.5 s is
+  // not heard in the window (it failed a run: drums back at beat 96 of a song played from 92). A song's form can rest drums and bass at 64.
   const lastBeat = Math.ceil((Math.max(...events.map((e) => e.t)) * sentTrack.bpm) / 60);
-  const plays = (layer, beat) => events.some((e) => e.layer === layer && (e.type === 'note' || e.type === 'hit') && e.t >= (beat * 60) / sentTrack.bpm + 0.5 && e.t < (beat * 60) / sentTrack.bpm + 2.5);
+  const plays = (layer, beat) => events.some((e) => e.layer === layer && (e.type === 'note' || e.type === 'hit') && e.t >= (beat * 60) / sentTrack.bpm + 0.6 && e.t < (beat * 60) / sentTrack.bpm + 1.6);
+  result.song = { variant: sentTrack.seed, bpm: sentTrack.bpm, parts: (sentTrack.form?.sections ?? []).map((s) => `${s.type} ${s.bars}`).join(', ') };
+  if (sentTrack.seed !== variant) problems.push(`the page's song is variant ${sentTrack.seed}, not the ${variant} typed into its field`);
   const ownBeat = [...Array(Math.max(0, lastBeat - 63)).keys()].map((i) => 64 + i).concat([...Array(Math.min(64, lastBeat)).keys()])
     .find((beat) => ['drums', 'bass', 'chords'].every((layer) => plays(layer, beat)));
-  if (ownBeat === undefined) problems.push("the page's song has no beat after which drums, bass and chords all start a note within 0.5 to 2.5 s");
+  if (ownBeat === undefined) problems.push("the page's song has no beat after which drums, bass and chords all start a note within 0.6 to 1.6 s");
   result.ownBeat = ownBeat ?? 64;
   await page.evaluate((beat) => { window.ownBeat = beat; }, result.ownBeat);
   // a voice change while playing: the chords switch to another sample guitar, the engine reports it ready, no error
