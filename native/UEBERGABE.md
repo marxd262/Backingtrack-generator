@@ -28,8 +28,8 @@ Der Generator ist nicht Teil dieses Laufs (dafür gibt es die Web-Version als R�
 
 | Zweck | Aufruf |
 |---|---|
-| Bauen und alle Tests | `native\build.ps1` (PowerShell) |
-| App starten | `native\start.cmd` |
+| Bauen und alle Tests | `native\run_tests.cmd` (Doppelklick) oder `native\build.ps1` (PowerShell) |
+| App starten | `native\start.cmd` (baut, was sich geändert hat, und startet; ohne Tests, seit 2026-11-23) |
 | Analyse einer Datei | `native/build/core/Release/btg_analyze.exe <audio> [out.json]` |
 | Trefferquoten | `node native/tools/analysis-score.mjs <Ordner> [...]` |
 | generierter Testsatz | `node native/tools/analysis-set.mjs` nach `native/build/analysis-set` |

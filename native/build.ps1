@@ -1,9 +1,10 @@
 # Configures and builds native/, then runs the tests.
 #   native\build.ps1              app and core
 #   native\build.ps1 -NoApp       core and tests only (no JUCE download)
-#   native\build.ps1 -Run         build, then start the app (start.cmd does this)
+#   native\build.ps1 -Run         build, then start the app
+#   native\build.ps1 -NoTests     build without running the tests (start.cmd: -Run -NoTests; run_tests.cmd runs them)
 #   native\build.ps1 -Tuning      for measuring: the analysis takes its numbers from the environment (tools\analysis-sweep.ps1)
-param([string]$Config = 'Release', [switch]$NoApp, [switch]$Run, [switch]$Tuning)
+param([string]$Config = 'Release', [switch]$NoApp, [switch]$Run, [switch]$NoTests, [switch]$Tuning)
 $ErrorActionPreference = 'Stop'
 
 $cmake = Get-Command cmake -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source
@@ -27,8 +28,10 @@ $app = if ($NoApp) { 'OFF' } else { 'ON' }
 if ($LASTEXITCODE) { exit $LASTEXITCODE }
 & $cmake --build $build --config $Config --parallel
 if ($LASTEXITCODE) { exit $LASTEXITCODE }
-& $ctest --test-dir $build -C $Config --output-on-failure
-if ($LASTEXITCODE) { exit $LASTEXITCODE }
+if (-not $NoTests) {
+    & $ctest --test-dir $build -C $Config --output-on-failure
+    if ($LASTEXITCODE) { exit $LASTEXITCODE }
+}
 
 if (-not $NoApp) {
     $exe = Get-ChildItem (Join-Path $build 'app') -Recurse -Filter '*.exe' |
