@@ -204,4 +204,59 @@ Json movePart(const Json& form, const Json& index, const Json& dir) {
     return result(replace(form, std::move(list)), to);
 }
 
+// ---------- what the strip and the inspector show (form-ui.js 7-51) ----------
+
+namespace {
+const Json& feelOf(const Json& form) { static const Json none; const Json* feel = own(form, "feel"); return feel == nullptr ? none : *feel; }
+double mean(const double (&pair)[2]) { return (pair[0] + pair[1]) / 2; }
+const Json* given(const Json& section, const char* key) { const Json* v = own(section, key); return v == nullptr || v->is_null() ? nullptr : v; } // `section[key] != null`
+// num: String(Math.round(n)) with a real minus sign
+std::string num(double n) {
+    std::string text = std::to_string(static_cast<long long>(jsRound(n)));
+    if (text[0] == '-') text.replace(0, 1, "\xE2\x88\x92");
+    return text;
+}
+std::string range(double a, double b) { return jsRound(a) == jsRound(b) ? num(a) : num(a) + " \xE2\x80\xA6 " + num(b); } // range([a, b], ''): one number when both round alike
+Json message(const char* key, Json params) { return Json::object({ { "key", key }, { "params", std::move(params) } }); }
+} // namespace
+
+Json stripBlocks(const Json& form) {
+    Json blocks = Json::array();
+    if (!isValidFormValue(form)) return blocks;
+    const double total = formLengthOf(form);
+    double start = 0;
+    const Json& sections = sectionsOf(form);
+    for (size_t index = 0; index < sections.size(); ++index) {
+        const Json& section = sections[index];
+        const Resolved r = resolvePart(section, feelOf(form));
+        const double bars = section.at("bars").get<double>();
+        blocks.push_back(Json::object({ { "index", index }, { "type", section.at("type") }, { "bars", section.at("bars") }, { "from", start + 1 }, { "to", start + bars }, { "width", bars / total },
+                                        { "height", 0.4 + 0.6 * clamp(1 + mean(r.level) / 12, 0, 1) }, { "locked", section.contains("locked") && section.at("locked") == true } })); // levelHeight
+        start += bars;
+    }
+    return blocks;
+}
+
+Json levelLabel(const Json& section, const Json& feel) {
+    if (const Json* level = given(section, "level")) return num(level->get<double>()) + " dB";
+    const Resolved r = resolvePart(section, feel);
+    return message("form.insp.default", Json::object({ { "v", range(r.level[0], r.level[1]) + " dB" } }));
+}
+
+Json densityLabel(const Json& section, const Json& feel) {
+    if (const Json* density = given(section, "density")) return message("ui.percent", Json::object({ { "n", num(density->get<double>() * 100) } }));
+    const Resolved r = resolvePart(section, feel);
+    return message("form.insp.default", Json::object({ { "v", message("ui.percent", Json::object({ { "n", range(r.density[0] * 100, r.density[1] * 100) } })) } }));
+}
+
+double levelValue(const Json& section, const Json& feel) {
+    const Json* level = given(section, "level");
+    return jsRound(level != nullptr ? level->get<double>() : mean(resolvePart(section, feel).level));
+}
+
+double densityValue(const Json& section, const Json& feel) {
+    const Json* density = given(section, "density");
+    return jsRound((density != nullptr ? density->get<double>() : mean(resolvePart(section, feel).density)) * 100);
+}
+
 } // namespace btg::detail

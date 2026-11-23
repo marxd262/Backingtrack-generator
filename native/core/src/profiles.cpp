@@ -526,6 +526,8 @@ namespace {
 void quoteInto(std::string& out, const std::string& text) {
     static const char* HEX = "0123456789abcdef";
     out += '"';
+    // printable ASCII without a quote or a backslash stands as it is (most texts: names, ids, keys); the rest is decoded (escapes, surrogates, bytes that are no UTF-8)
+    if (std::all_of(text.begin(), text.end(), [](char c) { return c >= 0x20 && c < 0x7F && c != '"' && c != '\\'; })) { out += text; out += '"'; return; }
     for (const char32_t cp : decode(text)) {
         if (cp == '"') out += "\\\"";
         else if (cp == '\\') out += "\\\\";
@@ -544,9 +546,13 @@ void stringifyInto(std::string& out, const Json& v, const std::string& gap, cons
     switch (v.type()) {
     case Json::value_t::null: out += "null"; return;
     case Json::value_t::boolean: out += v.get<bool>() ? "true" : "false"; return;
-    case Json::value_t::number_integer: case Json::value_t::number_unsigned: case Json::value_t::number_float:
-        out += std::isfinite(v.get<double>()) ? jsStringOf(&v) : "null";
+    case Json::value_t::number_integer: case Json::value_t::number_unsigned: case Json::value_t::number_float: {
+        const double d = v.get<double>();
+        // a whole number up to 2^53 is its digits (as Number::toString writes it, -0 as 0), without the detour of the shortest digits
+        if (std::floor(d) == d && std::fabs(d) <= 9007199254740992.0) { out += std::to_string(static_cast<long long>(d)); return; }
+        out += std::isfinite(d) ? jsStringOf(&v) : "null";
         return;
+    }
     case Json::value_t::string: quoteInto(out, v.get_ref<const std::string&>()); return;
     case Json::value_t::array: {
         if (v.empty()) { out += "[]"; return; }

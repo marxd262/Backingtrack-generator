@@ -30,24 +30,28 @@ const { saveLast, loadLast } = await load('ui/session-store.js');
 const { readSession, writeSession } = await load('ui/profile-session.js');
 const { factoryProfiles, factoryParts } = await load('ui/profile-factory.js');
 const { loopBars } = await load('ui/position.js');
-const { PART_IDS, captureParts, applyParts, partIdsOf } = await load('core/profile-parts.js');
-const { parseFile, makeProfileFile, makeFolderFile, FORMAT_FOLDER, LIMITS } = await load('core/profile.js');
-const { newTree, find, sortItems, addProfile, addFolder, renameNode, removeNode, overwriteParts, importNode, freeName, moveNode, moveTargets, countNodes, countProfiles } = await load('core/profile-tree.js');
+const { PART_IDS, PART_PRESETS, captureParts, applyParts, partIdsOf } = await load('core/profile-parts.js');
+const { parseFile, makeProfileFile, makeFolderFile, FORMAT_FOLDER, PROFILE_VERSION, FOLDER_VERSION, LIMITS } = await load('core/profile.js');
+const { newTree, find, sortItems, addProfile, addFolder, renameNode, removeNode, overwriteParts, importNode, freeName, canMove, moveNode, moveTargets, listFolders, countNodes, countProfiles } = await load('core/profile-tree.js');
 const { chooseRoot, chooseScale } = await load('ui/key-scale.js');
 const { toggleTag } = await load('ui/tags-ui.js');
 const { addChord } = await load('ui/progression-editor.js');
 const { stepVariant } = await load('ui/variant.js');
-const { editPart, setLocked, addPart, copyPart, deletePart, movePart, stripBlocks } = await load('ui/form-ui.js');
-const { organTuning, presetDrive, LESLIE_MODES } = await load('ui/organ-tuning.js');
+const { editPart, setLocked, addPart, copyPart, deletePart, movePart, stripBlocks, levelValue, densityValue, levelLabel, densityLabel, limits } = await load('ui/form-ui.js');
+const { organTuning, presetDrive, LESLIE_MODES, DEFAULT_ORGAN } = await load('ui/organ-tuning.js');
+const { DEFAULT_PAN } = await load('ui/mix-state.js');
+const { tagEffect } = await load('ui/tag-effects.js');
+const { layoutWheel, nodeMatches } = await load('ui/wheel-geometry.js');
 const { STYLE_PRESETS, TAG_CATEGORIES, isSoundOnlyChange } = await load('core/tags.js');
-const { SCALE_NAMES, chordOptions } = await load('core/music.js');
+const { SCALE_NAMES, chordOptions, allowedChords, diatonicChords, noteToPc, chordMidi, noteName } = await load('core/music.js');
 const { CHORD_COLORS } = await load('core/harmony.js');
-const { METERS, meterKey, convertTempo, groovesFor } = await load('core/grooves.js');
+const { METERS, meterKey, convertTempo, groovesFor, grooveIdFor } = await load('core/grooves.js');
 const { TEMPLATE_IDS, TARGET_SIZES } = await load('core/form-roll.js');
-const { PART_TYPES, TRANSITIONS, FORM_LIMITS, DYNAMICS_MAX } = await load('core/form-types.js');
+const { PART_TYPES, TRANSITIONS, FORM_LIMITS, FEEL_DEFAULTS, DYNAMICS_MAX, resolveSection } = await load('core/form-types.js');
 const { formLength, isValidForm, chordIndex, sectionAt } = await load('core/form.js');
-const { nextDistinctChord, progressionRoles, romanDegree, fretboardNotes, beatsUntilChange } = await load('core/fretboard.js');
-const { chordName } = await load('core/chords.js');
+const { nextDistinctChord, progressionRoles, romanDegree, fretboardNotes, beatsUntilChange, STANDARD_TUNING, FRETS } = await load('core/fretboard.js');
+const { CHORDS, CHORD_GROUPS, chordName, chordShort } = await load('core/chords.js');
+const { t, setLanguage, getLanguage } = await load('i18n/index.js');
 const { normalizeTrack } = await load('core/track.js');
 const { VOICES, VOICE_LAYERS, completeVoices, setAllVoices, voiceKind, usesTimbreField } = await load('core/voices.js');
 const { LAYER_IDS, jobsFor, completeJobs } = await load('core/layers.js');
@@ -64,6 +68,7 @@ let player; // what the player plays (play.js 35-46): every action that changes 
 // the profile window (profiles.js 41-47) and the last session (app.js 153, the offer of "Weitermachen"); `resumed`: the bar the playback starts at after a resume that
 // restored (app.js 233), null after every other action (PROTOKOLL.md section 4)
 let tree, selection, open, message, undo, last, resumed;
+let drag; // the own row being dragged (profile-drag.js), or null: profileDrag (PROTOKOLL.md section 3)
 let refusals; // progression-editor.js 11: how often addChord found the progression full (not exported: counted here where the real addChord refuses)
 let rollNote; // form-strip.js 37: "Neu würfeln" found every part locked
 // PROTOKOLL.md section 3a (ruled, the web has none of it): what is wrong with the storage per name, state().storage, and the damaged text of profiles.json until it is kept
@@ -184,6 +189,7 @@ function commit(next, selectId, texts, undoable = false, openNext = open) {
   if (!saveTree(layoutStorage, next)) { message = [msg('ui.profileNotStored')]; return; }
   undo = undoable ? { tree, selection } : null;
   tree = next;
+  drag = null; // a change of the tree ends a drag
   open = openNext;
   if (selectId) select(selectId);
   message = texts.filter(Boolean);
@@ -219,6 +225,13 @@ const remember = ({ bar, at: time }) => { last = at(time, () => saveLast(layoutS
 // profiles.js 215-218
 const nameRefused = (code, value) => { message = [msg(`ui.profileErr.${code === 'nameTaken' ? 'nameTakenHere' : code}`, { name: wanted(value) })]; };
 class OutOfIds extends Error {}
+// Against the web, on the user's decision of 2026-11-22 ("Die app soll melden wenn das Profil Aus einer neueren version stammt."): a file of a version above the one the app
+// writes for its format is read as far as its fields are known, as the web reads it, and the import names that version (src/ stays as it is). `text`: a file parseFile took.
+function newerVersion(text) {
+  const raw = JSON.parse(text);
+  const writes = raw.format === FORMAT_FOLDER ? FOLDER_VERSION : PROFILE_VERSION;
+  return typeof raw.version === 'number' && raw.version > writes ? msg('ui.profileNewerVersion', { version: raw.version }) : '';
+}
 
 const ACTIONS = {
   start: {
@@ -431,6 +444,9 @@ const ACTIONS = {
     valid: (a) => typeof a.key === 'string' && rows().some((r) => r.key === a.key && r.expandable),
     run: (a) => { open = open.includes(a.key) ? open.filter((k) => k !== a.key) : [...open, a.key]; },
   },
+  // PROTOKOLL.md section 3, ruled (the web holds the drag inside profile-drag.js): a drag begins on an own entry (canDrag, 251) and ends (null) with a drop, Escape or a
+  // cancel; profiles() names the rows it may be dropped on (dropTarget, 246-249). It changes nothing but the window
+  profileDrag: { valid: (a) => a.key === null || (typeof a.key === 'string' && find(tree, a.key) !== null), run: (a) => { drag = a.key; } },
   // 175-185: the session box stands only for the session (410); the folder select is listFolders (436), '' the top level (178)
   saveProfile: {
     valid: (a) => chosen().kind === 'session' && isName(a.name) && (a.folder === null || isFolderId(a.folder)) && isPartList(a.parts) && isNewId(a.id),
@@ -543,6 +559,7 @@ const ACTIONS = {
       commit(added.tree, single ? added.rootId : null, [
         single ? msg('ui.profileImported', { name: node.name })
           : node ? count('ui.profileImportedFolder', added.profiles, { name: node.name }) : count('ui.profileRestored', added.profiles),
+        newerVersion(a.text),
         r.skipped ? count('ui.profileSkipped', r.skipped) : '',
         added.dropped ? count('ui.profileDropped', added.dropped) : '',
       ], true, single ? open : opened(open, target ?? 'mine'));
@@ -559,6 +576,45 @@ const ACTIONS = {
       if (stored.problem) return;
       ({ tree, problem: problems.profiles, damaged: damagedText } = loadProfiles(stored));
       undo = null;
+      drag = null;
+    },
+  },
+  // PROTOKOLL.md section 3a, ruled; the web has none: the plan's one-time take-over of what the old page kept in the WebView's storage (backingtrack.profiles, .session, .mix).
+  // A text is taken only when nothing is stored under its name, read by the loader of the page load (reload below) for that name, and stored as it is; a text that loader finds
+  // unreadable or damaged is not taken, nor a profiles.json while the one stored has a problem. The tree is written first: when it is not stored, nothing else is taken
+  importLegacy: {
+    valid: (a) => ['profiles', 'session', 'mix'].every((k) => Object.hasOwn(a, k) && (a[k] === null || typeof a[k] === 'string')),
+    run: (a) => {
+      const taken = (field, name) => {
+        const text = a[field];
+        if (text === null || Buffer.byteLength(text, 'utf8') > STORED_LIMIT) return null;
+        try { if (localStorage.getItem(KEYS[name]) !== null) return null; } catch { return null; } // a storage that cannot say holds something
+        return text;
+      };
+      const profilesText = problems.profiles === null ? taken('profiles', 'profiles.json') : null;
+      if (profilesText !== null) {
+        const loaded = loadProfiles({ text: profilesText, problem: null });
+        if (loaded.problem === null) {
+          try { layoutStorage.setItem(KEYS['profiles.json'], profilesText); } catch { message = [msg('ui.profileNotStored')]; return; }
+          tree = loaded.tree;
+          undo = null;
+          drag = null;
+        }
+      }
+      const sessionText = taken('session', 'session.json');
+      const entry = sessionText === null ? null : loadLast(storeOf('session.json', sessionText));
+      if (entry !== null) {
+        last = entry;
+        try { layoutStorage.setItem(KEYS['session.json'], sessionText); } catch { /* named in storage (apply) */ }
+      }
+      const mixText = taken('mix', 'mix.json');
+      const raw = mixText === null ? null : parsedOrNone(mixText);
+      if (raw && isObject(raw.value)) {
+        state.mix = loadMix(storeOf('mix.json', mixText));
+        state.pan = loadPan(storeOf('mix.json', mixText));
+        try { layoutStorage.setItem(KEYS['mix.json'], mixText); } catch { /* named in storage (apply) */ }
+        change.mix = true;
+      }
     },
   },
   // ---------- the last session: app.js ----------
@@ -648,7 +704,101 @@ export function position(beats) {
     fretboard: fretboardNotes({ key: track.key, scale: state.scale, current: chord, next }), // tuning.js 60-64
     part: hit ? { index: hit.index, type: hit.section.type, n: track.form.sections.slice(0, hit.index + 1).filter((s) => s.type === hit.section.type).length } : null,
     countdown: beatsUntilChange(track, (beats * 60) / track.bpm), // app.js 102: the song's seconds at the track's tempo
+    notes: tones(track.key, chord), // fretboard.js 173 (chordSentence)
+    nextNotes: next ? tones(track.key, next) : null,
+    wheel: wheelAt(track.key, chord, next), // wheel.js 57-58, 96 with wheelState (tuning.js 42-47) while playing
   };
+}
+// fretboard.js 173 (chordSentence, which takes the text of the page): the tones of a chord in their order, named in the key's spelling
+const tones = (key, chord) => chordMidi(chord, 3).map((m) => noteName(key, m % 12));
+const same = (a, b) => noteToPc(a.root) === noteToPc(b.root) && a.quality === b.quality; // wheel.js 9
+// wheel.js 57-58: the node of the chord that sounds (an allowed chord at the node, nodeMatches) and that of the next one, unless the node is the same; the next one's label (96)
+function wheelAt(key, chord, next) {
+  const { nodes } = layoutWheel(1, key);
+  const allowed = allowedChords(key);
+  const nodeOf = (c) => { const i = nodes.findIndex((n) => allowed.some((a) => same(a, n.chord)) && nodeMatches(n, c, key)); return i < 0 ? null : i; };
+  const current = nodeOf(chord), following = next ? nodeOf(next) : null;
+  return { current, next: following === current ? null : following, nextShort: next ? chordShort(next) : null };
+}
+
+// ---------- what the building blocks show that follows from the state (PROTOKOLL.md section 4: derived, tables) ----------
+// form-ui.js 12-15, 37-47 (levelLabel, densityLabel) with their texts as messages, for the page that translates: a text needs none, { key, params } is t(key, params) after every
+// param that is a message is translated. A transcription; every label is checked against the real function in both languages below.
+const minus = (n) => String(Math.round(n)).replace('-', '−');
+const span = ([a, b]) => (Math.round(a) === Math.round(b) ? minus(a) : `${minus(a)} … ${minus(b)}`);
+const levelMessage = (s, feel) => (s.level != null ? `${minus(s.level)} dB` : msg('form.insp.default', { v: `${span(resolveSection(s, feel).level)} dB` }));
+const densityMessage = (s, feel) => (s.density != null ? msg('ui.percent', { n: minus(s.density * 100) })
+  : msg('form.insp.default', { v: msg('ui.percent', { n: span(resolveSection(s, feel).density.map((x) => x * 100)) }) }));
+const translated = (m) => (typeof m === 'string' ? m : t(m.key, Object.fromEntries(Object.entries(m.params).map(([k, v]) => [k, translated(v)]))));
+function checkedLabel(message, label, s, feel) {
+  const lang = getLanguage();
+  try {
+    for (const l of ['de', 'en']) {
+      setLanguage(l);
+      if (translated(message) !== label(s, feel)) throw new Error(`the label ${JSON.stringify(message)} is not form-ui.js's in ${l}: ${label(s, feel)}`);
+    }
+  } finally { setLanguage(lang); }
+  return message;
+}
+// wheel.js 14, 28, 41, 54-73 on the nodes of layoutWheel (wheel-geometry.js), without their geometry: the allowed chord at each in the key's spelling (allowedAt), whether it is
+// diatonic and in the progression, its label; the path of the progression (nodeOf of each chord, those without a node left out)
+function wheelOf(track) {
+  const { key } = track;
+  const { nodes } = layoutWheel(1, key);
+  const allowed = allowedChords(key), diatonic = diatonicChords(key), progression = track.bars.map((b) => b.chord);
+  return {
+    nodes: nodes.map((n) => {
+      const chord = allowed.find((c) => same(c, n.chord)) ?? null;
+      return { ring: n.ring, index: n.index, chord: n.chord, allowed: chord, diatonic: Boolean(chord && diatonic.some((d) => same(d, chord))),
+        inProgression: Boolean(chord && progression.some((p) => same(p, chord))), short: chordShort(chord ?? n.chord) };
+    }),
+    path: progression.map((c) => nodes.findIndex((n) => nodeMatches(n, c, key))).filter((i) => i >= 0),
+  };
+}
+/** What the building blocks show that follows from the state alone, by the functions they call (PROTOKOLL.md section 4, derived()). */
+export function derived() {
+  const { track } = state;
+  const form = formNow();
+  const voices = completeVoices(track.voices);
+  const total = form ? formLength(form) : 0;
+  return JSON.parse(JSON.stringify({
+    // progression-editor.js 111-126: per root the qualities it allows and the name of every quality of the register on it
+    chordOptions: chordOptions(track.key).map(({ root, qualities }) => ({ root, qualities, names: Object.fromEntries(Object.keys(CHORDS).map((quality) => [quality, chordName({ root, quality })])) })),
+    wheel: wheelOf(track),
+    tagEffect: Object.fromEntries(TAG_CATEGORIES.flatMap((c) => c.tags).map((tag) => [tag, tagEffect(tag, track)])), // tags-ui.js 83, 87; tuning.js 127
+    voices, // voices-panel.js 89, organ-panel.js 48
+    voiceKind: voiceKind(track.voices), // mixer.js 79, 118
+    jobs: completeJobs(track.jobs), // jobs-panel.js 29
+    timbre: resolveTrackTimbre(track), // timbre-panel.js 102
+    usesTimbreField: Object.fromEntries(Object.entries(DEFAULT_TIMBRE).flatMap(([group, fields]) => Object.keys(fields).map((f) => [`${group}.${f}`, usesTimbreField(track.voices, `${group}.${f}`)]))), // timbre-panel.js 108, voices-panel.js 105
+    presetDrive: presetDrive(voices.chords.variant), // organ-panel.js 56
+    meter: meterKey(track.meter), // rhythm.js 52
+    groove: grooveIdFor(track), // rhythm.js 63
+    formChoice: formChoice(), // form-panel.js 69
+    // form-strip.js 233-245 with form-ui.js: the strip and the inspector stand only with a valid form; per part what the inspector shows of it (183-217), and the grip's longest (85-86)
+    form: form ? {
+      blocks: stripBlocks(form),
+      parts: form.sections.map((s, i) => ({
+        transition: resolveSection(s, form.feel).transition, crash: resolveSection(s, form.feel).crash, levelValue: levelValue(s, form.feel), densityValue: densityValue(s, form.feel),
+        levelLabel: checkedLabel(levelMessage(s, form.feel), levelLabel, s, form.feel), densityLabel: checkedLabel(densityMessage(s, form.feel), densityLabel, s, form.feel),
+        limits: limits(form, i), maxBars: Math.min(FORM_LIMITS.bars, FORM_LIMITS.length - (total - s.bars)),
+      })),
+    } : null,
+  }));
+}
+/** The constants the page lists and labels (PROTOKOLL.md section 4, tables()); of VOICES, CHORDS and STYLE_PRESETS the fields the page reads. */
+export function tables() {
+  return JSON.parse(JSON.stringify({
+    ROOTS, SCALE_NAMES, LAYER_IDS, VOICE_LAYERS,
+    VOICES: Object.fromEntries(VOICE_LAYERS.map((layer) => [layer, Object.fromEntries(Object.entries(VOICES[layer]).map(([id, v]) => [id, { kind: v.kind, hidden: v.hidden === true, variants: v.variants }]))])),
+    jobsFor: Object.fromEntries(LAYER_IDS.map((layer) => [layer, jobsFor(layer)])),
+    METERS, groovesFor: Object.fromEntries(Object.keys(METERS).map((key) => [key, groovesFor(key)])),
+    CHORD_COLORS, CHORD_GROUPS, CHORDS: Object.fromEntries(Object.entries(CHORDS).map(([id, c]) => [id, { group: c.group }])),
+    STYLE_PRESETS: STYLE_PRESETS.map((p) => ({ id: p.id, bpm: p.bpm })),
+    TAG_CATEGORIES, DEFAULT_TIMBRE, LESLIE_MODES, DEFAULT_ORGAN,
+    PART_TYPES, TRANSITIONS, TEMPLATE_IDS, TARGET_SIZES, FEEL_DEFAULTS, DYNAMICS_MAX,
+    PART_IDS, PART_PRESETS, LIMITS, FORMAT_FOLDER, STANDARD_TUNING, FRETS, DEFAULT_PAN,
+  }));
 }
 
 // ---------- loading the page (state.js 58-90, app.js 153 and 484-486, profiles.js 41-47): the session's constructor; the ids of a repaired tree are the session's own ----------
@@ -704,6 +854,7 @@ export function reload() {
   open = ['mine', 'factory'];
   message = null;
   undo = null;
+  drag = null;
   last = loadLast(storeOf('session.json', session.text)); // only the offer: the web applies it on the click (226-236), that is resume
   // damaged: a text from which loadLast reads no entry; a mixer text that is no JSON or no object (a list too), from which loadMix and loadPan read no value
   const mixRaw = mix.text === null ? null : parsedOrNone(mix.text);
@@ -770,13 +921,22 @@ function profilesView() {
     items: light(tree.items), nodes: countNodes(tree), factory: factoryProfiles(), selection, open, undo: undo !== null, message,
     targets: s.node ? moveTargets(tree, s.node.id).filter((f) => f.id !== s.parentId) : [], // profiles.js 395
     counts: s.kind === 'folder' || s.kind === 'mine' ? inside(s.node ?? tree) : null, // 407, 461
+    drag: drag === null ? null : { key: drag, targets: dropRows(drag) },
   };
+}
+// profiles.js 246-249 (dropTarget, not exported): of the rows "mine" and the own folders in the order of listFolders, those the dragged entry may be dropped on
+function dropRows(id) {
+  const dropTarget = (key) => {
+    const to = key === 'mine' ? null : find(tree, key)?.node.type === 'folder' ? key : undefined;
+    return to !== undefined && to !== (find(tree, id)?.parent?.id ?? null) && canMove(tree, id, to) ? to : undefined;
+  };
+  return ['mine', ...listFolders(tree).slice(1).map((f) => f.id)].filter((key) => dropTarget(key) !== undefined);
 }
 // what the box "Zuletzt gespielt" shows (app.js 450-459)
 const lastView = (entry) => ({ bar: entry.bar, at: entry.at, root: entry.parts.harmony.key.root, scale: entry.parts.harmony.scale, style: entry.parts.style.style, bpm: entry.parts.tempo.bpm, seed: entry.parts.variant.seed });
 
 /** The reference's state, read only, for the export's draws. */
-export const current = () => ({ state, touched, selected, tree, selection, open, undo, last, rows: rows(), kind: chosen().kind, problems });
+export const current = () => ({ state, touched, selected, tree, selection, open, undo, last, rows: rows(), kind: chosen().kind, problems, drag: drag === null ? null : { key: drag, targets: dropRows(drag) } });
 /** Back to what the core's constructor gives on an empty storage (the start state of variant 1, the mixer's defaults, no profiles), before each sequence. */
 export const reset = () => {
   store.clear();

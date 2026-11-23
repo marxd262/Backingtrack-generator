@@ -51,4 +51,16 @@ Json movePart(const Json& form, const Json& index, const Json& dir);
 // form-types.js FORM_LIMITS (music.json): "parts", "bars", "length", "levelMin", "levelMax", "densityMin" or "densityMax".
 double formLimit(const char* name);
 
+// form-types.js resolveSection, as the typed result of generator.cpp (generator_internal.h: bars, layers, density, level, transition, crash). Domain: a part of a valid form
+// and the form's feel (anything: `feel?.dynamics`).
+struct Resolved;
+Resolved resolvePart(const Json& section, const Json& feel);
+// form-ui.js, what the strip and the inspector show (native/PROTOKOLL.md section 4, derived()). Domain: a form (stripBlocks: [] for one that is not valid) and a part of a valid
+// form with its feel. A label is a text or a message { key, params } of the web's translations, whose params may be messages themselves (the web's t() inside t()).
+Json stripBlocks(const Json& form);
+Json levelLabel(const Json& section, const Json& feel);
+Json densityLabel(const Json& section, const Json& feel);
+double levelValue(const Json& section, const Json& feel);
+double densityValue(const Json& section, const Json& feel);
+
 } // namespace btg::detail

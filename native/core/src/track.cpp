@@ -767,6 +767,17 @@ Json chordName(const Json& chord) {
     return isString(root) || isObject(root) ? Json(jsString(root) + "undefined") : Json();
 }
 
+Json diatonicChordsOf(const Json& key) {
+    Json out = Json::array();
+    for (const auto& [root, quality] : diatonicChords(key)) out.push_back(Json::object({ { "root", root }, { "quality", quality } }));
+    return out;
+}
+
+std::string chordShort(const Json& chord) {
+    const Json& spec = musicJson().at("chords").at(jsString(own(chord, "quality"))); // CHORDS[chord.quality]
+    return jsString(own(chord, "root")) + spec.value("short", spec.at("symbol").get<std::string>());
+}
+
 // what harmony.cpp and form_roll.cpp take from the helpers above
 const Json& musicTable() { return musicJson(); }
 int noteToPcOf(const Json& name) { return noteToPc(&name); }

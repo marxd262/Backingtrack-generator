@@ -81,7 +81,7 @@ if (isMain && (process.argv.includes('--data') || dataOnly >= 0)) {
   // what the track check reads (track.js, voices.js, layers.js, form.js, form-types.js, music.js, chords.js, tags.js); the order of the
   // registers is part of it (chordOptions lists the qualities in register order), so the core reads this file with its keys in order
   const { LAYERS, LAYER_IDS } = await load('core/layers.js');
-  const { CHORDS } = await load('core/chords.js');
+  const { CHORDS, CHORD_GROUPS } = await load('core/chords.js');
   const { TAG_CATEGORIES, TAG_PLAY_EFFECTS } = await load('core/tags.js');
   const { TIMBRE_EFFECTS } = await load('core/timbre-effects.js');
   const { LESLIE_MODES, DEFAULT_ORGAN } = await load('ui/organ-tuning.js');
@@ -94,7 +94,9 @@ if (isMain && (process.argv.includes('--data') || dataOnly >= 0)) {
     voices: Object.fromEntries(VOICE_LAYERS.map((layer) => [layer, Object.fromEntries(Object.entries(VOICES[layer]).map(([id, v]) => [id, v.variants]))])),
     movedVoices: readLiteral('core/voices.js', 'MOVED'), // "<id>/<variant>" of a removed voice -> its successor
     layers: Object.fromEntries(LAYER_IDS.map((id) => [id, { defaultOn: LAYERS[id].defaultOn, jobs: LAYERS[id].jobs ?? [] }])),
-    chords: Object.fromEntries(Object.entries(CHORDS).map(([id, c]) => [id, { symbol: c.symbol, on: c.on, intervals: c.intervals }])),
+    // `group` and `short` (chordShort: only some chords have one) for the page's tables and the chord wheel (PROTOKOLL.md section 4)
+    chords: Object.fromEntries(Object.entries(CHORDS).map(([id, c]) => [id, { symbol: c.symbol, on: c.on, intervals: c.intervals, group: c.group, ...(c.short !== undefined && { short: c.short }) }])),
+    chordGroups: CHORD_GROUPS,
     modes: Object.fromEntries(Object.entries(readLiteral('core/music.js', 'MODES')).map(([id, m]) => [id, { steps: m.steps, qualities: m.qualities, parentMajor: m.parentMajor, dominant: m.dominant }])),
     meters: Object.keys(METERS),
     tags: TAG_CATEGORIES,
@@ -118,6 +120,8 @@ if (isMain && (process.argv.includes('--data') || dataOnly >= 0)) {
     scaleModes: SCALE_MODE,
     roots: readLiteral('ui/state.js', 'ROOTS'),
     voiceKinds: Object.fromEntries(VOICE_LAYERS.map((layer) => [layer, Object.fromEntries(Object.entries(VOICES[layer]).map(([id, v]) => [id, { kind: v.kind, hidden: v.hidden === true }]))])),
+    // the roots of the chord wheel's rings (ui/wheel-geometry.js), whose chords derived() gives
+    wheel: { fifths: readLiteral('ui/wheel-geometry.js', 'FIFTHS'), relativeMinors: readLiteral('ui/wheel-geometry.js', 'RELATIVE_MINORS') },
   };
   const dir = dataOnly >= 0 ? resolve(process.argv[dataOnly + 1]) : join(repo, 'native/core/data');
   mkdirSync(dir, { recursive: true });

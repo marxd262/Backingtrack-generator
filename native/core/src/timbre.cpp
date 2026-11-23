@@ -126,7 +126,9 @@ Json resolveTrackTimbre(const Json& track) {
     return toJson(timbre);
 }
 
-bool usesTimbreField(const Json& voices, const Json& path) {
+namespace {
+// usesTimbreField; `complete`: the voices are completeVoices' already (completeVoices gives such voices back as they are)
+bool uses(const Json& voices, bool complete, const Json& path) {
     static const char* const ALWAYS_ON[] = { "fuzz", "overdrive", "distortion", "vibrato", "chorus" }; // the chain and the modulation lie behind every voice
     const std::string text = jsStringOf(&path); // String(path).split('.')
     const size_t first = text.find('.');
@@ -138,9 +140,13 @@ bool usesTimbreField(const Json& voices, const Json& path) {
     for (const char* always : ALWAYS_ON) if (field == always) return true;
     // `uses.includes(path)` compares the path itself: a list that reads like a path is not in it
     if (!path.is_string()) return false;
-    const Json chosen = completeVoices(voices);
-    return registry.at(layer).at(chosen.at(layer).at("id").get<std::string>()).count(text) > 0;
+    const Json chosen = complete ? Json() : completeVoices(voices);
+    return registry.at(layer).at((complete ? voices : chosen).at(layer).at("id").get<std::string>()).count(text) > 0;
 }
+} // namespace
+
+bool usesTimbreField(const Json& voices, const Json& path) { return uses(voices, false, path); }
+bool usesCompleteTimbreField(const Json& chosen, const Json& path) { return uses(chosen, true, path); }
 
 bool isSoundOnlyChange(const Json& prevTags, const Json& nextTags) {
     // the chosen tags as the web's Set holds them: a number, a text, a boolean and null once however often named, a list or an object (never the same one twice) each
@@ -167,9 +173,13 @@ bool isSoundOnlyChange(const Json& prevTags, const Json& nextTags) {
 }
 
 Json tagEffect(const Json& tag, const Json& track) {
-    const std::string key = jsStringOf(&tag); // TAG_PLAY_EFFECTS[tag]: the tag as a property name
     const Json* form = own(track, "form");
-    const bool hasForm = form != nullptr && isValidFormValue(*form);
+    const Json* voices = own(track, "voices");
+    return tagEffect(tag, track, form != nullptr && isValidFormValue(*form), completeVoices(voices != nullptr ? *voices : Json()));
+}
+
+Json tagEffect(const Json& tag, const Json& track, bool hasForm, const Json& chosen) {
+    const std::string key = jsStringOf(&tag); // TAG_PLAY_EFFECTS[tag]: the tag as a property name
     Json play = Json::array();
     if (const Json* effects = entryOf("tagPlayEffects", key))
         for (const auto& [param, value] : effects->items())
@@ -177,12 +187,11 @@ Json tagEffect(const Json& tag, const Json& track) {
     Json sound = Json::array();
     bool anyArrives = false;
     if (const Json* effects = entryOf("timbreEffects", key)) {
-        const Json* voices = own(track, "voices");
         const Json* timbre = own(track, "timbre");
         for (const auto& [path, delta] : effects->items()) {
             const auto [group, field] = splitPath(path);
             Json blocked; // null
-            if (!usesTimbreField(voices != nullptr ? *voices : Json(), Json(path))) blocked = "voice";
+            if (!usesCompleteTimbreField(chosen, Json(path))) blocked = "voice";
             else if (isSetBy(own(timbre, group), field)) blocked = "knob";
             anyArrives = anyArrives || blocked.is_null();
             sound.push_back(Json::object({ { "path", path }, { "delta", delta }, { "blocked", blocked } }));

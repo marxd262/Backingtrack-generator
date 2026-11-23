@@ -23,6 +23,7 @@
 #include "btg/track.h"
 #include "json_compare.h"
 
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -235,12 +236,53 @@ void checkReplace(const btg::Session& session, const SequenceStorage& storage, s
     }
 }
 
+// Task 32a, fix round 1: the members of the text of a JSON object, in the text's order, each its key and the text of its value as it stands there (not read and written
+// again: so the comparison sees how numbers are written and the order of keys). For the session's texts: no white space between tokens, keys without escapes.
+std::vector<std::pair<std::string, std::string>> membersOf(const std::string& text) {
+    std::vector<std::pair<std::string, std::string>> out;
+    size_t i = 1; // after '{'
+    while (i < text.size() && text[i] == '"') {
+        const size_t keyEnd = text.find('"', i + 1);
+        std::string key = text.substr(i + 1, keyEnd - i - 1);
+        const size_t start = keyEnd + 2; // after ':'
+        size_t j = start;
+        int depth = 0;
+        bool inString = false;
+        for (; j < text.size(); ++j) {
+            const char c = text[j];
+            if (inString) { if (c == '\\') ++j; else if (c == '"') inString = false; continue; }
+            if (c == '"') inString = true;
+            else if (c == '{' || c == '[') ++depth;
+            else if ((c == '}' || c == ']') && depth-- == 0) break;
+            else if (c == ',' && depth == 0) break;
+        }
+        out.emplace_back(std::move(key), text.substr(start, j - start));
+        i = j + 1;
+    }
+    return out;
+}
+// where two texts first differ, with the text around it on both sides
+std::string firstDifference(const std::string& want, const std::string& got) {
+    size_t at = 0;
+    while (at < want.size() && at < got.size() && want[at] == got[at]) ++at;
+    const size_t from = at < 60 ? 0 : at - 60;
+    return "at byte " + std::to_string(at) + ": want ..." + want.substr(from, 140) + "..., got ..." + (from < got.size() ? got.substr(from, 140) : std::string()) + "...";
+}
+
+// Task 32a: the stored texts of the sequences' new sessions (`stored` of a restart step, by name), for the check of importLegacy; and the state whose derived() is the
+// longest text, kept (with a storage of its own) to time derived() on it
+std::vector<std::map<std::string, std::string>> storedGroups;
+SequenceStorage largestStorage;
+std::unique_ptr<btg::Session> largest;
+size_t largestBytes = 0;
+
 // A case is { steps, at } (export-logic.mjs, Task 29 and 30b, the fix wave of Phase 6; a plain list is the steps without places): a step is an action text; { action, fail?,
 // failReads? }, the action with writes that fail or reads that throw; { restart, stored?, failReads? }, a new session on the same storage after `stored` replaced texts (null
 // removes one); { probe: [key, name] }, exportFile only. `at` per step the places of the playback to ask position for. `out` per step { change, state, track, sound, tuning,
 // keys, position }: `keys` the order of the keys of track() and state().track (read in the order of their texts), `position` per place the fnv of position's text;
-// `profiles` when its text differs from the step before, `writes` if the step wrote, and the export of the selected row with the name "Export" when it differs from the
-// step before: `export`, for the session `exportHash`.
+// `profiles` when its text differs from the step before, `writes` if the step wrote, `derived` the fields of derived() whose text differs from the step before (Task 32a:
+// a list of [field, text] in the text's order, each text as derived() wrote it), and the export of the selected row with the name "Export" when it differs from the step
+// before: `export`, for the session `exportHash`.
 json playSession(const json& in) {
     const json& steps = in.is_array() ? in : in.at("steps");
     SequenceStorage storage;
@@ -249,6 +291,7 @@ json playSession(const json& in) {
     std::optional<std::string> shown;
     std::string viewText; // profiles() as text: recorded when it is another than the step before had (a tree of 1,000 nodes is 170 KB)
     json view;
+    std::map<std::string, std::string> shownDerived; // per field of derived() its text at the step before
     for (size_t k = 0; k < steps.size(); ++k) {
         const json& step = steps[k];
         storage.log = json::array();
@@ -256,8 +299,13 @@ json playSession(const json& in) {
         if (step.is_string()) c = session->apply(step.get<std::string>());
         else if (step.contains("probe")) { out.push_back({ { "probe", session->exportFile(step.at("probe").at(0).get<std::string>(), step.at("probe").at(1).get<std::string>()) } }); continue; }
         else if (step.contains("restart")) {
-            if (step.contains("stored"))
-                for (const auto& [name, text] : step.at("stored").items()) { if (text.is_null()) storage.files.erase(name); else storage.files[name] = text.get<std::string>(); }
+            if (step.contains("stored")) {
+                std::map<std::string, std::string> group;
+                for (const auto& [name, text] : step.at("stored").items()) {
+                    if (text.is_null()) storage.files.erase(name); else storage.files[name] = group[name] = text.get<std::string>();
+                }
+                if (!group.empty()) storedGroups.push_back(std::move(group));
+            }
             storage.failReads = step.contains("failReads") ? step.at("failReads").get<std::string>() : "";
             session = std::make_unique<btg::Session>(storage);
             storage.failReads.clear();
@@ -281,6 +329,19 @@ json playSession(const json& in) {
         if (!in.is_array()) for (const json& beats : in.at("at").at(k)) places.push_back(fnv(session->position(beats.get<double>())));
         record["position"] = places;
         if (!storage.log.empty()) record["writes"] = storage.log;
+        const std::string derivedText = session->derived();
+        json changed = json::array();
+        for (auto& [field, text] : membersOf(derivedText)) {
+            if (shownDerived[field] == text) continue;
+            shownDerived[field] = text;
+            changed.push_back(json::array({ field, std::move(text) }));
+        }
+        if (!changed.empty()) record["derived"] = changed;
+        if (derivedText.size() > largestBytes) {
+            largestBytes = derivedText.size();
+            largestStorage = storage;
+            largest = std::make_unique<btg::Session>(*session, largestStorage);
+        }
         const std::string selection = view.value("selection", std::string("session"));
         const std::string file = session->exportFile(selection, "Export");
         if (!shown || *shown != file) {
@@ -292,11 +353,38 @@ json playSession(const json& in) {
     }
     return out;
 }
-// where a sequence first differs: the step, its action and the field
-void printSessionStep(const json& c, const json& got) {
-    for (size_t k = 0; k < c.at("out").size() && k < got.size(); ++k) {
+// Task 32a: derived() after each step of a sequence, compared by itself (a summary line of its own) and then taken out of both records. Fix round 1: by text, field by
+// field (the list of the fields that changed, in the text's order: at the first step all of them, so the order of the fields counts too), byte for byte
+long long derivedChecks = 0, derivedWrong = 0;
+json withoutDerived(const json& c, json& got) {
+    json want = c.at("out");
+    const json& steps = c.at("in").is_array() ? c.at("in") : c.at("in").at("steps");
+    for (size_t k = 0; k < want.size() && k < got.size(); ++k) {
+        if (want[k].contains("probe")) continue;
+        ++derivedChecks;
+        const json wanted = want[k].value("derived", json::array()), given = got[k].value("derived", json::array());
+        std::string difference; // the first field whose name or text differs, and where
+        for (size_t f = 0; f < std::max(wanted.size(), given.size()) && difference.empty(); ++f) {
+            if (f >= wanted.size() || f >= given.size()) difference = "field " + (f < wanted.size() ? wanted[f] : given[f]).at(0).get<std::string>() + " only on one side";
+            else if (wanted[f].at(0) != given[f].at(0)) difference = "field " + wanted[f].at(0).get<std::string>() + " where it has " + given[f].at(0).get<std::string>();
+            else if (wanted[f].at(1) != given[f].at(1))
+                difference = "field " + wanted[f].at(0).get<std::string>() + " " + firstDifference(wanted[f].at(1).get<std::string>(), given[f].at(1).get<std::string>());
+        }
+        if (!difference.empty() && ++derivedWrong <= 10) {
+            const std::string text = steps[k].is_string() ? steps[k].get<std::string>() : steps[k].dump();
+            std::printf("derived: different at step %zu (%.200s), %s\n", k, text.c_str(), difference.c_str());
+        }
+        want[k].erase("derived");
+        got[k].erase("derived");
+    }
+    return want;
+}
+
+// where a sequence first differs: the step, its action and the field (`want`: the case's records without derived)
+void printSessionStep(const json& c, const json& want, const json& got) {
+    for (size_t k = 0; k < want.size() && k < got.size(); ++k) {
         btg::test::Compare step;
-        step.value("record", c.at("out")[k], got[k]);
+        step.value("record", want[k], got[k]);
         if (step.result == btg::test::Match::identical) continue;
         const json& in = (c.at("in").is_array() ? c.at("in") : c.at("in").at("steps"))[k];
         const std::string text = in.is_string() ? in.get<std::string>() : in.dump();
@@ -506,6 +594,8 @@ const std::map<std::string, std::function<json(const json&)>> FUNCTIONS {
     { "barStart", [](const json& in) {
         try { return json(btg::barStart(in.at("text").get<std::string>(), in.at("bar").get<int>())); }
         catch (const std::invalid_argument&) { return json { { "threw", true } }; } } },
+    // Task 32a: the constants the page lists and labels, against the JavaScript's; fix round 1: the text, byte for byte (the order of keys, how numbers are written)
+    { "tables", [](const json&) { return json(btg::Session::tables()); } },
 };
 
 } // namespace
@@ -557,8 +647,9 @@ int main(int argc, char** argv) {
                 ++seen[c.at("fn").get<std::string>()];
                 const auto fn = FUNCTIONS.find(c.at("fn").get<std::string>());
                 btg::test::Compare compare;
-                json got;
+                json got, want;
                 if (fn == FUNCTIONS.end()) compare.fail("fn");
+                else if (c.at("fn") == "session") { got = fn->second(c.at("in")); want = withoutDerived(c, got); compare.value("out", want, got); }
                 else { got = fn->second(c.at("in")); compare.value("out", c.at("out"), got); }
                 if (compare.result == btg::test::Match::identical) { ++identical; continue; }
                 if (compare.result == btg::test::Match::close && c.at("fn") == "renderString") { // the ruled exception (above): passes, counted
@@ -567,7 +658,9 @@ int main(int argc, char** argv) {
                     continue;
                 }
                 if (compare.result == btg::test::Match::close) { ++close; std::printf("close: %s #%zu %s by %.3g\n", c.at("fn").get<std::string>().c_str(), i, compare.field.c_str(), compare.delta); continue; }
-                if (different < 20 && c.at("fn") == "session") printSessionStep(c, got);
+                if (different < 20 && c.at("fn") == "session") printSessionStep(c, want, got);
+                if (different < 20 && c.at("fn") == "tables" && c.at("out").is_string() && got.is_string())
+                    std::printf("tables: the text differs %s\n", firstDifference(c.at("out").get<std::string>(), got.get<std::string>()).c_str());
                 if (++different <= 20) std::printf("different: %s #%zu %s: in %s, want %s, got %s\n", c.at("fn").get<std::string>().c_str(), i, compare.field.c_str(),
                                                    c.at("in").dump().c_str(), c.at("out").dump().c_str(), got.dump().c_str());
             } catch (const std::exception& error) { // a case that is no case, or a function that throws what the web's does not
@@ -703,6 +796,24 @@ int main(int argc, char** argv) {
             newer.replace(newer.find("\"version\":2"), 11, "\"version\":99");
             s.apply(json { { "action", "importProfile" }, { "from", "text" }, { "text", newer }, { "ids", json::array({ "v1" }) } }.dump());
             check(profilesOf(s).at("items").size() == 1 && profilesOf(s).at("message").at(0).at("key") == "ui.profileImported", "a file of version 99 is not read");
+            // Task 32a, the user's decision of 2026-11-22: the newer version is named with its number; a file of the app's own version names none, and both read the same tree
+            {
+                SequenceStorage own;
+                btg::Session same(own);
+                run(same, { sel("mine") });
+                same.apply(json { { "action", "importProfile" }, { "from", "text" }, { "text", goodFile }, { "ids", json::array({ "v1" }) } }.dump());
+                const json named = json { { "key", "ui.profileNewerVersion" }, { "params", { { "version", 99 } } } };
+                check(profilesOf(s).at("message").size() == 2 && profilesOf(s).at("message").at(1) == named, "a file of version 99 does not name its version");
+                check(profilesOf(same).at("message").size() == 1 && profilesOf(same).at("message").at(0).at("key") == "ui.profileImported" && profilesOf(same).at("items") == profilesOf(s).at("items"),
+                      "a file of the app's version names a version, or reads another tree than one of version 99");
+                SequenceStorage folders;
+                btg::Session folder(folders);
+                run(folder, { sel("mine") });
+                folder.apply(json { { "action", "importProfile" }, { "from", "text" }, { "text", R"({"format":"backingtrack-folder","version":2,"name":"F","items":[{"type":"profile","name":"p","parts":{"tempo":{"bpm":100}}}]})" },
+                                    { "ids", json::array({ "f1", "f2" }) } }.dump());
+                check(profilesOf(folder).at("message").size() == 2 && profilesOf(folder).at("message").at(1) == json { { "key", "ui.profileNewerVersion" }, { "params", { { "version", 2 } } } },
+                      "a folder file of version 2 (the app writes 1) does not name its version");
+            }
             std::string deep = "{\"type\":\"profile\",\"name\":\"p\",\"parts\":{\"tempo\":{\"bpm\":100}}}";
             for (int i = 0; i < 9; ++i) deep = "{\"type\":\"folder\",\"name\":\"T\",\"items\":[" + deep + "]}";
             run(s, { sel("mine") });
@@ -953,6 +1064,76 @@ int main(int argc, char** argv) {
         if (btg::detail::parseFile(Json(folders)).at("ok").get<bool>()) { std::printf("FAIL: a folder file nested 84 levels deep is read\n"); ++profileDepthWrong; }
     } catch (const std::exception& error) { std::printf("FAIL: the check of the depth of a profile file threw: %s\n", error.what()); ++profileDepthWrong; }
     std::printf("profile depth: %d of 3 checks wrong (a file nested beyond 64 levels counts as no JSON; the web reads it)\n", profileDepthWrong);
+    // Task 32a: derived() after every step of every sequence (withoutDerived), and its time on the state of the sequences where its text is the longest
+    double perCall = 0;
+    if (largest) {
+        const auto begin = std::chrono::steady_clock::now();
+        for (int i = 0; i < 100; ++i) largest->derived();
+        perCall = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin).count() / 100;
+    }
+    std::printf("derived: %lld of %lld steps wrong (what derived() gives after each step of each sequence); the longest, %zu bytes, takes %.3f ms per call\n", derivedWrong, derivedChecks, largestBytes, perCall);
+    if (derivedChecks == 0) std::printf("FAIL: the reference has no sequence: derived() was not checked\n");
+    // Task 32a: importLegacy (PROTOKOLL.md section 3a) on the texts the sequences stored for a new session, each by itself and those of one step together: a session on an
+    // empty storage that got start and then the texts equals (state(), profiles(), every stored text) a session made on a storage that holds them and started alike; a text
+    // that session finds unreadable or damaged changes nothing; a storage that holds the name already keeps it; sent twice, the second changes nothing
+    int legacyWrong = 0, legacyChecks = 0;
+    try {
+        const auto check = [&](bool ok, const std::string& what) { ++legacyChecks; if (!ok && ++legacyWrong <= 10) std::printf("FAIL: importLegacy: %s\n", what.c_str()); };
+        const std::map<std::string, std::string> FIELD { { "profiles.json", "profiles" }, { "session.json", "session" }, { "mix.json", "mix" } };
+        const std::string START = R"({"action":"start","variant":3})";
+        const auto legacyOf = [&](const std::map<std::string, std::string>& texts) {
+            json a = { { "action", "importLegacy" }, { "profiles", nullptr }, { "session", nullptr }, { "mix", nullptr } };
+            for (const auto& [name, text] : texts) a[FIELD.at(name)] = text;
+            return a.dump();
+        };
+        std::map<std::string, std::string> others; // what another session holds under each name
+        {
+            SequenceStorage st;
+            btg::Session s(st);
+            for (const char* a : { R"({"action":"saveProfile","name":"Z","folder":null,"parts":["tempo"],"id":"z"})", R"({"action":"rememberSession","bar":2,"at":3})",
+                                   R"({"action":"setLevel","channel":"pad","value":20})" }) s.apply(a);
+            others = st.files;
+        }
+        std::set<std::map<std::string, std::string>> tried;
+        for (const auto& group : storedGroups) {
+            std::vector<std::map<std::string, std::string>> tries;
+            std::map<std::string, std::string> all;
+            for (const auto& [name, text] : group) if (FIELD.count(name)) { tries.push_back({ { name, text } }); all[name] = text; }
+            if (tries.size() > 1) tries.push_back(all);
+            for (const auto& texts : tries) {
+                if (!tried.insert(texts).second) continue;
+                const std::string what = " (" + legacyOf(texts).substr(0, 160) + ")";
+                SequenceStorage made, empty;
+                made.files = texts;
+                btg::Session b(made), a(empty);
+                b.apply(START);
+                a.apply(START);
+                const std::string stateBefore = a.state(), profilesBefore = a.profiles();
+                const btg::Session::Change c = a.apply(legacyOf(texts));
+                const json problems = json::parse(b.state()).at("storage");
+                bool readable = true;
+                for (const auto& entry : texts) readable = readable && problems.at(FIELD.at(entry.first)).is_null();
+                if (readable)
+                    check(a.state() == b.state() && a.profiles() == b.profiles() && empty.files == made.files && c.mix == (texts.count("mix.json") > 0), "a session that took the texts is not one made on them" + what);
+                else if (texts.size() == 1)
+                    check(a.state() == stateBefore && a.profiles() == profilesBefore && empty.files.empty() && changeOf(c) == changeOf({}), "a text the constructor finds unreadable or damaged is taken" + what);
+                const std::string stateAfter = a.state(), profilesAfter = a.profiles();
+                const auto filesAfter = empty.files;
+                check(changeOf(a.apply(legacyOf(texts))) == changeOf({}) && a.state() == stateAfter && a.profiles() == profilesAfter && empty.files == filesAfter, "sent twice, the second changes something" + what);
+                if (texts.size() > 1) continue;
+                const std::string& name = texts.begin()->first;
+                SequenceStorage holds;
+                holds.files[name] = others.at(name);
+                btg::Session h(holds);
+                h.apply(START);
+                const std::string heldState = h.state(), heldProfiles = h.profiles();
+                check(changeOf(h.apply(legacyOf(texts))) == changeOf({}) && h.state() == heldState && h.profiles() == heldProfiles && holds.files == std::map<std::string, std::string> { { name, others.at(name) } },
+                      "a storage that holds the name does not keep it" + what);
+            }
+        }
+        if (legacyChecks == 0) check(false, "the reference brings no stored texts");
+    } catch (const std::exception& error) { std::printf("FAIL: the check of importLegacy threw: %s\n", error.what()); ++legacyWrong; }
+    std::printf("legacy: %d of %d checks wrong (importLegacy takes a text of the old page as a session made on it does, a damaged one not, nothing over a stored one, nothing twice)\n", legacyWrong, legacyChecks);
     // the replace check ran inside the sequences (playSession); a key it never met was not proven
     std::set<std::string> kinds; // setTimbre/<path> and setRhythmKnob/<knob> by their action, editPart's by field
     for (const std::string& key : replaceMet) kinds.insert(key.rfind("editPart/", 0) == 0 ? key : key.substr(0, key.find('/')));
@@ -969,5 +1150,6 @@ int main(int argc, char** argv) {
     // A close is a difference in the last bits (possibly another platform's math library): it fails too. An exception has to be ruled
     // by the owner and named here (function and field, from the line above), not passed.
     if (close) std::printf("FAIL: %lld case(s) are only close, not bit for bit: a difference in the last bits, possibly another platform's math library; ruled exceptions are named in this test\n", close);
-    return different || untested || close || deepWrong || seedWrong || formWrong || storageWrong || viewWrong || outsideWrong || profileDepthWrong || replaceWrong || replaceUnmet ? 1 : 0;
+    return different || untested || close || deepWrong || seedWrong || formWrong || storageWrong || viewWrong || outsideWrong || profileDepthWrong || replaceWrong || replaceUnmet
+                   || derivedWrong || derivedChecks == 0 || legacyWrong ? 1 : 0;
 }

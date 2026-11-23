@@ -177,9 +177,6 @@ Json progressionFor(const Json& key, const Json& seed) {
 
 // ---------- harmony.js ----------
 
-namespace {
-
-// stepBase(chord, key): the base (maj, min, dim) of the step the chord belongs to in the key, none for an unknown quality or a root that is no step; throws like the JavaScript
 std::optional<std::string> stepBase(const Json& chord, const Json& key) {
     if (chord.is_null()) thrown("Cannot read properties of null (reading 'quality')");
     const ChordInfo* spec = chordSpec(jsStringOf(own(chord, "quality")));
@@ -190,8 +187,6 @@ std::optional<std::string> stepBase(const Json& chord, const Json& key) {
         if (noteToPcOf(step.at("root")) == pc) return spec->on.size() == 1 ? spec->on[0] : step.at("quality").get<std::string>();
     return std::nullopt;
 }
-
-} // namespace
 
 Json colorChord(const Json& chord, const Json& color, const Json& key) {
     const std::string colorName = jsStringOf(&color);

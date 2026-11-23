@@ -145,7 +145,8 @@
         0,
         4,
         7
-      ]
+      ],
+      "group": "triad"
     },
     "min": {
       "symbol": "m",
@@ -156,7 +157,8 @@
         0,
         3,
         7
-      ]
+      ],
+      "group": "triad"
     },
     "dim": {
       "symbol": "dim",
@@ -167,7 +169,9 @@
         0,
         3,
         6
-      ]
+      ],
+      "group": "triad",
+      "short": "°"
     },
     "aug": {
       "symbol": "aug",
@@ -178,7 +182,8 @@
         0,
         4,
         8
-      ]
+      ],
+      "group": "triad"
     },
     "sus2": {
       "symbol": "sus2",
@@ -190,7 +195,8 @@
         0,
         2,
         7
-      ]
+      ],
+      "group": "triad"
     },
     "sus4": {
       "symbol": "sus4",
@@ -202,7 +208,8 @@
         0,
         5,
         7
-      ]
+      ],
+      "group": "triad"
     },
     "power": {
       "symbol": "5",
@@ -214,7 +221,8 @@
       "intervals": [
         0,
         7
-      ]
+      ],
+      "group": "triad"
     },
     "dom7": {
       "symbol": "7",
@@ -226,7 +234,8 @@
         4,
         7,
         10
-      ]
+      ],
+      "group": "seventh"
     },
     "maj7": {
       "symbol": "maj7",
@@ -238,7 +247,8 @@
         4,
         7,
         11
-      ]
+      ],
+      "group": "seventh"
     },
     "min7": {
       "symbol": "m7",
@@ -250,7 +260,8 @@
         3,
         7,
         10
-      ]
+      ],
+      "group": "seventh"
     },
     "m7b5": {
       "symbol": "m7b5",
@@ -262,7 +273,8 @@
         3,
         6,
         10
-      ]
+      ],
+      "group": "seventh"
     },
     "dim7": {
       "symbol": "dim7",
@@ -274,7 +286,8 @@
         3,
         6,
         9
-      ]
+      ],
+      "group": "seventh"
     },
     "maj6": {
       "symbol": "6",
@@ -286,7 +299,8 @@
         4,
         7,
         9
-      ]
+      ],
+      "group": "extended"
     },
     "min6": {
       "symbol": "m6",
@@ -298,7 +312,8 @@
         3,
         7,
         9
-      ]
+      ],
+      "group": "extended"
     },
     "add9": {
       "symbol": "add9",
@@ -310,7 +325,8 @@
         4,
         7,
         14
-      ]
+      ],
+      "group": "extended"
     },
     "dom9": {
       "symbol": "9",
@@ -323,7 +339,8 @@
         7,
         10,
         14
-      ]
+      ],
+      "group": "extended"
     },
     "min9": {
       "symbol": "m9",
@@ -336,9 +353,15 @@
         7,
         10,
         14
-      ]
+      ],
+      "group": "extended"
     }
   },
+  "chordGroups": [
+    "triad",
+    "seventh",
+    "extended"
+  ],
   "modes": {
     "minor": {
       "steps": [
@@ -2252,5 +2275,35 @@
         "hidden": false
       }
     }
+  },
+  "wheel": {
+    "fifths": [
+      "C",
+      "G",
+      "D",
+      "A",
+      "E",
+      "B",
+      "F#",
+      "Db",
+      "Ab",
+      "Eb",
+      "Bb",
+      "F"
+    ],
+    "relativeMinors": [
+      "A",
+      "E",
+      "B",
+      "F#",
+      "C#",
+      "G#",
+      "D#",
+      "Bb",
+      "F",
+      "C",
+      "G",
+      "D"
+    ]
   }
 }

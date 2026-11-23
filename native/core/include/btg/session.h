@@ -47,6 +47,10 @@ public:
     std::string tuning() const;                    // for Engine::setTuning
     std::string state() const;                     // everything the page shows but the profile window and what depends on the playback's position
     std::string profiles() const;                  // the profile window (PROTOKOLL.md section 4); built when an action changes it, not per call
+    // what the building blocks show that follows from the state alone (the chord options, the wheel, the words' effects, the voices, the knobs, the strip ...: PROTOKOLL.md
+    // section 4); built per call: about 1 ms, 1.6 ms on the longest state of the logic test (a form of 64 parts)
+    std::string derived() const;
+    static std::string tables();                   // the constants the page lists and labels (PROTOKOLL.md section 4); the same text for every session
     // what the displays show at the playback's position `beats` (the transport's beats, counted from the start of the song; beyond the loop's end and below 0 they wrap
     // around the loop), as the shell's position message brings it 30 times a second (PROTOKOLL.md section 4)
     std::string position(double beats) const;

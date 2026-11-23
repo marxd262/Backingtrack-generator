@@ -1079,9 +1079,13 @@ add('presetDrive', presetDrive, [...VOICES.chords.organ.variants, 'nope', '', nu
   // (the case's `at`) the fnv of JSON.stringify of what position gives (in full the fretboard alone would double the reference). A probe step has only { probe }. The
   // case is { in: { steps, at } }. The test makes the same record by the same rules.
   const nameOf = (step) => { try { return JSON.parse(typeof step === 'string' ? step : step.action ?? 'null')?.action; } catch { return undefined; } };
+  // Task 32a: `derived` per step, the fields of what derived() gives whose text differs from what the step before had (all at the first step; the test keeps the same
+  // record), as a list of [field, text] in their order, the text JSON.stringify's: the test compares texts, so the number format and the order of keys count (fix round 1).
+  // In full at every step it would double the reference, and most steps change a field or two
   const sequence = (steps) => {
     ref.reset();
     let shown = null, shownView = null;
+    const shownDerived = {};
     const results = [];
     const at = [];
     const out = steps.map((step, k) => {
@@ -1104,6 +1108,12 @@ add('presetDrive', presetDrive, [...VOICES.chords.organ.variants, 'nope', '', nu
       special.places += at[k].length;
       const writes = ref.storage.takeWrites();
       if (writes.length) rec.writes = writes;
+      const changed = Object.entries(ref.derived()).map(([field, value]) => [field, JSON.stringify(value)]).filter(([field, text]) => {
+        if (shownDerived[field] === text) return false;
+        shownDerived[field] = text;
+        return true;
+      });
+      if (changed.length) rec.derived = changed;
       const selection = rec.profiles.selection;
       const view = JSON.stringify(rec.profiles);
       if (view === shownView) delete rec.profiles; else shownView = view;
@@ -1260,7 +1270,8 @@ add('presetDrive', presetDrive, [...VOICES.chords.organ.variants, 'nope', '', nu
     if (how < 0.85) return JSON.stringify({ ...action, action: any(['nope', action.action.toLowerCase(), `${action.action}s`, 5, null]) });
     return any([text.slice(0, Math.floor(text.length / 2)), `[${text}]`, `${text}x`, '', 'null', JSON.stringify(action.action)]);
   };
-  const NAMES = ref.ACTION_NAMES.filter((n) => n !== 'start');
+  // the actions of Task 32a have sequences of their own (below): the random sequences stay as they were
+  const NAMES = ref.ACTION_NAMES.filter((n) => !['start', 'profileDrag', 'importLegacy'].includes(n));
   const FORM_ACTIONS = ['setFormFeel', 'releaseStructure', 'selectPart', 'editPart', 'toggleLock', 'deletePart', 'movePart', 'copyPart', 'addPart', 'rerollForm'];
   // Task 30b: the window's buttons stand for one kind of row (PROTOKOLL.md section 3); a visible row of one of the kinds, after opening its folder if need be
   const NEEDS = { saveProfile: ['session'], overwriteProfile: ['profile'], renameNode: ['profile', 'folder'], addFolder: ['folder', 'mine'], deleteNode: ['profile', 'folder'],
@@ -1546,6 +1557,37 @@ add('presetDrive', presetDrive, [...VOICES.chords.organ.variants, 'nope', '', nu
     ...on('resume', [5, 'x', [], {}, { bar: 1 }, { bar: -1, at: 1 }, { bar: 1, at: 1.5 }], 'playing'), act('resume'),
     fail(act('resume', { playing: { bar: 7, at: 300 } })), fail(act('resume', { playing: null }), 'throw'), { restart: true }, act('resume', { playing: null }),
     act('start', { variant: 8 }), act('newVariant', { variant: 9 }), act('resume', { playing: null }), act('newVariant', { variant: 10 })]);
+  // Task 32a: dragging a row (the rule of profiles.js 246-249): an entry at the top with no folder to go to (no target), a folder that holds eight levels (no target),
+  // the deepest of eight folders (every folder above its own), a profile in it; a drop (moveNode) and every other change of the tree end the drag, a change that is not
+  // stored does not, and neither does `start`; a new session has none
+  const drag = (key) => act('profileDrag', { key });
+  LIMITS.profileDrag = build([drag(null), ...on('profileDrag', ['mine', 'session', 'factory', 'factory:funk', 'nope', '', 5, ['a']], 'key'), act('profileDrag'),
+    save('A'), () => drag(idOf('A')), drag(null), sel('mine'), folderAdd('F'), () => drag(idOf('A')), () => drag(idOf('F')),
+    sel('mine'), ...Array.from({ length: 8 }, (_, i) => folderAdd(`D${i + 1}`)), () => drag(idOf('D1')), () => drag(idOf('D8')), () => drag(idOf('D7')),
+    sel('session'), () => save('Tief', { folder: idOf('D7'), parts: ['tempo'] }), () => drag(idOf('Tief')), () => drag(idOf('A')),
+    () => act('moveNode', { id: idOf('A'), target: idOf('D8') }), () => drag(idOf('A')), act('start', { variant: 9 }), sel('session'), fail(save('Kaputt')), fail(save('Kaputt'), 'throw'),
+    () => act('moveNode', { id: idOf('A'), target: null }), () => drag(idOf('D8')), act('undoProfile'), () => drag(idOf('F')), () => sel(idOf('F')), act('deleteNode'),
+    () => drag(idOf('D2')), act('setLevel', { channel: 'bass', value: 33 }), { restart: true }, () => drag(idOf('D3')), sel('mine'), imp(profileText('I'), 1), () => drag(idOf('D3')),
+    { restart: true, failReads: 'throw' }, act('start', { variant: 10 }), () => drag(idOf('D3')), act('reloadProfiles'), () => drag(idOf('D3')), drag(null), drag(null)]);
+  // Task 32a: the take-over of the old page's texts (importLegacy): the texts of a session of the web, into a storage that holds none of them, again (nothing), each into a
+  // storage that holds the others, texts the readers find damaged or an old flat list, a storage whose writes fail or whose reads throw, a profiles.json that was unreadable
+  const legacy = (profiles, session, mix) => act('importLegacy', { profiles, session, mix });
+  const NONE = { restart: true, stored: { 'profiles.json': null, 'session.json': null, 'mix.json': null } };
+  let old = {};
+  LIMITS.importLegacy = build([legacy(null, null, null), act('importLegacy'), act('importLegacy', { profiles: 5, session: null, mix: null }), act('importLegacy', { profiles: null, session: null }),
+    act('importLegacy', { profiles: null, session: [], mix: null }), save('A'), sel('mine'), folderAdd('F'), sel('session'), () => save('B', { folder: idOf('F') }),
+    act('setLevel', { channel: 'drums', value: 40 }), act('setPan', { layer: 'bass', value: -50 }), act('rememberSession', { bar: 7, at: 1700000000000 }),
+    () => { old = { profiles: ref.storage.text('profiles.json'), session: ref.storage.text('session.json'), mix: ref.storage.text('mix.json') }; return NONE; }, act('start', { variant: 2 }),
+    () => legacy(old.profiles, old.session, old.mix), () => legacy(old.profiles, old.session, old.mix), act('resume', { playing: null }),
+    NONE, act('start', { variant: 3 }), () => legacy(old.profiles, null, null), () => legacy(old.profiles, old.session, old.mix),
+    () => ({ restart: true, stored: { 'profiles.json': null, 'session.json': old.session, 'mix.json': null } }), act('start', { variant: 4 }), () => legacy(old.profiles, '{"parts":5}', old.mix),
+    NONE, act('start', { variant: 5 }), legacy('kein JSON', 'x', '[1]'), legacy('{"items":5}', '{"parts":{}}', '5'), legacy('[]', null, '{"master":0.5,"pan":{"lead":0.25}}'),
+    NONE, act('start', { variant: 6 }), () => legacy(JSON.stringify([{ name: 'Alt', profile: { format: 'backingtrack-profile', version: 1, track: { key: { root: 'A', mode: 'minor' }, bpm: 96,
+      bars: [{ chord: { root: 'A', quality: 'min' }, beats: 4 }], seed: 3, length: 8 } } }]), null, null),
+    NONE, act('start', { variant: 7 }), () => fail(legacy(old.profiles, old.session, old.mix)), () => fail(legacy(null, old.session, old.mix), 'throw'), () => legacy(old.profiles, old.session, old.mix),
+    NONE, act('start', { variant: 8 }), () => ({ action: legacy(old.profiles, old.session, old.mix), failReads: 'throw' }), () => ({ action: legacy(old.profiles, old.session, old.mix), failReads: 'none' }),
+    { ...NONE, failReads: 'throw' }, act('start', { variant: 9 }), () => legacy(old.profiles, old.session, old.mix), act('reloadProfiles'), () => legacy(old.profiles, null, null),
+    () => ({ restart: true, stored: { 'profiles.json': 'kaputt' } }), act('start', { variant: 11 }), () => legacy(old.profiles, null, null), sel('session'), save('C'), drag(null)]);
   if (ref.ACTION_NAMES.some((name) => !LIMITS[name])) throw new Error(`no sequence at the limits for ${ref.ACTION_NAMES.filter((name) => !LIMITS[name])}`);
   for (const name of ref.ACTION_NAMES) sequence(LIMITS[name]);
   // Task 30b: new sessions on the same storage: what the sequence wrote, an earlier text of the same sequence, texts that are missing, damaged or of the old format, reads that fail
@@ -1602,6 +1644,33 @@ add('presetDrive', presetDrive, [...VOICES.chords.organ.variants, 'nope', '', nu
       () => act('setFormTarget', { bars: other(TARGET_SIZES, st().formTarget) }), act('rerollForm'), lockAll(), act('rerollForm'), act('start', { variant: 35 })]),
   ];
   for (const steps of NOTICES) sequence(steps);
+  // Task 32a: dragging in the profile window, 30 sequences of 30 steps from a fork of their own (the random sequences above stay as they were): folders and profiles made
+  // anywhere in the tree (deeper and deeper), drags of an own entry, of rows that are no entry and ends, drops onto a target the reference names, moves the drag did not
+  // offer, changes of the tree while a drag is on (undo, delete, a save that is not stored)
+  const D = createRng(2029).fork('drag-sequences');
+  const anyD = (list) => list[Math.floor(D.next() * list.length)];
+  for (let n = 0; n < 30; n++) {
+    const steps = [];
+    ref.reset();
+    const push = (step) => { if (steps.length < 30) { steps.push(step); runStep(step); ref.storage.takeWrites(); } };
+    const fresh = () => `d${n}-${steps.length}`;
+    push(act('start', { variant: 100 + n }));
+    while (steps.length < 30) {
+      const r = D.next(), own = ownNodes(), folders = own.filter((x) => x.type === 'folder'), now = ref.current().drag;
+      if (r < 0.2) { push(sel(folders.length && D.next() < 0.8 ? anyD(folders).id : 'mine')); push(act('addFolder', { name: `O${steps.length}`, id: fresh() })); }
+      else if (r < 0.32) { push(sel('session')); push(act('saveProfile', { name: `P${steps.length}`, folder: folders.length && D.next() < 0.7 ? anyD(folders).id : null, parts: ['tempo'], id: fresh() })); }
+      else if (r < 0.62) push(drag(D.next() < 0.1 ? null : own.length && D.next() < 0.9 ? anyD(own).id : anyD(['mine', 'session', 'factory', 'nope'])));
+      else if (r < 0.8 && now?.targets.length) { const to = anyD(now.targets); push(act('moveNode', { id: now.key, target: to === 'mine' ? null : to })); push(drag(null)); }
+      else if (r < 0.86 && own.length) push(act('moveNode', { id: anyD(own).id, target: folders.length && D.next() < 0.8 ? anyD(folders).id : null }));
+      else if (r < 0.9) push(act('undoProfile'));
+      else if (r < 0.94 && own.length) { push(sel(anyD(own).id)); push(act('deleteNode')); }
+      else if (r < 0.97) { push(sel('session')); push(fail(act('saveProfile', { name: 'Nicht', folder: null, parts: ['tempo'], id: fresh() }))); }
+      else push(drag(null));
+    }
+    sequence(steps);
+  }
+  // Task 32a: the constants the page lists and labels (tables()), as JSON.stringify's text: the order of the keys is the page's order of chips, voices and knobs
+  cases.push({ fn: 'tables', in: null, out: JSON.stringify(ref.tables()) });
   // texts that are no action, and the reader's edges (track.cpp's Reader, JSON.parse's rules): a key twice (the last value), a field more (not read), a byte order
   // mark (no JSON), a lone surrogate in a field not read, a field nested so that the text is 64 levels deep (the reader's limit, see PROTOKOLL.md: deeper is no JSON there)
   sequence(['', ' ', 'x', '{', '}', '[]', '5', 'null', 'true', '"start"', '{}', '{"action":5}', '{"action":null}', '{"action":"nope"}', '{"action":"toString"}', '{"action":"__proto__"}', '{"action":"constructor"}',

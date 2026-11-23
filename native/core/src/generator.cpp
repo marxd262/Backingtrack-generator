@@ -2,6 +2,7 @@
 // timeline.js, tags.js, grooves.js, arrange.js, form-arrange.js, form-types.js, form.js (chordIndex),
 // form-post.js, microtiming.js, music.js (chord tones, modes). All six layers; lead and percussion have their own
 // files (lead.cpp, percussion.cpp), the articulation step too. See generator_internal.h for the rules of the port.
+#include "form_internal.h"
 #include "generator_internal.h"
 
 #include <nlohmann/json.hpp>
@@ -683,6 +684,19 @@ std::string grooveIdFor(const Track& track) {
     const auto found = grooves().find(track.groove);
     if (found != grooves().end() && found->second.meter == key) return track.groove;
     return DEFAULT_GROOVE.at(key);
+}
+
+Resolved resolvePart(const json& section, const json& feel) {
+    const auto number = [&](const char* key) { return section.contains(key) && section.at(key).is_number() ? std::optional<double>(section.at(key).get<double>()) : std::nullopt; };
+    Part p;
+    p.type = section.at("type").get<std::string>();
+    p.bars = section.at("bars").get<int>();
+    p.level = number("level");
+    p.density = number("density");
+    if (section.contains("transition") && section.at("transition").is_string()) p.transition = section.at("transition").get<std::string>();
+    if (section.contains("crash") && section.at("crash").is_boolean()) p.crash = section.at("crash").get<bool>();
+    const bool finite = feel.is_object() && feel.contains("dynamics") && feel.at("dynamics").is_number() && std::isfinite(feel.at("dynamics").get<double>()); // Number.isFinite(feel?.dynamics)
+    return resolveSection(p, finite ? feel.at("dynamics").get<double>() : 0.6);
 }
 
 std::vector<std::pair<int, int>> phrasesOf(const Section& sec) {

@@ -34,6 +34,8 @@ Json resolveTrackTimbre(const Json& track);
 // voices (all of master): both count as used. Otherwise the chosen voice's `uses` decide (sound.json). Never throws: anything is a `voices` (completeVoices fills it), a `path` is
 // read as the text String(path) (the web finds the layer in it) and only a text can be in a voice's `uses` (an array that reads like a path is not).
 bool usesTimbreField(const Json& voices, const Json& path);
+// the same for voices that completeVoices gave (it gives them back as they are), without completing them again: for a caller that asks for many paths of one track
+bool usesCompleteTimbreField(const Json& chosen, const Json& path);
 
 // tags.js. Domain: two tracks' `tags`. true when the chosen tags differ and every one that differs is a sound-only tag (an entry in the sound table, none in the play table). Never
 // throws; what is no { category: [list] } gives false. A tag of any value: the web's Set keeps a number and a text apart and every list or object as another one, and reads a
@@ -44,6 +46,8 @@ bool isSoundOnlyChange(const Json& prevTags, const Json& nextTags);
 // a track that is no object has no fields. A knob "set by hand" is any own field of a group of `track.timbre` (even null); a group that is a text or a list has `length` as a member
 // (a text also `sub`, the name of the knob bass.sub), which the web counts as set: the core knows those members only (shortcut in timbre.cpp). Never throws.
 Json tagEffect(const Json& tag, const Json& track);
+// the same with what it reads of the track beside the tag given: `hasForm` isValidForm(track.form), `chosen` completeVoices(track.voices); for a caller that asks for every tag
+Json tagEffect(const Json& tag, const Json& track, bool hasForm, const Json& chosen);
 
 // ui/organ-tuning.js. Domain: { leslie: 'off' | 'slow' | 'auto' | 'fast', drive: null | 0..1 } (DEFAULT_ORGAN is `auto` and null: nothing). Returns the tuning of every organ preset, or {}.
 // Anything else counts as the default, as in the web app. Never throws.

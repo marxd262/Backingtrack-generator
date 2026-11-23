@@ -77,6 +77,10 @@ Json chordOptions(const Json& key);
 // chords.js: the root and the symbol of the quality, as the JavaScript concatenates them: a string, or null where it makes a NaN.
 // Throws std::invalid_argument for a quality the register does not have.
 Json chordName(const Json& chord);
+// music.js diatonicChords: the chords of the key's steps in the key's spelling, as a list of { root, quality }. Throws like allowedChords.
+Json diatonicChordsOf(const Json& key);
+// chords.js chordShort: the root and the short symbol of the quality (its symbol where it has none). Domain: a chord of the register (else it throws).
+std::string chordShort(const Json& chord);
 
 // What harmony.cpp and form_roll.cpp take from the helpers of track.cpp; each answers as the JavaScript's does.
 const Json& musicTable();                            // native/core/data/music.json, parsed once (the tables of the web app, written by export-events.mjs --data)

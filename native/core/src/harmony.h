@@ -1,7 +1,7 @@
 #pragma once
 
 // The harmony of the web app and the data its displays read, on JSON values, one function for each of the JavaScript's with its name:
-// progressionFor (progressions.js), colorChord and colorProgression (harmony.js), styleChordColor (tags.js), chordTimeline (timeline.js),
+// progressionFor (progressions.js), stepBase (music.js), colorChord and colorProgression (harmony.js), styleChordColor (tags.js), chordTimeline (timeline.js),
 // fretboardNotes, nextDistinctChord, progressionRoles, romanDegree, beatsUntilChange and degreeLabel (fretboard.js). native/core/tests/test_logic.cpp
 // compares them with the web app one by one. Control thread only.
 //
@@ -43,6 +43,9 @@ uint32_t seedBase(const Json& seed);
 // progressions.js. Domain: a valid key, an integer seed (a number of any value works as `seed >>> 0` does: a fraction, a negative one, beyond 2^32; null or
 // missing is 0). Throws for a key that allowedChords throws for. A seed that is a text, a boolean, a list or an object throws (the web takes 5, 1, 5, ... of them).
 Json progressionFor(const Json& key, const Json& seed);
+// music.js stepBase: the base quality (maj, min, dim) of the step the chord belongs to in the key; none for an unknown quality or a root that is no step. Domain: a valid key
+// and a chord whose root is a note name; throws where the web does (a null chord, a root that is no note name).
+std::optional<std::string> stepBase(const Json& chord, const Json& key);
 // harmony.js. Domain: a chord { root, quality }, one of the four colours, a valid key. Outside it equal to the JavaScript, which guards it: an unknown colour, quality
 // or root, a root without a step in the key and an invalid key leave the chord as it is (a new object); null gives {}. Never throws.
 Json colorChord(const Json& chord, const Json& color, const Json& key);
