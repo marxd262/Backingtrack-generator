@@ -102,38 +102,39 @@ else()
     set_source_files_properties(src/file_player.cpp PROPERTIES COMPILE_OPTIONS -w)
 endif()
 
-# Beat tracking with the Beat This! model through ONNX Runtime (both MIT): the prebuilt library of the release,
+# Beat tracking with the Beat This! model through ONNX Runtime (both MIT): the prebuilt library of its package,
 # pinned by checksum. The model itself is not in the repository: native/tools/get-models.mjs downloads it to
 # native/models. Without the model the analysis falls back to its own beat tracker.
 option(BTG_BEAT_MODEL "Beat tracking with the Beat This! model through ONNX Runtime" ON)
 if(BTG_BEAT_MODEL)
-    set(ort_version 1.30.1)
-    if(WIN32)
-        set(ort_file onnxruntime-win-x64-${ort_version}.zip)
-        set(ort_hash 9e70d829a7c2014c6f6d2889cd3578733c2e5bbe919e186b5f2038d59176ab13)
-    elseif(APPLE)
-        set(ort_file onnxruntime-osx-arm64-${ort_version}.tgz)
-        set(ort_hash b9b1f72babd1b121b2323ac3069939623ce1d75db693b282bf5c2e593d340c79)
-    else()
-        set(ort_file onnxruntime-linux-x64-${ort_version}.tgz)
-        set(ort_hash 35a95c9c2b298bbd7dd2d63c73b333adb039b7a0faa04790fa69243dfddefdd3)
-    endif()
+    # Microsoft's NuGet package (a zip): one file for the three systems, headers under build/native/include, libraries under
+    # runtimes/<system>/native. Until 2026-11-22 the build took 1.30.1 from the GitHub release, whose address then answered 404.
+    set(ort_version 1.32.0)
     FetchContent_Declare(onnxruntime
-        URL https://github.com/microsoft/onnxruntime/releases/download/v${ort_version}/${ort_file}
-        URL_HASH SHA256=${ort_hash}
+        URL https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/${ort_version}/microsoft.ml.onnxruntime.${ort_version}.nupkg
+        URL_HASH SHA256=a9150bc2992cbbb6722070da9910e1ffa989a8bfc67bdd5bb8e745ca755641db
+        DOWNLOAD_NAME onnxruntime-${ort_version}.zip # by this name CMake takes it for the zip it is
         DOWNLOAD_EXTRACT_TIMESTAMP TRUE
         SOURCE_SUBDIR none) # a prebuilt package: nothing to configure
     FetchContent_MakeAvailable(onnxruntime)
     add_library(btg_onnxruntime SHARED IMPORTED GLOBAL)
-    target_include_directories(btg_onnxruntime INTERFACE ${onnxruntime_SOURCE_DIR}/include)
+    target_include_directories(btg_onnxruntime INTERFACE ${onnxruntime_SOURCE_DIR}/build/native/include)
     if(WIN32)
+        set(ort_dir ${onnxruntime_SOURCE_DIR}/runtimes/win-x64/native)
         set_target_properties(btg_onnxruntime PROPERTIES
-            IMPORTED_LOCATION ${onnxruntime_SOURCE_DIR}/lib/onnxruntime.dll
-            IMPORTED_IMPLIB ${onnxruntime_SOURCE_DIR}/lib/onnxruntime.lib)
+            IMPORTED_LOCATION ${ort_dir}/onnxruntime.dll
+            IMPORTED_IMPLIB ${ort_dir}/onnxruntime.lib)
     elseif(APPLE)
-        set_target_properties(btg_onnxruntime PROPERTIES IMPORTED_LOCATION ${onnxruntime_SOURCE_DIR}/lib/libonnxruntime.dylib)
+        # The library calls itself @rpath/libonnxruntime.1.dylib and the package's file is libonnxruntime.dylib: a program linked
+        # against it looks for the first name, so a copy of that name lies beside it. Not built on the development machine.
+        set(ort_dir ${onnxruntime_SOURCE_DIR}/runtimes/osx-arm64/native)
+        file(COPY_FILE ${ort_dir}/libonnxruntime.dylib ${ort_dir}/libonnxruntime.1.dylib ONLY_IF_DIFFERENT)
+        set_target_properties(btg_onnxruntime PROPERTIES IMPORTED_LOCATION ${ort_dir}/libonnxruntime.1.dylib)
     else()
-        set_target_properties(btg_onnxruntime PROPERTIES IMPORTED_LOCATION ${onnxruntime_SOURCE_DIR}/lib/libonnxruntime.so)
+        # The same on Linux: the library's own name is libonnxruntime.so.1, the package's file libonnxruntime.so.
+        set(ort_dir ${onnxruntime_SOURCE_DIR}/runtimes/linux-x64/native)
+        file(COPY_FILE ${ort_dir}/libonnxruntime.so ${ort_dir}/libonnxruntime.so.1 ONLY_IF_DIFFERENT)
+        set_target_properties(btg_onnxruntime PROPERTIES IMPORTED_LOCATION ${ort_dir}/libonnxruntime.so.1)
     endif()
 
     add_library(btg_beats STATIC src/beat_model.cpp)
