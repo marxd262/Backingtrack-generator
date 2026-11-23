@@ -2,16 +2,20 @@
 
 #include <juce_audio_utils/juce_audio_utils.h>
 
+#include "Storage.h"
+
 #include <btg/engine.h>
 #include <btg/file_player.h>
+#include <btg/session.h>
 #include <btg/transport.h>
 
 #include <map>
+#include <optional>
 
 class BackingtrackProcessor final : public juce::AudioProcessor, private juce::Thread {
 public:
     BackingtrackProcessor();
-    ~BackingtrackProcessor() override { loader.removeAllJobs (true, 10000); stopThread (10000); }
+    ~BackingtrackProcessor() override;
 
     void prepareToPlay (double sampleRate, int) override { engine.prepare (sampleRate); filePlayer.prepare (sampleRate); }
     void releaseResources() override {}
@@ -65,7 +69,36 @@ public:
     void controlArrived() { controlAt = juce::Time::getHighResolutionTicks(); }
     std::atomic<float> reactionMs { 0.0f }, load { 0.0f };
 
+    // The core's session on the user's storage (private below), built once; what the shell does with it is native/PROTOKOLL.md, section 7.
+    struct Answer { std::string state, profiles; std::optional<btg::Session::Change> change; int events = 0; }; // for the page; profiles empty: unchanged
+    struct Lanes { std::string json; double bpm = 0.0; int number = 0; };    // the events of the lanes, built at the tempo bpm
+    struct Followed { juce::String failed, status; std::optional<Lanes> lanes; }; // after the engine followed: a failed call, voiceStatus (empty: no track or voices set), new lanes
+    // Loader thread. An action (its JSON text) and what follows it; `answered` gets the session's answer at once, before the lanes and the engine.
+    Followed act (std::string actionJson, const std::function<void (const Answer&)>& answered);
+    Followed playSession();                // loader thread: the play key, the session's song from bar 1 with everything
+    std::optional<Answer> stopTransport(); // the thread that runs the transport's messages: stops; the answer when it remembered the session first
+    Answer answerNow() const;              // any thread: the state and the profile view as they stand
+    std::optional<Lanes> lanesNow() const; // any thread: the last lanes built
+    std::optional<std::string> positionNow (double beats); // any thread: position(beats), nothing when the session's lock is held (the caller never waits)
+    std::string exportNow (const std::string& key, const std::string& name) const; // any thread: Session::exportFile
+    std::atomic<bool> sessionPlays { false }; // the transport's last start was the session's song
+
 private:
+    // The session is not thread-safe: every call of it holds sessionLock. Actions and the playback of its song run on the loader thread, in order with
+    // the transport's messages; apply is short, the lanes and the engine calls after it run outside the lock.
+    FileStorage storage { FileStorage::defaultFolder() };
+    juce::CriticalSection sessionLock;
+    btg::Session session { storage };
+    struct Texts;
+    int barPlaying();                      // under sessionLock: the bar the session's song plays, -1 when it plays none
+    void everything (const Texts& t);      // loader thread: the engine with the whole state
+    void mix (const juce::var& state);
+    void playFrom (const std::string& song, int bar, double bpm, bool inPlace); // song: the session's track()
+    int lanesNumber = 0;                   // under sessionLock: the number of the newest lanes, as the state's answer carries it
+    std::string lanesKey;                  // loader thread: laneKey of the track the newest lanes are built from
+    std::optional<Lanes> lastLanes;        // under sessionLock
+    bool barInLead = false;                // under sessionLock: the lead of a restart in place, where the web knows the bar at once (app.js 180)
+
     void run() override;
 
     std::atomic<float>* master = parameters.getRawParameterValue ("master");

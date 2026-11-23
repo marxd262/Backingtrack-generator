@@ -2,9 +2,11 @@
 // records console errors and failed requests, plays, and measures what the engine reports back:
 // position, levels, reaction time of controls at the buffer sizes given, jump and loop.
 // Usage: node native/tools/ui-check.mjs [app.exe] [output folder]
-// The app runs muted (BTG_MUTE): levels are measured, nothing is heard.
+// The app runs muted (BTG_MUTE): levels are measured, nothing is heard; and on a storage folder of its own (BTG_STORAGE_DIR, removed afterwards):
+// the developer's profiles are never touched. Its debug port 9333 is track-check.mjs's too: the two cannot run at once.
 import { spawn } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
@@ -23,7 +25,8 @@ const stats = (list) => {
   return { n: sorted.length, mean: +(sorted.reduce((a, b) => a + b, 0) / sorted.length).toFixed(2), median: at(0.5), p95: at(0.95), max: at(1) };
 };
 
-const app = spawn(exe, [], { env: { ...process.env, BTG_MUTE: '1', WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${PORT}` }, stdio: 'ignore' });
+const storage = mkdtempSync(join(tmpdir(), 'btg-ui-check-'));
+const app = spawn(exe, [], { env: { ...process.env, BTG_MUTE: '1', BTG_STORAGE_DIR: storage, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${PORT}` }, stdio: 'ignore' });
 let browser;
 try {
   for (let i = 0; !browser && i < 40; i++) {
@@ -661,5 +664,8 @@ try {
   process.exitCode = result.problems.length ? 1 : 0;
 } finally {
   await browser?.close().catch(() => {});
+  const gone = new Promise((r) => { app.once('exit', r); setTimeout(r, 5000); });
   app.kill();
+  await gone;
+  rmSync(storage, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 }

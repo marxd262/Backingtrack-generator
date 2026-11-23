@@ -45,4 +45,18 @@ struct Song {
 };
 Song buildSong(const std::string& trackJson);
 
+// The events as the web app's buildEvents gives them (each with the fields of its type, the fields that are set), as JSON text: what the page draws
+// its lanes and LEDs from (native/PROTOKOLL.md section 7). Never throws but for an allocation that fails.
+std::string eventsJson(const std::vector<Event>& events);
+
+// The beat at which bar `bar` of the loop begins: the beats of the bars before it, each bars[chordIndex(track, i)].beats of the normalized track, as
+// the web's player sums them for its start bar (src/audio/play.js 39-46); what the shell hands the transport to start at a bar (native/PROTOKOLL.md
+// section 7). Throws std::invalid_argument for text that is no track and for a bar outside 0 to length - 1, where play() throws a RangeError.
+double barStart(const std::string& trackJson, int bar);
+
+// laneKey of the web app (src/ui/lanes.js 10), byte for byte: JSON.stringify of the track fields that change its event stream (key, bars, tags, seed,
+// length, meter, groove, complexity, loose, ornaments, form, jobs, voices, variety; not the tempo, not the layers), a missing one as null. `trackJson`
+// is a track's text; text that is no object counts as an object without fields. Never throws but for an allocation that fails.
+std::string laneKey(const std::string& trackJson);
+
 } // namespace btg

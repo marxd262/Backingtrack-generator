@@ -1013,7 +1013,42 @@ Session::Session(Storage& storage) : storage_(storage), memory_(std::make_unique
     } catch (...) {} // the start state itself failed (an allocation): state() and the others give empty texts, apply changes nothing
 }
 
+Session::Session(const Session& other, Storage& storage) : storage_(storage), memory_(std::make_unique<Memory>(*other.memory_)) {}
+
 Session::~Session() = default;
+
+// The actions a newer one with the same key replaces whole (session.h). Each sets one value and reads nothing of the one before; the value is checked
+// here as its handler checks it, and the rest of its validity is the state's (the voices for setTimbre, a valid form for editPart), which no action of
+// a key changes: two actions of one key are valid alike. Not here, with the reason the logic test's replace check finds: setLevel, setPan, setTempo,
+// setFormFeel, setLeslie, setOrganDrive and editPart's type and bars do nothing when they bring the value shown, so a newer one alone could leave
+// out a write or its flags; editPart's reset (null) is not valid while the part has no value of its own; what counts or rolls (addChord, rerollForm,
+// newVariant) and what toggles (toggleMute, toggleLock) depends on the one before.
+std::string Session::replaceKey(const std::string& actionJson) {
+    try {
+        const Json a = detail::parsedText(actionJson);
+        if (!a.is_object() || !a.contains("action") || !a.at("action").is_string()) return "";
+        const std::string name = a.at("action").get<std::string>();
+        const Json& value = field(a, "value");
+        if (name == "setTimbre") { // timbre-panel.js 39-44: track.timbre[group][field] = value / 100
+            const Json& group = field(a, "group");
+            const Json& f = field(a, "field");
+            if (!group.is_string() || !f.is_string() || !isInt(value, 0, 100)) return "";
+            const std::string path = group.get<std::string>() + "." + f.get<std::string>();
+            return timbrePaths().count(path) ? "setTimbre/" + path : "";
+        }
+        if (name == "setRhythmKnob") { // rhythm.js 36-49: track[knob] = value / 100
+            const Json& knob = field(a, "knob");
+            return oneOf(knob, std::vector<std::string> { "complexity", "loose", "ornaments" }) && isInt(value, 0, 100) ? "setRhythmKnob/" + knob.get<std::string>() : "";
+        }
+        if (name == "editPart") { // form-ui.js editPart of the selected part with one field
+            const Json& f = field(a, "field");
+            if (f == "level" && isInt(value, formLimit("levelMin"), formLimit("levelMax"))) return "editPart/level";
+            if (f == "density" && isInt(value, formLimit("densityMin") * 100, formLimit("densityMax") * 100)) return "editPart/density";
+            if (f == "transition" && oneOf(value, music().at("form").at("transitions"))) return "editPart/transition";
+        }
+        return "";
+    } catch (...) { return ""; } // no input is known that reaches it
+}
 
 Session::Change Session::apply(const std::string& actionJson) {
     try {

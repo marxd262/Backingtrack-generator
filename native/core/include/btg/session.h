@@ -25,6 +25,8 @@ public:
     // the web app's page load: reads the storage once (the profiles, the mixer, the last session as the offer of "Weitermachen"), the start state of variant 1;
     // restores nothing, writes nothing, never throws (a name it could not read is named in state().storage). The shell sends `start` next (PROTOKOLL.md section 2).
     explicit Session(Storage& storage);
+    // a copy of `other` as it stands, on another storage (btg_logic_tests forks a session at a state to compare two ways on from it)
+    Session(const Session& other, Storage& storage);
     ~Session();
     Session(const Session&) = delete;
     Session& operator=(const Session&) = delete;
@@ -32,6 +34,13 @@ public:
     // profiles: the action changed what profiles() gives (the page reads it again); the other seven are the web's calls of its player.
     struct Change { bool events = false, sound = false, voices = false, tempo = false, mix = false, restart = false, inPlace = false, profiles = false; };
     Change apply(const std::string& actionJson);   // never throws; an action that is not valid changes nothing
+    // The key of an action whose effect a newer action with the same key replaces whole, empty for every other action (native/PROTOKOLL.md section 7,
+    // "Was ein Schritt kostet": one knob's value; setTimbre of a group's field, setRhythmKnob of a knob, editPart of the selected part's level, density
+    // or transition). On any state: an action with a key and directly after it a newer one with the same key give what the newer alone gives: state(),
+    // track(), sound(), tuning(), profiles(), the newer's flags, every stored text (btg_logic_tests holds it on the states of its sequences). Not with
+    // another action between (leaving out the first would change the order of the timbre's fields). The shell drops a queued action whose next one has
+    // its key. Never throws.
+    static std::string replaceKey(const std::string& actionJson);
     // The accessors never throw; each gives an empty text if something unexpected throws (none is known: an allocation that fails), and the caller keeps what it had.
     std::string track() const;                     // for Engine::setTrack: every layer on, as the web hands its player; the mutes are state().track.layers, for Engine::setMuted
     std::string sound() const;                     // for Engine::setSound

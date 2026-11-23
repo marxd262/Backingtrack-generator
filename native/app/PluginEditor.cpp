@@ -2,7 +2,13 @@
 
 #include <juce_gui_extra/juce_gui_extra.h>
 
+#include <atomic>
+#include <functional>
 #include <limits>
+#include <memory>
+#include <optional>
+#include <string>
+#include <utility>
 
 #if JucePlugin_Build_Standalone
  #include <juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h> // the app's audio device, for the measurements
@@ -42,14 +48,20 @@ std::optional<juce::WebBrowserComponent::Resource> resource (const juce::String&
 
 const juce::StringArray layerNames { "drums", "bass", "chords", "pad", "lead", "percussion" }; // order of btg::Engine::Layer
 
+juce::String utf8 (const std::string& text) { return juce::String::fromUTF8 (text.data(), static_cast<int> (text.size())); }
+
 // Messages that build the song (and read its packs) or start, stop or move the transport: they run on the processor's loader
 // thread in the order the page sent them, so a play waits for its track's packs and a stop sent meanwhile comes after it.
-const juce::StringArray queued { "track", "voices", "tuning", "timbre", "pack", "play", "stop", "tempo", "seek", "loop", "playFile", "fileRate" };
+// `action`, `playSession`, `sync` and `export` are the session's (native/PROTOKOLL.md section 7): `sync` and `export` answer after the actions before them.
+const juce::StringArray queued { "track", "voices", "tuning", "timbre", "pack", "play", "stop", "tempo", "seek", "loop", "playFile", "fileRate",
+                                 "action", "playSession", "sync", "export" };
 
-struct Done { juce::String failed, status; double ms = 0.0; }; // status: btg::Engine::voiceStatus after a track or voices
+// status: btg::Engine::voiceStatus after a track or voices (and for `sync`); lanes: the session's new lanes (for `sync` the last); text: an export's file
+struct Done { juce::String failed, status; double ms = 0.0; std::optional<BackingtrackProcessor::Lanes> lanes; std::string text; };
+using Answered = std::function<void (const BackingtrackProcessor::Answer&)>; // the session's answer, to the page at once
 
 // Loader thread: what a queued message does.
-Done control (BackingtrackProcessor& p, const juce::var& message) {
+Done control (BackingtrackProcessor& p, const juce::var& message, const Answered& answered) {
     Done done;
     const auto started = juce::Time::getMillisecondCounterHiRes();
     const auto type = message["type"].toString();
@@ -63,16 +75,29 @@ Done control (BackingtrackProcessor& p, const juce::var& message) {
         else if (type == "pack") p.pack (message["id"].toString().toStdString());
         else if (type == "play") {
             p.playsFile = false;
+            p.sessionPlays = false;
             p.transport.setLoop (0.0, 0.0);
             // shortcut: every start of the generator is delayed by the web app's 0.15 s (play.js LEAD), during which the clock stands and the
             // sum's compressors settle on silence; starting at once would need the chain's state aged by that time instead (a loaded file has none).
             p.transport.play ((double) message["startBeats"], (double) message["bpm"], 0.15);
-        } else if (type == "stop") p.transport.stop();
+        } else if (type == "stop") {
+            if (const auto remembered = p.stopTransport()) answered (*remembered);
+        } else if (type == "action" || type == "playSession") {
+            const auto f = type == "action" ? p.act (message["json"].toString().toStdString(), answered) : p.playSession();
+            done.failed = f.failed;
+            done.status = f.status;
+            done.lanes = f.lanes;
+        } else if (type == "sync") { // a page that loaded or reloaded: everything it draws from, as it stands after the actions sent before
+            answered (p.answerNow());
+            done.lanes = p.lanesNow();
+            done.status = p.engine.voiceStatus();
+        } else if (type == "export") done.text = p.exportNow (message["key"].toString().toStdString(), message["name"].toString().toStdString());
         else if (type == "tempo") p.transport.setTempo ((double) message["bpm"]);
         else if (type == "seek") p.transport.seek ((double) message["beats"]);
         else if (type == "loop") p.transport.setLoop ((double) message["start"], (double) message["end"]);
         else if (type == "playFile") {
             p.playsFile = true; // the page sets and clears the loop itself
+            p.sessionPlays = false;
             if (message.hasProperty ("rate")) p.fileRate = juce::jlimit (0.25, 2.0, (double) message["rate"]);
             p.transport.play ((double) message["from"], 60.0 * p.fileRate); // one beat = one second of the track
         } else if (type == "fileRate") { // speed of the loaded track, 1 = as recorded
@@ -100,7 +125,7 @@ public:
         // The strip: what holds for every page (which page, the language) and the measurements.
         addAndMakeVisible (page);
         page.onClick = [this] {
-            processor.loader.addJob ([&p = processor] { p.transport.stop(); }); // in order with the queued transport messages
+            processor.loader.addJob ([&p = processor] { p.stopTransport(); }); // in order with the queued transport messages; the page is left (pagehide)
             shows (! ownTrack);
             browser.goToURL (juce::WebBrowserComponent::getResourceProviderRoot() + (ownTrack ? "native/track.html" : "ui/index.html"));
         };
@@ -154,8 +179,19 @@ private:
             // each type, every other message and their order stay as they are.
             auto* newest = type == "timbre" ? &p.newestTimbre : type == "tuning" ? &p.newestTuning : nullptr;
             const juce::uint64 number = newest != nullptr ? ++*newest : 0;
-            p.loader.addJob ([&p, message, newest, number, editor = juce::Component::SafePointer<Editor> (this)] {
-                const Done result = newest != nullptr && newest->load() != number ? Done {} : control (p, message);
+            // An action whose next queued message is a newer action of the same Session::replaceKey (one knob's steps) is dropped when its job starts:
+            // the newer one replaces its effect whole (PROTOKOLL.md section 7), it gets no answer of its own. Any other message between keeps it.
+            const auto key = type == "action" ? btg::Session::replaceKey (message["json"].toString().toStdString()) : std::string();
+            if (! key.empty() && key == lastKey) lastDropped->store (true);
+            const auto dropped = key.empty() ? nullptr : std::make_shared<std::atomic<bool>> (false);
+            lastKey = key;
+            lastDropped = dropped;
+            p.loader.addJob ([&p, message, newest, number, dropped, editor = juce::Component::SafePointer<Editor> (this)] {
+                const Answered answered = [editor] (const BackingtrackProcessor::Answer& a) {
+                    juce::MessageManager::callAsync ([editor, a] { if (editor != nullptr) editor->answer (a); });
+                };
+                const bool skip = (newest != nullptr && newest->load() != number) || (dropped != nullptr && dropped->load());
+                const Done result = skip ? Done {} : control (p, message, answered);
                 p.controlArrived();
                 juce::MessageManager::callAsync ([editor, message, result] { if (editor != nullptr) editor->done (message, result); });
             });
@@ -212,9 +248,67 @@ private:
         processor.controlArrived();
     }
 
+    // An event as emitEventIfBrowserIsVisible sends it (emitByBackend with the payload's JSON in a quoted literal), escaped in one pass: JUCE's
+    // escapes with String::replace, which copies the whole text once per backslash, and the session's texts travel as strings, a quote escaped in
+    // each key and value (the lanes' 1 MB has about 200 000: minutes on the message thread; a profile view of 1,000 nodes, 170 KB: seconds).
+    void emit (const char* event, const juce::var& object) {
+        if (! browser.isVisible()) return;
+        const std::string json = juce::JSON::toString (object, true).toStdString();
+        std::string script = std::string ("window.__JUCE__.backend.emitByBackend(\"") + event + "\", '";
+        script.reserve (script.size() + json.size() + json.size() / 4 + 3);
+        for (const char ch : json) {
+            if (ch == '\\') script += "\\\\";
+            else if (ch == '\'') script += "\\'";
+            else script += ch;
+        }
+        script += "');";
+        browser.evaluateJavascript (utf8 (script));
+    }
+
+    // Message thread: the session's answer (PROTOKOLL.md section 7): `state`, then `profiles` when its text came with it.
+    void answer (const BackingtrackProcessor::Answer& a) {
+        auto* state = new juce::DynamicObject();
+        state->setProperty ("json", utf8 (a.state));
+        if (a.change) {
+            auto* change = new juce::DynamicObject();
+            const auto& c = *a.change;
+            for (const auto& [name, on] : { std::pair { "events", c.events }, { "sound", c.sound }, { "voices", c.voices }, { "tempo", c.tempo }, { "mix", c.mix },
+                                            { "restart", c.restart }, { "inPlace", c.inPlace }, { "profiles", c.profiles } })
+                change->setProperty (name, on);
+            state->setProperty ("change", juce::var (change));
+        }
+        state->setProperty ("events", a.events);
+        emit ("state", juce::var (state));
+        if (a.profiles.empty()) return;
+        auto* profiles = new juce::DynamicObject();
+        profiles->setProperty ("json", utf8 (a.profiles));
+        emit ("profiles", juce::var (profiles));
+    }
+    void emitLanes (const BackingtrackProcessor::Lanes& lanes) {
+        auto* events = new juce::DynamicObject();
+        events->setProperty ("number", lanes.number);
+        events->setProperty ("bpm", lanes.bpm);
+        events->setProperty ("json", utf8 (lanes.json));
+        emit ("events", juce::var (events));
+    }
+
     // Message thread: a queued message has run on the loader thread.
     void done (const juce::var& message, const Done& r) {
         const auto type = message["type"].toString();
+        if (type == "sync") { // after its `state` and `profiles` (answered): the last lanes, the voices' state, and the position at the next tick
+            if (r.lanes) emitLanes (*r.lanes);
+            browser.emitEventIfBrowserIsVisible ("voices", juce::JSON::parse (r.status));
+            sentPosition.clear();
+            return;
+        }
+        if (type == "export") {
+            auto* file = new juce::DynamicObject();
+            file->setProperty ("key", message["key"]);
+            file->setProperty ("name", message["name"]);
+            file->setProperty ("json", utf8 (r.text));
+            emit ("export", juce::var (file));
+            return;
+        }
         if (r.failed.isNotEmpty()) error = r.failed; // a failed message of any type shows as a failed track's (the next track or voices sets it anew)
         if (type == "pack") { // for native/app/web/sampler.js: error "" = ready
             auto* reply = new juce::DynamicObject();
@@ -225,6 +319,7 @@ private:
         }
         if (type == "play") run = (int) message["run"];
         if (type == "track") buildMs = r.ms;
+        if (r.lanes) emitLanes (*r.lanes);
         if (r.status.isEmpty()) return;
         const auto voices = juce::JSON::parse (r.status);
         browser.emitEventIfBrowserIsVisible ("voices", voices);
@@ -286,6 +381,14 @@ private:
         file->setProperty ("error", track.error);
         state->setProperty ("file", juce::var (file));
         browser.emitEventIfBrowserIsVisible ("engine", juce::var (state));
+        // what the displays show at the session song's place (PROTOKOLL.md section 7), when its text changed; never waiting for the session's lock
+        const double at = processor.sessionPlays && processor.transport.playing() ? processor.transport.beats() : 0.0;
+        if (const auto place = processor.positionNow (at); place && ! place->empty() && *place != sentPosition) {
+            sentPosition = *place;
+            auto* position = new juce::DynamicObject();
+            position->setProperty ("json", utf8 (sentPosition));
+            emit ("position", juce::var (position));
+        }
         if (track.version != sentTrack && track.analysis.isNotEmpty()) {
             auto* result = new juce::DynamicObject();
             result->setProperty ("name", track.name);
@@ -337,6 +440,10 @@ private:
     // with the engine's twice a second and write the result there.
     const juce::String positionLog = juce::SystemStats::getEnvironmentVariable ("BTG_POSITION_LOG", {});
     int sentTrack = 0;     // version of the track analysis the page has
+    std::string sentPosition; // the session's position text the page has
+    // the replaceKey of the last queued message (empty: no action of a key) and the flag that drops its job
+    std::string lastKey;
+    std::shared_ptr<std::atomic<bool>> lastDropped;
     bool ownTrack = false; // which page shows: the generator's UI or the page for a loaded track
     bool english = false;  // the language of the app, as the page that shows last said or the strip chose
     std::unique_ptr<juce::FileChooser> chooser;

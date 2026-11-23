@@ -4,8 +4,11 @@
 //   node native/tools/position-check.mjs <track> [seconds per stretch, default 40] [start seconds ...]
 // Writes native/build/position/position.log (the raw samples) and app-analysis.json (the analysis as the app made it,
 // to compare with btg_analyze). By hand, with sound: start the app with BTG_POSITION_LOG=<file> set and play.
+// The app runs on a storage folder of its own (BTG_STORAGE_DIR, removed afterwards): the developer's profiles are never touched.
+// Its debug port 9334 is shell-check.mjs's too: the two cannot run at once.
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
@@ -22,7 +25,8 @@ const PORT = 9334;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const median = (v) => [...v].sort((a, b) => a - b)[Math.floor(v.length / 2)];
 
-const app = spawn(exe, [], { env: { ...process.env, BTG_MUTE: '1', BTG_NO_CACHE: '1', BTG_POSITION_LOG: log, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${PORT}` }, stdio: 'ignore' });
+const storage = mkdtempSync(join(tmpdir(), 'btg-position-check-'));
+const app = spawn(exe, [], { env: { ...process.env, BTG_MUTE: '1', BTG_NO_CACHE: '1', BTG_POSITION_LOG: log, BTG_STORAGE_DIR: storage, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${PORT}` }, stdio: 'ignore' });
 let browser;
 try {
   for (let i = 0; !browser && i < 40; i++) { await sleep(500); browser = await chromium.connectOverCDP(`http://127.0.0.1:${PORT}`).catch(() => null); }
@@ -60,5 +64,8 @@ try {
   }
 } finally {
   await browser?.close().catch(() => {});
+  const gone = new Promise((r) => { app.once('exit', r); setTimeout(r, 5000); });
   app.kill();
+  await gone;
+  rmSync(storage, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 }

@@ -1628,6 +1628,43 @@ add('presetDrive', presetDrive, [...VOICES.chords.organ.variants, 'nope', '', nu
   console.log(`profiles: ${cases.length - before} cases (${Object.entries(counts).map(([name, n]) => `${name} ${n}`).join(', ')})`);
 }
 
+// Task 31: what the app's shell sends the page for its lanes (native/PROTOKOLL.md section 7, generator.h): laneKey (ui/lanes.js 10), byte for byte, of every track of
+// the parity set and of tracks without its optional fields; buildEvents as eventsJson writes it (compared as values), for tracks whose events together have every field.
+{
+  const { laneKey } = await load('ui/lanes.js');
+  const { buildEvents } = await load('core/events.js');
+  const bare = parityTracks.slice(0, 20).map(({ groove, complexity, loose, ornaments, form, variety, ...rest }) => rest);
+  add('laneKey', (text) => laneKey(JSON.parse(text)), [...parityTracks, ...bare].map((t) => JSON.stringify(t)));
+  const FIELDS = ['t', 'bar', 'type', 'beat', 'chord', 'name', 'kind', 'index', 'layer', 'midi', 'vel', 'dur', 'art', 'artSemi', 'artTime', 'artRate', 'strum', 'strumUp', 'leslie', 'swell', 'ring'];
+  const seen = new Set(), picked = [];
+  for (const t of parityTracks) {
+    if (FIELDS.every((f) => seen.has(f))) break;
+    const keys = new Set(buildEvents(t).flatMap((e) => Object.entries(e).filter(([, v]) => v !== undefined).map(([k]) => k)));
+    if ([...keys].some((k) => !seen.has(k))) { picked.push(t); keys.forEach((k) => seen.add(k)); }
+  }
+  const missing = FIELDS.filter((f) => !seen.has(f));
+  if (missing.length) throw new Error(`no track of the parity set has events with ${missing.join(', ')}`);
+  add('eventsJson', (text) => buildEvents(JSON.parse(text)), picked.map((t) => JSON.stringify(t)));
+  // Task 31, fix round 1: the beat at which a bar begins (generator.h barStart), the start bar's sum of src/audio/play.js 39-46 in beats, on the normalized
+  // track with the web's chordIndex; a bar outside the loop is play()'s RangeError ({ threw: true }). Every 4th track of the parity set (all meters, with
+  // and without a form), at the first, second, middle and last bar and just outside.
+  const { normalizeTrack } = await load('core/track.js');
+  const { chordIndex } = await load('core/form.js');
+  const starts = parityTracks.filter((t, i) => i % 4 === 0).flatMap((t) => {
+    const length = normalizeTrack(t).length;
+    return [0, 1, Math.floor(length / 2), length - 1, length, -1].map((bar) => ({ text: JSON.stringify(t), bar }));
+  });
+  add('barStart', ({ text, bar }) => {
+    const t = normalizeTrack(JSON.parse(text));
+    if (!(Number.isInteger(bar) && bar >= 0 && bar < t.length)) return { threw: true };
+    let beats = 0;
+    for (let i = 0; i < bar; i++) beats += t.bars[chordIndex(t, i)].beats;
+    return beats;
+  }, starts);
+  console.log(`lanes: laneKey of ${parityTracks.length + bare.length} tracks, eventsJson of ${picked.length} tracks (fields ${[...seen].join(', ')}), barStart ${starts.length} cases `
+    + `(meters ${[...new Set(parityTracks.filter((t, i) => i % 4 === 0).map((t) => JSON.stringify(normalizeTrack(t).meter)))].join(' ')})`);
+}
+
 // The cases go to chunk files (logic-001.json, ...: each a JSON list of cases, a new one begun once the current passes CHUNK_BYTES), so that the
 // test never holds the whole reference; logic.json is the manifest: { total, chunks: [{ file, count }] } in the order of the cases.
 const CHUNK_BYTES = 16e6;

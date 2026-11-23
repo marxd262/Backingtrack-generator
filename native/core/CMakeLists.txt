@@ -79,6 +79,7 @@ add_library(btg_core STATIC
     src/session.cpp
     src/profiles.cpp
     src/profile_tree.cpp
+    src/lanes.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/grooves_bytes.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/sound_bytes.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/music_bytes.cpp
@@ -194,6 +195,10 @@ target_link_libraries(btg_compressor PRIVATE btg_core)
 # The layer effects alone on a raw file, for native/tools/fx-compare.mjs (against the web app's chains in Chromium).
 add_executable(btg_fx tools/fx.cpp)
 target_link_libraries(btg_fx PRIVATE btg_core)
+
+# A list of actions played on a session, what the shell gives the page after each: the reference of native/tools/shell-check.mjs.
+add_executable(btg_session tools/session.cpp)
+target_link_libraries(btg_session PRIVATE btg_core nlohmann_json::nlohmann_json)
 
 # Analysis of an audio file to JSON (tempo, beats, chords, key).
 add_executable(btg_analyze tools/analyze.cpp)

@@ -18,6 +18,7 @@
 #include "../src/string_model.h"
 #include "../src/timbre.h"
 #include "../src/track_internal.h"
+#include "btg/generator.h"
 #include "btg/session.h"
 #include "btg/track.h"
 #include "json_compare.h"
@@ -142,6 +143,98 @@ std::string keyOrder(const Json& v) {
     for (auto it = v.begin(); it != v.end(); ++it) out += (it == v.begin() ? "" : ",") + stringify(Json(it.key())) + ":" + keyOrder(it.value());
     return out + '}';
 }
+// Task 31, fix round 2: Session::replaceKey (session.h). On the states of the sequences (every REPLACE_EVERY-th step), for candidate actions of many
+// kinds (those with a key, and those that must have none: what does nothing on the value shown, what writes, counts, rolls, toggles or marks a value as
+// set by hand), with three values each (two others and the one the state shows): whenever an older and a newer one have the same non-empty key, the
+// older, then the newer gives on one copy of the session exactly what the newer alone gives on another: state(), track(), sound(), tuning(), profiles(),
+// the newer's flags, every stored text. A key on an action for which that fails, fails here. Only directly one after the other: with an action of
+// another key between, leaving out the older changes the order of the timbre's groups and fields in the track (a check of that, run once, failed
+// 1,033 of 14,994 times on exactly that), so the shell drops only an action whose newer one comes directly behind it.
+constexpr size_t REPLACE_EVERY = 4;
+long long replaceChecks = 0, replaceWrong = 0;
+std::set<std::string> replaceMet; // the keys the check met
+std::string actionText(const char* name, json fields) { fields["action"] = name; return fields.dump(); }
+struct Candidate { std::function<std::string(const json&)> make; std::vector<json> values; }; // values: two others, then the one the state shows
+std::vector<Candidate> replaceCandidates(const json& s, size_t k) {
+    const json& t = s.at("track");
+    const auto percent = [](const json& v, int otherwise) { return v.is_number() ? json(std::lround(v.get<double>() * 100)) : json(otherwise); };
+    const auto at = [](const json& o, const std::string& key) { return o.is_object() && o.contains(key) ? o.at(key) : json(); };
+    static const std::vector<std::string> channels { "drums", "bass", "chords", "pad", "lead", "percussion", "master" };
+    static const std::vector<std::string> layers { "drums", "bass", "chords", "pad", "lead", "percussion" };
+    static const std::vector<std::string> knobs { "complexity", "loose", "ornaments" }, feels { "structure", "dynamics", "pauses", "randomness" };
+    static const std::vector<std::string> paths = [] { std::vector<std::string> out; Timbre timbre; forEachField(timbre, [&](const char* g, const char* f, double&) { out.push_back(std::string(g) + "." + f); }); return out; }();
+    const std::string ch = channels[k % channels.size()], layer = layers[k % layers.size()], knob = knobs[k % knobs.size()], feel = feels[k % feels.size()];
+    const auto timbreAt = [&](size_t i) {
+        const std::string path = paths[i % paths.size()], group = path.substr(0, path.find('.')), name = path.substr(path.find('.') + 1);
+        return Candidate { [group, name](const json& v) { return actionText("setTimbre", { { "group", group }, { "field", name }, { "value", v } }); },
+                           { 13, 87, percent(at(at(at(t, "timbre"), group), name), 50) } };
+    };
+    const json& sections = at(at(t, "form"), "sections");
+    const json part = sections.is_array() && s.at("selectedPart").get<size_t>() < sections.size() ? sections.at(s.at("selectedPart").get<size_t>()) : json::object();
+    const auto edit = [](const char* name) { return [name](const json& v) { return actionText("editPart", { { "field", name }, { "value", v } }); }; };
+    const json meter = t.at("meter");
+    const std::string meterKey = std::to_string(meter.at(0).get<int>()) + "/" + std::to_string(meter.at(1).get<int>());
+    return {
+        { [ch](const json& v) { return actionText("setLevel", { { "channel", ch }, { "value", v } }); }, { 13, 87, percent(at(s.at("mix"), ch), 100) } },
+        { [layer](const json& v) { return actionText("setPan", { { "layer", layer }, { "value", v } }); }, { -40, 60, percent(at(s.at("pan"), layer), 0) } },
+        { [](const json& v) { return actionText("setTempo", { { "bpm", v }, { "from", "play" } }); }, { 77, 143, t.at("bpm") } },
+        { [](const json& v) { return actionText("setTempo", { { "bpm", v }, { "from", "start" } }); }, { 77, 143, t.at("bpm") } },
+        timbreAt(k), timbreAt(k + 11),
+        { [knob](const json& v) { return actionText("setRhythmKnob", { { "knob", knob }, { "value", v } }); }, { 13, 87, percent(at(t, knob), 50) } },
+        { [feel](const json& v) { return actionText("setFormFeel", { { "knob", feel }, { "value", v } }); }, { 13, 87, percent(at(s.at("formFeel"), feel), 50) } },
+        { [](const json& v) { return actionText("setOrganDrive", { { "value", v } }); }, { 13, 87, at(s.at("organ"), "drive").is_number() ? percent(s.at("organ").at("drive"), 0) : json() } },
+        { [](const json& v) { return actionText("setLeslie", { { "mode", v } }); }, { "off", "fast", at(s.at("organ"), "leslie") } },
+        { edit("level"), { -3, -18, at(part, "level").is_number() ? at(part, "level") : json(-6) } },
+        { edit("density"), { -40, 60, at(part, "density").is_number() ? percent(part.at("density"), 0) : json(0) } },
+        { edit("transition"), { "fill", "stop", at(part, "transition").is_string() ? at(part, "transition") : json("none") } },
+        { edit("type"), { "chorus", "bridge", at(part, "type") } },
+        { edit("bars"), { 4, 12, at(part, "bars") } },
+        { edit("crash"), { true, false, at(part, "crash").is_boolean() ? at(part, "crash") : json(false) } },
+        { edit("level"), { json(), -9, json() } },
+        { [](const json& v) { return actionText("setGroove", { { "groove", v } }); }, { "straight", "latin", at(t, "groove") } },
+        { [](const json& v) { return actionText("setJob", { { "layer", "lead" }, { "job", v } }); }, { "melody", "riff", at(at(t, "jobs"), "lead") } },
+        { [](const json& v) { return actionText("selectPart", { { "index", v } }); }, { 0, 1, s.at("selectedPart") } },
+        { [](const json& v) { return actionText("setMeter", { { "meter", v } }); }, { "3/4", "6/8", meterKey } },
+        { [](const json& v) { return actionText("newVariant", { { "variant", v } }); }, { 11, 22, t.at("seed") } },
+        { [](const json& v) { return actionText("enterVariant", { { "variant", v } }); }, { 11, 22, t.at("seed") } },
+        { [](const json& v) { return actionText("setChordColor", { { "color", v } }); }, { "sevenths", "power", s.at("chordColor") } },
+        { [layer](const json&) { return actionText("toggleMute", { { "layer", layer } }); }, { 0, 0, 0 } },
+        { [](const json&) { return actionText("toggleLock", json::object()); }, { 0, 0, 0 } },
+        { [](const json&) { return actionText("rerollForm", json::object()); }, { 0, 0, 0 } },
+        { [](const json&) { return actionText("addPart", json::object()); }, { 0, 0, 0 } },
+        { [](const json&) { return actionText("toggleAllVoices", json::object()); }, { 0, 0, 0 } },
+        { [chord = t.at("bars").at(0).at("chord")](const json&) { return actionText("addChord", { { "root", chord.at("root") }, { "quality", chord.at("quality") } }); }, { 0, 0, 0 } },
+    };
+}
+// `one` and `other`, each played on its own copy of `at` (with a copy of its stored texts): the same state, track, sound, tuning, profile view, flags
+// of their last action and stored texts?
+bool sameWays(const btg::Session& at, const SequenceStorage& stored, const std::vector<std::string>& one, const std::vector<std::string>& other) {
+    SequenceStorage a = stored, b = stored;
+    for (SequenceStorage* x : { &a, &b }) { x->failWrites.clear(); x->failReads.clear(); x->failName.clear(); }
+    btg::Session first(at, a), second(at, b);
+    btg::Session::Change ca, cb;
+    for (const std::string& text : one) ca = first.apply(text);
+    for (const std::string& text : other) cb = second.apply(text);
+    return first.state() == second.state() && first.track() == second.track() && first.sound() == second.sound() && first.tuning() == second.tuning()
+        && first.profiles() == second.profiles() && changeOf(ca) == changeOf(cb) && a.files == b.files;
+}
+void checkReplace(const btg::Session& session, const SequenceStorage& storage, size_t k) {
+    const json s = json::parse(session.state());
+    // which two of the three values this state pairs, in turn from state to state: another and another, another and the one shown, the one shown and
+    // another, the same twice, another and the one shown
+    static const std::pair<size_t, size_t> PAIRS[] = { { 0, 1 }, { 0, 2 }, { 2, 0 }, { 0, 0 }, { 1, 2 } };
+    const auto [i, j] = PAIRS[(k / REPLACE_EVERY) % 5];
+    for (const Candidate& c : replaceCandidates(s, k)) {
+        const std::string older = c.make(c.values[i]), newer = c.make(c.values[j]);
+        const std::string key = btg::Session::replaceKey(older);
+        if (key.empty() || key != btg::Session::replaceKey(newer)) continue;
+        replaceMet.insert(key);
+        ++replaceChecks;
+        if (!sameWays(session, storage, { older, newer }, { newer }) && ++replaceWrong <= 12)
+            std::printf("FAIL: replaceKey %s: %s then %s does not give what %s alone gives (step %zu)\n", key.c_str(), older.c_str(), newer.c_str(), newer.c_str(), k);
+    }
+}
+
 // A case is { steps, at } (export-logic.mjs, Task 29 and 30b, the fix wave of Phase 6; a plain list is the steps without places): a step is an action text; { action, fail?,
 // failReads? }, the action with writes that fail or reads that throw; { restart, stored?, failReads? }, a new session on the same storage after `stored` replaced texts (null
 // removes one); { probe: [key, name] }, exportFile only. `at` per step the places of the playback to ask position for. `out` per step { change, state, track, sound, tuning,
@@ -195,6 +288,7 @@ json playSession(const json& in) {
             if (selection == "session") record["exportHash"] = fnv(file); else record["export"] = file;
         }
         out.push_back(std::move(record));
+        if (k % REPLACE_EVERY == 0) checkReplace(*session, storage, k);
     }
     return out;
 }
@@ -405,6 +499,13 @@ const std::map<std::string, std::function<json(const json&)>> FUNCTIONS {
     { "isReservedId", [](const json& in) { return json(isReservedId(in.get<std::string>())); } },
     { "loadTree", [](const json& in) { MapStorage s = storageOf(in); const Json tree = loadTree(s, idsOf(ordered(in))); return storedAnd("tree", tree, s); } },
     { "saveTree", [](const json& in) { MapStorage s = storageOf(in); const bool saved = saveTree(s, Json::parse(in.at("args").get<std::string>()).at("tree")); return json { { "saved", saved }, { "stored", storedOf(s) } }; } },
+    // Task 31: what the shell sends the page for its lanes (generator.h). `in` is the track's text; laneKey byte for byte, the events as values.
+    { "laneKey", [](const json& in) { return json(btg::laneKey(in.get<std::string>())); } },
+    { "eventsJson", [](const json& in) { return parsed(btg::eventsJson(btg::buildEvents(in.get<std::string>()))); } },
+    // fix round 1: the beat at which a bar begins; a bar outside the loop throws std::invalid_argument, the web's RangeError: { threw: true }
+    { "barStart", [](const json& in) {
+        try { return json(btg::barStart(in.at("text").get<std::string>(), in.at("bar").get<int>())); }
+        catch (const std::invalid_argument&) { return json { { "threw", true } }; } } },
 };
 
 } // namespace
@@ -852,6 +953,15 @@ int main(int argc, char** argv) {
         if (btg::detail::parseFile(Json(folders)).at("ok").get<bool>()) { std::printf("FAIL: a folder file nested 84 levels deep is read\n"); ++profileDepthWrong; }
     } catch (const std::exception& error) { std::printf("FAIL: the check of the depth of a profile file threw: %s\n", error.what()); ++profileDepthWrong; }
     std::printf("profile depth: %d of 3 checks wrong (a file nested beyond 64 levels counts as no JSON; the web reads it)\n", profileDepthWrong);
+    // the replace check ran inside the sequences (playSession); a key it never met was not proven
+    std::set<std::string> kinds; // setTimbre/<path> and setRhythmKnob/<knob> by their action, editPart's by field
+    for (const std::string& key : replaceMet) kinds.insert(key.rfind("editPart/", 0) == 0 ? key : key.substr(0, key.find('/')));
+    std::string met;
+    for (const std::string& kind : kinds) met += (met.empty() ? "" : ", ") + kind;
+    const bool replaceUnmet = kinds.size() != 5;
+    std::printf("replace: %lld of %lld checks wrong (an action and, directly after it, a newer one of its replaceKey give what the newer alone gives; "
+                "%zu keys of the kinds %s)\n", replaceWrong, replaceChecks, replaceMet.size(), met.c_str());
+    if (replaceUnmet) std::printf("FAIL: the replace check met %zu kinds of key, the core gives 5 (setTimbre, setRhythmKnob, editPart level, density, transition)\n", kinds.size());
     int untested = 0; // a function of the table that the file brings no case for was not checked
     for (const auto& entry : FUNCTIONS) if (!seen.count(entry.first)) { std::printf("no case for %s in %s\n", entry.first.c_str(), argv[1]); ++untested; }
     std::printf("logic: functions %zu, cases %zu, identical %lld, close %lld, different %lld\n", FUNCTIONS.size(), read, identical, close, different);
@@ -859,5 +969,5 @@ int main(int argc, char** argv) {
     // A close is a difference in the last bits (possibly another platform's math library): it fails too. An exception has to be ruled
     // by the owner and named here (function and field, from the line above), not passed.
     if (close) std::printf("FAIL: %lld case(s) are only close, not bit for bit: a difference in the last bits, possibly another platform's math library; ruled exceptions are named in this test\n", close);
-    return different || untested || close || deepWrong || seedWrong || formWrong || storageWrong || viewWrong || outsideWrong || profileDepthWrong ? 1 : 0;
+    return different || untested || close || deepWrong || seedWrong || formWrong || storageWrong || viewWrong || outsideWrong || profileDepthWrong || replaceWrong || replaceUnmet ? 1 : 0;
 }

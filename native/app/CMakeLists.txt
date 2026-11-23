@@ -13,7 +13,7 @@ juce_add_plugin(BackingtrackApp
     NEEDS_WEBVIEW2 TRUE
     NEEDS_CURL FALSE)
 
-target_sources(BackingtrackApp PRIVATE PluginProcessor.cpp PluginEditor.cpp)
+target_sources(BackingtrackApp PRIVATE PluginProcessor.cpp PluginEditor.cpp Storage.cpp)
 
 get_filename_component(BTG_REPO_ROOT "${CMAKE_SOURCE_DIR}/.." ABSOLUTE)
 
@@ -43,3 +43,16 @@ target_link_libraries(BackingtrackApp
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)
+
+# The app's storage on its own (Storage.h): the rules of read and write and the abort test of Review Focus 3, which starts this program again.
+juce_add_console_app(btg_storage_tests PRODUCT_NAME "btg_storage_tests")
+target_sources(btg_storage_tests PRIVATE StorageTests.cpp Storage.cpp)
+target_compile_definitions(btg_storage_tests PRIVATE JUCE_USE_CURL=0 JUCE_WEB_BROWSER=0)
+target_link_libraries(btg_storage_tests
+    PRIVATE
+        btg_core
+        juce::juce_core
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
+add_test(NAME storage COMMAND btg_storage_tests)

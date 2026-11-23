@@ -5,6 +5,7 @@
 #include <btg/beat_model.h>
 #endif
 #include <btg/decode.h>
+#include <btg/generator.h>
 #include <btg/pack.h>
 #include <btg_platform/system_audio.h>
 
@@ -29,6 +30,201 @@ BackingtrackProcessor::BackingtrackProcessor()
       juce::Thread ("track loader"),
       parameters (*this, nullptr, "state", createParameters()) {
     engine.setPackSource ([this] (const std::string& id) { return pack (id); });
+    // PROTOKOLL.md section 2 and 7: after the session is built, always `start` with a variant the shell draws (rollVariant: 1 to 9999); the engine follows
+    const auto start = "{\"action\":\"start\",\"variant\":" + std::to_string (juce::Random::getSystemRandom().nextInt ({ 1, 10000 })) + "}";
+    loader.addJob ([this, start] { act (start, [] (const Answer&) {}); }); // the page is not there yet: it asks with `sync`
+}
+
+BackingtrackProcessor::~BackingtrackProcessor() {
+    loader.removeAllJobs (true, 10000);
+    stopThread (10000);
+    stopTransport(); // the app closes: the web's pagehide remembers the session that plays
+}
+
+// ---------- the session (PROTOKOLL.md section 7) ----------
+
+namespace {
+
+juce::var parsed (const std::string& text) { return juce::JSON::parse (juce::String::fromUTF8 (text.data(), static_cast<int> (text.size()))); }
+const char* const layerIds[] = { "drums", "bass", "chords", "pad", "lead", "percussion" }; // order of btg::Engine::Layer
+
+// what stop() remembers in the web (app.js 154): the session at the bar that plays, at the time of the app's clock
+std::string remembered (int bar) {
+    return "{\"action\":\"rememberSession\",\"bar\":" + std::to_string (bar) + ",\"at\":" + std::to_string (juce::Time::currentTimeMillis()) + "}";
+}
+
+} // namespace
+
+// The session's texts the engine gets, read under the lock and used outside it.
+struct BackingtrackProcessor::Texts { std::string track, sound, tuning, state; };
+
+int BackingtrackProcessor::barPlaying() {
+    // the web's state.current: null until the first bar of a start (the lead), but at once after a restart in place
+    if (! sessionPlays || ! transport.playing() || (transport.standing() && ! barInLead)) return -1;
+    return static_cast<int> (parsed (session.position (transport.beats()))["bar"]);
+}
+
+BackingtrackProcessor::Followed BackingtrackProcessor::act (std::string action, const std::function<void (const Answer&)>& answered) {
+    const juce::var given = parsed (action);
+    const bool resume = given["action"].toString() == "resume";
+    btg::Session::Change c;
+    Texts t;
+    Answer answer;
+    bool newLanes = false, hadLast = false;
+    int bar = -1, number = 0;
+    {
+        const juce::ScopedLock lock (sessionLock);
+        bar = barPlaying();
+        if (resume && given.isObject()) { // "Weitermachen": the shell says whether a bar plays (PROTOKOLL.md section 7)
+            hadLast = ! parsed (session.state())["last"].isVoid();
+            juce::var playing;
+            if (bar >= 0) {
+                playing = new juce::DynamicObject();
+                playing.getDynamicObject()->setProperty ("bar", bar);
+                playing.getDynamicObject()->setProperty ("at", juce::Time::currentTimeMillis());
+            }
+            given.getDynamicObject()->setProperty ("playing", playing);
+            action = juce::JSON::toString (given, true).toStdString();
+        }
+        c = session.apply (action);
+        if (c.restart && ! resume && bar >= 0) session.apply (remembered (bar)); // restartIfPlaying stops first, and stop() remembers
+        t = { session.track(), session.sound(), session.tuning(), session.state() };
+        if (const auto key = btg::laneKey (t.track); key != lanesKey) {
+            lanesKey = key;
+            newLanes = true;
+            ++lanesNumber;
+        }
+        number = lanesNumber;
+        answer = { t.state, c.profiles ? session.profiles() : std::string(), c, number };
+    }
+    answered (answer);
+
+    Followed f;
+    const juce::var state = parsed (t.state), sessionTrack = parsed (t.track);
+    const auto bpm = static_cast<double> (sessionTrack["bpm"]);
+    if (newLanes) { // the number the answer named always comes with its lanes: an empty list when the song cannot be built (the web draws an empty lane, tuning.js 93)
+        Lanes lanes { "[]", bpm, number };
+        try { lanes.json = btg::eventsJson (btg::buildSong (t.track).events); } catch (const std::exception& e) { f.failed = e.what(); }
+        f.lanes = lanes;
+        const juce::ScopedLock lock (sessionLock);
+        lastLanes = std::move (lanes);
+    }
+    try {
+        const bool playing = sessionPlays && transport.playing();
+        if (c.restart) {
+            everything (t);
+            f.status = engine.voiceStatus();
+            if (resume) playFrom (t.track, static_cast<int> (state["resumed"]["bar"]), bpm, false); // in any case, at the bar it restored
+            else if (playing) {
+                const int loop = juce::jmax (1, static_cast<int> (state["loopBars"]));
+                const bool inPlace = c.inPlace && bar >= 0; // with no bar yet the web's state.current is null: from bar 1
+                playFrom (t.track, inPlace ? bar % loop : 0, bpm, inPlace);
+            }
+            return f;
+        }
+        if (resume && hadLast && playing) { // it did not restore: the web stopped before applyParts (app.js 229)
+            transport.stop();
+            sessionPlays = false;
+        }
+        if (c.sound) {
+            engine.setSound (t.sound);
+            engine.setTuning (t.tuning);
+        }
+        if (c.events) engine.setTrack (t.track); // with the track's voices
+        else if (c.voices) engine.setVoices (juce::JSON::toString (sessionTrack["voices"], true).toStdString());
+        if (c.events || c.voices) f.status = engine.voiceStatus();
+        if (c.tempo) transport.setTempo (bpm);
+        if (c.mix) mix (state);
+    } catch (const std::exception& e) {
+        f.failed = e.what();
+        f.status = engine.voiceStatus();
+    }
+    return f;
+}
+
+// start() of the web (app.js 121-151): the fine values first (the voices the track builds read them), the track, its sound, the mixer
+void BackingtrackProcessor::everything (const Texts& t) {
+    engine.setTuning (t.tuning);
+    engine.setTrack (t.track);
+    engine.setSound (t.sound);
+    mix (parsed (t.state));
+}
+
+void BackingtrackProcessor::mix (const juce::var& state) {
+    const auto& levels = state["mix"];
+    if (auto* parameter = parameters.getParameter ("master")) parameter->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, static_cast<float> (levels["master"])));
+    for (int l = 0; l < btg::Engine::layerCount; ++l) {
+        const auto layer = static_cast<btg::Engine::Layer> (l);
+        const juce::Identifier id (layerIds[l]);
+        engine.setLevel (layer, static_cast<float> (levels[id]));
+        engine.setPan (layer, static_cast<float> (state["pan"][id]));
+        engine.setMuted (layer, ! static_cast<bool> (state["track"]["layers"][id]));
+    }
+}
+
+// the transport plays the session's song from the start of `bar` (the core's barStart), after the web's lead of 0.15 s (see `play`); throws as barStart
+void BackingtrackProcessor::playFrom (const std::string& song, int bar, double bpm, bool inPlace) {
+    const double beats = btg::barStart (song, bar);
+    playsFile = false;
+    transport.setLoop (0.0, 0.0);
+    {
+        const juce::ScopedLock lock (sessionLock);
+        barInLead = inPlace;
+    }
+    sessionPlays = true;
+    transport.play (beats, bpm, 0.15);
+}
+
+BackingtrackProcessor::Followed BackingtrackProcessor::playSession() {
+    Texts t;
+    {
+        const juce::ScopedLock lock (sessionLock);
+        t = { session.track(), session.sound(), session.tuning(), session.state() };
+    }
+    Followed f;
+    try {
+        everything (t);
+        playFrom (t.track, 0, static_cast<double> (parsed (t.track)["bpm"]), false);
+    } catch (const std::exception& e) {
+        f.failed = e.what();
+    }
+    f.status = engine.voiceStatus();
+    return f;
+}
+
+std::optional<BackingtrackProcessor::Answer> BackingtrackProcessor::stopTransport() {
+    std::optional<Answer> answer;
+    {
+        const juce::ScopedLock lock (sessionLock);
+        if (const int bar = barPlaying(); bar >= 0) {
+            session.apply (remembered (bar));
+            answer = Answer { session.state(), {}, std::nullopt, lanesNumber };
+        }
+    }
+    transport.stop();
+    sessionPlays = false;
+    return answer;
+}
+
+BackingtrackProcessor::Answer BackingtrackProcessor::answerNow() const {
+    const juce::ScopedLock lock (sessionLock);
+    return { session.state(), session.profiles(), std::nullopt, lanesNumber };
+}
+
+std::optional<BackingtrackProcessor::Lanes> BackingtrackProcessor::lanesNow() const {
+    const juce::ScopedLock lock (sessionLock);
+    return lastLanes;
+}
+
+std::optional<std::string> BackingtrackProcessor::positionNow (double beats) {
+    const juce::ScopedTryLock lock (sessionLock);
+    if (! lock.isLocked()) return std::nullopt;
+    return session.position (beats);
+}
+
+std::string BackingtrackProcessor::exportNow (const std::string& key, const std::string& name) const {
+    const juce::ScopedLock lock (sessionLock);
+    return session.exportFile (key, name);
 }
 
 std::shared_ptr<const btg::Pack> BackingtrackProcessor::pack (const std::string& id) {
@@ -89,7 +285,7 @@ static juce::String peaksOf (const std::vector<float>& mono, double rate) {
 
 void BackingtrackProcessor::loadTrack (const juce::File& file) {
     stopThread (10000); // a load still running is given up
-    loader.addJob ([this] { transport.stop(); }); // in order with the queued transport messages (PluginEditor.cpp, `queued`)
+    loader.addJob ([this] { stopTransport(); }); // in order with the queued transport messages (PluginEditor.cpp, `queued`)
     trackFile = file;
     trackProgress = 0.0f;
     trackLoading = true;
