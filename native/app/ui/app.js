@@ -1,34 +1,21 @@
-// Start- und Spielseite: ein Zustandsobjekt (state.js), render() schreibt daraus alle Texte und Attribute neu.
-import { play, STYLE_PRESETS, validateTrack, t, setLanguage } from '../index.js';
-import { positionLabel, chordAtBar, loopBars } from './position.js';
-import { $, LAYERS, ALL_LAYERS, ROOTS, state, layoutStorage, chordName, rollVariant, preset, pressed, setText, setAttr, saveLang, deriveBars, applyStyle, rollNewForm, setFormTemplate } from './state.js';
-import { saveLayout } from './layout-state.js';
+// Start- und Spielseite: render() schreibt alle Texte und Attribute aus dem, was die Sitzung zuletzt gab (session.js: state, derived, tables,
+// position, der Verlauf, die Meldungen der Engine), neu; die Bedienelemente schicken Aktionen. Was spielt und was gespeichert wird, gehört der
+// Sitzung und der Hülle der App; die Seite hält Sprache, Seite und Anzeigezustand (backingtrack.lang, backingtrack.layout).
+import { t, setLanguage, detectLanguage } from './i18n/index.js';
+import { session, listen, send, post, start, holds, beatsNow } from './session.js';
+import { $, setText, setAttr, pressed } from './dom.js';
+import { positionLabel } from './position.js';
+import { loadLayout, saveLayout } from './layout-state.js';
 import { initTuning } from './tuning.js';
 import { initMixer } from './mixer.js';
-import { initProfiles } from './profiles.js';
-import { stepVariant } from './variant.js';
 import { buildKeyScale, buildKeyScaleSelects } from './key-scale.js';
-import { createLcdSelect } from './lcd-select.js';
-import { resolveTrackTimbre } from '../core/timbre.js';
-import { beatsUntilChange } from '../core/fretboard.js';
-import { sectionAt, formLength } from '../core/form.js';
+import { createLcdSelect, syncLcdSelects } from './lcd-select.js';
 import { initTimbrePanel } from './timbre-panel.js';
-import { initVoices } from './voices-panel.js';
-import { loadVoices, missingPacks } from '../audio/load-voices.js';
+import { initVoices, voiceLoad } from './voices-panel.js';
 import { initJobs } from './jobs-panel.js';
 import { initOrgan } from './organ-panel.js';
-import { organTuning } from './organ-tuning.js';
 import { initRhythm } from './rhythm.js';
 import { syncKnobs } from './knob.js';
-import { syncLcdSelects } from './lcd-select.js';
-import { initFormPanel } from './form-panel.js';
-import { initFormStrip } from './form-strip.js';
-import { readSession, writeSession } from './profile-session.js';
-import { saveLast, loadLast } from './session-store.js';
-import { applyParts } from '../core/profile-parts.js';
-import { chooseRoot } from './key-scale.js';
-import { SCALE_NAMES } from '../core/music.js';
-import { convertTempo, meterKey } from '../core/grooves.js';
 
 // Dekoratives 16tel-Bild je Stil, 1 = Schlag
 const RHYTHMS = {
@@ -37,24 +24,56 @@ const RHYTHMS = {
   reggae: '0000100000001000', country: '1000001010000010', poppunk: '1011101110111011',
 };
 
-// --- Wiedergabe: ein AudioContext für alle Starts, nie zwei Player gleichzeitig ---
-let ctx = null;
-let player = null;
-let loadingPacks = false; // Start wartet auf die Sample-Packs
-
-// Start erst, wenn die Packs der gewählten Sample-Stimmen da sind (Wunsch des Nutzers 2026-11-15), sonst spielte der Synth-Rückfall die
-// ersten Takte. Ein Pack, das nicht lädt, gibt nach seinem Fehler (spätestens nach dem Zeitlimit des Samplers) frei; dann spielt dort der Synth.
-async function startWhenLoaded(startBar = 0) {
-  if (loadingPacks) return; // zweiter Klick während des Ladens
-  if (missingPacks(state.track).length) {
-    try { ctx ??= new AudioContext(); } catch { /* start() meldet den Fehler */ } // noch im Klick anlegen: nach dem Warten zählt er nicht mehr als Nutzergeste
-    loadingPacks = true;
-    render();
-    await loadVoices(state.track);
-    loadingPacks = false;
-  }
-  start(startBar);
+// --- was die Seite selbst hält: Sprache, Seite, Fokus/Einstellen ---
+const LANG_KEY = 'backingtrack.lang';
+// Schon der Zugriff auf localStorage kann werfen (gesperrter Speicher); null speichert nichts
+const layoutStorage = (() => { try { return localStorage; } catch { return null; } })();
+function readLang() {
+  try {
+    const saved = localStorage.getItem(LANG_KEY);
+    if (saved === 'de' || saved === 'en') return saved;
+  } catch { /* Speicher gesperrt: Browsersprache */ }
+  return detectLanguage(navigator.language);
 }
+let lang = readLang();
+let page = 'start'; // 'start' | 'play'
+let layout = loadLayout(layoutStorage); // Fokus/Einstellen, Beschriftung, Bünde
+// Die Variante, die die Web-App aus dem Browser würfelt (crypto), bringt die Aktion mit: der Kern würfelt nicht
+const rollVariant = () => (crypto.getRandomValues(new Uint32Array(1))[0] % 9999) + 1;
+
+// Die Sprache wählt die Leiste der App für jede Seite; die eigenen Tasten der Seite stehen verborgen (sie gelten weiter, die Leiste hört mit)
+document.head.append(Object.assign(document.createElement('style'), { textContent: '.lang { display: none !important; }' }));
+function setLang(next) {
+  lang = next;
+  try { localStorage.setItem(LANG_KEY, lang); } catch { /* ohne Speicher gilt die Wahl nur bis zum Neuladen */ }
+  post('language', { lang });
+  render();
+}
+listen((what, value) => { if (what === 'language' && (value === 'de' || value === 'en')) setLang(value); });
+addEventListener('load', () => post('language', { lang })); // die Leiste zeigt die Sprache der Seite
+
+// --- Wiedergabe: die Hülle spielt den Song der Sitzung (playSession, stop); die Seite zeigt, wo er steht ---
+const playing = () => session.engine.playing;
+// Die Web-App zeigt Takt, Akkord und Countdown erst ab dem ersten Takt (state.current), nicht im Vorlauf eines Starts (die Uhr steht 0,15 s):
+// hadBar wird wahr, sobald die Uhr in dieser Wiedergabe läuft, und bleibt es über einen Neustart am Takt
+let hadBar = false;
+const current = () => playing() && hadBar;
+let starting = false; // "Los" geschickt, die Engine hat den Start noch nicht gemeldet: ein zweiter Klick tut nichts (wie in der Web-App, solange die Packs laden)
+let startFailed = false; // der letzte Start spielte nicht (die Web-App: err.playFailed), bis zum nächsten Start oder Weitermachen
+let errorsHidden = false; // die Web-App löscht die Fehler eines Weitermachens, wenn eine Wiedergabe beginnt (app.js 122 der Web-App)
+listen((what) => {
+  if (what === 'playing') {
+    if (!playing()) {
+      hadBar = false;
+      for (const layer of [...sounding.keys()]) endSound(layer);
+    } else {
+      errorsHidden = true;
+      if (!session.engine.standing) hadBar = true;
+    }
+  }
+  if (what === 'state') for (const layer of [...sounding.keys()]) if (!session.state.track.layers[layer]) endSound(layer); // stumm: die LED geht sofort aus
+  if (what !== 'language') render();
+});
 
 // Lichter der Schichten (LED im Modultitel und vor dem Spurnamen), drei Stufen über dem Grundzustand "spielt in diesem Takt" (.on, gedämpft):
 // .sound: ein Ton der Schicht klingt gerade (volle Helligkeit, so lange wie der Ton; ein gehaltener Pad-Akkord leuchtet also durch),
@@ -65,7 +84,7 @@ const FLASH_MS = 70;
 const calm = matchMedia('(prefers-reduced-motion: reduce)');
 const flashing = new Set(); // LED-Gruppen, die gerade leuchten
 function flash(key, selector) {
-  if (calm.matches || state.page !== 'play' || flashing.has(key)) return;
+  if (calm.matches || page !== 'play' || flashing.has(key)) return;
   const leds = document.querySelectorAll(selector);
   for (const el of leds) el.classList.add('hit');
   flashing.add(key);
@@ -79,227 +98,76 @@ function endSound(layer) {
   for (const el of document.querySelectorAll(layerLeds(layer))) el.classList.remove('sound');
 }
 function holdSound(layer, ms) {
-  if (calm.matches || state.page !== 'play') return;
+  if (calm.matches || page !== 'play') return;
   const until = performance.now() + ms;
   if (sounding.get(layer)?.until >= until) return; // ein längerer Ton klingt schon
   clearTimeout(sounding.get(layer)?.timer);
   for (const el of document.querySelectorAll(layerLeds(layer))) el.classList.add('sound');
   sounding.set(layer, { until, timer: setTimeout(() => endSound(layer), ms) });
 }
-// jedes gespielte Ereignis einer hörbaren Schicht (stumme leuchten nicht); die Dauer zählt beim Starttempo, also mal Starttempo durch jetziges
+// jedes gespielte Ereignis einer hörbaren Schicht (stumme leuchten nicht); die Dauer zählt beim Tempo des Verlaufs, also mal dieses durch das jetzige
 function flashEvent(e) {
-  if (!(e.type === 'note' || e.type === 'hit') || !state.track.layers[e.layer]) return;
+  if (!(e.type === 'note' || e.type === 'hit') || !session.state.track.layers[e.layer]) return;
   flash(e.layer, layerLeds(e.layer));
-  if (e.type === 'note') holdSound(e.layer, (e.dur * 1000 * playBpm) / state.track.bpm);
+  if (e.type === 'note') holdSound(e.layer, (e.dur * 1000 * session.lanes.bpm) / session.engine.bpm);
 }
-
-// Countdown bis zum nächsten Akkordwechsel und Schlag-LED: eigene Bildzeitschleife (nicht über render()), nur bei laufender Wiedergabe,
-// schreibt nur bei Änderung. Die Liedzeit des Players bezieht sich auf das Starttempo, daher dessen bpm.
-let countdownFrame = 0;
-let playBpm = 0;
-let lastBeat = -1;
-function tickCountdown() {
-  const n = player ? beatsUntilChange({ ...state.track, bpm: playBpm }, player.songTime()) : null;
-  setText($('play-countdown'), n === null ? '' : t(n === 1 ? 'ui.countdownOne' : 'ui.countdownMany', { n }));
-  const beat = player ? Math.floor((player.songTime() * playBpm) / 60 + 1e-6) : -1;
-  if (beat !== lastBeat) {
-    lastBeat = beat;
-    if (player) flash('beat', '#beat-led');
+// Die Ereignisse, deren Schlag (t beim Tempo des Verlaufs) die Wiedergabe seit dem letzten Bild überschritten hat, im Durchlauf von lanes.beats Schlägen;
+// ein Sprung (Spulen, Schleife, Neustart) beginnt dort neu, ohne nachzuholen
+let ledLanes = null, ledBeats = [], ledAt = -1, ledNext = 0;
+function tickLeds() {
+  const lanes = session.lanes;
+  if (!current() || !lanes?.beats) ledAt = -1;
+  else {
+    if (lanes !== ledLanes) { ledLanes = lanes; ledBeats = lanes.events.map((e) => (e.t * lanes.bpm) / 60); ledAt = -1; }
+    const now = ((beatsNow() % lanes.beats) + lanes.beats) % lanes.beats;
+    const wrapped = ledAt >= 0 && now < ledAt && ledAt - now > lanes.beats / 2;
+    if (ledAt < 0 || (now < ledAt && !wrapped) || now > ledAt + 2) ledNext = ledBeats.findIndex((b) => b > now);
+    else {
+      if (wrapped) { while (ledNext >= 0 && ledNext < ledBeats.length) flashEvent(lanes.events[ledNext++]); ledNext = 0; }
+      while (ledNext >= 0 && ledNext < ledBeats.length && ledBeats[ledNext] <= now) flashEvent(lanes.events[ledNext++]);
+    }
+    ledAt = now;
   }
-  countdownFrame = player ? requestAnimationFrame(tickCountdown) : 0;
+  requestAnimationFrame(tickLeds);
 }
+requestAnimationFrame(tickLeds);
 
-// Teil am Takt `bar` für die Kopfleiste: übersetzter Typ plus laufende Nummer dieses Typs ("Strophe 2"); ohne Form leer
-function partLabel(track, bar) {
-  const total = formLength(track.form);
-  const hit = total > 0 ? sectionAt(track.form, bar % total) : null;
-  if (!hit) return '';
-  const n = track.form.sections.slice(0, hit.index + 1).filter((s) => s.type === hit.section.type).length;
-  return `${t(`form.part.${hit.section.type}`)} ${n}`;
-}
+// Teil am Takt für die Kopfleiste: übersetzter Typ plus laufende Nummer dieses Typs ("Strophe 2"); ohne Form leer
+const partLabel = (part) => (part ? `${t(`form.part.${part.type}`)} ${part.n}` : '');
 
-function start(startBar = 0) {
-  state.errors = [];
-  const { master, ...layerLevels } = state.mix;
-  try {
-    ctx ??= new AudioContext(); // nur aus einem Klick heraus aufgerufen
-    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
-    // alle Schichten erzeugen und stumme per setLayer leise schalten, damit Einschalten live ohne Neustart klingt
-    player = play(ctx, { ...state.track, layers: ALL_LAYERS }, {
-      loops: Infinity, // läuft bis Stopp
-      startBar,
-      levels: layerLevels, // Mischpult von der ersten Note an
-      master,
-      pans: state.pan,
-      tuning: organTuning(state.organ), // Leslie und Zerre der Orgel; im Standard leer
-      onEvent: flashEvent,
-      onBar: (b) => { state.current = b; render(); },
-      onEnd: () => { stop(); render(); },
-    });
-    for (const name of LAYERS) if (!state.track.layers[name]) player.setLayer(name, false);
-    state.playing = true;
-    playBpm = state.track.bpm;
-    cancelAnimationFrame(countdownFrame);
-    tickCountdown();
-  } catch {
-    player?.stop();
-    player = null;
-    const found = validateTrack(state.track);
-    state.errors = found.length ? found : [{ code: 'playFailed', params: {} }];
-  }
-}
+// --- Bedienung der Startseite ---
+// Überrasch mich: die Zufallszahlen der Web-App (Math.random) bringt die Aktion mit; was der Nutzer auf der Startseite selbst gewählt hat, weiß die Sitzung
+$('surprise').addEventListener('click', () => send({ action: 'surprise', variant: rollVariant(), style: Math.random(), tempo: Math.random(), scale: Math.random(), root: Math.random() }));
 
-// Zuletzt gespielt (Startseite, "Weitermachen"): beim Stopp und beim Verlassen der Seite wird die Sitzung samt laufendem Takt gemerkt
-let lastPlayed = loadLast(layoutStorage);
-const rememberSession = () => {
-  if (state.playing && state.current) lastPlayed = saveLast(layoutStorage, readSession(state), state.current.bar % loopBars(state.track));
-};
-addEventListener('pagehide', rememberSession);
-
-function stop() {
-  rememberSession();
-  player?.stop();
-  player = null;
-  cancelAnimationFrame(countdownFrame);
-  for (const layer of [...sounding.keys()]) endSound(layer);
-  lastBeat = -1;
-  setText($('play-countdown'), '');
-  state.playing = false;
-  state.current = null;
-}
-
-// inPlace: nur der Klang hat sich geändert (Ereignisstrom gleich), also im laufenden Takt weiter statt ab Takt 1;
-// sonst hörte man neue Akkord- und Pad-Klänge im langsamen Aufbau erst nach vielen Takten
-function restartIfPlaying({ inPlace = false } = {}) {
-  if (!state.playing) return;
-  const current = inPlace ? state.current : null;
-  stop();
-  start(current ? current.bar % loopBars(state.track) : 0); // nie hinter dem Ende (play wirft sonst RangeError)
-  // derselbe Takt beginnt neu: Taktzeile, Verlauf und Griffbrett bleiben dort, statt bis zum ersten onBar leer zu sein;
-  // der Akkord kommt aus der (bei einer neuen Variante anderen) Folge
-  if (current && state.playing) state.current = { ...current, chord: chordAtBar(state.track, current.bar) };
-}
-
-// Schlagwort- und Stilwechsel live an den laufenden Player geben statt neu zu starten: Klang per setTimbre, Tempo per setTempo,
-// Muster per setTrack (tauscht den Ereignisstrom ab dem nächsten ungeplanten Ereignis). Liefert setTrack false (Länge oder
-// Taktlängen anders) oder wirft es, bleibt der Neustart an der gleichen Position; ohne laufenden Player gibt es nichts zu tun.
-function applyLive({ patterns = false, tempo = false } = {}) {
-  if (!player) return;
-  try {
-    player.setTimbre(resolveTrackTimbre(state.track));
-    if (tempo) player.setTempo(state.track.bpm);
-    if (patterns && !player.setTrack({ ...state.track, layers: ALL_LAYERS })) restartIfPlaying({ inPlace: true });
-  } catch {
-    restartIfPlaying({ inPlace: true });
-  }
-}
-
-// Schicht ein/aus (Stummtaste im Mischpult; die Spurnamen zeigen es nur an), live ohne Neustart
-function toggleLayer(name) {
-  state.track.layers = { ...state.track.layers, [name]: !state.track.layers[name] };
-  player?.setLayer(name, state.track.layers[name]);
-  if (!state.track.layers[name]) endSound(name); // stumm: die LED geht sofort aus
-}
-
-// Was der Nutzer auf der Startseite selbst gewählt hat (Tonart oder Skala, Stil, Tempo, Variantennummer): "Überrasch mich" lässt es stehen
-const touched = { key: false, style: false, tempo: false, variant: false };
-$('key-pop').addEventListener('click', (e) => { if (e.target.closest('button')) touched.key = true; });
-
-// Überrasch mich: würfelt Stil (mit seinen Schlagworten), Tempo (Stiltempo ±10 %), Tonart, Skala und Variante neu
-const pick = (list) => list[Math.floor(Math.random() * list.length)];
-$('surprise').addEventListener('click', () => {
-  const bpm = state.track.bpm;
-  if (!touched.style) applyStyle(pick(STYLE_PRESETS).id);
-  const styleBpm = convertTempo(preset(state.style).bpm, '4/4', meterKey(state.track.meter));
-  state.track.bpm = touched.tempo ? bpm : Math.min(200, Math.max(40, Math.round(styleBpm * (0.9 + Math.random() * 0.2))));
-  if (!touched.variant) state.track.seed = rollVariant();
-  if (!touched.key) {
-    state.scale = pick(SCALE_NAMES);
-    chooseRoot(pick(ROOTS)); // setzt den Modus der Skala und leitet die Folge neu ab
-  } else deriveBars();
-  rollNewForm();
-  restartIfPlaying({ inPlace: true });
-  render();
-});
-
-// Weitermachen: die gemerkte Sitzung ganz wiederherstellen (wie ein Profil laden) und am gemerkten Takt weiterspielen, Spielseite im Fokus
+// Weitermachen: die Sitzung stellt die gemerkte wieder her, die Hülle spielt sie am gemerkten Takt; dann die Spielseite im Fokus
 $('resume').addEventListener('click', async () => {
-  const last = lastPlayed;
-  if (!last) return;
-  if (state.playing) stop();
-  const r = applyParts(readSession(state), last.parts);
-  if (!r.ok) { state.errors = r.errors; render(); return; } // ganz oder gar nicht
-  writeSession(state, r.session);
-  await startWhenLoaded(Math.min(last.bar, loopBars(state.track) - 1));
-  if (state.playing) openFrom('resume', { mode: 'focus' });
+  const answer = await send({ action: 'resume' });
+  errorsHidden = false;
+  startFailed = false;
+  if (answer.resumed) openFrom('resume', { mode: 'focus' });
   else render();
 });
 
-// --- Aufbau der Auswahl (einmal), Texte kommen aus render() ---
-function chip(parent, data, onClick) {
-  const b = document.createElement('button');
-  b.type = 'button';
-  b.className = 'chip';
-  Object.assign(b.dataset, data);
-  b.addEventListener('click', () => { onClick(); render(); });
-  parent.append(b);
-  return b;
-}
-
-// Tonart und Skala: Chips im Popover der Startseite, LCD-Auswahlen im Modul Harmonie der Spielseite
-const keyScales = [
-  buildKeyScale({ keyChips: $('key-chips'), scaleChips: $('scale-chips') }, { restartIfPlaying, render: () => render() }),
-  buildKeyScaleSelects({ keySelect: $('key-select'), scaleSelect: $('scale-select') }, { restartIfPlaying, render: () => render() }),
-];
-
-for (const { id } of STYLE_PRESETS) {
-  const card = chip($('style-cards'), { style: id }, () => {
-    applyStyle(id);
-    touched.style = true;
-    applyLive({ patterns: true, tempo: true });
-    $('style-pop').hidePopover();
-  });
-  card.className = 'card';
-  card.innerHTML = '<span class="card-name"></span><span class="card-bpm"></span><span class="card-hint"></span><span class="rhythm" aria-hidden="true"></span>';
-  for (const step of RHYTHMS[id]) card.lastChild.append(Object.assign(document.createElement('i'), { className: step === '1' ? 'on' : '' }));
-}
-
-// Stil im Modul Charakter: wie die Stilkarten der Startseite
-const styleSelect = $('style-select');
-for (const { id } of STYLE_PRESETS) {
-  const o = Object.assign(document.createElement('option'), { value: id });
-  o.dataset.i18n = `style.${id}`;
-  styleSelect.append(o);
-}
-createLcdSelect(styleSelect, { prevKey: 'ui.lcdPrev', nextKey: 'ui.lcdNext' });
-styleSelect.addEventListener('change', () => {
-  applyStyle(styleSelect.value);
-  applyLive({ patterns: true, tempo: true });
-  render();
-});
-
-// Tempo-Regler im Popover und im Modul Rhythmus teilen sich den Zustand
-for (const id of ['tempo', 'tuning-tempo']) {
+// Tempo-Regler im Popover (from "start") und im Modul Rhythmus (from "play")
+for (const [id, from] of [['tempo', 'start'], ['tuning-tempo', 'play']]) {
   $(id).addEventListener('input', (e) => {
-    if (id === 'tempo') touched.tempo = true;
-    state.track.bpm = Number(e.target.value);
-    player?.setTempo(state.track.bpm); // live, ohne Neustart
+    send({ action: 'setTempo', bpm: Number(e.target.value), from }, e.target);
     render();
   });
 }
 
 // Zustand der Spielseite (Fokus oder Einstellen) setzen und merken
 function setMode(mode) {
-  if (state.layout.mode === mode) return;
-  state.layout = { ...state.layout, mode };
-  saveLayout(layoutStorage, state.layout);
+  if (layout.mode === mode) return;
+  layout = { ...layout, mode };
+  saveLayout(layoutStorage, layout);
 }
 
 // Seitenwechsel; die Wiedergabe läuft weiter. mode (optional) setzt den Zustand der Spielseite.
 let opener = 'tune-btn'; // Knopf der Startseite, der die Spielseite zuletzt geöffnet hat
-function showPage(page, { mode } = {}) {
+function showPage(next, { mode } = {}) {
   if (mode) setMode(mode);
-  state.page = page;
+  page = next;
   render();
   if (page === 'play') $('play-title').focus();
   // "Zur Spielseite" ist im Stand versteckt: dann auf Los
@@ -311,58 +179,52 @@ function openFrom(id, opts) {
   showPage('play', opts);
 }
 
-// Los auf der Startseite: im Stand starten und zur Spielseite, beim Spielen stoppen und bleiben
+// Start (start() der Web-App): die Fehler davor fallen weg; spielt er nicht, steht err.playFailed da. true: er spielt
+async function playSession() {
+  starting = true;
+  errorsHidden = true;
+  startFailed = false;
+  render();
+  const report = await start();
+  starting = false;
+  startFailed = !report.playing;
+  render();
+  return report.playing;
+}
+// Los auf der Startseite: im Stand starten und zur Spielseite, beim Spielen stoppen und bleiben; gescheitert: die Meldung steht auf der Startseite
 $('go').addEventListener('click', async () => {
-  if (state.playing) {
-    stop();
-    render();
+  if (playing()) {
+    post('stop');
     return;
   }
-  await startWhenLoaded();
-  if (state.playing) openFrom('go', { mode: 'focus' });
-  else render(); // Start gescheitert: die Meldung steht auf der Startseite
+  if (!starting && (await playSession())) openFrom('go', { mode: 'focus' });
 });
-$('play-go').addEventListener('click', async () => {
-  if (state.playing) stop();
-  else await startWhenLoaded();
-  render();
+$('play-go').addEventListener('click', () => {
+  if (playing()) post('stop');
+  else if (!starting) playSession();
 });
 $('tune-btn').addEventListener('click', () => openFrom('tune-btn', { mode: 'setup' }));
 $('to-play').addEventListener('click', () => openFrom('to-play'));
 $('play-back').addEventListener('click', () => showPage('start'));
 $('mode-switch').addEventListener('click', () => {
-  setMode(state.layout.mode === 'setup' ? 'focus' : 'setup');
+  setMode(layout.mode === 'setup' ? 'focus' : 'setup');
   render();
 });
 
-// Neue Variante leitet die Folge aus Tonart und Nummer neu ab (eigene Folge entfällt). Während der Wiedergabe geht es im
-// laufenden Takt weiter, damit der Aufbau schon voll ist.
-function setVariant(seed) {
-  state.track.seed = seed;
-  deriveBars();
-  rollNewForm(); // die nicht gesperrten Teile der Form
-  restartIfPlaying({ inPlace: true });
-  render();
-}
-$('new-variant').addEventListener('click', () => setVariant(rollVariant()));
-$('variant-random').addEventListener('click', () => setVariant(rollVariant()));
-$('variant-prev').addEventListener('click', () => setVariant(stepVariant(state.track.seed, -1)));
-$('variant-next').addEventListener('click', () => setVariant(stepVariant(state.track.seed, 1)));
+// Neue Variante: die Sitzung leitet die Folge aus Tonart und Nummer neu ab; eine laufende Wiedergabe geht im laufenden Takt weiter
+$('new-variant').addEventListener('click', () => send({ action: 'newVariant', variant: rollVariant() }));
+$('variant-random').addEventListener('click', () => send({ action: 'newVariant', variant: rollVariant() }));
+$('variant-prev').addEventListener('click', () => send({ action: 'stepVariant', dir: -1 }));
+$('variant-next').addEventListener('click', () => send({ action: 'stepVariant', dir: 1 }));
 
 // Eingabe übernehmen (Enter oder Verlassen); Ungültiges ignorieren, beim Verlassen zeigt das Feld wieder die Variante
 $('variant').addEventListener('change', (e) => {
   const n = Number(e.target.value);
-  if (e.target.value !== '' && Number.isInteger(n) && n >= 1 && n <= 9999) { touched.variant = true; setVariant(n); }
+  if (e.target.value !== '' && Number.isInteger(n) && n >= 1 && n <= 9999) send({ action: 'enterVariant', variant: n });
 });
-$('variant').addEventListener('blur', (e) => { e.target.value = String(state.track.seed); });
+$('variant').addEventListener('blur', (e) => { if (session.state) e.target.value = String(session.state.track.seed); });
 
-for (const b of document.querySelectorAll('[data-lang]')) {
-  b.addEventListener('click', () => {
-    state.lang = b.dataset.lang;
-    saveLang(state.lang);
-    render();
-  });
-}
+for (const b of document.querySelectorAll('[data-lang]')) b.addEventListener('click', () => setLang(b.dataset.lang));
 
 // Popover: Escape, Klick daneben und "nur eines offen" macht die native Popover-API; hier aria-expanded und Fokus
 for (const button of document.querySelectorAll('[popovertarget]')) {
@@ -376,27 +238,57 @@ for (const button of document.querySelectorAll('[popovertarget]')) {
   });
 }
 
-const renderTuning = initTuning({ render: () => render(), restartIfPlaying, applyLive });
-const renderMixer = initMixer({ render: () => render(), player: () => player, toggleLayer, chooseAll: (kind) => voices.chooseAll(kind) });
-const renderProfiles = initProfiles({ render: () => render(), restartIfPlaying, applyLive });
-const renderRhythm = initRhythm({ render: () => render(), restartIfPlaying, applyLive });
-const renderForm = initFormPanel({ render: () => render(), restartIfPlaying, applyLive });
-const renderStrip = initFormStrip({ render: () => render(), restartIfPlaying, applyLive });
-const renderTimbre = initTimbrePanel({ render: () => render(), player: () => player }); // baut die Instrument-Module
-const voices = initVoices({ render: () => render(), player: () => player }); // nach dem Klangpanel: füllt den Platz Stimme in dessen Modulen
-const renderJobs = initJobs({ render: () => render(), changed: () => applyLive({ patterns: true }) }); // ebenso: Aufgabe
-const renderOrgan = initOrgan({ render: () => render(), player: () => player }); // ebenso: Leslie und Zerre der Orgel im Akkord-Modul
+// --- Aufbau der Auswahl (einmal, wenn die Festwerte da sind), Texte kommen aus render() ---
+let built = null;
+function build() {
+  const { STYLE_PRESETS, VOICE_LAYERS } = session.tables;
+  const keyScales = [
+    buildKeyScale({ keyChips: $('key-chips'), scaleChips: $('scale-chips') }),
+    buildKeyScaleSelects({ keySelect: $('key-select'), scaleSelect: $('scale-select') }),
+  ];
+  for (const { id } of STYLE_PRESETS) {
+    const card = Object.assign(document.createElement('button'), { type: 'button', className: 'card' });
+    card.dataset.style = id;
+    card.addEventListener('click', () => {
+      send({ action: 'setStyle', style: id, from: 'start' });
+      $('style-pop').hidePopover();
+    });
+    card.innerHTML = '<span class="card-name"></span><span class="card-bpm"></span><span class="card-hint"></span><span class="rhythm" aria-hidden="true"></span>';
+    for (const step of RHYTHMS[id]) card.lastChild.append(Object.assign(document.createElement('i'), { className: step === '1' ? 'on' : '' }));
+    $('style-cards').append(card);
+  }
+  // Stil im Modul Charakter: wie die Stilkarten der Startseite
+  const styleSelect = $('style-select');
+  for (const { id } of STYLE_PRESETS) {
+    const o = Object.assign(document.createElement('option'), { value: id });
+    o.dataset.i18n = `style.${id}`;
+    styleSelect.append(o);
+  }
+  createLcdSelect(styleSelect, { prevKey: 'ui.lcdPrev', nextKey: 'ui.lcdNext' });
+  styleSelect.addEventListener('change', () => send({ action: 'setStyle', style: styleSelect.value, from: 'play' }, styleSelect));
 
-// Akkordart-Gruppen im Popover sind <details>: immer offen (keine Klappgruppen)
-for (const el of document.querySelectorAll('#add-qualities details[data-group]')) el.open = true;
+  const renderTuning = initTuning({ page: () => page, current });
+  const renderMixer = initMixer();
+  const renderRhythm = initRhythm();
+  const renderTimbre = initTimbrePanel(); // baut die Instrument-Module
+  const renderVoices = initVoices(); // nach dem Klangpanel: füllt den Platz Stimme in dessen Modulen
+  const renderJobs = initJobs(); // ebenso: Aufgabe
+  const renderOrgan = initOrgan(); // ebenso: Leslie und Zerre der Orgel im Akkord-Modul
+  const loading = () => VOICE_LAYERS.some((layer) => voiceLoad(layer) === 'loading');
+  return { keyScales, styleSelect, loading, panels: [renderTuning, renderMixer, renderVoices, renderJobs, renderOrgan, renderTimbre, renderRhythm] };
+}
 
 // --- Darstellung ---
 const langGroup = document.querySelector('.lang');
 const topBar = document.querySelector('.top');
 const show = (el, on) => { if (el.hidden === on) el.hidden = !on; };
+let lastBeat = -1;
 
 function render() {
-  const { track, scale, style, playing, lang, current, errors, page } = state;
+  const { tables, state, derived, position } = session;
+  if (!tables || !state || !derived || !position) return; // bis die Antwort auf sync da ist
+  built ??= build();
+  const { track, scale, style, errors, loopBars, last } = state;
   setLanguage(lang);
   document.documentElement.lang = lang;
   document.title = t('ui.title');
@@ -408,79 +300,78 @@ function render() {
   }
   for (const b of document.querySelectorAll('[data-lang]')) pressed(b, b.dataset.lang === lang);
 
+  const bpm = holds($('tempo')) ? $('tempo').value : String(track.bpm); // ein gezogener Regler zeigt die Hand bis zur Antwort
   setText($('key-btn'), t('ui.keyScale', { root: track.key.root, scale: t(`scale.${scale}`) }));
   setText($('style-btn'), t(`style.${style}`));
-  setText($('tempo-btn'), `${track.bpm} ${t('ui.bpm')}`);
+  setText($('tempo-btn'), `${bpm} ${t('ui.bpm')}`);
   // nur bei Änderung: <output>.value ersetzt den Textknoten
-  for (const id of ['tempo', 'tempo-out']) if ($(id).value !== String(track.bpm)) $(id).value = String(track.bpm);
+  for (const id of ['tempo', 'tempo-out']) if ($(id).value !== bpm) $(id).value = bpm;
 
-  for (const k of keyScales) k.render();
-  if (styleSelect.value !== style) styleSelect.value = style;
+  for (const k of built.keyScales) k.render();
+  if (!holds(built.styleSelect) && built.styleSelect.value !== style) built.styleSelect.value = style;
   for (const card of $('style-cards').children) {
-    const { id, bpm } = preset(card.dataset.style);
+    const { id, bpm: styleBpm } = tables.STYLE_PRESETS.find((p) => p.id === card.dataset.style);
     setText(card.querySelector('.card-name'), t(`style.${id}`));
-    setText(card.querySelector('.card-bpm'), `${bpm} ${t('ui.bpm')}`);
+    setText(card.querySelector('.card-bpm'), `${styleBpm} ${t('ui.bpm')}`);
     setText(card.querySelector('.card-hint'), t(`style.${id}.hint`));
     pressed(card, id === style);
   }
 
-  // während der Eingabe nicht überschreiben (render läuft je Takt)
+  // während der Eingabe nicht überschreiben
   if (document.activeElement !== $('variant') && $('variant').value !== String(track.seed)) $('variant').value = String(track.seed);
-  setText($('chords'), track.bars.map((b) => chordName(b.chord)).join(' – '));
-  const now = current ? chordName(current.chord) : '';
-  const bar = current ? positionLabel(current.bar, loopBars(track)) : '';
-  const message = errors.map((e) => t(`err.${e.code}`, e.params)).join(' ');
+  setText($('chords'), position.progression.map((p) => p.name).join(' – '));
+  const place = current();
+  const now = place ? position.name : '';
+  const bar = place ? positionLabel(position.bar, loopBars) : '';
+  const message = [...(errorsHidden ? [] : errors), ...(startFailed ? [{ code: 'playFailed', params: {} }] : [])].map((e) => t(`err.${e.code}`, e.params)).join(' ');
+  const loadingPacks = starting && !playing() && built.loading();
   for (const id of ['go', 'play-go']) {
-    setText($(id), t(playing ? 'ui.stop' : loadingPacks ? 'voice.status.loading' : 'ui.go'));
+    setText($(id), t(playing() ? 'ui.stop' : loadingPacks ? 'voice.status.loading' : 'ui.go'));
     setAttr($(id), 'aria-busy', String(loadingPacks));
-    $(id).classList.toggle('playing', playing);
+    $(id).classList.toggle('playing', playing());
   }
-  for (const [id, text] of [['now-chord', now], ['play-now', now], ['position', bar], ['play-position', bar], ['play-part', partLabel(track, current?.bar ?? 0)],
+  for (const [id, text] of [['now-chord', now], ['play-now', now], ['position', bar], ['play-position', bar], ['play-part', partLabel(position.part)],
     ['message', message], ['play-message', message], ['play-variant', t('ui.variantShown', { n: track.seed })]]) {
     setText($(id), text);
   }
+  // Countdown bis zum nächsten Akkordwechsel und Schlag-LED, nur bei laufender Wiedergabe
+  const n = place ? position.countdown : null;
+  setText($('play-countdown'), n === null ? '' : t(n === 1 ? 'ui.countdownOne' : 'ui.countdownMany', { n }));
+  if ((place ? position.beat : -1) !== lastBeat) {
+    lastBeat = place ? position.beat : -1;
+    if (place) flash('beat', '#beat-led');
+  }
 
   // im Stand zeigen die leeren Displays der Kopfleiste gedämpft die Länge und den ersten Akkord (nur als Bild: der Text bleibt leer)
-  setAttr($('play-position'), 'data-idle', t('ui.positionIdle', { n: loopBars(track) }));
-  setAttr($('play-now'), 'data-idle', track.bars.length ? chordName(track.bars[0].chord) : '');
+  setAttr($('play-position'), 'data-idle', t('ui.positionIdle', { n: loopBars }));
+  setAttr($('play-now'), 'data-idle', position.progression[0]?.name ?? '');
   show($('start'), page === 'start');
   show($('play'), page === 'play');
-  show($('to-play'), playing);
-  show($('last'), Boolean(lastPlayed));
-  if (lastPlayed) {
-    const p = lastPlayed.parts;
+  show($('to-play'), playing());
+  show($('last'), Boolean(last));
+  // was mit der gemerkten Sitzung nicht stimmt (PROTOKOLL.md Abschnitt 3a): eine Zeile beim Kasten, auch statt seiner
+  const stored = state.storage.session;
+  show($('last-storage'), Boolean(stored));
+  setText($('last-storage'), stored ? t(`ui.storage.session.${stored}`) : '');
+  if (last) {
     setText($('last-summary'), t('ui.lastSummary', {
-      key: t('ui.keyScale', { root: p.harmony.key.root, scale: t(`scale.${p.harmony.scale}`) }),
-      style: t(`style.${p.style.style}`),
-      bpm: p.tempo.bpm,
-      variant: p.variant.seed,
-      bar: lastPlayed.bar + 1,
-      when: lastPlayed.at ? new Date(lastPlayed.at).toLocaleString(lang, { dateStyle: 'medium', timeStyle: 'short' }) : '',
+      key: t('ui.keyScale', { root: last.root, scale: t(`scale.${last.scale}`) }),
+      style: t(`style.${last.style}`),
+      bpm: last.bpm,
+      variant: last.seed ?? '',
+      bar: last.bar + 1,
+      when: last.at ? new Date(last.at).toLocaleString(lang, { dateStyle: 'medium', timeStyle: 'short' }) : '',
     }));
   }
-  // vor renderTuning: das Akkordrad zeichnet nur, wenn es sichtbar ist
-  setAttr($('play'), 'data-mode', state.layout.mode);
-  setAttr($('mode-switch'), 'aria-checked', String(state.layout.mode === 'setup'));
+  setAttr($('play'), 'data-mode', layout.mode);
+  setAttr($('mode-switch'), 'aria-checked', String(layout.mode === 'setup'));
   // Sprachtasten: in der Kopfleiste der Spielseite, sonst oben auf der Startseite (nur bei Wechsel umhängen, sonst ginge der Fokus verloren)
   const langHome = page === 'play' ? $('play-message') : null;
   if (langHome ? langGroup.nextElementSibling !== langHome : langGroup.parentElement !== topBar) {
     if (langHome) langHome.before(langGroup);
     else topBar.append(langGroup);
   }
-  renderTuning();
-  renderMixer();
-  renderProfiles();
-  voices.render();
-  renderJobs();
-  renderOrgan();
-  renderTimbre();
-  renderRhythm();
-  renderForm();
-  renderStrip();
+  for (const panel of built.panels) panel();
   syncKnobs(); // zuletzt: die Eingaben tragen jetzt ihre Werte
   syncLcdSelects();
 }
-
-deriveBars();
-setFormTemplate('auto'); // Standard: Songform passend zum Stil, Ziel 96 Takte
-render();

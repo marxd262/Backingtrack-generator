@@ -1,58 +1,33 @@
 // Stimmenwahl in den Instrument-Modulen (Rack): ein LCD-Select für Stimme und Variante zusammen (nach Art gruppiert, ein Eintrag je
-// Variante), Art-Kennung SMP/SYN, Ladezustand der Sample-Stimmen im Display und ein Hinweis auf ausgegraute Knöpfe. Die Wahl steht in
-// state.track.voices und wirkt live über player.setVoices. Ein Stilwechsel setzt die vom Stil vorgeschlagenen Stimmen (Bass, Akkorde, Schlagzeug;
-// state.js applyStyle); renderVoices bemerkt jede von außen geänderte Wahl (Stil, Profil, Weitermachen), lädt ihr Pack und gibt sie an den Player.
-// Welche Regler eine Stimme benutzt, steht im Register (usesTimbreField).
-import { t } from '../index.js';
-import { state, setText, setAttr } from './state.js';
-import { DEFAULT_TIMBRE } from '../core/timbre.js';
-import { VOICES, VOICE_LAYERS, completeVoices, usesTimbreField, setAllVoices } from '../core/voices.js';
-import { loadPack, peekPack } from '../audio/voices/sampler.js';
-import { packIdFor } from '../audio/voices/pack-id.js';
+// Variante), Art-Kennung SMP/SYN, Ladezustand der Sample-Stimmen im Display und ein Hinweis auf ausgegraute Knöpfe. Die Wahl ist die Aktion
+// setVoice, was die Auswahl zeigt, gibt derived().voices; welche Regler eine Stimme benutzt, derived().usesTimbreField. Die Packs lädt die Engine
+// der App; ihren Zustand meldet die Hülle (Ereignis `voices`, nach jedem Aufruf der Engine, der Stimmen oder Track setzt).
+import { t } from './i18n/index.js';
+import { session, send, holds } from './session.js';
+import { setText, setAttr } from './dom.js';
 import { createLcdSelect } from './lcd-select.js';
 
 const KINDS = ['synth', 'model', 'sample'];
-// nur Instrumente mit echter Wahl (mehr als eine sichtbare Stimme)
-const CHOOSABLE = VOICE_LAYERS.filter((layer) => Object.values(VOICES[layer]).filter((v) => !v.hidden).length > 1);
 const el = (tag, props = {}) => Object.assign(document.createElement(tag), props);
+const same = (a, b) => a?.id === b?.id && a?.variant === b?.variant;
 
-export function initVoices({ render, player }) {
+/** Ladezustand der Sample-Stimme einer Schicht ('' für eine andere): lädt, solange eine Antwort sie gewählt hat und die Engine noch nicht gemeldet
+ *  hat; sonst bereit oder nicht verfügbar nach der Meldung. */
+export function voiceLoad(layer) {
+  const voice = session.derived.voices[layer];
+  if (session.tables.VOICES[layer][voice.id].kind !== 'sample') return '';
+  if (session.voicesDue && !same(voice, session.reported?.[layer])) return 'loading';
+  const status = session.voices?.[layer] ?? '';
+  return status === 'ready' ? 'ready' : status.startsWith('error') ? 'error' : '';
+}
+
+export function initVoices() {
   const rows = {};
-  const loadState = {}; // je Instrument: '' | 'loading' | 'ready' | 'error' (nur Sample-Stimmen laden)
-  const watched = {}; // je Instrument die Wahl ("id/variante"), deren Laden zuletzt verfolgt wurde
+  const { VOICES, VOICE_LAYERS, DEFAULT_TIMBRE } = session.tables;
+  // nur Instrumente mit echter Wahl (mehr als eine sichtbare Stimme)
+  const choosable = VOICE_LAYERS.filter((layer) => Object.values(VOICES[layer]).filter((v) => !v.hidden).length > 1);
 
-  // Ladezustand einer gerade gewählten Sample-Stimme verfolgen; ein überholter Ausgang (inzwischen andere Wahl) zählt nicht mehr
-  function watch(layer) {
-    const { id, variant } = completeVoices(state.track.voices)[layer];
-    watched[layer] = `${id}/${variant}`;
-    if (VOICES[layer][id].kind !== 'sample') { loadState[layer] = ''; return; }
-    // schon geladen: sofort bereit, ohne 'lädt …' dazwischen (sonst flackert die Ansage)
-    if (peekPack(packIdFor(layer, variant))) { loadState[layer] = 'ready'; return; }
-    loadState[layer] = 'loading';
-    const asked = `${id}/${variant}`;
-    const current = () => `${completeVoices(state.track.voices)[layer].id}/${completeVoices(state.track.voices)[layer].variant}`;
-    loadPack(packIdFor(layer, variant)).then(
-      () => { if (current() === asked) { loadState[layer] = 'ready'; render(); } },
-      () => { if (current() === asked) { loadState[layer] = 'error'; render(); } },
-    );
-  }
-
-  const choose = (layer, next) => {
-    state.track.voices = completeVoices({ ...state.track.voices, [layer]: next });
-    player()?.setVoices(state.track.voices);
-    watch(layer);
-    render();
-  };
-
-  // alle Schichten auf Sample oder Synth; ein Pack, das nicht lädt, zeigt den Fehler nur im Display seines Instruments
-  const chooseAll = (kind) => {
-    state.track.voices = setAllVoices(state.track.voices, kind);
-    player()?.setVoices(state.track.voices);
-    for (const layer of VOICE_LAYERS) watch(layer);
-    render();
-  };
-
-  for (const layer of CHOOSABLE) {
+  for (const layer of choosable) {
     const slot = document.querySelector(`.instrument[data-layer="${layer}"] .inst-voice`);
     const caption = el('div', { className: 'inst-caption' });
     const label = el('label', { htmlFor: `voice-${layer}`, className: 'lbl' });
@@ -80,36 +55,28 @@ export function initVoices({ render, player }) {
     }
     select.addEventListener('change', () => {
       const [id, variant] = select.value.split('/');
-      choose(layer, { id, variant });
+      send({ action: 'setVoice', layer, id, variant }, select);
     });
     rows[layer] = { label, kind, status, select, hint, groups, options };
   }
 
-  function renderVoices() {
-    const voices = completeVoices(state.track.voices);
-    // Wahl von außen geändert (Stil, Profil, Weitermachen): Pack laden und verfolgen, die neuen Stimmen live an den Player
-    const changed = VOICE_LAYERS.filter((layer) => watched[layer] !== `${voices[layer].id}/${voices[layer].variant}`);
-    for (const layer of changed) watch(layer);
-    if (changed.length) player()?.setVoices(voices);
-    for (const layer of CHOOSABLE) {
+  return function renderVoices() {
+    const voices = session.derived.voices;
+    for (const layer of choosable) {
       const r = rows[layer], { id, variant } = voices[layer];
       setText(r.label, t('ui.voice'));
       for (const [kind, group] of Object.entries(r.groups)) if (group.label !== t(`voice.kind.${kind}`)) group.label = t(`voice.kind.${kind}`);
       for (const [key, option] of Object.entries(r.options)) setText(option, t(`variant.${layer}.${key.replace('/', '.')}`));
       // eine versteckte Stimme (Saitenmodell) hat keine Zeile: das Display bleibt dann leer
-      if (r.select.value !== `${id}/${variant}`) r.select.value = `${id}/${variant}`;
-      setAttr(r.select, 'title', r.options[`${id}/${variant}`]?.textContent ?? ''); // lange Namen werden im Display gekürzt
+      if (!holds(r.select) && r.select.value !== `${id}/${variant}`) r.select.value = `${id}/${variant}`;
+      setAttr(r.select, 'title', r.options[r.select.value]?.textContent ?? ''); // lange Namen werden im Display gekürzt
       setText(r.kind, t(`voice.kindShort.${VOICES[layer][id].kind === 'sample' ? 'sample' : 'synth'}`));
-      setText(r.status, loadState[layer] ? t(`voice.status.${loadState[layer]}`) : '');
+      const load = voiceLoad(layer);
+      setText(r.status, load ? t(`voice.status.${load}`) : '');
       // Hinweis, solange die Stimme Regler ihres Instruments nicht benutzt (sie sind im Modul ausgegraut)
-      const unused = Object.keys(DEFAULT_TIMBRE[layer] ?? {}).some((field) => !usesTimbreField(state.track.voices, `${layer}.${field}`));
+      const unused = Object.keys(DEFAULT_TIMBRE[layer] ?? {}).some((field) => !session.derived.usesTimbreField[`${layer}.${field}`]);
       if (r.hint.hidden === unused) r.hint.hidden = !unused;
       setText(r.hint, unused ? t('ui.voiceHint') : '');
     }
-  }
-
-  // die Packs der Startwahl gleich beim Öffnen laden (Samples sind der Standard), damit der erste Start nicht warten muss
-  for (const layer of VOICE_LAYERS) watch(layer);
-
-  return { render: renderVoices, chooseAll };
+  };
 }

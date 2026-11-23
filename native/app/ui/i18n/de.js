@@ -280,6 +280,13 @@ export default {
   'ui.lastPlayed': 'Zuletzt gespielt',
   'ui.lastSummary': '{key} · {style} · {bpm} bpm · Variante {variant} · Takt {bar} · {when}',
   'ui.resume': 'Weitermachen',
+  // Speicher der App (state().storage, native/PROTOKOLL.md Abschnitt 3a): was nicht gespeichert ist oder sich nicht lesen ließ
+  'ui.storage.session.unreadable': 'Die zuletzt gespielte Sitzung ließ sich nicht lesen. Die App macht ohne sie weiter.',
+  'ui.storage.session.damaged': 'Die zuletzt gespielte Sitzung ist beschädigt und ließ sich nicht lesen. Die App macht ohne sie weiter.',
+  'ui.storage.session.notStored': 'Die zuletzt gespielte Sitzung konnte nicht gespeichert werden. Beim nächsten Start bietet die App die ältere an.',
+  'ui.storage.mix.unreadable': 'Die gespeicherten Einstellungen des Mischpults ließen sich nicht lesen. Es gelten die Standardwerte.',
+  'ui.storage.mix.damaged': 'Die gespeicherten Einstellungen des Mischpults sind beschädigt. Es gelten die Standardwerte.',
+  'ui.storage.mix.notStored': 'Die Einstellungen des Mischpults konnten nicht gespeichert werden. Sie gelten, bis die App endet; beim nächsten Start gelten die älteren.',
   'ui.variant': 'Variante',
   'ui.language': 'Sprache',
   'ui.tempo': 'Tempo',

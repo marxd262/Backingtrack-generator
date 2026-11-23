@@ -1,14 +1,12 @@
-// Verlauf: eine Spur je Schicht über alle Takte, ohne Text (Beschriftung sind die Schicht-Knöpfe daneben).
+// Verlauf: eine Spur je Schicht über alle Takte, ohne Text (Beschriftung sind die Schicht-Knöpfe daneben). Die Ereignisse bringt die Hülle
+// (Ereignis `events`, neu, wenn sich der Ereignisstrom ändert), die Schichten tables().LAYER_IDS (setLanes).
 import { fitCanvas, cssColors } from './canvas.js';
-import { LAYER_IDS } from '../core/layers.js';
 
-const LANES = LAYER_IDS;
+let LANES = [];
+/** Die Schichten der Spuren, in ihrer Reihenfolge (einmal, vor dem ersten Zeichnen). */
+export const setLanes = (ids) => { LANES = ids; };
 const SECTION = 8; // Abschnittsgrenze alle 8 Takte, solange der Track keine Songform hat
 const summaries = new WeakMap();
-
-/** Memo-Schlüssel des Verlaufs: alles, was den Ereignisstrom ändert. Tempo und Schichten fehlen (x-Achse sind Takte, stumme Spuren werden nur gedimmt). */
-export const laneKey = ({ key, bars, tags, seed, length, meter, groove, complexity, loose, ornaments, form, jobs, voices, variety }) =>
-  JSON.stringify([key, bars, tags, seed, length, meter, groove, complexity, loose, ornaments, form, jobs, voices, variety]);
 
 // Je Takt: Startzeit, Anzahl Ereignisse je Schicht, Fill-Marker und Teilanfänge der Form. Einmal je Ereignisliste.
 function summarize(events) {
@@ -30,6 +28,9 @@ const summaryOf = (events) => {
   if (!s) summaries.set(events, (s = summarize(events)));
   return s;
 };
+
+/** Startzeit jedes Takts (Sekunden beim Tempo der Ereignisse), aus ihren Akkord-Ereignissen. */
+export const barStarts = (events) => summaryOf(events).starts;
 
 /** Schichten mit mindestens einem Ereignis in diesem Takt (für die LEDs an Modulen und Spuren). */
 export const activeLayers = (events, bar) => new Set(LANES.filter((l) => summaryOf(events).counts[l][bar]));

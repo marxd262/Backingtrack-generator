@@ -1,23 +1,18 @@
-// Akkordfarbe in der Gruppe "Akkordfolge": eine Einstellung (state.chordColor), die die aktuelle Folge umfärbt und für neu erzeugte
-// Folgen (Tonart, Skala, Variante) gilt. Von Hand Angefügtes bleibt, bis die Farbe erneut gewählt oder die Folge neu erzeugt wird.
-import { $, state, pressed, setChordColor } from './state.js';
-import { CHORD_COLORS } from '../core/harmony.js';
+// Akkordfarbe in der Gruppe "Akkordfolge": eine Einstellung (state().chordColor), die die aktuelle Folge umfärbt und für neu erzeugte
+// Folgen (Tonart, Skala, Variante) gilt; die Regel steht in der Sitzung (Aktion setChordColor).
+import { session, send } from './session.js';
+import { $, pressed } from './dom.js';
 
-// changed(): nach einer Änderung der Folge (Neustart falls nötig, neu rendern)
-export function initChordColor({ changed }) {
+export function initChordColor() {
   const box = $('chord-color');
-  for (const color of CHORD_COLORS) {
+  for (const color of session.tables.CHORD_COLORS) {
     const b = Object.assign(document.createElement('button'), { type: 'button', className: 'chip' });
     b.dataset.color = color;
     b.dataset.i18n = `chordColor.${color}`;
-    b.addEventListener('click', () => {
-      state.chordColorFromStyle = false; // vom Nutzer gewählt: folgt nicht mehr dem Stil
-      setChordColor(color);
-      changed();
-    });
+    b.addEventListener('click', () => send({ action: 'setChordColor', color }));
     box.append(b);
   }
   return function renderChordColor() {
-    for (const b of box.children) pressed(b, b.dataset.color === state.chordColor);
+    for (const b of box.children) pressed(b, b.dataset.color === session.state.chordColor);
   };
 }

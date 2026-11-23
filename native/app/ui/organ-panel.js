@@ -1,16 +1,16 @@
 // Orgel im Akkord-Modul: zwei Knöpfe in Zeile 2 des Knopfrasters (bei den Akkorden sonst frei), sichtbar nur, solange die Akkorde die
-// Tonewheel-Orgel spielen. Leslie: Wähler mit vier Stellungen (aus, langsam, automatisch, schnell; automatisch = schnell in Refrain und Aufbau),
-// Orgel-Zerre: 0..100 %, zeigt die Zerre des gewählten Presets, bis der Nutzer dreht (Doppelklick stellt sie wieder her).
-// Die Wahl steht in state.organ, geht als Feinwert an den Player (setTuning, wirkt ab dem nächsten Ton) und steht im Profil-Teil Klangregler.
-import { t } from '../index.js';
-import { state, setAttr } from './state.js';
+// Tonewheel-Orgel spielen (derived().voices). Leslie: Wähler mit vier Stellungen (aus, langsam, automatisch, schnell; automatisch = schnell in Refrain und Aufbau),
+// Orgel-Zerre: 0..100 %, zeigt die Zerre des gewählten Presets (derived().presetDrive), bis der Nutzer dreht (Doppelklick stellt sie wieder her).
+// Die Wahl ist die Aktion setLeslie oder setOrganDrive; was der Player davon bekommt, gibt die Hülle ihm (tuning()).
+import { t } from './i18n/index.js';
+import { session, send, holds } from './session.js';
+import { setAttr } from './dom.js';
 import { createKnob } from './knob.js';
-import { completeVoices } from '../core/voices.js';
-import { LESLIE_MODES, DEFAULT_ORGAN, organTuning, presetDrive } from './organ-tuning.js';
 
 const el = (tag, props) => Object.assign(document.createElement(tag), props);
 
-export function initOrgan({ render, player }) {
+export function initOrgan() {
+  const { LESLIE_MODES, DEFAULT_ORGAN } = session.tables;
   const grid = document.querySelector('.instrument[data-layer="chords"] .inst-knobs');
   // vor den Effekten einhängen: Tab-Reihenfolge wie die Leserichtung im Raster
   const before = grid.querySelector('.knob-cell:has(#timbre-chords-fuzz)');
@@ -30,37 +30,33 @@ export function initOrgan({ render, player }) {
   const driveKnob = createKnob(drive.input, { origin: 'start', size: 's' });
 
   leslie.input.addEventListener('input', () => {
-    state.organ = { ...state.organ, leslie: LESLIE_MODES[Number(leslie.input.value)] };
-    render();
+    send({ action: 'setLeslie', mode: LESLIE_MODES[Number(leslie.input.value)] }, leslie.input);
+    show();
   });
   drive.input.addEventListener('input', () => {
-    state.organ = { ...state.organ, drive: Number(drive.input.value) / 100 };
-    render();
+    send({ action: 'setOrganDrive', value: Number(drive.input.value) }, drive.input);
+    show();
   });
   // Doppelklick: zurück zur Zerre des Presets (nach dem Knopf selbst, der auf 0 stellt)
-  driveKnob.wrap.addEventListener('dblclick', () => {
-    state.organ = { ...state.organ, drive: null };
-    render();
-  });
+  driveKnob.wrap.addEventListener('dblclick', () => send({ action: 'setOrganDrive', value: null }, drive.input));
 
-  let pushed = JSON.stringify(organTuning(state.organ));
-  return function renderOrgan() {
-    const { id, variant } = completeVoices(state.track.voices).chords;
-    const shown = id === 'organ';
-    for (const { box } of [leslie, drive]) if (box.hidden === shown) box.hidden = !shown;
-    const mode = String(Math.max(0, LESLIE_MODES.indexOf(state.organ.leslie)));
+  function show() {
+    const { organ } = session.state;
+    const mode = holds(leslie.input) ? leslie.input.value : String(Math.max(0, LESLIE_MODES.indexOf(organ.leslie)));
     if (leslie.input.value !== mode) leslie.input.value = mode;
     const where = t(`ui.leslie.${LESLIE_MODES[Number(mode)]}`);
     setAttr(leslie.input, 'aria-valuetext', where);
     setAttr(leslie.box, 'data-hint', where);
-    const percent = String(Math.round((state.organ.drive ?? presetDrive(variant)) * 100));
+    const percent = holds(drive.input) ? drive.input.value : String(Math.round((organ.drive ?? session.derived.presetDrive) * 100));
     if (drive.input.value !== percent) drive.input.value = percent;
     const amount = t('ui.percent', { n: percent });
     setAttr(drive.input, 'aria-valuetext', amount);
     setAttr(drive.box, 'data-hint', amount);
-    // jede Änderung (Knopf, Profil, Weitermachen) geht einmal an den laufenden Player
-    const tuning = organTuning(state.organ);
-    const key = JSON.stringify(tuning);
-    if (key !== pushed) { pushed = key; player()?.setTuning(tuning); }
+  }
+
+  return function renderOrgan() {
+    const shown = session.derived.voices.chords.id === 'organ';
+    for (const { box } of [leslie, drive]) if (box.hidden === shown) box.hidden = !shown;
+    show();
   };
 }

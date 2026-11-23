@@ -1,25 +1,16 @@
 // Schlagworte nach Kategorien: je Kategorie eine Gruppe mit Umschalt-Knöpfen, mehrere pro Kategorie wählbar. Jedes Wort trägt hinter dem
 // Namen Kennbuchstaben für seine Art (Spiel, Klang, Form; über CSS aus data-marks, also nicht Teil des Textes), ist blass, solange es im
 // jetzigen Zustand nichts bewirkt, und die Anzeige über der Liste (#tag-fx) sagt für das überfahrene oder fokussierte Wort, was es wann bewegt.
-import { TAG_CATEGORIES, t } from '../index.js';
-import { pressed, setAttr, setText } from './state.js';
-import { tagEffect } from './tag-effects.js';
-
-// Auswahl als { kategorie: [tags] } in der Reihenfolge von TAG_CATEGORIES, leere Kategorien entfallen
-export function toggleTag(tags, category, tag) {
-  const out = {};
-  for (const c of TAG_CATEGORIES) {
-    const list = c.tags.filter((x) => (tags[c.id] ?? []).includes(x) !== (c.id === category && x === tag));
-    if (list.length) out[c.id] = list;
-  }
-  return out;
-}
+// Was ein Wort bewirkt, gibt die Sitzung (derived().tagEffect), das Umschalten ist die Aktion toggleTag.
+import { t } from './i18n/index.js';
+import { session } from './session.js';
+import { pressed, setAttr, setText } from './dom.js';
 
 let shown = null; // { category, tag } des Worts, das die Anzeige gerade erklärt
 
 // Texte setzt render() über data-i18n
 export function buildTags(container, onToggle) {
-  for (const { id, tags } of TAG_CATEGORIES) {
+  for (const { id, tags } of session.tables.TAG_CATEGORIES) {
     const group = document.createElement('div');
     group.className = 'tag-group';
     const name = Object.assign(document.createElement('p'), { className: 'tag-label', id: `tags-${id}` });
@@ -77,12 +68,13 @@ export function effectText(category, tag, fx) {
 
 /** Auswahl, Kennbuchstaben und Abschwächung der Wörter nach dem Zustand des Tracks; die Anzeige zeigt das zuletzt berührte Wort. */
 export function renderTags(container, track, display) {
+  const effect = session.derived.tagEffect;
   for (const b of container.querySelectorAll('button[data-tag]')) {
     const { category, tag } = b.dataset;
     pressed(b, (track.tags[category] ?? []).includes(tag));
-    const fx = tagEffect(tag, track);
+    const fx = effect[tag];
     setAttr(b, 'data-marks', fx.kinds.map((kind) => t(`tagfx.mark.${kind}`)).join(' '));
     b.classList.toggle('inert', !fx.effective);
   }
-  if (display) setText(display, shown ? effectText(shown.category, shown.tag, tagEffect(shown.tag, track)) : t('tagfx.idle'));
+  if (display) setText(display, shown ? effectText(shown.category, shown.tag, effect[shown.tag]) : t('tagfx.idle'));
 }

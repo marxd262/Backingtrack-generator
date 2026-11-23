@@ -16,10 +16,15 @@
 
 namespace {
 
-// The web UI is served from disk: the repo's src/ plus replacements from native/app/web.
+// The web UI is served from disk: the repo's src/ plus replacements from native/app/web; the app's own page (native/app/ui) under /app/.
 // shortcut: absolute build-machine paths, works only where it was built; a release embeds or installs these files.
 const juce::File webRoot { BTG_WEB_ROOT };
 const juce::File shimRoot { BTG_WEB_SHIMS };
+const juce::File appRoot { BTG_APP_UI };
+
+// The generator's page: the app's own (it draws what the session gives) with BTG_UI_NEW=1, else the web's with the shims.
+// shortcut: the old page stays the default until the new one has every building block, upgrade: Task 32c makes /app/ the only page.
+const juce::String generatorPage = juce::SystemStats::getEnvironmentVariable ("BTG_UI_NEW", {}) == "1" ? "app/index.html" : "ui/index.html";
 
 // Files of the web app that the app replaces: the engine is the player, and it owns the samples.
 const juce::StringArray shims { "/audio/play.js", "/audio/load-voices.js", "/audio/voices/sampler.js" };
@@ -35,11 +40,12 @@ juce::String mimeType (const juce::File& file) {
 
 std::optional<juce::WebBrowserComponent::Resource> resource (const juce::String& url) {
     const auto path = url.upToFirstOccurrenceOf ("?", false, false);
-    if (path.contains ("..")) return std::nullopt; // stay inside the two roots
-    // /native/...: pages of the app itself (native/app/web)
+    if (path.contains ("..")) return std::nullopt; // stay inside the roots
+    // /native/...: pages of the app itself (native/app/web); /app/...: the app's generator page (native/app/ui)
     const auto file = shims.contains (path) ? shimRoot.getChildFile (path.fromLastOccurrenceOf ("/", false, false))
                     : path.startsWith ("/native/") ? shimRoot.getChildFile (path.fromFirstOccurrenceOf ("/native/", false, false))
-                                                   : webRoot.getChildFile (path.trimCharactersAtStart ("/"));
+                    : path.startsWith ("/app/") ? appRoot.getChildFile (path.fromFirstOccurrenceOf ("/app/", false, false))
+                                                : webRoot.getChildFile (path.trimCharactersAtStart ("/"));
     juce::MemoryBlock bytes;
     if (! file.existsAsFile() || ! file.loadFileAsData (bytes)) return std::nullopt;
     const auto* begin = static_cast<const std::byte*> (bytes.getData());
@@ -126,8 +132,9 @@ public:
         addAndMakeVisible (page);
         page.onClick = [this] {
             processor.loader.addJob ([&p = processor] { p.stopTransport(); }); // in order with the queued transport messages; the page is left (pagehide)
+            lastKey.clear(); // a job between two steps of one knob: neither is dropped
             shows (! ownTrack);
-            browser.goToURL (juce::WebBrowserComponent::getResourceProviderRoot() + (ownTrack ? "native/track.html" : "ui/index.html"));
+            browser.goToURL (juce::WebBrowserComponent::getResourceProviderRoot() + (ownTrack ? "native/track.html" : generatorPage));
         };
         addAndMakeVisible (language);
         language.addItem ("Deutsch", 1);
@@ -145,7 +152,7 @@ public:
         addAndMakeVisible (browser);
         setResizable (true, true);
         setSize (1440, 930);
-        browser.goToURL (juce::WebBrowserComponent::getResourceProviderRoot() + "ui/index.html");
+        browser.goToURL (juce::WebBrowserComponent::getResourceProviderRoot() + generatorPage);
         startTimerHz (30);
     }
 
@@ -168,7 +175,7 @@ private:
         page.setButtonText (track ? "Generator" : text ("Eigener Track", "Own track"));
     }
 
-    // UI -> engine. Messages come from native/app/web/play.js.
+    // UI -> engine. Messages come from native/app/web/play.js (the old page) or native/app/ui/session.js (the new one).
     void handle (const juce::var& message) {
         const auto type = message["type"].toString();
         if (queued.contains (type)) {
@@ -181,14 +188,17 @@ private:
             const juce::uint64 number = newest != nullptr ? ++*newest : 0;
             // An action whose next queued message is a newer action of the same Session::replaceKey (one knob's steps) is dropped when its job starts:
             // the newer one replaces its effect whole (PROTOKOLL.md section 7), it gets no answer of its own. Any other message between keeps it.
-            const auto key = type == "action" ? btg::Session::replaceKey (message["json"].toString().toStdString()) : std::string();
+            // Only the actions named here can have a key: any other text (an import of megabytes) is not parsed on the message thread.
+            const auto json = type == "action" ? message["json"].toString() : juce::String();
+            const bool keyed = json.contains ("\"setTimbre\"") || json.contains ("\"setRhythmKnob\"") || json.contains ("\"editPart\"");
+            const auto key = keyed ? btg::Session::replaceKey (json.toStdString()) : std::string();
             if (! key.empty() && key == lastKey) lastDropped->store (true);
             const auto dropped = key.empty() ? nullptr : std::make_shared<std::atomic<bool>> (false);
             lastKey = key;
             lastDropped = dropped;
             p.loader.addJob ([&p, message, newest, number, dropped, editor = juce::Component::SafePointer<Editor> (this)] {
-                const Answered answered = [editor] (const BackingtrackProcessor::Answer& a) {
-                    juce::MessageManager::callAsync ([editor, a] { if (editor != nullptr) editor->answer (a); });
+                const Answered answered = [editor, seq = message["seq"]] (const BackingtrackProcessor::Answer& a) {
+                    juce::MessageManager::callAsync ([editor, a, seq] { if (editor != nullptr) editor->answer (a, seq); });
                 };
                 const bool skip = (newest != nullptr && newest->load() != number) || (dropped != nullptr && dropped->load());
                 const Done result = skip ? Done {} : control (p, message, answered);
@@ -220,9 +230,12 @@ private:
         if (type == "openFile") {
             chooser = std::make_unique<juce::FileChooser> (text ("Track laden", "Load track"), juce::File(), "*.wav;*.flac;*.mp3;*.m4a;*.aac;*.ogg;*.aiff;*.aif;*.wma;*.mp4;*.m4v;*.mov;*.mkv;*.webm");
             chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [this] (const juce::FileChooser& c) {
-                if (c.getResult().existsAsFile()) processor.loadTrack (c.getResult());
+                if (! c.getResult().existsAsFile()) return;
+                lastKey.clear(); // loadTrack queues a stop job
+                processor.loadTrack (c.getResult());
             });
         } else if (type == "loadFile") { // the same without the dialog, for the automatic check
+            lastKey.clear();
             processor.loadTrack (juce::File (message["path"].toString()));
         } else if (type == "language") { // a page says which language it shows (it remembers the choice)
             english = message["lang"].toString() == "en";
@@ -265,8 +278,23 @@ private:
         browser.evaluateJavascript (utf8 (script));
     }
 
-    // Message thread: the session's answer (PROTOKOLL.md section 7): `state`, then `profiles` when its text came with it.
-    void answer (const BackingtrackProcessor::Answer& a) {
+    void emitText (const char* event, const std::string& text) {
+        auto* object = new juce::DynamicObject();
+        object->setProperty ("json", utf8 (text));
+        emit (event, juce::var (object));
+    }
+
+    // Message thread: the session's answer (PROTOKOLL.md section 7): `tables` with the answer to `sync`, `derived` when its text changed, `state`
+    // (with the `seq` of the action it answers), then `profiles` when its text came with it.
+    void answer (const BackingtrackProcessor::Answer& a, const juce::var& seq) {
+        if (! a.tables.empty()) {
+            emitText ("tables", a.tables);
+            sentDerived.clear(); // a page that synced has no derived yet
+        }
+        if (! a.derived.empty() && a.derived != sentDerived) {
+            sentDerived = a.derived;
+            emitText ("derived", a.derived);
+        }
         auto* state = new juce::DynamicObject();
         state->setProperty ("json", utf8 (a.state));
         if (a.change) {
@@ -278,16 +306,15 @@ private:
             state->setProperty ("change", juce::var (change));
         }
         state->setProperty ("events", a.events);
+        if (! seq.isVoid()) state->setProperty ("seq", seq);
         emit ("state", juce::var (state));
-        if (a.profiles.empty()) return;
-        auto* profiles = new juce::DynamicObject();
-        profiles->setProperty ("json", utf8 (a.profiles));
-        emit ("profiles", juce::var (profiles));
+        if (! a.profiles.empty()) emitText ("profiles", a.profiles);
     }
     void emitLanes (const BackingtrackProcessor::Lanes& lanes) {
         auto* events = new juce::DynamicObject();
         events->setProperty ("number", lanes.number);
         events->setProperty ("bpm", lanes.bpm);
+        events->setProperty ("beats", lanes.beats);
         events->setProperty ("json", utf8 (lanes.json));
         emit ("events", juce::var (events));
     }
@@ -318,6 +345,7 @@ private:
             return;
         }
         if (type == "play") run = (int) message["run"];
+        if (type == "playSession" && message.hasProperty ("seq")) run = (int) message["seq"]; // the first report of this run tells the page whether its start plays
         if (type == "track") buildMs = r.ms;
         if (r.lanes) emitLanes (*r.lanes);
         if (r.status.isEmpty()) return;
@@ -431,7 +459,7 @@ private:
     }
 
     BackingtrackProcessor& processor;
-    int run = 0; // which play() the position belongs to
+    int run = 0; // which play() the position belongs to; the new page: the seq of its last playSession
     int ticks = 0;
     double buildMs = 0.0; // time the last track took to become events
     juce::String error;
@@ -441,6 +469,7 @@ private:
     const juce::String positionLog = juce::SystemStats::getEnvironmentVariable ("BTG_POSITION_LOG", {});
     int sentTrack = 0;     // version of the track analysis the page has
     std::string sentPosition; // the session's position text the page has
+    std::string sentDerived;  // the session's derived text the page has
     // the replaceKey of the last queued message (empty: no action of a key) and the flag that drops its job
     std::string lastKey;
     std::shared_ptr<std::atomic<bool>> lastDropped;
@@ -452,8 +481,8 @@ private:
     juce::Label status;
     juce::WebBrowserComponent browser { juce::WebBrowserComponent::Options()
         .withBackend (juce::WebBrowserComponent::Options::Backend::webview2)
-        .withWinWebView2Options (juce::WebBrowserComponent::Options::WinWebView2().withUserDataFolder (
-            juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("BackingtrackGenerator/WebView2")))
+        // the browser's profile (the pages' localStorage) beside the session's files: a check's BTG_STORAGE_DIR moves it too
+        .withWinWebView2Options (juce::WebBrowserComponent::Options::WinWebView2().withUserDataFolder (FileStorage::defaultFolder().getChildFile ("WebView2")))
         .withNativeIntegrationEnabled()
         .withResourceProvider ([this] (const juce::String& url) { return url.startsWith ("/media/video") ? video() : resource (url); })
         .withEventListener ("btg", [this] (const juce::var& message) { handle (message); }) };

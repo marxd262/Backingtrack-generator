@@ -25,7 +25,8 @@ target_compile_definitions(BackingtrackApp
         JUCE_VST3_CAN_REPLACE_VST2=0
     PRIVATE
         BTG_WEB_ROOT="${BTG_REPO_ROOT}/src"
-        BTG_WEB_SHIMS="${CMAKE_CURRENT_SOURCE_DIR}/web")
+        BTG_WEB_SHIMS="${CMAKE_CURRENT_SOURCE_DIR}/web"
+        BTG_APP_UI="${CMAKE_CURRENT_SOURCE_DIR}/ui")
 if(BTG_BEAT_MODEL)
     target_link_libraries(BackingtrackApp PRIVATE btg_beats)
     if(WIN32) # next to the program itself, which is the target JUCE derives from the plugin
@@ -56,3 +57,8 @@ target_link_libraries(btg_storage_tests
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)
 add_test(NAME storage COMMAND btg_storage_tests)
+
+# The app's page (native/app/ui) imports nothing from outside its folder (native/tools/ui-imports.mjs).
+if(NODE)
+    add_test(NAME ui_imports COMMAND ${NODE} ${CMAKE_SOURCE_DIR}/tools/ui-imports.mjs)
+endif()

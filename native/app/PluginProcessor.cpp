@@ -95,7 +95,7 @@ BackingtrackProcessor::Followed BackingtrackProcessor::act (std::string action, 
             ++lanesNumber;
         }
         number = lanesNumber;
-        answer = { t.state, c.profiles ? session.profiles() : std::string(), c, number };
+        answer = { t.state, c.profiles ? session.profiles() : std::string(), c, number, session.derived(), {} };
     }
     answered (answer);
 
@@ -104,7 +104,11 @@ BackingtrackProcessor::Followed BackingtrackProcessor::act (std::string action, 
     const auto bpm = static_cast<double> (sessionTrack["bpm"]);
     if (newLanes) { // the number the answer named always comes with its lanes: an empty list when the song cannot be built (the web draws an empty lane, tuning.js 93)
         Lanes lanes { "[]", bpm, number };
-        try { lanes.json = btg::eventsJson (btg::buildSong (t.track).events); } catch (const std::exception& e) { f.failed = e.what(); }
+        try {
+            const auto song = btg::buildSong (t.track);
+            lanes.json = btg::eventsJson (song.events);
+            for (const int beats : song.barBeats) lanes.beats += beats;
+        } catch (const std::exception& e) { f.failed = e.what(); }
         f.lanes = lanes;
         const juce::ScopedLock lock (sessionLock);
         lastLanes = std::move (lanes);
@@ -198,7 +202,7 @@ std::optional<BackingtrackProcessor::Answer> BackingtrackProcessor::stopTranspor
         const juce::ScopedLock lock (sessionLock);
         if (const int bar = barPlaying(); bar >= 0) {
             session.apply (remembered (bar));
-            answer = Answer { session.state(), {}, std::nullopt, lanesNumber };
+            answer = Answer { session.state(), {}, std::nullopt, lanesNumber, session.derived(), {} };
         }
     }
     transport.stop();
@@ -208,7 +212,7 @@ std::optional<BackingtrackProcessor::Answer> BackingtrackProcessor::stopTranspor
 
 BackingtrackProcessor::Answer BackingtrackProcessor::answerNow() const {
     const juce::ScopedLock lock (sessionLock);
-    return { session.state(), session.profiles(), std::nullopt, lanesNumber };
+    return { session.state(), session.profiles(), std::nullopt, lanesNumber, session.derived(), btg::Session::tables() };
 }
 
 std::optional<BackingtrackProcessor::Lanes> BackingtrackProcessor::lanesNow() const {

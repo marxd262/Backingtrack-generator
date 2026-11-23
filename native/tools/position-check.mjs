@@ -67,5 +67,6 @@ try {
   const gone = new Promise((r) => { app.once('exit', r); setTimeout(r, 5000); });
   app.kill();
   await gone;
-  rmSync(storage, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  // the folder holds the app's WebView2 profile too, which its browser may hold a moment after the app ended: retried, and never a failure of the check
+  try { rmSync(storage, { recursive: true, force: true, maxRetries: 12, retryDelay: 100 }); } catch (error) { console.error(`position-check: could not remove ${storage}: ${error.message}`); }
 }

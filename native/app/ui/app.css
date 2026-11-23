@@ -468,7 +468,7 @@ body:has(.play:not([hidden])) main { max-width: none; padding: 0; background: no
   font-size: 12px;
   font-weight: normal;
 }
-#mod-harmony .message { margin: 8px 0 0; }
+#mod-harmony .message, #mod-mixer .message { margin: 8px 0 0; }
 
 /* Gruppen (details/summary), bis zum Umbau der Instrument-Module immer offen: Haarlinie oben, Zusammenfassung als große Trefferfläche mit Pfeil */
 .group { border-top: 1px solid var(--ink-soft); }

@@ -70,8 +70,9 @@ public:
     std::atomic<float> reactionMs { 0.0f }, load { 0.0f };
 
     // The core's session on the user's storage (private below), built once; what the shell does with it is native/PROTOKOLL.md, section 7.
-    struct Answer { std::string state, profiles; std::optional<btg::Session::Change> change; int events = 0; }; // for the page; profiles empty: unchanged
-    struct Lanes { std::string json; double bpm = 0.0; int number = 0; };    // the events of the lanes, built at the tempo bpm
+    // for the page; profiles empty: unchanged; derived: the session's text (the editor sends it when it changed); tables: only for `sync`
+    struct Answer { std::string state, profiles; std::optional<btg::Session::Change> change; int events = 0; std::string derived, tables; };
+    struct Lanes { std::string json; double bpm = 0.0; int number = 0; double beats = 0.0; }; // the events of the lanes, built at the tempo bpm; beats: the loop's length
     struct Followed { juce::String failed, status; std::optional<Lanes> lanes; }; // after the engine followed: a failed call, voiceStatus (empty: no track or voices set), new lanes
     // Loader thread. An action (its JSON text) and what follows it; `answered` gets the session's answer at once, before the lanes and the engine.
     Followed act (std::string actionJson, const std::function<void (const Answer&)>& answered);

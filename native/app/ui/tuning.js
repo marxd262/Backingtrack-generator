@@ -1,130 +1,78 @@
-// Bedienelemente der Spielseite: Schlagworte und Tempo (Rack), Schichten mit Verlauf,
-// Griffbrett und Akkordrad (Visualisierung), Akkordfolge (Modul Harmonie). Teilt den Zustand mit der Startseite; app.js ruft die
-// zurückgegebene Funktion in jedem render() auf.
-import { buildEvents, t, TAG_CATEGORIES } from '../index.js';
-import { $, LAYERS, ALL_LAYERS, state, layoutStorage, chordName, setText, setAttr } from './state.js';
-import { saveLayout } from './layout-state.js';
-import { loopBars } from './position.js';
-import { nextDistinctChord, progressionRoles, romanDegree } from '../core/fretboard.js';
-import { createFretboardModule } from './fretboard.js';
-import { buildTags, renderTags, toggleTag } from './tags-ui.js';
-import { tagEffect } from './tag-effects.js';
-import { isSoundOnlyChange } from '../core/tags.js';
-import { initProgressionEditor, addChord } from './progression-editor.js';
+// Bedienelemente der Spielseite: Schlagworte und Tempo (Rack), Schichten mit Verlauf, die Folge unter dem Akkordrad und das Tonart-Modul
+// (Visualisierung), die Akkordfarbe (Modul Harmonie). Alles kommt aus den Texten der Sitzung (state, derived, position) und dem Verlauf der Hülle;
+// app.js ruft die zurückgegebene Funktion in jedem render() auf.
+// shortcut: Griffbrett, Akkordrad und Akkordfolge (fretboard.js, wheel.js, progression-editor.js) sind noch die der Web-App und hier nicht
+// eingehängt, upgrade: Task 32b-2 baut sie auf die Texte um und hängt sie hier wieder ein.
+import { t } from './i18n/index.js';
+import { session, send, holds } from './session.js';
+import { $, setText, setAttr } from './dom.js';
+import { buildTags, renderTags } from './tags-ui.js';
 import { initChordColor } from './chord-color.js';
-import { drawLanes, laneKey, activeLayers } from './lanes.js';
-import { createWheel } from './wheel.js';
+import { drawLanes, activeLayers, barStarts, setLanes } from './lanes.js';
 
-export function initTuning({ render, restartIfPlaying, applyLive }) {
-  const changed = () => { restartIfPlaying(); render(); };
-
-  for (const name of LAYERS) {
+export function initTuning({ page, current }) {
+  const { LAYER_IDS, TAG_CATEGORIES } = session.tables;
+  setLanes(LAYER_IDS);
+  for (const name of LAYER_IDS) {
     // nur Anzeige (LED und Name); stumm schaltet allein das Mischpult
     const b = Object.assign(document.createElement('span'), { className: 'lane-label' });
     Object.assign(b.dataset, { layer: name, i18n: `layer.${name}` });
     $('lane-buttons').append(b);
   }
-  $('lane-buttons').parentElement.style.setProperty('--lanes', LAYERS.length); // Verlaufshöhe folgt der Schichtzahl
+  $('lane-buttons').parentElement.style.setProperty('--lanes', LAYER_IDS.length); // Verlaufshöhe folgt der Schichtzahl
 
-  buildTags($('tags'), (category, tag) => {
-    const before = state.track.tags;
-    state.track.tags = toggleTag(before, category, tag);
-    // live, ohne Neustart: reiner Klang nur über setTimbre, sonst ändert sich auch der Ereignisstrom
-    applyLive({ patterns: !isSoundOnlyChange(before, state.track.tags) });
-    render();
-  });
+  buildTags($('tags'), (category, tag) => send({ action: 'toggleTag', category, tag }));
+  $('tags').addEventListener('tagshown', () => renderTags($('tags'), session.state.track, $('tag-fx'))); // ein anderes Wort berührt: die Anzeige neu schreiben
+  const renderChordColor = initChordColor();
 
-  $('tags').addEventListener('tagshown', render); // ein anderes Wort berührt: die Anzeige neu schreiben
-  const renderProgression = initProgressionEditor(changed, render);
-  const renderChordColor = initChordColor({ changed });
-  // Folgender Akkord (erster andere, auch über die Naht); im Stand beginnt die Folge bei Takt 0
-  const nextChord = () => nextDistinctChord(state.track.bars, state.track.length, state.current?.bar ?? 0, state.track.form);
-  const wheelState = () => ({
-    key: state.track.key,
-    progression: state.track.bars.map((b) => b.chord),
-    current: state.playing && state.current ? state.current.chord : null,
-    next: state.playing && state.current ? nextChord() : null,
-  });
-  const fretboard = createFretboardModule($('mod-fretboard'), {
-    layout: () => state.layout,
-    // Umschalter im Modulkopf: gewählter Wert wird mit der Seite gemerkt
-    choose(attr, value) {
-      state.layout = { ...state.layout, [attr]: value };
-      saveLayout(layoutStorage, state.layout);
-      render();
-    },
-  });
-
-  // Tonart-Modul (Tonart, Skala, folgender Akkord), Griffbrett und Textfassung; im Stand der erste Akkord der Folge.
-  // Der Countdown schreibt app.js über eigene Bildzeitschleife, nicht hier.
-  function renderFretboard() {
-    const { track } = state;
-    const current = state.current?.chord ?? track.bars[0]?.chord ?? null;
-    const next = nextChord();
-    fretboard.update({ key: track.key, scale: state.scale, current, next });
+  // Tonart-Modul (Tonart, Skala, folgender Akkord). Der Countdown steht in app.js.
+  function renderKey() {
+    const { track, scale } = session.state;
+    const { next, nextName } = session.position;
     setText($('play-key'), `${track.key.root}${track.key.mode === 'minor' ? 'm' : ''}`);
-    setText($('play-scale'), t(`scale.${state.scale}`));
-    setText($('play-next'), next ? chordName(next) : '');
+    setText($('play-scale'), t(`scale.${scale}`));
+    setText($('play-next'), next ? nextName : '');
     if ($('key-next').hidden !== !next) $('key-next').hidden = !next;
   }
 
   // Folge unter dem Akkordkreis, nur Anzeige: Rollen-Klassen wie im Modul Harmonie
   function renderWheelProgression() {
     const row = $('wheel-prog');
-    const { track } = state;
-    const roles = progressionRoles(track, state.current?.bar ?? null);
-    while (row.children.length < track.bars.length) row.append(Object.assign(document.createElement('span'), { className: 'chip' }));
-    while (row.children.length > track.bars.length) row.lastChild.remove();
-    track.bars.forEach(({ chord }, i) => {
-      setText(row.children[i], chordName(chord));
-      setAttr(row.children[i], 'class', `chip role-${roles[i]}`);
-      setAttr(row.children[i], 'data-degree', romanDegree(track.key, chord));
+    const { progression } = session.position;
+    while (row.children.length < progression.length) row.append(Object.assign(document.createElement('span'), { className: 'chip' }));
+    while (row.children.length > progression.length) row.lastChild.remove();
+    progression.forEach(({ name, degree, role }, i) => {
+      setText(row.children[i], name);
+      setAttr(row.children[i], 'class', `chip role-${role}`);
+      setAttr(row.children[i], 'data-degree', degree);
     });
   }
 
-  const wheel = createWheel($('wheel'), wheelState(), (chord) => (addChord(chord) ? changed() : render()));
-
-  // Ereignisse nur neu bauen, wenn sich der Schlüssel (laneKey) ändert; Tempo und Schichten gehören nicht dazu.
-  let memo = { id: '', events: [] };
-  function laneEvents() {
-    const id = laneKey(state.track);
-    if (id !== memo.id) {
-      let events = [];
-      try { events = buildEvents({ ...state.track, layers: ALL_LAYERS }); } catch { /* ungültiger Track: leerer Verlauf */ }
-      memo = { id, events, starts: events.filter((e) => e.type === 'chord').map((e) => e.t) };
-    }
-    return memo;
-  }
-
-  // Akkordrad zeichnet nur, wenn es sichtbar ist; beim Einblenden zeichnet der ResizeObserver
-  const wheelShown = () => $('wheel').checkVisibility();
-
+  const noEvents = [];
   // LED an Instrument-Modul und Spur: an, solange die Wiedergabe läuft, die Schicht nicht stumm ist und sie in diesem Takt spielt
   function renderActivity(events) {
-    const active = state.playing && state.current ? activeLayers(events, state.current.bar % loopBars(state.track)) : new Set();
-    const on = (layer) => active.has(layer) && Boolean(state.track.layers[layer]);
+    const active = current() ? activeLayers(events, session.position.bar) : new Set();
+    const on = (layer) => active.has(layer) && Boolean(session.state.track.layers[layer]);
     for (const led of document.querySelectorAll('.led[data-activity]')) led.classList.toggle('on', on(led.dataset.activity));
     for (const b of $('lane-buttons').children) b.classList.toggle('on', on(b.dataset.layer));
   }
 
   function drawCanvases() {
-    if (state.page !== 'play') return;
-    const { events, starts } = laneEvents();
+    if (page() !== 'play' || !session.state) return;
+    const events = session.lanes?.events ?? noEvents;
     renderActivity(events);
-    const sec = state.current ? starts[state.current.bar % loopBars(state.track)] ?? 0 : 0;
-    drawLanes($('lanes'), events, sec, state.track.layers);
-    fretboard.resize(); // neue Größe oder anderer Bundabstand: Brett neu aufbauen
-    if (wheelShown()) wheel.update(wheelState());
+    const sec = current() ? barStarts(events)[session.position.bar] ?? 0 : 0;
+    drawLanes($('lanes'), events, sec, session.state.track.layers);
   }
   // neue Größe (Fokus ⇄ Einstellen, Fenster): neu zeichnen
-  const resized = new ResizeObserver(drawCanvases);
-  for (const id of ['fretboard', 'wheel', 'lanes']) resized.observe($(id));
+  new ResizeObserver(drawCanvases).observe($('lanes'));
 
-  // gewählte Schlagworte als Schilder (nur Anzeige); nur bei Änderung neu bauen, render() läuft je Takt
+  // gewählte Schlagworte als Schilder (nur Anzeige); nur bei Änderung neu bauen, render() läuft je Schlag
   let wordsKey = '';
   // Wörter, die im jetzigen Zustand nichts bewirken (z. B. Klangwörter bei einer Sample-Stimme), sind blass wie im Schlagwort-Fenster
   function renderWords(track) {
-    const words = TAG_CATEGORIES.flatMap((c) => (track.tags[c.id] ?? []).map((tag) => ({ text: t(`tag.${c.id}.${tag}`), inert: !tagEffect(tag, track).effective })));
+    const effect = session.derived.tagEffect;
+    const words = TAG_CATEGORIES.flatMap((c) => (track.tags[c.id] ?? []).map((tag) => ({ text: t(`tag.${c.id}.${tag}`), inert: !effect[tag].effective })));
     const key = words.map((w) => `${w.text}${w.inert ? '~' : ''}`).join('|');
     if (key === wordsKey) return;
     wordsKey = key;
@@ -132,20 +80,20 @@ export function initTuning({ render, restartIfPlaying, applyLive }) {
   }
 
   return function renderTuning() {
-    if (state.page !== 'play') return;
-    const { track } = state;
+    if (page() !== 'play') return;
+    const { track } = session.state;
     renderTags($('tags'), track, $('tag-fx'));
     renderWords(track);
-    // nur bei Änderung: <output>.value ersetzt den Textknoten
-    const shown = `${track.bpm} ${t('ui.bpm')}`;
-    for (const [id, v] of [['tuning-tempo', String(track.bpm)], ['tuning-tempo-out', shown]]) {
+    // das Tempo zeigt die Antwort der Sitzung, solange ein Drehen unbeantwortet ist, die Hand; nur bei Änderung: <output>.value ersetzt den Textknoten
+    const bpm = holds($('tuning-tempo')) ? $('tuning-tempo').value : String(track.bpm);
+    const shown = `${bpm} ${t('ui.bpm')}`;
+    for (const [id, v] of [['tuning-tempo', bpm], ['tuning-tempo-out', shown]]) {
       if ($(id).value !== v) $(id).value = v;
     }
     setAttr($('tuning-tempo'), 'aria-valuetext', shown);
     for (const b of $('lane-buttons').children) setAttr(b, 'data-muted', String(!track.layers[b.dataset.layer]));
-    renderProgression();
     renderChordColor();
-    renderFretboard();
+    renderKey();
     renderWheelProgression();
     drawCanvases();
   };

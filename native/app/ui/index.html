@@ -83,6 +83,8 @@
       <p class="last-summary" id="last-summary"></p>
       <button type="button" class="chip" id="resume" data-i18n="ui.resume" aria-describedby="last-summary"></button>
     </div>
+    <!-- was mit der gemerkten Sitzung nicht stimmt (Speicher der App): eine Zeile, auch wenn der Kasten fehlt -->
+    <p class="message" id="last-storage" role="status" hidden></p>
     </section>
    </div>
   </section>
@@ -110,7 +112,9 @@
       <button type="button" class="mode-switch" id="mode-switch" role="switch" aria-checked="false">
         <span class="mode-off" aria-hidden="true" data-i18n="ui.modeFocus"></span><span class="mode-track" aria-hidden="true"></span><span class="mode-on" data-i18n="ui.modeSetup"></span>
       </button>
-      <button type="button" class="chip" id="profiles-btn" popovertarget="profiles-pop" aria-haspopup="dialog" aria-expanded="false" aria-controls="profiles-pop" data-i18n="ui.profiles"></button>
+      <!-- shortcut: das Profilfenster (profiles.js), die Songform (form-panel.js, form-strip.js), Griffbrett, Akkordrad und Akkordfolge sind noch
+           die der Web-App und nicht eingehängt: ihre Plätze bleiben leer, ihre Tasten verborgen, upgrade: Task 32b-2 hängt sie ein -->
+      <button type="button" class="chip" id="profiles-btn" popovertarget="profiles-pop" aria-haspopup="dialog" aria-expanded="false" aria-controls="profiles-pop" data-i18n="ui.profiles" hidden></button>
       <!-- hierher hängt app.js die Sprachtasten, solange die Spielseite sichtbar ist -->
       <p class="message" id="play-message" aria-live="polite"></p>
       <!-- Profile: Baum (Aktuelle Sitzung, Werksprofile, Meine Profile) und Feld zur Auswahl; baut profiles.js -->
@@ -148,7 +152,7 @@
           <h3 class="module-title" id="mod-song-title" data-i18n="mod.song"></h3>
           <div class="song-wrap">
             <!-- links: ganzes Lied (nur im Zustand Einstellen): Anzeigen oben, Knöpfe darunter, hinter der Punktlinie die Tasten -->
-            <div class="form-song" id="form-song" role="group" aria-labelledby="form-song-title">
+            <div class="form-song" id="form-song" role="group" aria-labelledby="form-song-title" hidden>
               <h4 class="label" id="form-song-title" data-i18n="group.form"></h4>
               <div class="field">
                 <label class="lbl" for="form-template" data-i18n="ui.formTemplate"></label>
@@ -276,7 +280,7 @@
           <!-- Akkorde der Folge (Klick entfernt), Farbe nach Rolle, darunter die Stufe; + öffnet die Auswahl -->
           <div class="prog-row">
             <div class="chips" id="progression" role="group" aria-labelledby="progression-title"></div>
-            <button type="button" class="chip add-btn" id="add-btn" popovertarget="add-pop" aria-haspopup="dialog" aria-expanded="false" aria-controls="add-pop" data-i18n-label="ui.addChord">+</button>
+            <button type="button" class="chip add-btn" id="add-btn" popovertarget="add-pop" aria-haspopup="dialog" aria-expanded="false" aria-controls="add-pop" data-i18n-label="ui.addChord" hidden>+</button>
           </div>
           <p class="message" id="tuning-message" aria-live="polite"></p>
           <h4 class="lbl" id="color-title" data-i18n="ui.chordColor"></h4>

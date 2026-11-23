@@ -13,6 +13,12 @@ import { chromium } from '@playwright/test';
 import { buildEvents } from '../../src/index.js';
 import { VOICES } from '../../src/core/voices.js';
 
+// BTG_UI_NEW=1: the app's new page (native/app/ui, Task 32b) instead of the web's, checked by native/tools/page-check.mjs, which starts the app itself
+if (process.env.BTG_UI_NEW === '1') {
+  await import('./page-check.mjs');
+  process.exit();
+}
+
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const exe = process.argv[2] ?? join(repo, 'native/build/app/BackingtrackApp_artefacts/Release/Standalone/Backingtrack Generator.exe');
 const out = process.argv[3] ?? join(repo, '.superpowers/native-screens');
@@ -667,5 +673,6 @@ try {
   const gone = new Promise((r) => { app.once('exit', r); setTimeout(r, 5000); });
   app.kill();
   await gone;
-  rmSync(storage, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  // the folder holds the app's WebView2 profile too, which its browser may hold a moment after the app ended: retried, and never a failure of the check
+  try { rmSync(storage, { recursive: true, force: true, maxRetries: 12, retryDelay: 100 }); } catch (error) { console.error(`ui-check: could not remove ${storage}: ${error.message}`); }
 }

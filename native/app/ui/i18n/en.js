@@ -280,6 +280,13 @@ export default {
   'ui.lastPlayed': 'Last played',
   'ui.lastSummary': '{key} · {style} · {bpm} bpm · variant {variant} · bar {bar} · {when}',
   'ui.resume': 'Continue',
+  // the app's storage (state().storage, native/PROTOKOLL.md section 3a): what was not saved or could not be read
+  'ui.storage.session.unreadable': 'The last session you played could not be read. The app carries on without it.',
+  'ui.storage.session.damaged': 'The last session you played is damaged and could not be read. The app carries on without it.',
+  'ui.storage.session.notStored': 'The last session you played could not be saved. Next time the app offers the earlier one.',
+  'ui.storage.mix.unreadable': 'The saved mixer settings could not be read. The defaults apply.',
+  'ui.storage.mix.damaged': 'The saved mixer settings are damaged. The defaults apply.',
+  'ui.storage.mix.notStored': 'The mixer settings could not be saved. They apply until you close the app; next time the earlier ones apply.',
   'ui.variant': 'Variant',
   'ui.language': 'Language',
   'ui.tempo': 'Tempo',

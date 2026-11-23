@@ -185,9 +185,9 @@ try {
       a.lanes++;
     } else if (state.events !== lanesNumber) problems.push(`(a) ${what}: no new lanes are due, the state names lanes ${state.events} after ${lanesNumber}`);
   }
-  // the storage folder holds what the session's storage holds, and no side file
+  // the storage folder holds what the session's storage holds, and no side file (beside the WebView2 profile, which lies there too: PROTOKOLL.md section 7)
   const stored = expected.at(-1).stored;
-  const files = readdirSync(storage);
+  const files = readdirSync(storage).filter((name) => name !== 'WebView2');
   for (const [name, text] of Object.entries(stored)) if (!files.includes(name) || readFileSync(join(storage, name), 'utf8') !== text) problems.push(`(a) the app's ${name} is not the session's text`);
   for (const name of files) if (!(name in stored) && !(name.endsWith('.bak') && name.slice(0, -4) in stored)) problems.push(`(a) the storage folder holds ${name}`);
   result.a = { ...a, stored: Object.keys(stored), files };
@@ -501,7 +501,8 @@ try {
   const gone = new Promise((r) => { app.once('exit', r); setTimeout(r, 5000); });
   app.kill();
   await gone;
-  rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  // the folder holds the app's WebView2 profile too, which its browser may hold a moment after the app ended: retried, and never a failure of the check
+  try { rmSync(work, { recursive: true, force: true, maxRetries: 12, retryDelay: 100 }); } catch (error) { console.error(`shell-check: could not remove ${work}: ${error.message}`); }
 }
 result.problems = [...new Set(problems)];
 writeFileSync(join(out, 'shell-check.json'), JSON.stringify(result, null, 2));
