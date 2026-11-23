@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title></title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="app.css">
+<script type="module" src="app.js"></script>
+</head>
+<body>
+<!-- Alle sichtbaren Texte setzt app.js über t(): data-i18n = Text, data-i18n-label = aria-label -->
+<header class="top">
+  <!-- Name der App, sichtbar nur auf der Startseite (die h1 für Vorleser steht in main) -->
+  <p class="brand" aria-hidden="true" data-i18n="ui.title"></p>
+  <!-- Namensnennung der Sample-Quellen (CC-BY); die Kopfleiste ist nur auf der Startseite sichtbar -->
+  <a class="chip credits" href="credits.html" data-i18n="ui.credits"></a>
+  <div class="lang" role="group" data-i18n-label="ui.language">
+    <button type="button" class="chip" data-lang="de" lang="de" data-i18n="ui.langDe" data-i18n-label="ui.langDeName"></button>
+    <button type="button" class="chip" data-lang="en" lang="en" data-i18n="ui.langEn" data-i18n-label="ui.langEnName"></button>
+  </div>
+</header>
+<main>
+  <h1 class="visually-hidden" data-i18n="ui.title"></h1>
+  <!-- Startseite im Rack: links der Satz (Tonart, Stil, Tempo als Displays), rechts Spielen; ringsum leerer Rackplatz -->
+  <section class="start" id="start">
+   <div class="shelf start-row">
+    <section class="module" id="mod-start" aria-labelledby="mod-start-title">
+    <h2 class="module-title" id="mod-start-title" data-i18n="mod.start"></h2>
+    <p class="tonight" id="tonight" data-i18n="ui.tonight"></p>
+    <p class="sentence" id="sentence">
+      <button type="button" class="word" id="key-btn" popovertarget="key-pop" aria-haspopup="dialog" aria-expanded="false" aria-controls="key-pop"></button>
+      <span data-i18n="ui.styleIn"></span>
+      <button type="button" class="word" id="style-btn" popovertarget="style-pop" aria-haspopup="dialog" aria-expanded="false" aria-controls="style-pop"></button>
+      <br>
+      <span data-i18n="ui.atTempo"></span>
+      <button type="button" class="word" id="tempo-btn" popovertarget="tempo-pop" aria-haspopup="dialog" aria-expanded="false" aria-controls="tempo-pop"></button>
+    </p>
+
+    <div class="pop" id="key-pop" popover role="dialog" aria-labelledby="key-btn">
+      <p class="pop-label" id="key-label" data-i18n="ui.key"></p>
+      <div class="chips" role="group" aria-labelledby="key-label" id="key-chips"></div>
+      <p class="pop-label" id="scale-label" data-i18n="ui.scale"></p>
+      <div class="chips" role="group" aria-labelledby="scale-label" id="scale-chips"></div>
+    </div>
+    <div class="pop" id="style-pop" popover role="dialog" aria-labelledby="style-btn">
+      <p class="pop-label" id="style-label" data-i18n="ui.style"></p>
+      <div class="cards" role="group" aria-labelledby="style-label" id="style-cards"></div>
+    </div>
+    <div class="pop" id="tempo-pop" popover role="dialog" aria-labelledby="tempo-btn">
+      <label class="pop-label" for="tempo" data-i18n="ui.tempo"></label>
+      <div class="tempo-row">
+        <input type="range" id="tempo" min="40" max="200" step="1">
+        <span><output id="tempo-out" for="tempo"></output> <span data-i18n="ui.bpm"></span></span>
+      </div>
+    </div>
+
+    <p class="variant">
+      <label for="variant" data-i18n="ui.variant"></label>
+      <input type="number" id="variant" min="1" max="9999" step="1" inputmode="numeric">
+      · <span data-i18n="ui.chords"></span>: <span id="chords"></span>
+    </p>
+    </section>
+    <section class="module" id="mod-go" aria-labelledby="mod-go-title">
+    <h2 class="module-title" id="mod-go-title" data-i18n="mod.go"></h2>
+    <button type="button" class="go" id="go"></button>
+    <div class="now">
+      <p class="now-chord lcd" id="now-chord"></p>
+      <p class="position" id="position"></p>
+    </div>
+    <p class="message" id="message" aria-live="polite"></p>
+    <p class="actions">
+      <button type="button" class="chip" id="to-play" data-i18n="ui.toPlayPage" hidden></button>
+      <!-- würfelt Tonart, Skala, Stil, Tempo und Variante; was auf dieser Seite selbst gewählt wurde, bleibt stehen -->
+      <button type="button" class="chip" id="surprise" data-i18n="ui.surprise"></button>
+      <button type="button" class="chip" id="new-variant" data-i18n="ui.newVariant"></button>
+      <button type="button" class="chip" id="tune-btn" data-i18n="ui.fineTune"></button>
+    </p>
+    <!-- Zuletzt gespielt (nur mit gemerkter Sitzung): Zusammenfassung und Weitermachen am gemerkten Takt -->
+    <div class="last" id="last" hidden>
+      <div class="dots"></div>
+      <h3 class="lbl" id="last-title" data-i18n="ui.lastPlayed"></h3>
+      <p class="last-summary" id="last-summary"></p>
+      <button type="button" class="chip" id="resume" data-i18n="ui.resume" aria-describedby="last-summary"></button>
+    </div>
+    </section>
+   </div>
+  </section>
+
+  <!-- Spielseite: Kopfleiste, Visualisierung (zwei Reihen), Rack (nur im Zustand Einstellen). Knöpfe baut tuning.js.
+       DOM-Reihenfolge = Tab-Reihenfolge: Kopfleiste, Visualisierung, Rack von links nach rechts. data-mode setzt app.js. -->
+  <section class="play" id="play" aria-labelledby="play-title" data-mode="focus" hidden>
+    <h2 class="visually-hidden" id="play-title" tabindex="-1" data-i18n="ui.playPage"></h2>
+    <header class="play-head">
+      <button type="button" class="go" id="play-go"></button>
+      <!-- Schlag-LED: blitzt bei laufender Wiedergabe auf jedem Schlag (app.js), nur Anzeige -->
+      <span class="led" id="beat-led" aria-hidden="true"></span>
+      <p class="lcd play-position" id="play-position"></p>
+      <p class="play-field"><span class="play-label" id="play-part-label" data-i18n="ui.part"></span><span class="lcd" id="play-part"></span></p>
+      <p class="lcd play-now" id="play-now"></p>
+      <div class="variant-switch" role="group" data-i18n-label="ui.variantSwitch">
+        <button type="button" class="chip" id="variant-prev" data-i18n-label="ui.variantPrev">&lsaquo;</button>
+        <p class="lcd play-variant" id="play-variant"></p>
+        <button type="button" class="chip" id="variant-next" data-i18n-label="ui.variantNext">&rsaquo;</button>
+        <button type="button" class="chip" id="variant-random" data-i18n-label="ui.variantRandom">&#x2684;</button>
+      </div>
+      <!-- Name der App: führt zur Startseite, die Wiedergabe läuft weiter -->
+      <button type="button" class="brand" id="play-back" data-i18n="ui.title" data-i18n-hint="ui.toStart"></button>
+      <!-- Name kommt aus "Einstellen" (an = Rack sichtbar); "Fokus" und die Schiene sind nur Bild -->
+      <button type="button" class="mode-switch" id="mode-switch" role="switch" aria-checked="false">
+        <span class="mode-off" aria-hidden="true" data-i18n="ui.modeFocus"></span><span class="mode-track" aria-hidden="true"></span><span class="mode-on" data-i18n="ui.modeSetup"></span>
+      </button>
+      <button type="button" class="chip" id="profiles-btn" popovertarget="profiles-pop" aria-haspopup="dialog" aria-expanded="false" aria-controls="profiles-pop" data-i18n="ui.profiles"></button>
+      <!-- hierher hängt app.js die Sprachtasten, solange die Spielseite sichtbar ist -->
+      <p class="message" id="play-message" aria-live="polite"></p>
+      <!-- Profile: Baum (Aktuelle Sitzung, Werksprofile, Meine Profile) und Feld zur Auswahl; baut profiles.js -->
+      <div class="pop" id="profiles-pop" popover role="dialog" aria-labelledby="profiles-btn">
+        <h3 class="module-title" aria-hidden="true" data-i18n="ui.profiles"></h3>
+        <div class="profiles" id="profiles"></div>
+      </div>
+    </header>
+
+    <div class="viz" id="viz">
+      <div class="shelf viz-top">
+        <section class="module" id="mod-key" aria-labelledby="mod-key-title">
+          <h3 class="module-title" id="mod-key-title" data-i18n="mod.key"></h3>
+          <p class="lcd play-key" id="play-key"></p>
+          <p class="key-scale" id="play-scale"></p>
+          <div class="dots"></div>
+          <!-- nur mit folgendem Akkord (sonst hidden); den Countdown schreibt app.js bei laufender Wiedergabe -->
+          <div class="key-next" id="key-next">
+            <p class="key-label"><span data-i18n="ui.keyNext"></span><span id="play-countdown"></span></p>
+            <p class="lcd alt play-next" id="play-next"></p>
+          </div>
+        </section>
+        <section class="module" id="mod-fretboard" aria-labelledby="mod-fretboard-title">
+          <!-- Inhalt (Umschalter, Brett, Legende) baut fretboard.js: derselbe Baustein wie auf der Seite für eigene Tracks der App -->
+        </section>
+        <section class="module" id="mod-wheel" aria-labelledby="mod-wheel-title">
+          <h3 class="module-title" id="mod-wheel-title" data-i18n="mod.wheel"></h3>
+          <canvas class="wheel" id="wheel" role="img" width="380" height="380" data-i18n-label="ui.wheelLabel"></canvas>
+          <!-- Folge mit Stufen, nur Anzeige (Spans); Rollenfarben wie im Modul Harmonie, baut tuning.js -->
+          <div class="wheel-prog" id="wheel-prog"></div>
+        </section>
+      </div>
+      <div class="shelf viz-bottom">
+        <section class="module" id="mod-song" aria-labelledby="mod-song-title">
+          <h3 class="module-title" id="mod-song-title" data-i18n="mod.song"></h3>
+          <div class="song-wrap">
+            <!-- links: ganzes Lied (nur im Zustand Einstellen): Anzeigen oben, Knöpfe darunter, hinter der Punktlinie die Tasten -->
+            <div class="form-song" id="form-song" role="group" aria-labelledby="form-song-title">
+              <h4 class="label" id="form-song-title" data-i18n="group.form"></h4>
+              <div class="field">
+                <label class="lbl" for="form-template" data-i18n="ui.formTemplate"></label>
+                <select id="form-template"></select>
+              </div>
+              <div class="field">
+                <label class="lbl" for="length" id="length-label"></label>
+                <select id="length"></select>
+              </div>
+              <div class="knob-grid">
+                <div class="knob-cell">
+                  <input type="range" id="form-structure" min="0" max="100" step="1">
+                  <label class="lbl" id="form-structure-label" for="form-structure" data-i18n="form.feel.structure"></label>
+                  <output class="lcd" id="form-structure-out" for="form-structure"></output>
+                </div>
+                <div class="knob-cell">
+                  <input type="range" id="form-dynamics" min="0" max="100" step="1">
+                  <label class="lbl" id="form-dynamics-label" for="form-dynamics" data-i18n="form.feel.dynamics"></label>
+                  <output class="lcd" id="form-dynamics-out" for="form-dynamics"></output>
+                </div>
+                <div class="knob-cell">
+                  <input type="range" id="form-pauses" min="0" max="100" step="1">
+                  <label class="lbl" id="form-pauses-label" for="form-pauses" data-i18n="form.feel.pauses"></label>
+                  <output class="lcd" id="form-pauses-out" for="form-pauses"></output>
+                </div>
+                <div class="knob-cell">
+                  <input type="range" id="form-randomness" min="0" max="100" step="1">
+                  <label class="lbl" id="form-randomness-label" for="form-randomness" data-i18n="form.feel.randomness"></label>
+                  <output class="lcd" id="form-randomness-out" for="form-randomness"></output>
+                </div>
+              </div>
+              <p class="sub-label" id="form-feel-hint" data-i18n="ui.formFeelOff" hidden></p>
+              <div class="form-bar" id="form-bar" hidden>
+                <div class="dots"></div>
+                <div class="btn-row">
+                  <span class="push-cell"><button type="button" class="push" id="form-roll" aria-labelledby="form-roll-label">&#x2684;</button><span class="lbl" id="form-roll-label" data-i18n="form.roll"></span></span>
+                  <span class="push-cell"><button type="button" class="push" id="form-add" aria-labelledby="form-add-label" aria-describedby="form-note">+</button><span class="lbl" id="form-add-label" data-i18n="form.add"></span></span>
+                </div>
+              </div>
+            </div>
+            <!-- Mitte: Streifen der Teile und Spuren auf derselben Takt-Achse (Spalte 2). Reihen: Hinweis, Streifen, Spuren.
+                 Streifen und Teil-Einstellungen baut form-strip.js (nur mit gültiger Form sichtbar). -->
+            <div class="lanes">
+              <p class="sub-label form-hint" id="form-hint" hidden></p>
+              <div class="form-strip" id="form-strip" role="listbox" aria-orientation="horizontal" data-i18n-label="form.strip" hidden></div>
+              <div class="lane-buttons" id="lane-buttons" role="group" data-i18n-label="ui.layers"></div>
+              <canvas id="lanes" role="img" data-i18n-label="ui.lanesLabel"></canvas>
+            </div>
+            <!-- rechts: gewählter Teil (nur im Zustand Einstellen): links die Anzeigen, rechts Knöpfe und Tasten. Nur das Schild trägt die Blockfarbe. -->
+            <div class="form-insp" id="form-insp" role="group" aria-labelledby="form-insp-title" hidden>
+              <h4 class="label" id="form-insp-title"><span data-i18n="form.insp.selected"></span> <span class="part-chip" id="part-chip"></span></h4>
+              <div class="insp-cols">
+                <div class="insp-displays">
+                  <div class="field">
+                    <label class="lbl" for="part-type" data-i18n="form.insp.type"></label>
+                    <select id="part-type"></select>
+                  </div>
+                  <div class="field">
+                    <span class="lbl" id="part-len-label" data-i18n="form.insp.length"></span>
+                    <div class="lcd-select" role="group" aria-labelledby="part-len-label">
+                      <button type="button" class="lcd-btn" id="part-shorter" data-i18n-label="form.insp.shorter" aria-describedby="form-note">&minus;</button>
+                      <output class="lcd-out" id="part-len-out" for="part-shorter part-longer"></output>
+                      <button type="button" class="lcd-btn" id="part-longer" data-i18n-label="form.insp.longer" aria-describedby="form-note">+</button>
+                    </div>
+                  </div>
+                  <div class="field">
+                    <label class="lbl" for="part-transition" data-i18n="form.insp.transition"></label>
+                    <select id="part-transition"></select>
+                  </div>
+                </div>
+                <div class="insp-controls">
+                  <div class="knob-grid">
+                    <div class="knob-cell">
+                      <div class="knob-row">
+                        <input type="range" id="part-level" min="-24" max="0" step="1" data-reset="part-level-reset">
+                        <button type="button" class="push" id="part-level-reset" data-i18n-label="form.insp.resetLevel">&#x21BA;</button>
+                      </div>
+                      <label class="lbl" for="part-level" data-i18n="form.insp.level"></label>
+                      <output class="lcd" id="part-level-out" for="part-level" aria-live="off"></output>
+                    </div>
+                    <div class="knob-cell">
+                      <div class="knob-row">
+                        <input type="range" id="part-density" min="-100" max="100" step="1" data-reset="part-density-reset">
+                        <button type="button" class="push" id="part-density-reset" data-i18n-label="form.insp.resetDensity">&#x21BA;</button>
+                      </div>
+                      <label class="lbl" for="part-density" data-i18n="form.insp.density"></label>
+                      <output class="lcd" id="part-density-out" for="part-density" aria-live="off"></output>
+                    </div>
+                  </div>
+                  <div class="dots"></div>
+                  <div class="btn-row">
+                    <span class="push-cell"><span class="pair-btns"><button type="button" class="push" id="part-left" data-i18n-label="form.insp.left">&lsaquo;</button><button type="button" class="push" id="part-right" data-i18n-label="form.insp.right">&rsaquo;</button></span><span class="lbl" data-i18n="form.insp.move"></span></span>
+                    <span class="push-cell"><span class="pair-btns"><button type="button" class="push" id="part-copy" data-i18n-label="form.insp.copy" aria-describedby="form-note">&#x29C9;</button><button type="button" class="push" id="part-delete" data-i18n-label="form.insp.delete" aria-describedby="form-note">&times;</button></span><span class="lbl" data-i18n="form.insp.copyDelete"></span></span>
+                  </div>
+                  <div class="btn-row">
+                    <button type="button" class="chip" id="part-crash" aria-pressed="false" data-i18n="form.insp.crash"></button>
+                    <button type="button" class="chip" id="part-lock" aria-pressed="false" aria-describedby="part-lock-hint" data-i18n="form.insp.lock"></button>
+                  </div>
+                </div>
+              </div>
+              <p class="sub-label" id="part-lock-hint" data-i18n="form.insp.lockHint"></p>
+              <p class="sub-label" id="form-note"></p>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <!-- Rack (nur im Zustand Einstellen): Module in Reihen auf Schienen (Lied, Instrumente, Mischung); scrollt senkrecht in sich -->
+    <div class="rack" id="rack">
+      <div class="shelf rack-row">
+        <section class="module" id="mod-harmony" aria-labelledby="mod-harmony-title">
+          <h3 class="module-title" id="mod-harmony-title" data-i18n="mod.harmony"></h3>
+          <div class="pair">
+            <div class="field">
+              <label class="lbl" for="key-select" data-i18n="ui.key"></label>
+              <select id="key-select"></select>
+            </div>
+            <div class="field">
+              <label class="lbl" for="scale-select" data-i18n="ui.scale"></label>
+              <select id="scale-select"></select>
+            </div>
+          </div>
+          <h4 class="lbl" id="progression-title" data-i18n="ui.progression"></h4>
+          <!-- Akkorde der Folge (Klick entfernt), Farbe nach Rolle, darunter die Stufe; + öffnet die Auswahl -->
+          <div class="prog-row">
+            <div class="chips" id="progression" role="group" aria-labelledby="progression-title"></div>
+            <button type="button" class="chip add-btn" id="add-btn" popovertarget="add-pop" aria-haspopup="dialog" aria-expanded="false" aria-controls="add-pop" data-i18n-label="ui.addChord">+</button>
+          </div>
+          <p class="message" id="tuning-message" aria-live="polite"></p>
+          <h4 class="lbl" id="color-title" data-i18n="ui.chordColor"></h4>
+          <div class="chips" id="chord-color" role="group" aria-labelledby="color-title"></div>
+          <div class="pop pop-rack" id="add-pop" popover role="dialog" aria-labelledby="add-title">
+            <h4 class="pop-label" id="add-title" data-i18n="ui.addChord"></h4>
+            <!-- zweistufig: erst der Grundton, dann die Akkordart; Chips baut progression-editor.js -->
+            <div id="add-chords" role="group" aria-labelledby="add-title">
+              <p class="sub-label" id="add-root-label" data-i18n="ui.addRoot"></p>
+              <div class="chips" id="add-roots" role="group" aria-labelledby="add-root-label"></div>
+              <p class="sub-label" id="add-quality-label" data-i18n="ui.addQuality"></p>
+              <div id="add-qualities" role="group" aria-labelledby="add-quality-label"></div>
+            </div>
+          </div>
+        </section>
+        <section class="module" id="mod-rhythm" aria-labelledby="mod-rhythm-title">
+          <h3 class="module-title" id="mod-rhythm-title" data-i18n="mod.rhythm"></h3>
+          <!-- eine Zeile Knöpfe: Tempo (groß, weiß), Komplexität, Lockerheit, Verzierungen; je Zelle Knopf, Name, Wert -->
+          <div class="knob-line">
+            <div class="knob-cell">
+              <input type="range" id="tuning-tempo" min="40" max="200" step="1">
+              <label class="lbl" for="tuning-tempo" data-i18n="ui.tempo"></label>
+              <output class="lcd" id="tuning-tempo-out" for="tuning-tempo"></output>
+            </div>
+            <div class="knob-cell">
+              <input type="range" id="complexity" min="0" max="100" step="1">
+              <label class="lbl" for="complexity" data-i18n="ui.complexity"></label>
+              <output class="lcd" id="complexity-out" for="complexity"></output>
+            </div>
+            <div class="knob-cell">
+              <input type="range" id="loose" min="0" max="100" step="1">
+              <label class="lbl" for="loose" data-i18n="ui.loose"></label>
+              <output class="lcd" id="loose-out" for="loose"></output>
+            </div>
+            <div class="knob-cell">
+              <input type="range" id="ornaments" min="0" max="100" step="1">
+              <label class="lbl" for="ornaments" data-i18n="ui.ornaments"></label>
+              <output class="lcd" id="ornaments-out" for="ornaments"></output>
+            </div>
+          </div>
+          <h4 class="lbl" id="meter-title" data-i18n="ui.meter"></h4>
+          <div class="chips" id="meter-chips" role="group" aria-labelledby="meter-title"></div>
+          <div class="field">
+            <label class="lbl" for="groove-select" data-i18n="ui.groove"></label>
+            <select id="groove-select"></select>
+          </div>
+        </section>
+        <section class="module" id="mod-character" aria-labelledby="mod-character-title">
+          <h3 class="module-title" id="mod-character-title" data-i18n="mod.character"></h3>
+          <div class="field">
+            <label class="lbl" for="style-select" data-i18n="ui.style"></label>
+            <select id="style-select"></select>
+          </div>
+          <ul class="char-words" id="char-words" data-i18n-label="ui.tags"></ul>
+          <button type="button" class="chip" id="tags-btn" popovertarget="tags-pop" aria-haspopup="dialog" aria-expanded="false" aria-controls="tags-pop" data-i18n="ui.tagsPick"></button>
+          <div class="pop pop-rack" id="tags-pop" popover role="dialog" aria-labelledby="tags-title">
+            <h4 class="pop-label" id="tags-title" data-i18n="ui.tags"></h4>
+            <!-- Legende der Kennbuchstaben und Anzeige: was das überfahrene oder fokussierte Wort bewegt und wann (tags-ui.js) -->
+            <p class="sub-label tag-legend" data-i18n="tagfx.legend"></p>
+            <p class="lcd tag-fx" id="tag-fx" aria-live="polite"></p>
+            <div id="tags"></div>
+          </div>
+        </section>
+        <!-- ein Modul je Instrument: Titel, Stimme, Aufgabe und Klangknöpfe bauen timbre-panel.js, voices-panel.js und jobs-panel.js -->
+        <div class="rack-instruments" id="rack-instruments"></div>
+        <section class="module" id="mod-mixer" aria-labelledby="mod-mixer-title">
+          <h3 class="module-title" id="mod-mixer-title" data-i18n="mod.mixer"></h3>
+          <!-- Mischpult: Fader, Pegelanzeigen, Pan und Stummtasten baut mixer.js; die Tasten sind der einzige Stummschalter, die Spurnamen über den Spuren zeigen den Zustand -->
+          <div class="mixer" id="mixer"></div>
+        </section>
+        <section class="module" id="mod-master" aria-labelledby="mod-master-title">
+          <h3 class="module-title" id="mod-master-title" data-i18n="mod.master"></h3>
+          <!-- Schalter "Alle Samples" (baut mixer.js), darunter der Gesamtklang (Helligkeit, Echo, Hall, Panorama, Raum): Knöpfe baut timbre-panel.js -->
+          <div class="master-voices" id="master-voices"></div>
+          <div class="mixer-master" id="mixer-master" role="group" data-i18n-label="group.master"></div>
+        </section>
+      </div>
+    </div>
+  </section>
+</main>
+</body>
+</html>
