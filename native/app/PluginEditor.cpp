@@ -22,9 +22,11 @@ const juce::File webRoot { BTG_WEB_ROOT };
 const juce::File shimRoot { BTG_WEB_SHIMS };
 const juce::File appRoot { BTG_APP_UI };
 
-// The generator's page: the app's own (it draws what the session gives) with BTG_UI_NEW=1, else the web's with the shims.
-// shortcut: the old page stays the default until the new one has every building block, upgrade: Task 32c makes /app/ the only page.
-const juce::String generatorPage = juce::SystemStats::getEnvironmentVariable ("BTG_UI_NEW", {}) == "1" ? "app/index.html" : "ui/index.html";
+// The generator's page and the own songs' page: the app's own (they draw what the core gives) with BTG_UI_NEW=1, else the web's with the shims.
+// shortcut: the old pages stay the default until the new ones are checked, upgrade: Task 32d makes /app/ the only page folder.
+const bool newPages = juce::SystemStats::getEnvironmentVariable ("BTG_UI_NEW", {}) == "1";
+const juce::String generatorPage = newPages ? "app/index.html" : "ui/index.html";
+const juce::String trackPage = newPages ? "app/track.html" : "native/track.html";
 
 // Files of the web app that the app replaces: the engine is the player, and it owns the samples.
 const juce::StringArray shims { "/audio/play.js", "/audio/load-voices.js", "/audio/voices/sampler.js" };
@@ -134,7 +136,7 @@ public:
             processor.loader.addJob ([&p = processor] { p.stopTransport(); }); // in order with the queued transport messages; the page is left (pagehide)
             lastKey.clear(); // a job between two steps of one knob: neither is dropped
             shows (! ownTrack);
-            browser.goToURL (juce::WebBrowserComponent::getResourceProviderRoot() + (ownTrack ? "native/track.html" : generatorPage));
+            browser.goToURL (juce::WebBrowserComponent::getResourceProviderRoot() + (ownTrack ? trackPage : generatorPage));
         };
         addAndMakeVisible (language);
         language.addItem ("Deutsch", 1);
@@ -225,6 +227,13 @@ private:
         }
         if (type == "positionLog") {
             if (positionLog.isNotEmpty()) juce::File (positionLog).appendText (message["line"].toString() + "\n");
+            return;
+        }
+        if (type == "chordDisplays") { // the own songs' page (PROTOKOLL.md section 7): answered here at once, it reads no session and changes nothing
+            auto* reply = new juce::DynamicObject();
+            reply->setProperty ("seq", message["seq"]);
+            reply->setProperty ("json", utf8 (btg::chordDisplays (message["json"].toString().toStdString())));
+            emit ("chordDisplays", juce::var (reply));
             return;
         }
         if (type == "openFile") {

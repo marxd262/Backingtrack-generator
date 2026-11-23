@@ -1,11 +1,12 @@
 // Start- und Spielseite: render() schreibt alle Texte und Attribute aus dem, was die Sitzung zuletzt gab (session.js: state, derived, tables,
 // position, der Verlauf, die Meldungen der Engine), neu; die Bedienelemente schicken Aktionen. Was spielt und was gespeichert wird, gehört der
 // Sitzung und der Hülle der App; die Seite hält Sprache, Seite und Anzeigezustand (backingtrack.lang, backingtrack.layout).
-import { t, setLanguage, detectLanguage } from './i18n/index.js';
+import { t, setLanguage } from './i18n/index.js';
 import { session, listen, send, post, start, holds, beatsNow } from './session.js';
 import { $, setText, setAttr, pressed } from './dom.js';
 import { positionLabel } from './position.js';
 import { loadLayout, saveLayout } from './layout-state.js';
+import { layoutStorage, readLang, saveLang } from './page-storage.js';
 import { initTuning } from './tuning.js';
 import { initMixer } from './mixer.js';
 import { initProfiles } from './profiles.js';
@@ -27,17 +28,7 @@ const RHYTHMS = {
   reggae: '0000100000001000', country: '1000001010000010', poppunk: '1011101110111011',
 };
 
-// --- was die Seite selbst hält: Sprache, Seite, Fokus/Einstellen ---
-const LANG_KEY = 'backingtrack.lang';
-// Schon der Zugriff auf localStorage kann werfen (gesperrter Speicher); null speichert nichts
-const layoutStorage = (() => { try { return localStorage; } catch { return null; } })();
-function readLang() {
-  try {
-    const saved = localStorage.getItem(LANG_KEY);
-    if (saved === 'de' || saved === 'en') return saved;
-  } catch { /* Speicher gesperrt: Browsersprache */ }
-  return detectLanguage(navigator.language);
-}
+// --- was die Seite selbst hält: Sprache, Seite, Fokus/Einstellen (Sprache und Speicher des Layouts teilt sie mit der Seite für eigene Tracks) ---
 let lang = readLang();
 let page = 'start'; // 'start' | 'play'
 let layout = loadLayout(layoutStorage); // Fokus/Einstellen, Beschriftung, Bünde
@@ -48,7 +39,7 @@ const rollVariant = () => (crypto.getRandomValues(new Uint32Array(1))[0] % 9999)
 document.head.append(Object.assign(document.createElement('style'), { textContent: '.lang { display: none !important; }' }));
 function setLang(next) {
   lang = next;
-  try { localStorage.setItem(LANG_KEY, lang); } catch { /* ohne Speicher gilt die Wahl nur bis zum Neuladen */ }
+  saveLang(lang);
   post('language', { lang });
   render();
 }
@@ -58,25 +49,14 @@ addEventListener('load', () => post('language', { lang })); // die Leiste zeigt 
 // Einmalige Übernahme (Task 32): was die alte Seite im Speicher der WebView hielt (Profile, zuletzt gespielte Sitzung, Mischpult), geht an die
 // Sitzung (importLegacy; sie nimmt nur, was sie selbst noch nicht gespeichert hat), bis eine Antwort zeigt, dass nichts mehr zu nehmen ist; dann
 // folgt der Vermerk. Die alten Einträge bleiben. Im Zweifel kein Vermerk: ein zweites Schicken nimmt nichts über Gespeichertes.
-// Nichts mehr zu nehmen heißt: an keinem Namen mit altem Text steht in der Antwort ein Problem des Speichers (state().storage: unlesbar,
-// beschädigt, nicht gespeichert), und profiles.json ließ sich schreiben: profiles() nennt kein ui.profileNotStored (sonst nimmt die Aktion nichts;
-// auch eine stehen gebliebene Meldung dieser Art zählt). Entschieden wird am ersten Text von profiles(), der nach der Antwort kommt: ihrem eigenen
-// oder dem von sync, das die Hülle nach ihr beantwortet (eine Antwort, die das Fenster nicht ändert, bringt keinen; einen Text, den die Seite noch
-// nicht hat, nimmt sie nicht als Zustimmung). shortcut: a read that throws at the moment of the action counts as stored, and an old text the
-// session's reader finds damaged is not taken: both answer like "the app's own text is stored", so they get the mark, upgrade: when importLegacy's
-// answer says per text whether it was taken or found stored (a field of the core)
-const settled = (old, state, profiles) => Object.entries(old).every(([name, text]) => text === null || state.storage[name] === null)
-  && !(old.profiles !== null && (profiles.message ?? []).some((m) => m.key === 'ui.profileNotStored'));
+// Nichts mehr zu nehmen heißt: die Antwort sagt zu jedem Text, was die Sitzung mit ihm tat (state().legacy), und keiner ist "failed" (der Speicher
+// ließ sich gerade nicht lesen oder schreiben, oder was unter dem Namen liegt, hat ein Problem: der nächste Start kann ihn nehmen).
 try {
   const old = Object.fromEntries(['profiles', 'session', 'mix'].map((name) => [name, localStorage.getItem(`backingtrack.${name}`)]));
   if (localStorage.getItem('backingtrack.imported') === null && Object.values(old).some((text) => text !== null)) {
-    let answer = null; // der state, der importLegacy beantwortet, bis ein Text von profiles() nach ihm entscheidet
-    listen((what) => {
-      if (what !== 'profiles' || !answer) return;
-      if (settled(old, answer, session.profiles)) try { localStorage.setItem('backingtrack.imported', '1'); } catch { /* ohne Speicher kommt sie beim nächsten Laden wieder */ }
-      answer = null;
+    send({ action: 'importLegacy', ...old }).then(({ legacy }) => {
+      if (legacy && !Object.values(legacy).includes('failed')) try { localStorage.setItem('backingtrack.imported', '1'); } catch { /* ohne Speicher kommt sie beim nächsten Laden wieder */ }
     });
-    send({ action: 'importLegacy', ...old }).then((state) => { answer = state; });
   }
 } catch { /* Speicher gesperrt: nichts zu übernehmen */ }
 

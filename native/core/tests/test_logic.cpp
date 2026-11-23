@@ -356,6 +356,7 @@ json playSession(const json& in) {
 // Task 32a: derived() after each step of a sequence, compared by itself (a summary line of its own) and then taken out of both records. Fix round 1: by text, field by
 // field (the list of the fields that changed, in the text's order: at the first step all of them, so the order of the fields counts too), byte for byte
 long long derivedChecks = 0, derivedWrong = 0;
+double displaysMs = 0, displaysLongest = 0; // Task 32c: the time chordDisplays took over the cases, and its longest call
 json withoutDerived(const json& c, json& got) {
     json want = c.at("out");
     const json& steps = c.at("in").is_array() ? c.at("in") : c.at("in").at("steps");
@@ -596,6 +597,14 @@ const std::map<std::string, std::function<json(const json&)>> FUNCTIONS {
         catch (const std::invalid_argument&) { return json { { "threw", true } }; } } },
     // Task 32a: the constants the page lists and labels, against the JavaScript's; fix round 1: the text, byte for byte (the order of keys, how numbers are written)
     { "tables", [](const json&) { return json(btg::Session::tables()); } },
+    // Task 32c: what the displays of the own songs' page show, the text byte for byte; `in` is the request's text. Each call is timed (the summary line `displays`)
+    { "chordDisplays", [](const json& in) {
+        const auto begin = std::chrono::steady_clock::now();
+        std::string text = btg::chordDisplays(in.get<std::string>());
+        const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin).count();
+        displaysMs += ms;
+        displaysLongest = std::max(displaysLongest, ms);
+        return json(std::move(text)); } },
 };
 
 } // namespace
@@ -627,7 +636,7 @@ int main(int argc, char** argv) {
     if (listed != count(manifest.at("total"))) { std::printf("%s lists %zu cases in its chunks, its total is %zu\n", argv[1], listed, count(manifest.at("total"))); return 1; }
     if (listed == 0) { std::printf("%s has no case: nothing was checked\n", argv[1]); return 1; } // a gate must not pass on nothing
     const std::filesystem::path directory = std::filesystem::path(argv[1]).parent_path();
-    long long identical = 0, close = 0, different = 0, closeString = 0;
+    long long identical = 0, close = 0, different = 0, closeString = 0, displaysChecks = 0, displaysWrong = 0;
     std::map<std::string, int> seen; // cases per function in the file
     size_t read = 0;                 // cases read so far: the number of the next case
     for (const json& chunk : manifest.at("chunks")) {
@@ -651,6 +660,7 @@ int main(int argc, char** argv) {
                 if (fn == FUNCTIONS.end()) compare.fail("fn");
                 else if (c.at("fn") == "session") { got = fn->second(c.at("in")); want = withoutDerived(c, got); compare.value("out", want, got); }
                 else { got = fn->second(c.at("in")); compare.value("out", c.at("out"), got); }
+                if (c.at("fn") == "chordDisplays") { ++displaysChecks; if (compare.result != btg::test::Match::identical) ++displaysWrong; }
                 if (compare.result == btg::test::Match::identical) { ++identical; continue; }
                 if (compare.result == btg::test::Match::close && c.at("fn") == "renderString") { // the ruled exception (above): passes, counted
                     ++closeString;
@@ -659,8 +669,8 @@ int main(int argc, char** argv) {
                 }
                 if (compare.result == btg::test::Match::close) { ++close; std::printf("close: %s #%zu %s by %.3g\n", c.at("fn").get<std::string>().c_str(), i, compare.field.c_str(), compare.delta); continue; }
                 if (different < 20 && c.at("fn") == "session") printSessionStep(c, want, got);
-                if (different < 20 && c.at("fn") == "tables" && c.at("out").is_string() && got.is_string())
-                    std::printf("tables: the text differs %s\n", firstDifference(c.at("out").get<std::string>(), got.get<std::string>()).c_str());
+                if (different < 20 && (c.at("fn") == "tables" || c.at("fn") == "chordDisplays") && c.at("out").is_string() && got.is_string())
+                    std::printf("%s: the text differs %s\n", c.at("fn").get<std::string>().c_str(), firstDifference(c.at("out").get<std::string>(), got.get<std::string>()).c_str());
                 if (++different <= 20) std::printf("different: %s #%zu %s: in %s, want %s, got %s\n", c.at("fn").get<std::string>().c_str(), i, compare.field.c_str(),
                                                    c.at("in").dump().c_str(), c.at("out").dump().c_str(), got.dump().c_str());
             } catch (const std::exception& error) { // a case that is no case, or a function that throws what the web's does not
@@ -1094,6 +1104,14 @@ int main(int argc, char** argv) {
                                    R"({"action":"setLevel","channel":"pad","value":20})" }) s.apply(a);
             others = st.files;
         }
+        // state() without what importLegacy said of the texts (a session made on them says nothing), and what it said of each text that was sent
+        const auto rest = [](const btg::Session& s) { json j = json::parse(s.state()); j.erase("legacy"); return j; };
+        const auto said = [&](const btg::Session& s, const std::map<std::string, std::string>& texts, const char* want) {
+            const json legacy = json::parse(s.state()).at("legacy");
+            bool all = legacy.is_object();
+            for (const auto& [name, field] : FIELD) all = all && legacy.at(field) == (texts.count(name) ? json(want) : json());
+            return all;
+        };
         std::set<std::map<std::string, std::string>> tried;
         for (const auto& group : storedGroups) {
             std::vector<std::map<std::string, std::string>> tries;
@@ -1108,32 +1126,86 @@ int main(int argc, char** argv) {
                 btg::Session b(made), a(empty);
                 b.apply(START);
                 a.apply(START);
-                const std::string stateBefore = a.state(), profilesBefore = a.profiles();
+                const json stateBefore = rest(a);
+                const std::string profilesBefore = a.profiles();
                 const btg::Session::Change c = a.apply(legacyOf(texts));
                 const json problems = json::parse(b.state()).at("storage");
                 bool readable = true;
                 for (const auto& entry : texts) readable = readable && problems.at(FIELD.at(entry.first)).is_null();
                 if (readable)
-                    check(a.state() == b.state() && a.profiles() == b.profiles() && empty.files == made.files && c.mix == (texts.count("mix.json") > 0), "a session that took the texts is not one made on them" + what);
+                    check(rest(a) == rest(b) && a.profiles() == b.profiles() && empty.files == made.files && c.mix == (texts.count("mix.json") > 0) && said(a, texts, "taken"),
+                          "a session that took the texts is not one made on them, or does not say taken" + what);
                 else if (texts.size() == 1)
-                    check(a.state() == stateBefore && a.profiles() == profilesBefore && empty.files.empty() && changeOf(c) == changeOf({}), "a text the constructor finds unreadable or damaged is taken" + what);
-                const std::string stateAfter = a.state(), profilesAfter = a.profiles();
+                    check(rest(a) == stateBefore && a.profiles() == profilesBefore && empty.files.empty() && changeOf(c) == changeOf({}) && said(a, texts, "damaged"),
+                          "a text the constructor finds unreadable or damaged is taken, or not said damaged" + what);
+                const json stateAfter = rest(a);
+                const std::string profilesAfter = a.profiles();
                 const auto filesAfter = empty.files;
-                check(changeOf(a.apply(legacyOf(texts))) == changeOf({}) && a.state() == stateAfter && a.profiles() == profilesAfter && empty.files == filesAfter, "sent twice, the second changes something" + what);
+                check(changeOf(a.apply(legacyOf(texts))) == changeOf({}) && rest(a) == stateAfter && a.profiles() == profilesAfter && empty.files == filesAfter && (!readable || said(a, texts, "stored")),
+                      "sent twice, the second changes something, or does not say stored" + what);
                 if (texts.size() > 1) continue;
                 const std::string& name = texts.begin()->first;
                 SequenceStorage holds;
                 holds.files[name] = others.at(name);
                 btg::Session h(holds);
                 h.apply(START);
-                const std::string heldState = h.state(), heldProfiles = h.profiles();
-                check(changeOf(h.apply(legacyOf(texts))) == changeOf({}) && h.state() == heldState && h.profiles() == heldProfiles && holds.files == std::map<std::string, std::string> { { name, others.at(name) } },
-                      "a storage that holds the name does not keep it" + what);
+                const json heldState = rest(h);
+                const std::string heldProfiles = h.profiles();
+                check(changeOf(h.apply(legacyOf(texts))) == changeOf({}) && rest(h) == heldState && h.profiles() == heldProfiles && holds.files == std::map<std::string, std::string> { { name, others.at(name) } }
+                          && said(h, texts, problems.at(FIELD.at(name)) == "unreadable" ? "damaged" : "stored"), // a text above 20,000,000 bytes is judged before the storage is read
+                      "a storage that holds the name does not keep it, or does not say stored" + what);
             }
         }
         if (legacyChecks == 0) check(false, "the reference brings no stored texts");
+        // Task 32c: state().legacy says per text what the action did: taken, stored (the app's own), damaged (the old text), failed (a read that throws, a write that fails:
+        // the page sends it again at the next load); a text not sent is null, and the next action sets it to null
+        const std::map<std::string, std::string> DAMAGED { { "profiles.json", "kein JSON" }, { "session.json", R"({"parts":5})" }, { "mix.json", "[1]" } };
+        const auto saidOf = [](const btg::Session& s) { return json::parse(s.state()).at("legacy"); };
+        for (const auto& [name, field] : FIELD) {
+            const auto one = [&, name = name, field = field](const std::string& how, const std::string& text, const std::function<void(SequenceStorage&)>& before, const char* want) {
+                SequenceStorage st;
+                before(st);
+                btg::Session s(st);
+                s.apply(START);
+                if (how == "reads") st.failReads = "throw";
+                if (how == "writes") st.failName = name;
+                s.apply(legacyOf({ { name, text } }));
+                st.failReads.clear();
+                st.failName.clear();
+                json expected = { { "profiles", nullptr }, { "session", nullptr }, { "mix", nullptr } };
+                expected[field] = want;
+                check(saidOf(s) == expected, "state().legacy of " + name + " (" + how + ") is " + saidOf(s).dump() + ", not " + want);
+                s.apply(START);
+                check(saidOf(s).is_null(), "state().legacy of " + name + " (" + how + ") stays after the next action");
+            };
+            const auto none = [](SequenceStorage&) {};
+            one("taken", others.at(name), none, "taken");
+            one("stored", others.at(name), [&, name = name](SequenceStorage& st) { st.files[name] = others.at(name); }, "stored");
+            one("damaged", DAMAGED.at(name), none, "damaged");
+            one("reads", others.at(name), none, "failed");
+            one("writes", others.at(name), none, "failed");
+            // fix round 1: the app's own text is stored but damaged (state().storage names it): doubtful, so failed, not stored
+            one("stored, damaged", others.at(name), [&, name = name](SequenceStorage& st) { st.files[name] = DAMAGED.at(name); }, "failed");
+        }
+        {
+            SequenceStorage st;
+            btg::Session s(st);
+            s.apply(START);
+            st.failName = "profiles.json";
+            s.apply(legacyOf(others));
+            st.failName.clear();
+            check(saidOf(s) == json { { "profiles", "failed" }, { "session", "failed" }, { "mix", "failed" } } && st.files.empty(), "a profiles.json that is not written leaves the others taken: " + saidOf(s).dump());
+            SequenceStorage throwing;
+            throwing.failReads = "throw";
+            btg::Session t(throwing);
+            throwing.failReads.clear();
+            t.apply(START);
+            t.apply(legacyOf({ { "profiles.json", others.at("profiles.json") } }));
+            check(saidOf(t).at("profiles") == "failed" && throwing.files.empty(), "a profiles.json unreadable at the load is not named failed: " + saidOf(t).dump());
+        }
     } catch (const std::exception& error) { std::printf("FAIL: the check of importLegacy threw: %s\n", error.what()); ++legacyWrong; }
-    std::printf("legacy: %d of %d checks wrong (importLegacy takes a text of the old page as a session made on it does, a damaged one not, nothing over a stored one, nothing twice)\n", legacyWrong, legacyChecks);
+    std::printf("legacy: %d of %d checks wrong (importLegacy takes a text of the old page as a session made on it does, a damaged one not, nothing over a stored one, nothing twice;"
+                " state().legacy says per text taken, stored, damaged or failed)\n", legacyWrong, legacyChecks);
     // the replace check ran inside the sequences (playSession); a key it never met was not proven
     std::set<std::string> kinds; // setTimbre/<path> and setRhythmKnob/<knob> by their action, editPart's by field
     for (const std::string& key : replaceMet) kinds.insert(key.rfind("editPart/", 0) == 0 ? key : key.substr(0, key.find('/')));
@@ -1145,6 +1217,8 @@ int main(int argc, char** argv) {
     if (replaceUnmet) std::printf("FAIL: the replace check met %zu kinds of key, the core gives 5 (setTimbre, setRhythmKnob, editPart level, density, transition)\n", kinds.size());
     int untested = 0; // a function of the table that the file brings no case for was not checked
     for (const auto& entry : FUNCTIONS) if (!seen.count(entry.first)) { std::printf("no case for %s in %s\n", entry.first.c_str(), argv[1]); ++untested; }
+    std::printf("displays: %lld of %lld cases wrong (chordDisplays: what the displays of the own songs' page show, against the old page's track.js and the web's functions);"
+                " %.3f ms per call, the longest %.3f ms\n", displaysWrong, displaysChecks, displaysChecks ? displaysMs / static_cast<double>(displaysChecks) : 0.0, displaysLongest);
     std::printf("logic: functions %zu, cases %zu, identical %lld, close %lld, different %lld\n", FUNCTIONS.size(), read, identical, close, different);
     std::printf("renderString: %lld of %d cases close, passed by the ruled exception (a C runtime function's last bit against V8's)\n", closeString, seen["renderString"]);
     // A close is a difference in the last bits (possibly another platform's math library): it fails too. An exception has to be ruled

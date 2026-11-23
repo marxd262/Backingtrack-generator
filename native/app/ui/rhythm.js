@@ -37,8 +37,7 @@ export function initRhythm() {
   });
 
   function show(field, slider) {
-    // shortcut: the 50 % a knob shows while its field is missing is a rule of the web (rhythm.js 66) no text of the session gives, upgrade: when derived() gives the knobs' values
-    const percent = holds(slider) ? slider.value : String(Math.round((session.state.track[field] ?? 0.5) * 100));
+    const percent = holds(slider) ? slider.value : String(Math.round(session.derived.rhythm[field] * 100));
     if (slider.value !== percent) slider.value = percent;
     const shown = t('ui.percent', { n: percent });
     setText($(`${field}-out`), shown);

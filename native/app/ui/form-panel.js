@@ -40,10 +40,7 @@ export function initFormPanel({ page }) {
 
   // ein Knopf zeigt die Antwort der Sitzung; solange ein Drehen unbeantwortet ist, die Hand
   function show(name, el) {
-    const { track, formFeel } = session.state;
-    // shortcut: the knobs show track.form.feel and without it formFeel, a rule of the web (form-panel.js 79) no text of the session gives, upgrade: when derived() gives the knobs' values
-    const feel = track.form?.feel ?? formFeel;
-    const percent = holds(el) ? el.value : String(Math.round(feel[name] * 100));
+    const percent = holds(el) ? el.value : String(Math.round(session.derived.feel[name] * 100));
     if (el.value !== percent) el.value = percent;
     setText($(`form-${name}-out`), t('ui.percent', { n: percent }));
     setAttr(el, 'aria-valuetext', t('ui.formFeelValue', { n: percent, def: Math.round(FEEL_DEFAULTS[name] * 100) }));

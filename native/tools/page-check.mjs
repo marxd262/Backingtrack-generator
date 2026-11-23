@@ -21,7 +21,8 @@
 // is the one the page got. Then the app starts once more on a folder where mix.json and session.json are folders (unreadable, and mix.json cannot
 // be written): the lines at the mixer and at the box of the last session say so. Then once with the web's page (no BTG_UI_NEW): its wheel and
 // fretboard have the boxes of this page's. Last, the one-time take-over: the old page's entries in the WebView's storage are sent once with
-// importLegacy, a second load sends nothing, and with the app's own texts stored other entries take nothing over.
+// importLegacy, a second load sends nothing, and with the app's own texts stored other entries take nothing over; a storage whose profiles.json
+// cannot be read (or is damaged) at the first start leaves no mark, and a later start on a working storage takes the profiles.
 // Writes .superpowers/native-screens/page-check.json and prints it.
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -837,7 +838,7 @@ try {
     const state = JSON.parse(window.got.state.at(-1).json), profiles = JSON.parse(window.got.profiles.at(-1).json);
     return {
       sent, mark: localStorage.getItem('backingtrack.imported'), kept: ['profiles', 'session', 'mix'].filter((k) => localStorage.getItem(`backingtrack.${k}`) !== null),
-      items: profiles.items, message: (profiles.message ?? []).map((m) => m.key), storage: state.storage, last: state.last, mix: state.mix,
+      items: profiles.items, message: (profiles.message ?? []).map((m) => m.key), storage: state.storage, legacy: state.legacy, last: state.last, mix: state.mix,
       rows: [...document.querySelectorAll('#profile-tree .tree-label')].map((l) => l.textContent),
     };
   });
@@ -871,13 +872,22 @@ try {
     problems.push(`take-over: the next start on a storage that works: ${JSON.stringify(result.takeOver.nextStart)}`);
   await quit();
   // (2) the app's profiles.json is damaged or unreadable when the page loads: the session keeps it as it is and takes no profiles, no mark
+  // (state().legacy says failed); Task 32c: a later start, with the problem gone, takes the profiles and marks
   for (const [problem, make] of [['damaged', (dir) => writeFileSync(join(dir, 'profiles.json'), '{"version":2,"items":')], ['unreadable', (dir) => mkdirSync(join(dir, 'profiles.json'))]]) {
     const dir = join(work, `legacy-${problem}`);
     mkdirSync(dir);
     make(dir);
     const got = await takeOver(await launch(dir, { prepare: putOld }));
-    result.takeOver[problem] = { sent: got.sent.length, mark: got.mark, storage: got.storage.profiles, names: names(got.items) };
-    if (got.sent.length !== 1 || got.mark !== null || got.storage.profiles !== problem || got.items.length) problems.push(`take-over: a ${problem} profiles.json: ${JSON.stringify(result.takeOver[problem])}`);
+    result.takeOver[problem] = { sent: got.sent.length, mark: got.mark, storage: got.storage.profiles, legacy: got.legacy, names: names(got.items) };
+    if (got.sent.length !== 1 || got.mark !== null || got.storage.profiles !== problem || got.legacy?.profiles !== 'failed' || got.items.length)
+      problems.push(`take-over: a ${problem} profiles.json: ${JSON.stringify(result.takeOver[problem])}`);
+    await quit();
+    rmSync(join(dir, 'profiles.json'), { recursive: true });
+    // the old entries are still in this folder's WebView profile without a mark: the page's first load sends them, before the recording begins
+    const later = await takeOver(await launch(dir, { prepare: putOld }));
+    result.takeOver[`${problem}, then working`] = { sent: later.sent.length, mark: later.mark, legacy: later.legacy, names: names(later.items) };
+    if (later.mark === null || later.legacy?.profiles !== 'taken' || JSON.stringify(names(later.items)) !== JSON.stringify(oldNames))
+      problems.push(`take-over: the start after a ${problem} profiles.json, on a storage that works: ${JSON.stringify(result.takeOver[`${problem}, then working`])}`);
     await quit();
   }
   // (3) a storage that works: taken and marked, a second load sends nothing, and other old entries without the mark take nothing over the app's own

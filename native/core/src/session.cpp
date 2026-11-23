@@ -1,10 +1,11 @@
 // The web app's state and the rules that change it (native/PROTOKOLL.md). The state is the JSON object of src/ui/state.js (the fields of PROTOKOLL.md,
 // section 4) plus `touched` of app.js, `selected` of form-strip.js (selectedPart), the web's `errors`, what the profile window holds (`profiles`: selection, open
-// folders, message) and `resumed`; the tree, what "undo" keeps and the last session are held beside it (Session::Memory). The functions below are state.js's and
+// folders, message), `resumed` and `legacy`; the tree, what "undo" keeps and the last session are held beside it (Session::Memory). The functions below are state.js's and
 // the handlers' with their names, line by line, on that object.
 // native/core/tests/test_logic.cpp (function `session`) plays the sequences of native/tools/export-logic.mjs against native/tools/session-reference.mjs.
 #include "btg/session.h"
 
+#include "btg/analysis.h"
 #include "form_internal.h"
 #include "generator_internal.h"
 #include "harmony.h"
@@ -306,7 +307,7 @@ Json startState(double variant) {
                             { "organ", music().at("organ").at("default") }, { "tempoRef", nullptr },
                             { "touched", Json::object({ { "key", false }, { "style", false }, { "tempo", false }, { "variant", false } }) },
                             { "selectedPart", 0 }, // form-strip.js 35: `selected`
-                            { "errors", Json::array() }, { "resumed", nullptr }, // state.js 88; no resume
+                            { "errors", Json::array() }, { "resumed", nullptr }, { "legacy", nullptr }, // state.js 88; no resume, no take-over
                             { "notice", nullptr }, { "refusals", 0 }, { "rollNote", false } }); // state.js 89; progression-editor.js 11; form-strip.js 37
     deriveBars(s);
     setFormTemplate(s, "auto");
@@ -912,24 +913,35 @@ const std::map<std::string, ProfileHandler>& profileHandlers() {
                                 for (const char* name : { "profiles", "session", "mix" }) if (!x.a.contains(name) || !(x.a.at(name).is_null() || x.a.at(name).is_string())) return false;
                                 return true; },
                             [](Step& x) {
+                                // state().legacy, per text sent: taken, or why not (PROTOKOLL.md section 3); a write that fails makes "failed" of "taken" (Session::apply)
+                                Json said = Json::object({ { "profiles", nullptr }, { "session", nullptr }, { "mix", nullptr } });
                                 const auto taken = [&](const char* field, const char* name) -> std::optional<std::string> { // the text, when it may be taken
                                     const Json& text = x.a.at(field);
-                                    if (text.is_null() || text.get_ref<const std::string&>().size() > STORED_LIMIT) return std::nullopt;
-                                    try { if (x.shell.read(name)) return std::nullopt; } catch (...) { return std::nullopt; } // a storage that cannot say holds something
+                                    if (text.is_null()) return std::nullopt;
+                                    if (text.get_ref<const std::string&>().size() > STORED_LIMIT) { said[field] = "damaged"; return std::nullopt; } // never readable
+                                    // a storage that cannot say holds something, and an own text with a problem (state().storage) is doubtful: the next load may tell
+                                    try {
+                                        if (x.shell.read(name)) { said[field] = x.problems.at(field).is_null() ? "stored" : "failed"; return std::nullopt; }
+                                    } catch (...) { said[field] = "failed"; return std::nullopt; }
                                     return text.get<std::string>();
                                 };
-                                if (x.problems.at("profiles").is_null()) // an unreadable or damaged profiles.json stays as the constructor found it
+                                if (x.problems.at("profiles").is_null()) { // an unreadable or damaged profiles.json stays as the constructor found it
                                     if (const auto text = taken("profiles", detail::PROFILES_NAME)) {
                                         LoadedTree loaded = loadProfiles({ text, false });
+                                        said["profiles"] = loaded.problem.is_null() ? "taken" : "damaged";
                                         if (loaded.problem.is_null()) { x.pending.write(detail::PROFILES_NAME, *text); x.newTree = std::move(loaded.tree); x.newUndo = Json(); }
                                     }
+                                } else if (!x.a.at("profiles").is_null()) said["profiles"] = "failed";
                                 if (const auto text = taken("session", detail::SESSION_NAME)) {
                                     Texts texts;
                                     texts.files[detail::SESSION_NAME] = text;
-                                    if (Json entry = detail::loadLast(texts); !entry.is_null()) { x.last = std::move(entry); x.pending.write(detail::SESSION_NAME, *text); }
+                                    Json entry = detail::loadLast(texts);
+                                    said["session"] = entry.is_null() ? "damaged" : "taken";
+                                    if (!entry.is_null()) { x.last = std::move(entry); x.pending.write(detail::SESSION_NAME, *text); }
                                 }
                                 if (const auto text = taken("mix", detail::MIX_NAME)) {
                                     const Json raw = detail::parsedText(*text);
+                                    said["mix"] = raw.is_object() ? "taken" : "damaged";
                                     if (raw.is_object()) {
                                         x.s["mix"] = sanitizeMix(raw);
                                         x.s["pan"] = sanitizePan(detail::orNull(detail::member(raw, "pan")));
@@ -937,6 +949,7 @@ const std::map<std::string, ProfileHandler>& profileHandlers() {
                                         x.c.mix = true;
                                     }
                                 }
+                                x.s["legacy"] = std::move(said);
                                 return true; } } },
         // app.js 153-157, 160: what stop() and pagehide remember while playing; the shell sends it then (PROTOKOLL.md section 3)
         { "rememberSession", { [](const Step& x) { return isInt(field(x.a, "bar"), 0, MAX_INT) && isInt(field(x.a, "at"), 0, MAX_INT); }, [](Step& x) { remember(x, x.a); return true; } } },
@@ -1053,29 +1066,30 @@ Json firstMatch(const Json& layout, const Json& chord, const Json& key, const st
     }
     return Json();
 }
-// wheel.js 14, 28, 41, 54-73: per node the allowed chord at it in the key's spelling (allowedAt), whether it is diatonic and in the progression, its label; the path of the
-// progression (nodeOf of each chord, those without a node left out)
-Json wheelOf(const Json& t) {
-    const Json& key = t.at("key");
+// wheel.js 14, 28, 41, 54-73 for the key and the chords of a progression: per node the allowed chord at it in the key's spelling (allowedAt; `named`: with its name, which
+// chordDisplays gives), whether it is diatonic and in the progression, its label; the path of the progression (nodeOf of each chord, those without a node left out)
+Json wheelOf(const Json& key, const Json& progression, bool named = false) {
     const Json layout = wheelNodes(key), allowed = detail::allowedChords(key), diatonic = detail::diatonicChordsOf(key);
-    const Json& bars = t.at("bars");
     Json nodes = Json::array();
     for (const Json& n : layout) {
         const Json* chord = findChord(allowed, n.at("chord"));
-        const bool inProgression = chord != nullptr && std::any_of(bars.begin(), bars.end(), [&](const Json& b) { return sameChord(b.at("chord"), *chord); });
-        nodes.push_back(Json::object({ { "ring", n.at("ring") }, { "index", n.at("index") }, { "chord", n.at("chord") }, { "allowed", chord != nullptr ? *chord : Json() },
+        const bool inProgression = chord != nullptr && std::any_of(progression.begin(), progression.end(), [&](const Json& c) { return sameChord(c, *chord); });
+        Json pick = chord != nullptr ? *chord : Json();
+        if (named && chord != nullptr) pick["name"] = detail::chordName(*chord);
+        nodes.push_back(Json::object({ { "ring", n.at("ring") }, { "index", n.at("index") }, { "allowed", std::move(pick) },
                                        { "diatonic", chord != nullptr && findChord(diatonic, *chord) != nullptr }, { "inProgression", inProgression },
                                        { "short", detail::chordShort(chord != nullptr ? *chord : n.at("chord")) } }));
     }
     Json path = Json::array();
-    for (const Json& b : bars) if (Json i = firstMatch(layout, b.at("chord"), key, [](const Json&) { return true; }); !i.is_null()) path.push_back(std::move(i));
+    for (const Json& c : progression) if (Json i = firstMatch(layout, c, key, [](const Json&) { return true; }); !i.is_null()) path.push_back(std::move(i));
     return Json::object({ { "nodes", nodes }, { "path", path } });
 }
-// wheel.js 57-58, 96 as wheelState gives them while playing (tuning.js 42-47): the node of the chord that sounds and that of the next one, unless it is the same node
+// wheel.js 57-58, 96 as wheelState gives them while playing (tuning.js 42-47): the node of the chord that sounds and that of the next one, unless it is the same node;
+// a chord that is null (chordDisplays: none sounds) has no node
 Json wheelAt(const Json& key, const Json& chord, const Json& next) {
     const Json layout = wheelNodes(key), allowed = detail::allowedChords(key);
-    const auto nodeOf = [&](const Json& c) { return firstMatch(layout, c, key, [&](const Json& n) { return findChord(allowed, n.at("chord")) != nullptr; }); };
-    const Json current = nodeOf(chord), following = next.is_null() ? Json() : nodeOf(next);
+    const auto nodeOf = [&](const Json& c) { return c.is_null() ? Json() : firstMatch(layout, c, key, [&](const Json& n) { return findChord(allowed, n.at("chord")) != nullptr; }); };
+    const Json current = nodeOf(chord), following = nodeOf(next);
     return Json::object({ { "current", current }, { "next", following == current ? Json() : following }, { "nextShort", next.is_null() ? Json() : Json(detail::chordShort(next)) } });
 }
 // fretboard.js 173 (chordSentence): the tones of a chord in their order, chordMidi(chord, 3) named with noteName in the key's spelling
@@ -1085,6 +1099,20 @@ Json tonesOf(const Json& key, const Json& chord) {
     Json out = Json::array();
     for (const Json& i : music().at("chords").at(chord.at("quality").get<std::string>()).at("intervals")) out.push_back(names[(base + i.get<int>()) % 12]);
     return out;
+}
+// native/app/web/track.js 25-30 (KINDS, chordOf), the old page of the own songs: a chord name as the analysis writes it, a root and the symbol of a quality of the register
+// (Am, F#7; KINDS is the register's symbols), as a chord; an unknown symbol is major. No chord (null): a name without a root, or one that is no text (the old page threw)
+Json chordOfName(const Json& name) {
+    if (!name.is_string()) return Json();
+    const std::string& text = name.get_ref<const std::string&>();
+    if (text.empty() || text[0] < 'A' || text[0] > 'G') return Json();
+    const size_t cut = text.size() > 1 && (text[1] == '#' || text[1] == 'b') ? 2 : 1;
+    const std::string rest = text.substr(cut);
+    // /^([A-G][#b]?)(.*)$/: JavaScript's `.` takes no line terminator, so such a name does not match
+    for (const char* stop : { "\n", "\r", "\xE2\x80\xA8", "\xE2\x80\xA9" }) if (rest.find(stop) != std::string::npos) return Json();
+    std::string quality = "maj";
+    for (auto it = music().at("chords").begin(); it != music().at("chords").end(); ++it) if (it.value().at("symbol") == rest) { quality = it.key(); break; }
+    return Json::object({ { "root", text.substr(0, cut) }, { "quality", quality } });
 }
 
 } // namespace
@@ -1200,7 +1228,8 @@ Session::Change Session::apply(const std::string& actionJson) {
         const std::string watched = voiceKeys(s.at("track").at("voices"));
         std::string pushed = detail::organTuning(s.at("organ")).dump();
         Step step { s, a, c, pushed, s.at("track").at("length"), meterKey(s.at("track").at("meter")), m.tree, m.undo, last, storage_, m.storage };
-        s["resumed"] = nullptr; // the bar of a resume holds for the action that set it only
+        s["resumed"] = nullptr; // the bar of a resume holds for the action that set it only, and what importLegacy did too
+        s["legacy"] = nullptr;
         if (handler != handlers().end()) handler->second.run(step);
         else if (!profile->second.valid(step) || !profile->second.run(step)) return {};
         // what render() does: hands the player the voices when one changed (voices-panel.js 89-93) and a changed tuning (organ-panel.js 62-64), clamps the selections
@@ -1218,6 +1247,9 @@ Session::Change Session::apply(const std::string& actionJson) {
         const auto notStored = [&] { // the tree is not taken: only the message, which may change the window
             m.state["profiles"]["message"] = Json::array({ msg("ui.profileNotStored") });
             m.state["resumed"] = nullptr; // a valid action all the same
+            Json said = s.at("legacy"); // importLegacy takes nothing then: what it would have taken was not written
+            if (said.is_object()) for (Json& value : said) if (value == "taken") value = "failed";
+            m.state["legacy"] = std::move(said);
             Change named;
             named.profiles = rebuild(m.view, m.state, m.tree, m.undo);
             return named;
@@ -1230,7 +1262,11 @@ Session::Change Session::apply(const std::string& actionJson) {
             }
             const bool held = written(storage_, name, text);
             if (name == detail::PROFILES_NAME) { if (!held) return notStored(); }
-            else m.storage[name == detail::SESSION_NAME ? "session" : "mix"] = held ? Json() : Json("notStored");
+            else {
+                const char* field = name == detail::SESSION_NAME ? "session" : "mix";
+                m.storage[field] = held ? Json() : Json("notStored");
+                if (!held && s.at("legacy").is_object()) s["legacy"][field] = "failed"; // importLegacy: not stored, so not taken for the next start
+            }
         }
         if (step.newTree) s["profiles"]["drag"] = nullptr; // a change of the tree ends a drag
         const bool window = step.newTree.has_value() || s.at("profiles") != m.state.at("profiles"); // what profiles() shows (undo changes only with the tree)
@@ -1306,14 +1342,23 @@ std::string Session::derived() const {
                                                { "densityLabel", detail::densityLabel(part, feel) }, { "limits", detail::limits(*f, Json(i)) },
                                                { "maxBars", num(std::min(formLimit("bars"), formLimit("length") - (total - numberOf(part.at("bars"))))) } })); // form-strip.js 85-86
             }
-            form = Json::object({ { "blocks", detail::stripBlocks(*f) }, { "parts", std::move(parts) } });
+            Json blocks = detail::stripBlocks(*f);
+            for (Json& b : blocks) { b.erase("index"); b.erase("width"); } // no block reads them (form-strip.js draws by its place and its bars)
+            form = Json::object({ { "blocks", std::move(blocks) }, { "parts", std::move(parts) } });
         }
+        Json rhythm = Json::object(); // rhythm.js 66: a knob shows 50 % while its field is missing
+        for (const char* knob : { "complexity", "loose", "ornaments" }) { const Json* v = detail::member(t, knob); rhythm[knob] = v != nullptr && !v->is_null() ? *v : Json(0.5); }
+        const Json* formFeel = detail::member(t, "form") != nullptr ? detail::member(t.at("form"), "feel") : nullptr; // track.form?.feel
         const Json drive = detail::presetDrive(voices.at("chords").at("variant"));
         // JSON.stringify's text: its numbers as JavaScript writes them (a whole double as 1, not 1.0: the blocks, presetDrive, the knobs)
-        return detail::stringify(Json::object({ { "chordOptions", std::move(options) }, { "wheel", wheelOf(t) }, { "tagEffect", std::move(effects) }, { "voices", std::move(voices) },
+        Json progression = Json::array();
+        for (const Json& b : t.at("bars")) progression.push_back(b.at("chord"));
+        return detail::stringify(Json::object({ { "chordOptions", std::move(options) }, { "wheel", wheelOf(t.at("key"), progression) }, { "tagEffect", std::move(effects) }, { "voices", std::move(voices) },
                                    { "voiceKind", voiceKind(t.at("voices")) }, { "jobs", detail::completeJobs(t.at("jobs")) }, { "timbre", detail::resolveTrackTimbre(t) },
                                    { "usesTimbreField", std::move(uses) }, { "presetDrive", drive }, { "meter", meterKey(t.at("meter")) }, { "groove", grooveIdFor(t) },
-                                   { "formChoice", formChoice(t) }, { "form", std::move(form) } }));
+                                   { "rhythm", std::move(rhythm) }, { "formChoice", formChoice(t) },
+                                   { "feel", formFeel != nullptr && !formFeel->is_null() ? *formFeel : s.at("formFeel") }, // form-panel.js 79: the form's, else the remembered
+                                   { "form", std::move(form) } }));
     } catch (...) { return ""; }
 }
 
@@ -1340,13 +1385,18 @@ std::string Session::tables() {
             detail::forEachField(defaults, [&](const char* group, const char* name, double& v) { timbre[group][name] = num(v); });
             const Json& form = music().at("form");
             const Json& fretboard = music().at("fretboard");
-            return detail::stringify(Json::object({ { "ROOTS", music().at("roots") }, { "SCALE_NAMES", scaleNames() }, { "LAYER_IDS", layerIds() }, { "VOICE_LAYERS", voiceLayers() }, { "VOICES", voices },
+            Json limits = detail::LIMITS();
+            limits.erase("depth"); // the page reads no depth: the session refuses what is too deep
+            Json barChords = Json::array(); // native/app/web/track.js 19-20: the names the analysis gives the twelve roots, major, then minor
+            for (const bool minor : { false, true }) for (int root = 0; root < 12; ++root) barChords.push_back(btg::chordName(root, minor));
+            return detail::stringify(Json::object({ { "ROOTS", music().at("roots") }, { "SCALE_NAMES", scaleNames() }, { "SCALES", keysOf(music().at("scales")) },
+                                       { "LAYER_IDS", layerIds() }, { "VOICE_LAYERS", voiceLayers() }, { "VOICES", voices },
                                        { "jobsFor", jobs }, { "METERS", music().at("meterGrid") }, { "groovesFor", grooves }, { "CHORD_COLORS", keysOf(music().at("chordColors").at("table")) },
-                                       { "CHORD_GROUPS", music().at("chordGroups") }, { "CHORDS", chords }, { "STYLE_PRESETS", styles }, { "TAG_CATEGORIES", music().at("tags") },
+                                       { "CHORD_GROUPS", music().at("chordGroups") }, { "CHORDS", chords }, { "MAX_CHORDS", MAX_CHORDS }, { "BAR_CHORDS", barChords }, { "STYLE_PRESETS", styles }, { "TAG_CATEGORIES", music().at("tags") },
                                        { "DEFAULT_TIMBRE", timbre }, { "LESLIE_MODES", music().at("organ").at("leslieModes") }, { "DEFAULT_ORGAN", music().at("organ").at("default") },
                                        { "PART_TYPES", form.at("partTypes") }, { "TRANSITIONS", form.at("transitions") }, { "TEMPLATE_IDS", form.at("templateIds") },
                                        { "TARGET_SIZES", form.at("targetSizes") }, { "FEEL_DEFAULTS", form.at("feelDefaults") }, { "DYNAMICS_MAX", form.at("dynamicsMax") },
-                                       { "PART_IDS", detail::PART_IDS() }, { "PART_PRESETS", detail::PART_PRESETS() }, { "LIMITS", detail::LIMITS() },
+                                       { "PART_IDS", detail::PART_IDS() }, { "PART_PRESETS", detail::PART_PRESETS() }, { "LIMITS", std::move(limits) },
                                        { "FORMAT_FOLDER", detail::FORMATS().at("FORMAT_FOLDER") }, { "STANDARD_TUNING", fretboard.at("standardTuning") }, { "FRETS", fretboard.at("frets") },
                                        { "DEFAULT_PAN", pan } }));
         }();
@@ -1397,6 +1447,26 @@ std::string Session::position(double beats) const {
                                         { "part", part }, { "countdown", countdown.is_null() ? countdown : num(countdown.get<double>()) },
                                         { "notes", tonesOf(t.at("key"), chord) }, { "nextNotes", next.is_null() ? Json() : tonesOf(t.at("key"), next) }, { "wheel", wheelAt(t.at("key"), chord, next) } });
         return dump(out); // every number in it is whole: the text is JSON.stringify's (stringify would take three times as long)
+    } catch (...) { return ""; }
+}
+
+// PROTOKOLL.md section 4b: what native/app/web/track.js hands the fretboard (showBoard, 419: fretboardNotes, chordSentence) and the wheel (421: wheel.js on the chords of the
+// part that plays), from the functions derived() and position() use; the names parsed as chordOfName does, a node's allowed chord with the name the page enters for it
+std::string chordDisplays(const std::string& requestJson) {
+    try {
+        const Json r = detail::parsedText(requestJson);
+        const Json& key = field(r, "key");
+        if (!detail::isValidKeyValue(key)) return "";
+        const Json current = chordOfName(field(r, "current")), next = chordOfName(field(r, "next"));
+        Json progression = Json::array();
+        if (const Json& chords = field(r, "chords"); chords.is_array())
+            for (const Json& name : chords) if (Json c = chordOfName(name); !c.is_null()) progression.push_back(std::move(c));
+        const auto name = [](const Json& c) { return c.is_null() ? Json() : detail::chordName(c); };
+        const auto tones = [&](const Json& c) { return c.is_null() ? Json() : tonesOf(key, c); };
+        const Json out = Json::object({ { "wheel", wheelOf(key, progression, true) }, { "at", wheelAt(key, current, next) },
+                                        { "fretboard", detail::fretboardNotes(Json::object({ { "key", key }, { "scale", field(r, "scale") }, { "current", current }, { "next", next } })) },
+                                        { "name", name(current) }, { "notes", tones(current) }, { "nextName", name(next) }, { "nextNotes", tones(next) } });
+        return dump(out); // every number in it is whole: the text is JSON.stringify's
     } catch (...) { return ""; }
 }
 

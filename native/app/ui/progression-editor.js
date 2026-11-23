@@ -5,9 +5,6 @@ import { t } from './i18n/index.js';
 import { session, send } from './session.js';
 import { $, setText, setAttr, pressed } from './dom.js';
 
-// shortcut: the 8 the notice names is MAX_CHORDS of the web (state.js), a rule of the session no text gives, upgrade: when state() or tables() gives it
-const MAX_CHORDS = 8;
-
 const button = (onClick) => {
   const b = Object.assign(document.createElement('button'), { type: 'button', className: 'chip' });
   b.addEventListener('click', onClick);
@@ -112,7 +109,7 @@ export function initProgressionEditor({ current }) {
       const off = !allowed.includes(b.dataset.quality);
       if (b.disabled !== off) b.disabled = off;
     }
-    announce(notice ? t(notice, { max: MAX_CHORDS }) : '', refusals);
+    announce(notice ? t(notice, { max: session.tables.MAX_CHORDS }) : '', refusals);
   }
   return renderProgression;
 }

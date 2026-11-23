@@ -166,8 +166,9 @@ export function createFretboardModule(section, { layout, choose, strings, frets 
   };
 }
 
-// Textfassung für Screenreader: "Jetzt: Am (A, C, E). Als Nächstes: Dm (D, F, A)"; ohne folgenden nur der erste Teil
+// Textfassung für Screenreader: "Jetzt: Am (A, C, E). Als Nächstes: Dm (D, F, A)"; ohne folgenden nur der erste Teil, ohne Akkord (die Seite für eigene Tracks) leer
 export function chordSentence({ name, notes, nextName, nextNotes }) {
+  if (!notes) return '';
   const part = (k, chord, tones) => t(k, { chord, notes: tones.join(', ') });
   return nextNotes ? `${part('ui.fretboardNow', name, notes)}. ${part('ui.fretboardNext', nextName, nextNotes)}` : part('ui.fretboardNow', name, notes);
 }

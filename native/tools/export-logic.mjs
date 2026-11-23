@@ -1581,6 +1581,8 @@ add('presetDrive', presetDrive, [...VOICES.chords.organ.variants, 'nope', '', nu
     () => legacy(old.profiles, old.session, old.mix), () => legacy(old.profiles, old.session, old.mix), act('resume', { playing: null }),
     NONE, act('start', { variant: 3 }), () => legacy(old.profiles, null, null), () => legacy(old.profiles, old.session, old.mix),
     () => ({ restart: true, stored: { 'profiles.json': null, 'session.json': old.session, 'mix.json': null } }), act('start', { variant: 4 }), () => legacy(old.profiles, '{"parts":5}', old.mix),
+    // fix round 1: the app's own session.json and mix.json stored but damaged: not taken, and said failed (doubtful), not stored
+    { restart: true, stored: { 'profiles.json': null, 'session.json': '{"parts":5}', 'mix.json': '[1]' } }, act('start', { variant: 12 }), () => legacy(null, old.session, old.mix),
     NONE, act('start', { variant: 5 }), legacy('kein JSON', 'x', '[1]'), legacy('{"items":5}', '{"parts":{}}', '5'), legacy('[]', null, '{"master":0.5,"pan":{"lead":0.25}}'),
     NONE, act('start', { variant: 6 }), () => legacy(JSON.stringify([{ name: 'Alt', profile: { format: 'backingtrack-profile', version: 1, track: { key: { root: 'A', mode: 'minor' }, bpm: 96,
       bars: [{ chord: { root: 'A', quality: 'min' }, beats: 4 }], seed: 3, length: 8 } } }]), null, null),
@@ -1671,6 +1673,44 @@ add('presetDrive', presetDrive, [...VOICES.chords.organ.variants, 'nope', '', nu
   }
   // Task 32a: the constants the page lists and labels (tables()), as JSON.stringify's text: the order of the keys is the page's order of chips, voices and knobs
   cases.push({ fn: 'tables', in: null, out: JSON.stringify(ref.tables()) });
+  // Task 32c: what the displays of the own songs' page show for a chord in a key (chordDisplays), as JSON.stringify's text, against the reference: the old page's lines
+  // (track.js, mirrored) and the web's functions. Every root the analysis names and its modes (major, minor, dorian) with every scale of the page's select; every root with
+  // chords of every kind the analysis names, as the chord that sounds, the next one and the part's (in the key and outside it); no chord that sounds, no next one, no chords,
+  // names that are no chords, other modes and spellings, keys and scales that are none, texts that are no request
+  {
+    const { SCALES, allowedChords: allowedIn } = await load('core/music.js');
+    const { chordName } = await load('core/chords.js');
+    const ROOT_NAMES = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B']; // analysis.cpp chordName
+    const SUFFIXES = ['', 'm', 'dim', 'aug', 'sus2', 'sus4', '5', '7', 'maj7', 'm7', 'm7b5', 'dim7', '6', 'm6', 'add9', '9', 'm9']; // analysis.cpp chordName, every kind
+    const before = cases.length;
+    const display = (request) => { const text = typeof request === 'string' ? request : JSON.stringify(request); cases.push({ fn: 'chordDisplays', in: text, out: ref.chordDisplays(text) }); };
+    let k = 0;
+    for (const mode of ['major', 'minor', 'dorian']) for (const root of ROOT_NAMES) for (const scale of Object.keys(SCALES)) {
+      const inKey = allowedIn({ root, mode }).map(chordName), j = k++;
+      const other = (n) => ROOT_NAMES[(j + 5 * n) % 12] + SUFFIXES[(7 * j + 3 * n) % 17];
+      display({ key: { root, mode }, scale, chords: [inKey[j % inKey.length], inKey[(j + 3) % inKey.length], other(1), other(2)],
+        current: j % 2 ? inKey[(j + 1) % inKey.length] : other(0), next: j % 3 ? other(3) : inKey[(j + 2) % inKey.length] });
+    }
+    const KEYS = ['major', 'minor', 'dorian'].flatMap((mode) => ROOT_NAMES.map((root) => ({ root, mode })));
+    for (let r = 0; r < 12; r++) for (let s = 0; s < 17; s++) {
+      const j = r * 17 + s, key = KEYS[j % KEYS.length];
+      display({ key, scale: Object.keys(SCALES)[j % 17], chords: [ROOT_NAMES[r] + SUFFIXES[s], ...allowedIn(key).map(chordName)], current: ROOT_NAMES[r] + SUFFIXES[s], next: ROOT_NAMES[(r + 7) % 12] + SUFFIXES[(s + 5) % 17] });
+    }
+    const A = { root: 'A', mode: 'minor' };
+    for (const [current, next] of [[null, 'C'], ['Am', null], [null, null], ['', ''], [undefined, undefined], ['Am', 'Am'], ['Am7', 'Am'], ['E7', 'E']]) display({ key: A, scale: 'minorPentatonic', chords: ['Am', 'C', 'G'], current, next });
+    for (const chords of [[], undefined, 'Am', null, { 0: 'Am' }]) display({ key: A, scale: 'minorPentatonic', chords, current: 'Am', next: 'E7' });
+    for (const name of ['N', 'H7', 'x', '', ' Am', 'am', 'A\nm', 'Am\n', 'A\rm', 'A m', 'A ', 5, null, true, {}, ['Am'], 'Cconstructor', 'C__proto__', 'CtoString', 'Cmaj9', 'A7#9', 'C/E', 'Ammaj7', 'Asus', 'Bbb', 'G##', 'E#', 'Cb', 'Ä', '€', 'A€'])
+      display({ key: A, scale: 'minor', chords: [name, 'Am', name], current: name, next: name });
+    display({ key: { root: 'C', mode: 'major' }, scale: 'major', chords: ['C', 'F#', 'Bbm7', 'Ebaug'], current: 'F#', next: 'Bbm7' }); // outside the key: no node, tones outside the scale
+    for (const key of [null, 'A', { root: 'H', mode: 'minor' }, { root: 'A', mode: 'aeolian' }, { root: 'A' }, { mode: 'minor' }, { root: 'A', mode: 'toString' }, { root: 'a', mode: 'minor' }, [], 5, { root: 'A', mode: 'minor', extra: 1 }])
+      display({ key, scale: 'minor', chords: ['Am'], current: 'Am', next: 'C' });
+    for (const scale of ['nope', null, 5, 'toString', '__proto__', '']) display({ key: A, scale, chords: ['Am'], current: 'Am', next: 'C' });
+    display({ key: A, chords: ['Am'], current: 'Am', next: 'C' }); // no scale
+    for (const text of ['', 'x', '[]', 'null', '5', '"Am"', '{}', '{"key":{"root":"A","mode":"minor"}}', '{"key":{"root":"A","mode":"minor"},"key":{"root":"C","mode":"major"},"scale":"major","current":"C"}']) display(text);
+    for (const mode of ['phrygian', 'lydian', 'mixolydian']) for (const root of ['C', 'F#', 'Bb']) display({ key: { root, mode }, scale: 'major', chords: ['C', 'Dm', 'G7'], current: 'Dm', next: 'G7' });
+    for (const root of ['Db', 'D#', 'Gb', 'G#', 'A#', 'Cb', 'E#', 'Fb', 'B#']) display({ key: { root, mode: 'minor' }, scale: 'minorPentatonic', chords: [`${root}m`, 'E'], current: `${root}m`, next: 'E7' });
+    console.log(`chordDisplays: ${cases.length - before} cases`);
+  }
   // texts that are no action, and the reader's edges (track.cpp's Reader, JSON.parse's rules): a key twice (the last value), a field more (not read), a byte order
   // mark (no JSON), a lone surrogate in a field not read, a field nested so that the text is 64 levels deep (the reader's limit, see PROTOKOLL.md: deeper is no JSON there)
   sequence(['', ' ', 'x', '{', '}', '[]', '5', 'null', 'true', '"start"', '{}', '{"action":5}', '{"action":null}', '{"action":"nope"}', '{"action":"toString"}', '{"action":"__proto__"}', '{"action":"constructor"}',

@@ -64,4 +64,10 @@ private:
     std::unique_ptr<Memory> memory_;
 };
 
+// What the displays of the page for the user's own songs show for a chord in a key, for any song (PROTOKOLL.md section 4b): `requestJson` is { key, scale, chords, current,
+// next } with the chords as the analysis names them; the answer the wheel (each node's allowed chord with the name the page enters), the nodes of the chord that sounds and
+// of the next one, the fretboard's tones, the names and tones of both chords. It reads the core's tables only, no session: any thread may call it. A name it cannot read
+// counts as no chord; empty for a request without a valid key and if something unexpected throws. Never throws.
+std::string chordDisplays(const std::string& requestJson);
+
 } // namespace btg

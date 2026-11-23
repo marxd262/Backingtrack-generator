@@ -23,7 +23,7 @@ Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
   setItem: (key, value) => { const text = String(value); writes.push([NAMES[key] ?? key, text, !writesFail]); if (writesFail) throw new Error('full'); store.set(key, text); },
   removeItem: (key) => { store.delete(key); } } });
 
-const { state, layoutStorage, ROOTS, ALL_LAYERS, preset, deriveBars, setChordColor, applyStyle, setMeter, formChoice, rollNewForm, setFormTemplate, setFormTarget, setFormFeel } = await load('ui/state.js');
+const { state, layoutStorage, ROOTS, ALL_LAYERS, MAX_CHORDS, preset, deriveBars, setChordColor, applyStyle, setMeter, formChoice, rollNewForm, setFormTemplate, setFormTarget, setFormFeel } = await load('ui/state.js');
 const { loadMix, loadPan, saveMix } = await load('ui/mix-state.js');
 const { loadTree, saveTree, isReservedId } = await load('ui/profile-store.js');
 const { saveLast, loadLast } = await load('ui/session-store.js');
@@ -43,7 +43,7 @@ const { DEFAULT_PAN } = await load('ui/mix-state.js');
 const { tagEffect } = await load('ui/tag-effects.js');
 const { layoutWheel, nodeMatches } = await load('ui/wheel-geometry.js');
 const { STYLE_PRESETS, TAG_CATEGORIES, isSoundOnlyChange } = await load('core/tags.js');
-const { SCALE_NAMES, chordOptions, allowedChords, diatonicChords, noteToPc, chordMidi, noteName } = await load('core/music.js');
+const { SCALE_NAMES, SCALES, isValidKey, chordOptions, allowedChords, diatonicChords, noteToPc, chordMidi, noteName } = await load('core/music.js');
 const { CHORD_COLORS } = await load('core/harmony.js');
 const { METERS, meterKey, convertTempo, groovesFor, grooveIdFor } = await load('core/grooves.js');
 const { TEMPLATE_IDS, TARGET_SIZES } = await load('core/form-roll.js');
@@ -66,8 +66,8 @@ let change; // what the web app calls on a running player during the action (app
 let pushed; // organ-panel.js 46: the tuning last handed to the player
 let player; // what the player plays (play.js 35-46): every action that changes its length or meter restarts it, so it is taken from the state before each action
 // the profile window (profiles.js 41-47) and the last session (app.js 153, the offer of "Weitermachen"); `resumed`: the bar the playback starts at after a resume that
-// restored (app.js 233), null after every other action (PROTOKOLL.md section 4)
-let tree, selection, open, message, undo, last, resumed;
+// restored (app.js 233), null after every other action (PROTOKOLL.md section 4); `legacy`: what importLegacy did with each text, null after every other action
+let tree, selection, open, message, undo, last, resumed, legacy;
 let drag; // the own row being dragged (profile-drag.js), or null: profileDrag (PROTOKOLL.md section 3)
 let refusals; // progression-editor.js 11: how often addChord found the progression full (not exported: counted here where the real addChord refuses)
 let rollNote; // form-strip.js 37: "Neu würfeln" found every part locked
@@ -582,37 +582,50 @@ const ACTIONS = {
   // PROTOKOLL.md section 3a, ruled; the web has none: the plan's one-time take-over of what the old page kept in the WebView's storage (backingtrack.profiles, .session, .mix).
   // A text is taken only when nothing is stored under its name, read by the loader of the page load (reload below) for that name, and stored as it is; a text that loader finds
   // unreadable or damaged is not taken, nor a profiles.json while the one stored has a problem. The tree is written first: when it is not stored, nothing else is taken
+  // `legacy` (state().legacy), per text sent: 'taken', or why not: 'stored' (the app's own text, read without a problem), 'damaged' (the reader cannot take the old text),
+  // 'failed' (the storage could not be read or written just now, or what is stored under the name has a problem that state().storage names: the next load may take it).
+  // Each text is judged first (the reads), then written in the order profiles.json, session.json, mix.json: a tree that is not stored takes nothing.
   importLegacy: {
     valid: (a) => ['profiles', 'session', 'mix'].every((k) => Object.hasOwn(a, k) && (a[k] === null || typeof a[k] === 'string')),
     run: (a) => {
+      const said = { profiles: null, session: null, mix: null };
+      legacy = said;
       const taken = (field, name) => {
         const text = a[field];
-        if (text === null || Buffer.byteLength(text, 'utf8') > STORED_LIMIT) return null;
-        try { if (localStorage.getItem(KEYS[name]) !== null) return null; } catch { return null; } // a storage that cannot say holds something
+        if (text === null) return null;
+        if (Buffer.byteLength(text, 'utf8') > STORED_LIMIT) { said[field] = 'damaged'; return null; } // never readable
+        try { if (localStorage.getItem(KEYS[name]) !== null) { said[field] = problems[field] === null ? 'stored' : 'failed'; return null; } } catch { said[field] = 'failed'; return null; }
         return text;
       };
+      if (problems.profiles !== null && a.profiles !== null) said.profiles = 'failed'; // an unreadable or damaged profiles.json stays as the page load found it
       const profilesText = problems.profiles === null ? taken('profiles', 'profiles.json') : null;
-      if (profilesText !== null) {
-        const loaded = loadProfiles({ text: profilesText, problem: null });
-        if (loaded.problem === null) {
-          try { layoutStorage.setItem(KEYS['profiles.json'], profilesText); } catch { message = [msg('ui.profileNotStored')]; return; }
-          tree = loaded.tree;
-          undo = null;
-          drag = null;
-        }
-      }
+      const loaded = profilesText === null ? null : loadProfiles({ text: profilesText, problem: null });
+      if (loaded) said.profiles = loaded.problem === null ? 'taken' : 'damaged';
       const sessionText = taken('session', 'session.json');
       const entry = sessionText === null ? null : loadLast(storeOf('session.json', sessionText));
-      if (entry !== null) {
-        last = entry;
-        try { layoutStorage.setItem(KEYS['session.json'], sessionText); } catch { /* named in storage (apply) */ }
-      }
+      if (sessionText !== null) said.session = entry === null ? 'damaged' : 'taken';
       const mixText = taken('mix', 'mix.json');
       const raw = mixText === null ? null : parsedOrNone(mixText);
-      if (raw && isObject(raw.value)) {
+      const mixTaken = Boolean(raw && isObject(raw.value));
+      if (mixText !== null) said.mix = mixTaken ? 'taken' : 'damaged';
+      if (loaded?.problem === null) {
+        try { layoutStorage.setItem(KEYS['profiles.json'], profilesText); } catch {
+          message = [msg('ui.profileNotStored')];
+          for (const k of Object.keys(said)) if (said[k] === 'taken') said[k] = 'failed';
+          return;
+        }
+        tree = loaded.tree;
+        undo = null;
+        drag = null;
+      }
+      if (entry !== null) {
+        last = entry;
+        try { layoutStorage.setItem(KEYS['session.json'], sessionText); } catch { said.session = 'failed'; } // and named in storage (apply)
+      }
+      if (mixTaken) {
         state.mix = loadMix(storeOf('mix.json', mixText));
         state.pan = loadPan(storeOf('mix.json', mixText));
-        try { layoutStorage.setItem(KEYS['mix.json'], mixText); } catch { /* named in storage (apply) */ }
+        try { layoutStorage.setItem(KEYS['mix.json'], mixText); } catch { said.mix = 'failed'; }
         change.mix = true;
       }
     },
@@ -654,11 +667,12 @@ export function apply(text) {
   const written = writes.length;
   pushed = JSON.stringify(organTuning(state.organ));
   player = state.track.bars.length ? playerOf({ ...state.track, layers: ALL_LAYERS }) : null; // no bars: the state as imported, before the first start (which calls no applyLive)
-  const before = resumed;
-  resumed = null; // the bar of a resume holds for the action that set it only
+  const before = [resumed, legacy];
+  resumed = null; // the bar of a resume holds for the action that set it only, and what importLegacy did too
+  legacy = null;
   let result;
   try { result = def.run(action); } catch (e) { if (e !== REFUSED) throw e; result = 'refused'; }
-  if (result === 'refused') { resumed = before; return 'refused'; } // found only on the way (importProfile, a commit after an unreadable read), before anything changed
+  if (result === 'refused') { [resumed, legacy] = before; return 'refused'; } // found only on the way (importProfile, a commit after an unreadable read), before anything changed
   // render(): voices-panel.js 89-93, organ-panel.js 62-64, form-strip.js 241, profiles.js 393
   if (voiceKeys() !== watched) change.voices = true;
   renderOrgan();
@@ -712,13 +726,46 @@ export function position(beats) {
 // fretboard.js 173 (chordSentence, which takes the text of the page): the tones of a chord in their order, named in the key's spelling
 const tones = (key, chord) => chordMidi(chord, 3).map((m) => noteName(key, m % 12));
 const same = (a, b) => noteToPc(a.root) === noteToPc(b.root) && a.quality === b.quality; // wheel.js 9
-// wheel.js 57-58: the node of the chord that sounds (an allowed chord at the node, nodeMatches) and that of the next one, unless the node is the same; the next one's label (96)
+// wheel.js 57-58: the node of the chord that sounds (an allowed chord at the node, nodeMatches) and that of the next one, unless the node is the same; the next one's label (96).
+// No chord (chordDisplays: none sounds) has no node (wheel.js 57: `current.current &&`)
 function wheelAt(key, chord, next) {
   const { nodes } = layoutWheel(1, key);
   const allowed = allowedChords(key);
-  const nodeOf = (c) => { const i = nodes.findIndex((n) => allowed.some((a) => same(a, n.chord)) && nodeMatches(n, c, key)); return i < 0 ? null : i; };
-  const current = nodeOf(chord), following = next ? nodeOf(next) : null;
+  const nodeOf = (c) => { if (!c) return null; const i = nodes.findIndex((n) => allowed.some((a) => same(a, n.chord)) && nodeMatches(n, c, key)); return i < 0 ? null : i; };
+  const current = nodeOf(chord), following = nodeOf(next);
   return { current, next: following === current ? null : following, nextShort: next ? chordShort(next) : null };
+}
+
+// ---------- the page of the user's own songs (native/app/web/track.js): what its displays show for a chord in a key (PROTOKOLL.md section 4b, chordDisplays) ----------
+// track.js 19-20 and 25-31, mirrored (the page touches the shell and the DOM when it loads): the names of the bar's select, and a chord name of the analysis as the app's chord
+// object and back. Against the old page, which threw there: a name without a root, or one that is no text, is no chord (null; the old page took String(name)), and a symbol
+// is looked up among KINDS' own keys only ('constructor' is no symbol: major, as any unknown one)
+const ROOT_NAMES = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B']; // track.js NAMES
+const BAR_CHORDS = [...ROOT_NAMES, ...ROOT_NAMES.map((n) => `${n}m`)];
+const KINDS = { '': 'maj', m: 'min', dim: 'dim', aug: 'aug', sus2: 'sus2', sus4: 'sus4', 5: 'power', 7: 'dom7', maj7: 'maj7', m7: 'min7', m7b5: 'm7b5', dim7: 'dim7', 6: 'maj6', m6: 'min6', add9: 'add9', 9: 'dom9', m9: 'min9' };
+const chordOf = (name) => {
+  const m = typeof name === 'string' ? /^([A-G][#b]?)(.*)$/.exec(name) : null;
+  return m ? { root: m[1], quality: Object.hasOwn(KINDS, m[2]) ? KINDS[m[2]] : 'maj' } : null;
+};
+const nameOf = (chord) => chord.root + (Object.keys(KINDS).find((suffix) => KINDS[suffix] === chord.quality) ?? '');
+/**
+ * What the old page hands its displays for the request's text { key, scale, chords, current, next } (the key and the scale of the analysis or the user's choice, the names of
+ * the chords of the part that plays, of the chord at the playhead and of the next one): showBoard (track.js 419: src/ui/fretboard.js paint's fretboardNotes, chordSentence's
+ * chordName and tones) and wheel.update (421: src/ui/wheel.js on the parsed chords), with every node's allowed chord named by nameOf (the click, 54). '' without a valid key.
+ */
+export function chordDisplays(text) {
+  let request;
+  try { request = JSON.parse(text); } catch { return ''; }
+  const { key, scale, chords, current: currentName, next: nextName } = request !== null && typeof request === 'object' ? request : {};
+  if (!isValidKey(key)) return '';
+  const current = chordOf(currentName), next = chordOf(nextName);
+  return JSON.stringify({
+    wheel: wheelOf(key, (Array.isArray(chords) ? chords : []).map(chordOf).filter(Boolean), nameOf),
+    at: wheelAt(key, current, next),
+    fretboard: fretboardNotes({ key, scale, current, next }),
+    name: current ? chordName(current) : null, notes: current ? tones(key, current) : null,
+    nextName: next ? chordName(next) : null, nextNotes: next ? tones(key, next) : null,
+  });
 }
 
 // ---------- what the building blocks show that follows from the state (PROTOKOLL.md section 4: derived, tables) ----------
@@ -740,16 +787,16 @@ function checkedLabel(message, label, s, feel) {
   } finally { setLanguage(lang); }
   return message;
 }
-// wheel.js 14, 28, 41, 54-73 on the nodes of layoutWheel (wheel-geometry.js), without their geometry: the allowed chord at each in the key's spelling (allowedAt), whether it is
-// diatonic and in the progression, its label; the path of the progression (nodeOf of each chord, those without a node left out)
-function wheelOf(track) {
-  const { key } = track;
+// wheel.js 14, 28, 41, 54-73 on the nodes of layoutWheel (wheel-geometry.js), without their geometry: the allowed chord at each in the key's spelling (allowedAt; `nameOf`:
+// with the name the page of the own songs sends back for it), whether it is diatonic and in the progression, its label; the path of the progression (nodeOf of each chord,
+// those without a node left out)
+function wheelOf(key, progression, nameOf = null) {
   const { nodes } = layoutWheel(1, key);
-  const allowed = allowedChords(key), diatonic = diatonicChords(key), progression = track.bars.map((b) => b.chord);
+  const allowed = allowedChords(key), diatonic = diatonicChords(key);
   return {
     nodes: nodes.map((n) => {
       const chord = allowed.find((c) => same(c, n.chord)) ?? null;
-      return { ring: n.ring, index: n.index, chord: n.chord, allowed: chord, diatonic: Boolean(chord && diatonic.some((d) => same(d, chord))),
+      return { ring: n.ring, index: n.index, allowed: chord && nameOf ? { ...chord, name: nameOf(chord) } : chord, diatonic: Boolean(chord && diatonic.some((d) => same(d, chord))),
         inProgression: Boolean(chord && progression.some((p) => same(p, chord))), short: chordShort(chord ?? n.chord) };
     }),
     path: progression.map((c) => nodes.findIndex((n) => nodeMatches(n, c, key))).filter((i) => i >= 0),
@@ -764,7 +811,7 @@ export function derived() {
   return JSON.parse(JSON.stringify({
     // progression-editor.js 111-126: per root the qualities it allows and the name of every quality of the register on it
     chordOptions: chordOptions(track.key).map(({ root, qualities }) => ({ root, qualities, names: Object.fromEntries(Object.keys(CHORDS).map((quality) => [quality, chordName({ root, quality })])) })),
-    wheel: wheelOf(track),
+    wheel: wheelOf(track.key, track.bars.map((b) => b.chord)),
     tagEffect: Object.fromEntries(TAG_CATEGORIES.flatMap((c) => c.tags).map((tag) => [tag, tagEffect(tag, track)])), // tags-ui.js 83, 87; tuning.js 127
     voices, // voices-panel.js 89, organ-panel.js 48
     voiceKind: voiceKind(track.voices), // mixer.js 79, 118
@@ -774,10 +821,12 @@ export function derived() {
     presetDrive: presetDrive(voices.chords.variant), // organ-panel.js 56
     meter: meterKey(track.meter), // rhythm.js 52
     groove: grooveIdFor(track), // rhythm.js 63
+    rhythm: Object.fromEntries(['complexity', 'loose', 'ornaments'].map((field) => [field, track[field] ?? 0.5])), // rhythm.js 66 (in a render function: a transcription)
     formChoice: formChoice(), // form-panel.js 69
+    feel: track.form?.feel ?? state.formFeel, // form-panel.js 79 (in a render function: a transcription)
     // form-strip.js 233-245 with form-ui.js: the strip and the inspector stand only with a valid form; per part what the inspector shows of it (183-217), and the grip's longest (85-86)
     form: form ? {
-      blocks: stripBlocks(form),
+      blocks: stripBlocks(form).map(({ index, width, ...block }) => block), // no block of the page reads index and width (PROTOKOLL.md section 4)
       parts: form.sections.map((s, i) => ({
         transition: resolveSection(s, form.feel).transition, crash: resolveSection(s, form.feel).crash, levelValue: levelValue(s, form.feel), densityValue: densityValue(s, form.feel),
         levelLabel: checkedLabel(levelMessage(s, form.feel), levelLabel, s, form.feel), densityLabel: checkedLabel(densityMessage(s, form.feel), densityLabel, s, form.feel),
@@ -789,15 +838,15 @@ export function derived() {
 /** The constants the page lists and labels (PROTOKOLL.md section 4, tables()); of VOICES, CHORDS and STYLE_PRESETS the fields the page reads. */
 export function tables() {
   return JSON.parse(JSON.stringify({
-    ROOTS, SCALE_NAMES, LAYER_IDS, VOICE_LAYERS,
+    ROOTS, SCALE_NAMES, SCALES: Object.keys(SCALES), LAYER_IDS, VOICE_LAYERS, // SCALES: the scale select of the own songs' page (track.js 299)
     VOICES: Object.fromEntries(VOICE_LAYERS.map((layer) => [layer, Object.fromEntries(Object.entries(VOICES[layer]).map(([id, v]) => [id, { kind: v.kind, hidden: v.hidden === true, variants: v.variants }]))])),
     jobsFor: Object.fromEntries(LAYER_IDS.map((layer) => [layer, jobsFor(layer)])),
     METERS, groovesFor: Object.fromEntries(Object.keys(METERS).map((key) => [key, groovesFor(key)])),
-    CHORD_COLORS, CHORD_GROUPS, CHORDS: Object.fromEntries(Object.entries(CHORDS).map(([id, c]) => [id, { group: c.group }])),
+    CHORD_COLORS, CHORD_GROUPS, CHORDS: Object.fromEntries(Object.entries(CHORDS).map(([id, c]) => [id, { group: c.group }])), MAX_CHORDS, BAR_CHORDS,
     STYLE_PRESETS: STYLE_PRESETS.map((p) => ({ id: p.id, bpm: p.bpm })),
     TAG_CATEGORIES, DEFAULT_TIMBRE, LESLIE_MODES, DEFAULT_ORGAN,
     PART_TYPES, TRANSITIONS, TEMPLATE_IDS, TARGET_SIZES, FEEL_DEFAULTS, DYNAMICS_MAX,
-    PART_IDS, PART_PRESETS, LIMITS, FORMAT_FOLDER, STANDARD_TUNING, FRETS, DEFAULT_PAN,
+    PART_IDS, PART_PRESETS, LIMITS: { name: LIMITS.name, nodes: LIMITS.nodes, file: LIMITS.file }, FORMAT_FOLDER, STANDARD_TUNING, FRETS, DEFAULT_PAN,
   }));
 }
 
@@ -861,6 +910,7 @@ export function reload() {
   problems.session = session.problem ?? (session.text !== null && last === null ? 'damaged' : null);
   problems.mix = mix.problem ?? (mix.text !== null && !(mixRaw && isObject(mixRaw.value)) ? 'damaged' : null);
   resumed = null;
+  legacy = null;
   change = { events: false, sound: false, voices: false, tempo: false, mix: false, restart: false, inPlace: false, profiles: false }; // a new session has called nothing
   renderStrip();
 }
@@ -902,6 +952,7 @@ export function record() {
       selectedPart: selected, errors: state.errors.length ? state.errors : validateTrack(state.track), // app.js 231 after a failed resume; else what a failed start shows
       last: last && lastView(last),
       resumed,
+      legacy,
       loopBars: loopBars(state.track),
       storage: problems,
       notice: state.notice ?? null, refusals, rollNote,

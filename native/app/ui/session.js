@@ -52,7 +52,8 @@ export function start() {
   return new Promise((resolve) => { starting = { n, resolve }; });
 }
 
-const on = (name, fn) => backend.addEventListener(name, fn);
+/** fn(message) for each event `name` of the shell (section 7): the own songs' page hears its own (engine, analysis, pong, chordDisplays) through this door too. */
+export const on = (name, fn) => backend.addEventListener(name, fn);
 on('tables', (m) => { session.tables = JSON.parse(m.json); tell('tables'); });
 on('derived', (m) => { session.derived = JSON.parse(m.json); }); // comes before the state it belongs to, when its text changed
 on('state', (m) => {
