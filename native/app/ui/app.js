@@ -8,6 +8,7 @@ import { positionLabel } from './position.js';
 import { loadLayout, saveLayout } from './layout-state.js';
 import { initTuning } from './tuning.js';
 import { initMixer } from './mixer.js';
+import { initProfiles } from './profiles.js';
 import { buildKeyScale, buildKeyScaleSelects } from './key-scale.js';
 import { createLcdSelect, syncLcdSelects } from './lcd-select.js';
 import { initTimbrePanel } from './timbre-panel.js';
@@ -15,6 +16,8 @@ import { initVoices, voiceLoad } from './voices-panel.js';
 import { initJobs } from './jobs-panel.js';
 import { initOrgan } from './organ-panel.js';
 import { initRhythm } from './rhythm.js';
+import { initFormPanel } from './form-panel.js';
+import { initFormStrip } from './form-strip.js';
 import { syncKnobs } from './knob.js';
 
 // Dekoratives 16tel-Bild je Stil, 1 = Schlag
@@ -52,16 +55,44 @@ function setLang(next) {
 listen((what, value) => { if (what === 'language' && (value === 'de' || value === 'en')) setLang(value); });
 addEventListener('load', () => post('language', { lang })); // die Leiste zeigt die Sprache der Seite
 
+// Einmalige Übernahme (Task 32): was die alte Seite im Speicher der WebView hielt (Profile, zuletzt gespielte Sitzung, Mischpult), geht an die
+// Sitzung (importLegacy; sie nimmt nur, was sie selbst noch nicht gespeichert hat), bis eine Antwort zeigt, dass nichts mehr zu nehmen ist; dann
+// folgt der Vermerk. Die alten Einträge bleiben. Im Zweifel kein Vermerk: ein zweites Schicken nimmt nichts über Gespeichertes.
+// Nichts mehr zu nehmen heißt: an keinem Namen mit altem Text steht in der Antwort ein Problem des Speichers (state().storage: unlesbar,
+// beschädigt, nicht gespeichert), und profiles.json ließ sich schreiben: profiles() nennt kein ui.profileNotStored (sonst nimmt die Aktion nichts;
+// auch eine stehen gebliebene Meldung dieser Art zählt). Entschieden wird am ersten Text von profiles(), der nach der Antwort kommt: ihrem eigenen
+// oder dem von sync, das die Hülle nach ihr beantwortet (eine Antwort, die das Fenster nicht ändert, bringt keinen; einen Text, den die Seite noch
+// nicht hat, nimmt sie nicht als Zustimmung). shortcut: a read that throws at the moment of the action counts as stored, and an old text the
+// session's reader finds damaged is not taken: both answer like "the app's own text is stored", so they get the mark, upgrade: when importLegacy's
+// answer says per text whether it was taken or found stored (a field of the core)
+const settled = (old, state, profiles) => Object.entries(old).every(([name, text]) => text === null || state.storage[name] === null)
+  && !(old.profiles !== null && (profiles.message ?? []).some((m) => m.key === 'ui.profileNotStored'));
+try {
+  const old = Object.fromEntries(['profiles', 'session', 'mix'].map((name) => [name, localStorage.getItem(`backingtrack.${name}`)]));
+  if (localStorage.getItem('backingtrack.imported') === null && Object.values(old).some((text) => text !== null)) {
+    let answer = null; // der state, der importLegacy beantwortet, bis ein Text von profiles() nach ihm entscheidet
+    listen((what) => {
+      if (what !== 'profiles' || !answer) return;
+      if (settled(old, answer, session.profiles)) try { localStorage.setItem('backingtrack.imported', '1'); } catch { /* ohne Speicher kommt sie beim nächsten Laden wieder */ }
+      answer = null;
+    });
+    send({ action: 'importLegacy', ...old }).then((state) => { answer = state; });
+  }
+} catch { /* Speicher gesperrt: nichts zu übernehmen */ }
+
 // --- Wiedergabe: die Hülle spielt den Song der Sitzung (playSession, stop); die Seite zeigt, wo er steht ---
 const playing = () => session.engine.playing;
 // Die Web-App zeigt Takt, Akkord und Countdown erst ab dem ersten Takt (state.current), nicht im Vorlauf eines Starts (die Uhr steht 0,15 s):
-// hadBar wird wahr, sobald die Uhr in dieser Wiedergabe läuft, und bleibt es über einen Neustart am Takt
+// hadBar wird wahr, sobald die Uhr in dieser Wiedergabe läuft, und bleibt es über einen Neustart am Takt; ein Neustart ab Takt 1 (die letzte
+// Antwort hat restart ohne inPlace: restartIfPlaying ohne inPlace und Weitermachen setzen state.current auf null) zeigt im Vorlauf nichts
 let hadBar = false;
+let fromStart = false;
 const current = () => playing() && hadBar;
 let starting = false; // "Los" geschickt, die Engine hat den Start noch nicht gemeldet: ein zweiter Klick tut nichts (wie in der Web-App, solange die Packs laden)
 let startFailed = false; // der letzte Start spielte nicht (die Web-App: err.playFailed), bis zum nächsten Start oder Weitermachen
 let errorsHidden = false; // die Web-App löscht die Fehler eines Weitermachens, wenn eine Wiedergabe beginnt (app.js 122 der Web-App)
 listen((what) => {
+  if (what === 'state' && session.change) fromStart = session.change.restart && !session.change.inPlace;
   if (what === 'playing') {
     if (!playing()) {
       hadBar = false;
@@ -69,6 +100,7 @@ listen((what) => {
     } else {
       errorsHidden = true;
       if (!session.engine.standing) hadBar = true;
+      else if (fromStart) hadBar = false;
     }
   }
   if (what === 'state') for (const layer of [...sounding.keys()]) if (!session.state.track.layers[layer]) endSound(layer); // stumm: die LED geht sofort aus
@@ -267,15 +299,30 @@ function build() {
   createLcdSelect(styleSelect, { prevKey: 'ui.lcdPrev', nextKey: 'ui.lcdNext' });
   styleSelect.addEventListener('change', () => send({ action: 'setStyle', style: styleSelect.value, from: 'play' }, styleSelect));
 
-  const renderTuning = initTuning({ page: () => page, current });
+  const renderTuning = initTuning({
+    page: () => page,
+    current,
+    layout: () => layout,
+    // Umschalter im Kopf des Griffbretts: gewählter Wert wird mit der Seite gemerkt
+    choose(attr, value) {
+      layout = { ...layout, [attr]: value };
+      saveLayout(layoutStorage, layout);
+      render();
+    },
+  });
   const renderMixer = initMixer();
+  const renderProfiles = initProfiles();
   const renderRhythm = initRhythm();
+  const renderForm = initFormPanel({ page: () => page });
+  const renderStrip = initFormStrip({ page: () => page, current });
   const renderTimbre = initTimbrePanel(); // baut die Instrument-Module
   const renderVoices = initVoices(); // nach dem Klangpanel: füllt den Platz Stimme in dessen Modulen
   const renderJobs = initJobs(); // ebenso: Aufgabe
   const renderOrgan = initOrgan(); // ebenso: Leslie und Zerre der Orgel im Akkord-Modul
+  // Akkordart-Gruppen im Popover sind <details>: immer offen (keine Klappgruppen)
+  for (const el of document.querySelectorAll('#add-qualities details[data-group]')) el.open = true;
   const loading = () => VOICE_LAYERS.some((layer) => voiceLoad(layer) === 'loading');
-  return { keyScales, styleSelect, loading, panels: [renderTuning, renderMixer, renderVoices, renderJobs, renderOrgan, renderTimbre, renderRhythm] };
+  return { keyScales, styleSelect, loading, panels: [renderTuning, renderMixer, renderProfiles, renderVoices, renderJobs, renderOrgan, renderTimbre, renderRhythm, renderForm, renderStrip] };
 }
 
 // --- Darstellung ---

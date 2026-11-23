@@ -1,10 +1,8 @@
 // Griffbrett-Block: SVG in Pixeln des Behälters aufbauen (6 Saiten, Bünde 0..22, hohe e-Saite oben); neu aufgebaut wird nur bei
 // neuer Größe oder anderem Bundabstand. update() ändert sonst nur Rollen, Sichtbarkeit und Beschriftung, und nur bei Änderung
-// (render läuft je Takt). Farben und Formen stehen in app.css.
-import { fretboardNotes, STANDARD_TUNING, FRETS } from '../core/fretboard.js';
-import { chordMidi, noteName } from '../core/music.js';
-import { t } from '../index.js';
-import { chordName, pressed, setAttr, setText } from './state.js';
+// (render läuft je Takt). Farben und Formen stehen in app.css. Die Töne gibt position().fretboard, Saiten und Bünde tables().
+import { t } from './i18n/index.js';
+import { pressed, setAttr, setText } from './dom.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 const MIN_W = 640; // schmaler wird der Behälter waagerecht gescrollt, das Brett bleibt so breit
@@ -29,7 +27,8 @@ const roles = (n) => [
   !n.scale && 'outside', // sichtbar und nicht in der Leiter: Akkordton außerhalb
 ].filter(Boolean).join(' ');
 
-export function createFretboard(container) {
+// strings: die Saiten (MIDI, die hohe e-Saite zuerst), frets: die Zahl der Bünde
+export function createFretboard(container, { strings, frets: FRETS }) {
   let svg = null;
   let cells = [];
   let built = '';
@@ -73,13 +72,13 @@ export function createFretboard(container) {
       if (MARKS.includes(fret)) num.textContent = String(fret);
     }
     el('line', { class: 'nut', x1: NUT_X, x2: NUT_X, y1: 2, y2: 2 + boardH }, svg);
-    STANDARD_TUNING.forEach((_, string) => {
+    strings.forEach((_, string) => {
       // tiefere Saiten dicker
       el('line', { class: 'string', x1: 4, x2: right, y1: stringY(string), y2: stringY(string), 'stroke-width': 0.8 + string * 0.3 }, svg);
     });
 
     cells = [];
-    STANDARD_TUNING.forEach((_, string) => {
+    strings.forEach((_, string) => {
       for (let fret = 0; fret <= FRETS; fret++) {
         const r = Math.min(NOTE_R, 0.36 * sh, fret === 0 ? OPEN_R : 0.44 * (wireX(fret) - wireX(fret - 1)));
         const g = el('g', { class: 'fret-note', 'data-string': string, 'data-fret': fret, 'data-role': '', hidden: '', style: `--r:${r.toFixed(1)}px`, transform: `translate(${noteX(fret).toFixed(1)} ${stringY(string).toFixed(1)})` }, svg);
@@ -91,11 +90,11 @@ export function createFretboard(container) {
   }
 
   function paint() {
-    const { key, scale, current, next, labels } = view;
+    const { notes, labels } = view;
     const id = JSON.stringify(view);
     if (!svg || id === last) return;
     last = id;
-    const found = new Map(fretboardNotes({ key, scale, current, next }).map((n) => [`${n.string}:${n.fret}`, n]));
+    const found = new Map(notes.map((n) => [`${n.string}:${n.fret}`, n]));
     for (const { g, text, id: cell } of cells) {
       const n = found.get(cell);
       if (!n) {
@@ -110,7 +109,7 @@ export function createFretboard(container) {
   }
 
   return {
-    // view: { key, scale, current, next, labels: 'names'|'degrees', spacing: 'real'|'even' }
+    // view: { notes (position().fretboard), labels: 'names'|'degrees', spacing: 'real'|'even' }
     update(next) {
       view = next;
       layout(view.spacing);
@@ -149,27 +148,26 @@ const MODULE = `
 
 // Das ganze Modul in `section` (ein leeres <section class="module" id="mod-fretboard">): derselbe Baustein für die Spielseite des
 // Generators und die Seite für eigene Tracks der App. Die Wahl der Umschalter gehört dem Aufrufer: `layout()` liefert sie als
-// { labels, frets }, `choose(attr, value)` nimmt eine neue entgegen (merken und neu zeichnen).
-export function createFretboardModule(section, { layout, choose }) {
+// { labels, frets }, `choose(attr, value)` nimmt eine neue entgegen (merken und neu zeichnen). strings, frets: wie createFretboard.
+export function createFretboardModule(section, { layout, choose, strings, frets }) {
   section.innerHTML = MODULE;
-  const board = createFretboard(section.querySelector('#fretboard'));
+  const board = createFretboard(section.querySelector('#fretboard'), { strings, frets });
   const chips = [...section.querySelectorAll('[data-labels], [data-frets]')].map((b) => ({ b, attr: 'labels' in b.dataset ? 'labels' : 'frets' }));
   for (const { b, attr } of chips) b.addEventListener('click', () => choose(attr, b.dataset[attr]));
   return {
-    // view: { key, scale, current, next }
-    update(view) {
+    // at: was position() gibt (fretboard, name, notes, nextName, nextNotes)
+    update(at) {
       const now = layout();
-      board.update({ ...view, labels: now.labels, spacing: now.frets });
+      board.update({ notes: at.fretboard, labels: now.labels, spacing: now.frets });
       for (const { b, attr } of chips) pressed(b, b.dataset[attr] === now[attr]);
-      setText(section.querySelector('#fretboard-text'), chordSentence(view.key, view.current, view.next));
+      setText(section.querySelector('#fretboard-text'), chordSentence(at));
     },
     resize: board.resize,
   };
 }
 
 // Textfassung für Screenreader: "Jetzt: Am (A, C, E). Als Nächstes: Dm (D, F, A)"; ohne folgenden nur der erste Teil
-export function chordSentence(key, current, next) {
-  if (!current) return '';
-  const part = (k, chord) => t(k, { chord: chordName(chord), notes: chordMidi(chord, 3).map((m) => noteName(key, m % 12)).join(', ') });
-  return next ? `${part('ui.fretboardNow', current)}. ${part('ui.fretboardNext', next)}` : part('ui.fretboardNow', current);
+export function chordSentence({ name, notes, nextName, nextNotes }) {
+  const part = (k, chord, tones) => t(k, { chord, notes: tones.join(', ') });
+  return nextNotes ? `${part('ui.fretboardNow', name, notes)}. ${part('ui.fretboardNext', nextName, nextNotes)}` : part('ui.fretboardNow', name, notes);
 }

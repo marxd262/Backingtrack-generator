@@ -2,7 +2,7 @@
 // Kennt keine Profile: Zeilen kommen fertig von außen (Row), Auswahl und Auf-/Zuklappen meldet er über handlers.
 // Row = { key, label, depth, kind, expandable, expanded, selected, draggable }. render() läuft je Takt: das DOM ändert sich nur bei neuen Zeilen.
 // Ziehbare Zeilen bekommen am Ende den Griff .drag-handle (nur für Zeiger: aria-hidden, kein Tabstopp; das Ziehen macht profile-drag.js).
-import { setText, setAttr } from './state.js';
+import { setText, setAttr } from './dom.js';
 
 const el = (tag, props = {}) => Object.assign(document.createElement(tag), props);
 

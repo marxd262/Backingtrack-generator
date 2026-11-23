@@ -23,15 +23,18 @@ const tell = (what, value) => { for (const fn of listeners) fn(what, value); };
 export const post = (type, fields = {}) => backend.emitEvent('btg', { type, ...fields });
 
 // Every action has a number; the shell's answer names the number of the action it answers. A step the shell drops because the next one replaces it
-// gets no answer of its own: the newer one's answer covers it. The numbers start at this load's time (in ms, below 2^31 for the shell's int): a late
-// answer to the page loaded before is not taken for one of this page's.
-let sent = Date.now() % 1e9;
+// gets no answer of its own: the newer one's answer covers it. The numbers start at this load's time (in ms, below 2^31 for the shell's int), and
+// an answer to a number at or below that start belongs to the page loaded before: it releases nothing here.
+const first = Date.now() % 1e9;
+let sent = first;
 const held = new Map(); // control -> the number of the last action it sent
 const waiting = []; // { n, resolve } of send()
 let starting = null; // { n, resolve } of start()
+let answered = []; // the resolves of an answer whose profiles follow it
 
 /** An action (section 3). `control`: the element that sent it; it shows the hand, not the session, until the answer to this or a newer action
- *  has come (a fader being dragged does not jump back to an older answer). Resolves with the state that answers it. */
+ *  has come (a fader being dragged does not jump back to an older answer). Resolves with the state that answers it, after the profiles that come
+ *  with it. */
 export function send(action, control) {
   const n = ++sent;
   if (control) held.set(control, n);
@@ -57,13 +60,34 @@ on('state', (m) => {
   session.change = m.change ?? null;
   const c = session.change;
   if (c && (c.events || c.voices || c.restart)) session.voicesDue = true;
-  if (typeof m.seq === 'number') {
+  const due = [];
+  if (typeof m.seq === 'number' && m.seq > first) {
     for (const [control, n] of held) if (n <= m.seq) held.delete(control);
-    for (let i = waiting.length - 1; i >= 0; i--) if (waiting[i].n <= m.seq) waiting.splice(i, 1)[0].resolve(session.state);
+    for (let i = waiting.length - 1; i >= 0; i--) if (waiting[i].n <= m.seq) due.push(waiting.splice(i, 1)[0].resolve);
   }
   tell('state');
+  const state = session.state;
+  if (c?.profiles) answered.push(...due.map((resolve) => () => resolve(state)));
+  else for (const resolve of due) resolve(state);
 });
-on('profiles', (m) => { session.profiles = JSON.parse(m.json); tell('profiles'); });
+on('profiles', (m) => {
+  session.profiles = JSON.parse(m.json);
+  tell('profiles');
+  const due = answered;
+  answered = [];
+  for (const resolve of due) resolve();
+});
+const exports = []; // { key, name, resolve } of exportFile()
+/** The text of the file the export buttons give for the row `key` (Session::exportFile, section 3), as it stands after the actions sent before;
+ *  empty: no file. */
+export function exportFile(key, name) {
+  post('export', { key, name });
+  return new Promise((resolve) => exports.push({ key, name, resolve }));
+}
+on('export', (m) => {
+  const i = exports.findIndex((e) => e.key === m.key && e.name === m.name);
+  if (i >= 0) exports.splice(i, 1)[0].resolve(m.json);
+});
 on('position', (m) => { session.position = JSON.parse(m.json); tell('position'); });
 on('events', (m) => { session.lanes = { number: m.number, bpm: m.bpm, beats: m.beats, events: JSON.parse(m.json) }; tell('lanes'); });
 on('voices', (m) => {
@@ -89,5 +113,6 @@ export const beatsNow = () => {
   return e.beats + (e.playing && !e.standing ? ((performance.now() - e.at) / 1000) * (e.bpm / 60) : 0);
 };
 
-// After every load (pageshow comes with the first load too, and when JUCE returns to the page with goBack): everything the page draws from.
-addEventListener('pageshow', () => post('sync'));
+// After every load (pageshow comes with the first load too, and when JUCE returns to the page with goBack): everything the page draws from. Its
+// answer carries its number: a hold of a control from before the return ends with it.
+addEventListener('pageshow', () => post('sync', { seq: ++sent }));

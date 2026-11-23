@@ -1,17 +1,19 @@
-// Bedienelemente der Spielseite: Schlagworte und Tempo (Rack), Schichten mit Verlauf, die Folge unter dem Akkordrad und das Tonart-Modul
-// (Visualisierung), die Akkordfarbe (Modul Harmonie). Alles kommt aus den Texten der Sitzung (state, derived, position) und dem Verlauf der Hülle;
-// app.js ruft die zurückgegebene Funktion in jedem render() auf.
-// shortcut: Griffbrett, Akkordrad und Akkordfolge (fretboard.js, wheel.js, progression-editor.js) sind noch die der Web-App und hier nicht
-// eingehängt, upgrade: Task 32b-2 baut sie auf die Texte um und hängt sie hier wieder ein.
+// Bedienelemente der Spielseite: Schlagworte und Tempo (Rack), Schichten mit Verlauf, Griffbrett, Akkordrad mit der Folge darunter und das
+// Tonart-Modul (Visualisierung), Akkordfolge und Akkordfarbe (Modul Harmonie). Alles kommt aus den Texten der Sitzung (state, derived, position)
+// und dem Verlauf der Hülle; app.js ruft die zurückgegebene Funktion in jedem render() auf.
 import { t } from './i18n/index.js';
 import { session, send, holds } from './session.js';
 import { $, setText, setAttr } from './dom.js';
 import { buildTags, renderTags } from './tags-ui.js';
+import { initProgressionEditor } from './progression-editor.js';
 import { initChordColor } from './chord-color.js';
 import { drawLanes, activeLayers, barStarts, setLanes } from './lanes.js';
+import { createFretboardModule } from './fretboard.js';
+import { createWheel } from './wheel.js';
 
-export function initTuning({ page, current }) {
-  const { LAYER_IDS, TAG_CATEGORIES } = session.tables;
+// layout(): Beschriftung und Bundabstand des Griffbretts; choose(attr, value): eine neue Wahl der Umschalter (app.js merkt sie)
+export function initTuning({ page, current, layout, choose }) {
+  const { LAYER_IDS, TAG_CATEGORIES, STANDARD_TUNING, FRETS } = session.tables;
   setLanes(LAYER_IDS);
   for (const name of LAYER_IDS) {
     // nur Anzeige (LED und Name); stumm schaltet allein das Mischpult
@@ -23,12 +25,16 @@ export function initTuning({ page, current }) {
 
   buildTags($('tags'), (category, tag) => send({ action: 'toggleTag', category, tag }));
   $('tags').addEventListener('tagshown', () => renderTags($('tags'), session.state.track, $('tag-fx'))); // ein anderes Wort berührt: die Anzeige neu schreiben
+  const renderProgression = initProgressionEditor({ current });
   const renderChordColor = initChordColor();
+  const fretboard = createFretboardModule($('mod-fretboard'), { layout, choose, strings: STANDARD_TUNING, frets: FRETS });
 
-  // Tonart-Modul (Tonart, Skala, folgender Akkord). Der Countdown steht in app.js.
+  // Tonart-Modul (Tonart, Skala, folgender Akkord), Griffbrett und Textfassung; im Stand der Akkord von Takt 1 (position(0)).
+  // Der Countdown steht in app.js.
   function renderKey() {
     const { track, scale } = session.state;
     const { next, nextName } = session.position;
+    fretboard.update(session.position);
     setText($('play-key'), `${track.key.root}${track.key.mode === 'minor' ? 'm' : ''}`);
     setText($('play-scale'), t(`scale.${scale}`));
     setText($('play-next'), next ? nextName : '');
@@ -48,6 +54,11 @@ export function initTuning({ page, current }) {
     });
   }
 
+  // Akkordrad: Klingender und nächster Knoten nur beim Spielen
+  const wheelState = () => ({ key: session.state.track.key, wheel: session.derived.wheel, at: current() ? session.position.wheel : null });
+  const wheel = createWheel($('wheel'), wheelState(), (chord) => send({ action: 'addChord', ...chord }));
+  const wheelShown = () => $('wheel').checkVisibility(); // zeichnet nur, wenn es sichtbar ist; beim Einblenden zeichnet der ResizeObserver
+
   const noEvents = [];
   // LED an Instrument-Modul und Spur: an, solange die Wiedergabe läuft, die Schicht nicht stumm ist und sie in diesem Takt spielt
   function renderActivity(events) {
@@ -63,9 +74,12 @@ export function initTuning({ page, current }) {
     renderActivity(events);
     const sec = current() ? barStarts(events)[session.position.bar] ?? 0 : 0;
     drawLanes($('lanes'), events, sec, session.state.track.layers);
+    fretboard.resize(); // neue Größe oder anderer Bundabstand: Brett neu aufbauen
+    if (wheelShown()) wheel.update(wheelState());
   }
   // neue Größe (Fokus ⇄ Einstellen, Fenster): neu zeichnen
-  new ResizeObserver(drawCanvases).observe($('lanes'));
+  const resized = new ResizeObserver(drawCanvases);
+  for (const id of ['fretboard', 'wheel', 'lanes']) resized.observe($(id));
 
   // gewählte Schlagworte als Schilder (nur Anzeige); nur bei Änderung neu bauen, render() läuft je Schlag
   let wordsKey = '';
@@ -92,6 +106,7 @@ export function initTuning({ page, current }) {
     }
     setAttr($('tuning-tempo'), 'aria-valuetext', shown);
     for (const b of $('lane-buttons').children) setAttr(b, 'data-muted', String(!track.layers[b.dataset.layer]));
+    renderProgression();
     renderChordColor();
     renderKey();
     renderWheelProgression();

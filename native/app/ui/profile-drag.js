@@ -3,8 +3,9 @@
 // Bewegung; wer vorher bewegt, scrollt den Baum (der Griff hat touch-action: none, darum scrollt hier das Modul selbst; kann der Baum
 // nicht scrollen, das umgebende .pop) und zieht in diesem Druck nie mehr. Während des Ziehens trägt die Zeile unter dem Zeiger data-drop="ok" oder "no", am Rand scrollt der Baum mit.
 // Loslassen auf "ok" ruft onDrop; Loslassen anderswo, Escape und pointercancel rufen nur onCancel, ebenso ein verlorenes Loslassen
-// (Maus ohne gedrückte Taste, Fenster verliert den Fokus oder wird verborgen). Kennt keine Profile.
-import { setAttr } from './state.js';
+// (Maus ohne gedrückte Taste, Fenster verliert den Fokus oder wird verborgen). onStart meldet den Beginn des Ziehens; refresh() bewertet
+// die Zeile unter dem Zeiger neu (canDrop hat eine neue Antwort). Kennt keine Profile.
+import { setAttr } from './dom.js';
 
 export const LONG_PRESS_MS = 400;
 export const MOVE_TOLERANCE_PX = 8;
@@ -26,7 +27,7 @@ export function edgeStep(y, top, bottom) {
   return y < top + edge ? -step : step;
 }
 
-export function attachDrag(container, { canDrag, canDrop, onDrop, onCancel }) {
+export function attachDrag(container, { canDrag, canDrop, onDrop, onCancel, onStart }) {
   let press = null; // { id, key, row, type, x, y, at, phase, lastX, lastY, over, timer, frame }
   let disarm = () => {}; // nimmt das Warten auf das Loslassen nach Esc zurück (swallowNextRelease)
 
@@ -49,6 +50,7 @@ export function attachDrag(container, { canDrag, canDrop, onDrop, onCancel }) {
     press.phase = 'drag';
     press.row.dataset.dragging = 'true';
     if (press.type !== 'mouse') navigator.vibrate?.(30); // das lange Drücken hat gegriffen
+    onStart?.(press.key);
     aim();
     const tick = () => {
       const r = container.getBoundingClientRect();
@@ -61,12 +63,12 @@ export function attachDrag(container, { canDrag, canDrop, onDrop, onCancel }) {
     press.frame = requestAnimationFrame(tick);
   }
 
-  // Zeile unter dem Zeiger markieren (nur Zeilen dieses Baums)
-  function aim() {
+  // Zeile unter dem Zeiger markieren (nur Zeilen dieses Baums); `again`: auch dieselbe Zeile neu bewerten
+  function aim(again = false) {
     const hit = document.elementFromPoint(press.lastX, press.lastY)?.closest('[data-key]');
     const row = hit && container.contains(hit) ? hit : null;
-    if (row !== press.over) {
-      press.over?.removeAttribute('data-drop');
+    if (row !== press.over || again) {
+      if (row !== press.over) press.over?.removeAttribute('data-drop');
       press.over = row;
       if (row) setAttr(row, 'data-drop', canDrop(press.key, row.dataset.key) ? 'ok' : 'no');
     }
@@ -166,10 +168,5 @@ export function attachDrag(container, { canDrag, canDrop, onDrop, onCancel }) {
   const menu = (e) => { if (e.target.closest?.('.drag-handle')) e.preventDefault(); }; // langes Drücken öffnet sonst das Kontextmenü
   container.addEventListener('pointerdown', down);
   container.addEventListener('contextmenu', menu);
-  return () => {
-    if (press) finish();
-    disarm();
-    container.removeEventListener('pointerdown', down);
-    container.removeEventListener('contextmenu', menu);
-  };
+  return { refresh: () => { if (press?.phase === 'drag') aim(true); } };
 }
