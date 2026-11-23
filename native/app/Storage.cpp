@@ -56,13 +56,16 @@ std::optional<juce::int64> sizeOf (const juce::File& file, const juce::File& fol
     if ((data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) throw std::runtime_error (name + " is not a file");
     return (static_cast<juce::int64> (data.nFileSizeHigh) << 32) | static_cast<juce::int64> (data.nFileSizeLow);
 #else
-    // macOS, Linux: stat(2) and its errno (not built here yet)
+    // macOS, Linux: stat(2) and its errno
     struct stat data {};
     if (stat (file.getFullPathName().toRawUTF8(), &data) != 0) {
         const int error = errno;
         struct stat own {};
         const bool folderMissing = stat (folder.getFullPathName().toRawUTF8(), &own) != 0 && errno == ENOENT;
-        if (FileStorage::nothingStored (static_cast<unsigned long> (error), folderMissing)) return std::nullopt;
+        // ENOENT names a missing folder at any depth as it names a missing file (Windows tells them apart: ERROR_PATH_NOT_FOUND): a storage's
+        // folder that is missing together with its parent is not a first start
+        const bool parentThere = ! folderMissing || stat (folder.getParentDirectory().getFullPathName().toRawUTF8(), &own) == 0;
+        if (parentThere && FileStorage::nothingStored (static_cast<unsigned long> (error), folderMissing)) return std::nullopt;
         throw std::runtime_error (name + ": the system cannot say whether it is there (errno " + std::to_string (error) + ")");
     }
     if (! S_ISREG (data.st_mode)) throw std::runtime_error (name + " is not a file");
@@ -89,7 +92,7 @@ bool FileStorage::nothingStored (unsigned long error, bool folderMissing) {
 #if JUCE_WINDOWS
     return error == ERROR_FILE_NOT_FOUND || (error == ERROR_PATH_NOT_FOUND && folderMissing);
 #else
-    // shortcut: ENOENT does not tell a missing file from a missing folder above the storage's; upgrade: when the app is built for macOS or Linux
+    // ENOENT is a missing file or a missing folder; sizeOf rules out the storage's folder missing together with its parent before it asks
     (void) folderMissing;
     return error == ENOENT;
 #endif
