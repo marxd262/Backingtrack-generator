@@ -26,8 +26,10 @@
 //       Param::values (L = R) with that intrinsic value and those events; --input: in added at audio rate
 //   btg_fx <in.f32> <out.f32> <rate> graph <frames> <1|2|3|4|5>
 //       the fixed graphs of voice-compare.mjs, built with SynthTone's calls (the numbers stand in both files)
-//   btg_fx <in.f32> <out.f32> <rate> voice <frames> <key> <timbre> [--tuning <json>] [<time> <midi> <vel> <seconds> [leslie=<v>] [swell=<dB>]
-//                                                                    [artTime=<s>] [glide=<s>]]...  (Task 21; the tuning and the organ's fields Task 20)
+//   btg_fx <in.f32> <out.f32> <rate> voice <frames> <key> <timbre> [--tuning <json>] [--without osc|buffers|both] [<time> <midi> <vel> <seconds>
+//                                                                    [leslie=<v>] [swell=<dB>] [artTime=<s>] [glide=<s>]]...  (Task 21; the tuning and the
+//                                                                    organ's fields Task 20)
+//       --without: the test hooks of patch.h (exactOscillators, wholeFrameBuffers, both) for native/tools/ab-quirks.mjs, as btg_render's
 //       the synth voice `key` ("chords/epiano/rhodes", "chords/organ/jazz") as setVoices builds it (makeVoice, no pack, the rate) with the
 //       timbre as setSound takes it (JSON) and the tuning as setTuning takes it, its notes each at its time (frames, a real number: the voice
 //       gets its frame and Tones::late the part of a frame after it, as the engine hands them but raw: the engine counts a part below 1/2048
@@ -148,7 +150,7 @@ int main(int argc, char** argv) {
                               "                                                                        [--custom <real> <imag> <normalized|raw>]\n"
                               "                                       | param <frames> <value> [set|linear|exp <v> <frame> | target <v> <frame> <tc>]... [--input]\n"
                               "                                       | graph <frames> <1..5>\n"
-                              "                                       | voice <frames> <key> <timbre> [--tuning <json>] [<time> <midi> <vel> <seconds> [leslie=<v>] [swell=<dB>] [artTime=<s>] [glide=<s>]]...\n"
+                              "                                       | voice <frames> <key> <timbre> [--tuning <json>] [--without osc|buffers|both] [<time> <midi> <vel> <seconds> [leslie=<v>] [swell=<dB>] [artTime=<s>] [glide=<s>]]...\n"
                               "       btg_fx curves <out.f32>\n";
     try {
         if (argc == 3 && std::string(argv[1]) == "curves") {
@@ -241,6 +243,14 @@ int main(int argc, char** argv) {
                 for (int i = 8; i < argc;) {
                     const std::string token = argv[i];
                     if (token == "--tuning" && i + 1 < argc) { tuning = argv[i + 1]; i += 2; continue; }
+                    if (token == "--without") { // the last argument without its value is an error too
+                        const std::string what = i + 1 < argc ? argv[i + 1] : "";
+                        if (what != "osc" && what != "buffers" && what != "both") throw std::runtime_error("--without osc, buffers or both");
+                        if (what != "buffers") exactOscillators = true;
+                        if (what != "osc") wholeFrameBuffers = true;
+                        i += 2;
+                        continue;
+                    }
                     if (const size_t eq = token.find('='); eq != std::string::npos) { // a field of the note before
                         if (notes.empty()) throw std::runtime_error(token + " before any note");
                         const std::string name = token.substr(0, eq);

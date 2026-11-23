@@ -5,7 +5,8 @@
 //                                                         (--no-open leaves the browser closed); runs until stopped
 // Both files of a pair play through Web Audio from one clock (two sources started at the same context time and offset, each
 // through its own gain); A/B is a 50 ms cross-fade of the two gains, which always add up to 1. Two <audio> elements had two clocks.
-// Pairs whose name is in none of the case files (native/tools/sound-cases/*.json) are listed last, as older runs.
+// Pairs whose name is in none of the case files (native/tools/sound-cases/*.json) are listed last, as older runs. A folder of ab-quirks.mjs
+// (<name>-mit.wav and <name>-ohne.wav: the core with and without the browser's oddities) gets those labels, and a LIESMICH.txt is shown.
 // sound-compare.mjs calls writeAbPage(folder) at the end of every run of cases.
 import { spawn } from 'node:child_process';
 import { existsSync, readdirSync, readFile, readFileSync, writeFileSync } from 'node:fs';
@@ -19,27 +20,35 @@ const repo = resolve(dirname(here), '../..');
 // Writes <folder>/index.html and <folder>/ab-open.cmd and returns the page's path and the number of pairs; throws when the folder holds no pair.
 export function writeAbPage(folder) {
   const files = new Set(readdirSync(folder));
-  const names = [...files].filter((f) => f.endsWith('-web.wav')).map((f) => f.slice(0, -'-web.wav'.length))
-    .filter((n) => /^[\w.-]+$/.test(n) && files.has(`${n}-nativ.wav`)).sort();
-  if (!names.length) throw new Error(`no pairs <name>-web.wav / <name>-nativ.wav in ${folder}`);
+  // the set of ab-quirks.mjs holds <name>-mit.wav and <name>-ohne.wav (the core with and without the browser's oddities): its own labels
+  const quirks = [...files].some((f) => f.endsWith('-mit.wav'));
+  const [fileA, fileB] = quirks ? ['mit', 'ohne'] : ['web', 'nativ'], [labelA, labelB] = quirks ? ['Mit', 'Ohne'] : ['Web', 'Nativ'];
+  const names = [...files].filter((f) => f.endsWith(`-${fileA}.wav`)).map((f) => f.slice(0, -`-${fileA}.wav`.length))
+    .filter((n) => /^[\w.-]+$/.test(n) && files.has(`${n}-${fileB}.wav`)).sort();
+  if (!names.length) throw new Error(`no pairs <name>-${fileA}.wav / <name>-${fileB}.wav in ${folder}`);
 
   const casesDir = join(repo, 'native/tools/sound-cases');
   const current = new Set(existsSync(casesDir)
     ? readdirSync(casesDir).filter((f) => f.endsWith('.json')).flatMap((f) => JSON.parse(readFileSync(join(casesDir, f), 'utf8')).map((c) => c.name))
     : names);
-  const TITLES = { band: 'Ganze Band', drums: 'Schlagzeug', bass: 'Bass', chords: 'Akkorde', pad: 'Pad', lead: 'Lead', percussion: 'Percussion' };
+  const TITLES = { band: 'Ganze Band', drums: 'Schlagzeug', bass: 'Bass', chords: 'Akkorde', pad: 'Pad', lead: 'Lead', percussion: 'Percussion',
+    osz: 'Oszillatoren', puffer: 'Rausch-Schläge und Saiten', beide: 'Beide Schalter, ganze Band' };
   const groups = new Map(Object.values(TITLES).map((title) => [title, []]));
   for (const name of names) {
-    const title = current.has(name) ? TITLES[name.split('-')[0]] ?? 'Sonstige' : 'Ältere Läufe (nicht mehr in den Fällen)';
+    const title = quirks || current.has(name) ? TITLES[name.split('-')[0]] ?? 'Sonstige' : 'Ältere Läufe (nicht mehr in den Fällen)';
     if (!groups.has(title)) groups.set(title, []);
     groups.get(title).push(name);
   }
   const list = [...groups].filter(([, items]) => items.length)
     .map(([title, items]) => `<h2>${title}</h2><p>${items.map((n) => `<button class="file" data-name="${n}">${n.replace(/^[a-z]+-/, '') || n}</button>`).join(' ')}</p>`).join('\n');
+  // a LIESMICH.txt in the folder (ab-quirks.mjs writes one) is shown below the files; without one the page is as before
+  const readme = existsSync(join(folder, 'LIESMICH.txt'))
+    ? `\n<style>pre.note{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.45 system-ui;margin:6px 0 24px}</style><h2>LIESMICH.txt</h2>`
+      + `<pre class="note">${readFileSync(join(folder, 'LIESMICH.txt'), 'utf8').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>` : '';
 
   const page = join(folder, 'index.html');
   // String.raw: the page's script keeps its backslashes; it uses no backticks and no dollar-brace of its own
-  writeFileSync(page, String.raw`<!doctype html><html lang="de"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>A/B: Web gegen nativ</title>
+  writeFileSync(page, String.raw`<!doctype html><html lang="de"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${quirks ? 'A/B: mit und ohne die Eigenheiten des Browsers' : 'A/B: Web gegen nativ'}</title>
 <style>
 body{font:16px system-ui;max-width:900px;margin:24px auto;padding:0 16px}
 #now{font-size:96px;font-weight:700;margin:8px 0;line-height:1}
@@ -55,14 +64,14 @@ button.file[aria-current=true]{background:#18a2a6;color:#111;border-color:#18a2a
 #msg{min-height:1.4em;margin:4px 0}
 #msg.bad{color:#b00020}
 </style>
-<p id="name"></p><div id="now">A<small>Web</small></div>
+<p id="name"></p><div id="now">A<small>${labelA}</small></div>
 <p><button id="play">Start / Pause (Enter)</button> <button id="toggle">A / B umschalten (Leertaste)</button> <button id="prev">vorige Datei (↑)</button> <button id="next">nächste Datei (↓)</button></p>
 <input id="pos" type="range" min="0" max="1" step="0.001" value="0" aria-label="Stelle">
 <p id="msg" role="status"></p>
 <p id="folder" hidden><button id="folder-btn">Ordner mit den Hörproben wählen</button><input id="folder-input" type="file" webkitdirectory hidden>
 <span id="folder-why">Aus einer geöffneten Datei darf die Seite ihre Nachbardateien nicht selbst lesen, deshalb dieser Schritt. Ohne ihn geht es mit ab-open.cmd im selben Ordner (Doppelklick).</span></p>
-<p class="keys">A = Web-Version, B = nativer Kern. Beide Dateien laufen aus einer Uhr im Gleichschritt; Umschalten blendet an derselben Stelle in 50 ms über, die beiden Lautstärken ergeben zusammen immer 1. <span id="time"></span></p>
-${list}
+<p class="keys">${quirks ? 'A = mit den Eigenheiten des Browsers (der heutige Klang), B = ohne sie.' : 'A = Web-Version, B = nativer Kern.'} Beide Dateien laufen aus einer Uhr im Gleichschritt; Umschalten blendet an derselben Stelle in 50 ms über, die beiden Lautstärken ergeben zusammen immer 1. <span id="time"></span></p>
+${list}${readme}
 <script>
 const $ = (id) => document.getElementById(id);
 const pos = $('pos'), now = $('now'), msg = $('msg'), folder = $('folder'), input = $('folder-input');
@@ -79,7 +88,7 @@ let want = false;      // the wish to be playing (it survives loading a file)
 let playing = false, paused = 0; // paused: the position while not playing
 let g = null, sources = [], t0 = 0, off0 = 0; // gains of A and B; the sources of the running play; context time and offset where it began
 const say = (text, bad) => { msg.textContent = text; msg.className = bad ? 'bad' : ''; };
-const show = () => { now.innerHTML = side ? 'B<small>Nativ</small>' : 'A<small>Web</small>'; };
+const show = () => { now.innerHTML = side ? 'B<small>${labelB}</small>' : 'A<small>${labelA}</small>'; };
 // the one clock: the context's
 const position = () => (playing ? Math.min(dur, off0 + Math.max(0, ctx.currentTime - t0)) : paused);
 
@@ -167,7 +176,7 @@ async function load(i) {
   paused = 0; bufs = null; dur = 0; loading = true;
   say('lädt …');
   try {
-    const [a, b] = await Promise.all([decode(names[index] + '-web.wav'), decode(names[index] + '-nativ.wav')]);
+    const [a, b] = await Promise.all([decode(names[index] + '-${fileA}.wav'), decode(names[index] + '-${fileB}.wav')]);
     if (mine !== token) return;
     bufs = { a, b }; dur = Math.min(a.duration, b.duration); loading = false;
     say('');

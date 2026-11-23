@@ -12,11 +12,24 @@
 #include "voices/organ_chain.h"
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <vector>
 
 namespace btg::detail {
+
+// Test hooks for one decision, not behaviour: the user hears the core with and without two ways Chromium starts a source inside its render
+// quanta (the listening set of native/tools/ab-quirks.cmd) and decides before Phase 9, when the web app stops being the reference. After
+// that they are removed, or the chosen one becomes the behaviour. Both false by default (the app, every tool but btg_render's and btg_fx's
+// --without): the web app's sound. Set on the control side before a render; read where a tone's graph is built.
+//   exactOscillators: an oscillator starts at its time to the part of a frame, its phase advanced by that part, whatever its frequency does
+//     and wherever in a render it starts: no first quantum of an a-rate oscillator (patch.cpp CHROMIUM_FIRST_QUANTUM), no k-rate blocks on
+//     the grid of render quanta, and the advance on the a-rate path and in the context's first render quantum too (SynthTone::osc).
+//   wholeFrameBuffers: a buffer source starts on its frame (its time rounded up), from its own first sample, never read between two
+//     (SynthTone::buffer).
+inline std::atomic<bool> exactOscillators { false }, wholeFrameBuffers { false };
+static_assert(std::atomic<bool>::is_always_lock_free, "the audio thread reads them");
 
 constexpr int NODES = 16, PARAMS = 6; // the pad's tone has 16 nodes; the e-piano's takes 5 params (amp, carrier, depth, bell, tremolo)
 // The most frames one render() takes: the engine's chunk (engine.cpp CHUNK, which asserts that the two are equal).

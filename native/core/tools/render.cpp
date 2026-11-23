@@ -1,10 +1,14 @@
 // Offline render of a track with the engine of the core, no JUCE:
 //   btg_render <track.json> <folder with the sample packs> <out.wav> [sample rate, default 48000] [--dry] [--sound <timbre.json>] [--tuning <file.json>] [--tail <seconds>]
+//              [--without osc|buffers|both]
 // The track is JSON as normalizeTrack() of the web app writes it (see native/tools). Plays the song once, then `tail` seconds (default 0.2) in
 // which the tones and the sends ring out; the file holds exactly the song's frames plus the tail's.
 // --sound: the timbre as the web app's resolveTrackTimbre(track) gives it (without the option: DEFAULT_TIMBRE), set before the track is built.
 // --tuning: fine values as the web app's setTuning takes them ({"bass/sample/finger":{"level":2}}), set before the track is built (before the timbre).
 // --dry: no limiter (no glue compressor either). The file is always a 32-bit float WAV, so that nothing clips; for native/tools/sound-compare.mjs.
+// --without osc|buffers|both: the test hooks of src/patch.h (exactOscillators, wholeFrameBuffers, both), the "ohne" side of
+// native/tools/ab-quirks.mjs; may be given more than once.
+#include "../src/patch.h"
 #include "btg/engine.h"
 #include "btg/pack.h"
 
@@ -29,11 +33,16 @@ int main(int argc, char** argv) {
         else if (std::string(argv[i]) == "--tuning" && i + 1 < argc) tuningFile = argv[++i];
         else if (std::string(argv[i]) == "--sound" && i + 1 < argc) soundFile = argv[++i];
         else if (std::string(argv[i]) == "--tail" && i + 1 < argc) tail = std::atof(argv[++i]);
-        else args.push_back(argv[i]);
+        else if (std::string(argv[i]) == "--without") { // the last argument without its value is an error too
+            const std::string what = i + 1 < argc ? argv[++i] : "";
+            if (what != "osc" && what != "buffers" && what != "both") { std::printf("--without osc, buffers or both\n"); return 2; }
+            if (what != "buffers") btg::detail::exactOscillators = true;
+            if (what != "osc") btg::detail::wholeFrameBuffers = true;
+        } else args.push_back(argv[i]);
     }
     argc = static_cast<int>(args.size());
     argv = args.data();
-    if (argc < 4) { std::printf("usage: btg_render <track.json> <packs folder> <out.wav> [sample rate] [--dry] [--sound <timbre.json>] [--tuning <file.json>] [--tail <seconds>]\n"); return 2; }
+    if (argc < 4) { std::printf("usage: btg_render <track.json> <packs folder> <out.wav> [sample rate] [--dry] [--sound <timbre.json>] [--tuning <file.json>] [--tail <seconds>] [--without osc|buffers|both]\n"); return 2; }
     const double rate = argc > 4 ? std::atof(argv[4]) : 48000.0;
     try {
         std::ifstream file(argv[1], std::ios::binary);

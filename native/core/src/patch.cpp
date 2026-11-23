@@ -103,7 +103,8 @@ long long framesNearest(double frames) { return frameOf(std::round(std::round(fr
 // values, and no input sounds yet). An FM carrier keeps the phase it loses there for its whole tone, so the e-piano's level and colour
 // differ from tone to tone with the tone's place in the quantum (measured in Task 21: one tone's level in 50 ms windows up to 2.25 dB off,
 // two strikes of the same pitch up to 5.4 dB, a track's level 1.0 to 1.8 dB). The core follows it because the web app sounds like that.
-// false takes it out (order() then gives no oscillator the ring, process() hands on nothing).
+// false takes it out (order() then gives no oscillator the ring, process() hands on nothing); the test hook exactOscillators (patch.h) does
+// that for the oscillators built while it is set.
 constexpr bool CHROMIUM_FIRST_QUANTUM = true;
 
 } // namespace
@@ -138,8 +139,10 @@ int SynthTone::osc(const WaveTables& wave, float hz, float cents, double start, 
     // with a timeline takes that path anyway), on which the frequency that moves the read index stays 0 (oscillator_handler.cc 710 to 746).
     node.start = frameOf(std::ceil(start));
     node.stop = framesUp(stop);
-    node.oscillator.offset = static_cast<int>((quantum + node.start) % 128);
-    node.oscillator.lead = node.start < firstQuantum ? 0.0 : std::max(0.0, static_cast<double>(node.start) - start); // (a NaN start: 0)
+    const bool exact = exactOscillators.load(std::memory_order_relaxed); // the test hook (patch.h): no grid, the lead wherever it starts
+    node.oscillator.exact = exact;
+    node.oscillator.offset = exact ? 0 : static_cast<int>((quantum + node.start) % 128);
+    node.oscillator.lead = node.start < firstQuantum && !exact ? 0.0 : std::max(0.0, static_cast<double>(node.start) - start); // (a NaN start: 0)
     end = std::max(end, node.stop);
     return n;
 }
@@ -158,8 +161,11 @@ int SynthTone::buffer(const float* data, int frames, double offset, bool loop, d
     node.loop = loop;
     node.start = framesUp(start);
     node.stop = framesUp(stop);
-    // RenderFromBuffer: a start before its frame reads from that much further on (-start_frame_offset); one rounded down to it does not
-    node.read += std::max(0.0, static_cast<double>(node.start) - start);
+    // RenderFromBuffer: a start before its frame reads from that much further on (-start_frame_offset); one rounded down to it does not.
+    // Every buffer of a synth tone comes here: the noise of the drums and the percussion, the organ's key clicks, the string voices' tones.
+    // shortcut: with wholeFrameBuffers set (patch.h) a buffer tone is not sub-frame exact, it starts up to a frame late, upgrade: when the
+    // choice falls on "without" and a pitched sample is layered with an oscillator started at the same time
+    if (!wholeFrameBuffers.load(std::memory_order_relaxed)) node.read += std::max(0.0, static_cast<double>(node.start) - start);
     end = std::max(end, node.stop);
     return n;
 }
@@ -286,7 +292,7 @@ bool SynthTone::order() {
     for (int i = 0; i < sequenceCount_ && CHROMIUM_FIRST_QUANTUM; ++i) {
         const Node& node = nodes_[sequence_[i]];
         const auto moves = [&](int w) { return node.slot[w] >= 0 && params_[node.slot[w]].hasTimeline(); };
-        if (node.kind != source || !(moves(0) || moves(1))) continue;
+        if (node.kind != source || node.oscillator.exact || !(moves(0) || moves(1))) continue;
         if (++moving > 1) return false;
         const int offset = static_cast<int>((quantum + node.start) % 128);
         if (offset == 0) continue;

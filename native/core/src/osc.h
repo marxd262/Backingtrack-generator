@@ -43,6 +43,7 @@ struct Oscillator {
     const WaveTables* wave = nullptr;
     double index = 0.0; // virtual_read_index (in constant(), from kInterpolate2Point on: at the start of the current block)
     int offset = 0;     // the place of its first frame in its render quantum: constant()'s first block is the rest of that quantum
+    bool exact = false; // moving() takes the lead too, which Chromium's a-rate path does not (patch.h exactOscillators)
     double lead = 0.0;  // frames from its start time to its first frame (the start rounded up): constant() begins its index that far on
     // Frequency and detune constant over the frames (Chromium's k-rate path); `left`: the frames from the first of these to the stop.
     void constant(float hz, float cents, float* out, int count, long long left);

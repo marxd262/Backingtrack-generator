@@ -336,8 +336,13 @@ void Oscillator::moving(const float* hz, const float* cents, bool hzMoving, bool
     if (!centsMoving) scale *= std::exp2(cents[0] / 1200);
     const unsigned mask = static_cast<unsigned>(w.size - 1);
     const double size = w.size, inverse = 1.0 / w.size;
-    lead = 0.0; // the a-rate path: Process's frequency is 0 there, a start between frames moves nothing
     double at = index;
+    if (exact && lead > 0 && count > 0) { // the part of a frame before its first frame, at that frame's increment
+        const float v = hzMoving && centsMoving ? std::exp2(cents[0] * k) * hz[0] : hzMoving ? hz[0] : std::exp2(cents[0] * k);
+        at += lead * static_cast<double>(clampToNyquist(v, nyquist) * scale);
+        at -= std::floor(at * inverse) * size;
+    }
+    lead = 0.0; // the a-rate path: Process's frequency is 0 there, a start between frames moves nothing
     for (int i = 0; i < count; ++i) {
         const float v = hzMoving && centsMoving ? std::exp2(cents[i] * k) * hz[i] : hzMoving ? hz[i] : std::exp2(cents[i] * k);
         const float increment = clampToNyquist(v, nyquist) * scale;
