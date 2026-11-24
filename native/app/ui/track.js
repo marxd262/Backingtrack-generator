@@ -51,7 +51,7 @@ on('chordDisplays', (m) => {
   if (track) { boardView = answer; showBoard(); }
   wheel.update({ key: asked.key, wheel: answer.wheel, at: answer.at });
 });
-// the last question again after every load and every return to the page: an answer lost while the browser was hidden is not sent again
+// the last question again after every load and every return to the page: an answer that came while the page lay in the browser's history is not sent again
 addEventListener('pageshow', () => ask(asked.request));
 
 // ---------- derive bars, chord changes and repeating parts ----------

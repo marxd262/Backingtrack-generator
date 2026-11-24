@@ -8,7 +8,8 @@
 // fonts the page shows come from its folder; credits.html opens from the start page and each licence link gives the pack's licence text.
 // (b) The page plays and shows: the variant typed into the page's field (5, or the one given) and the lead's job melody make the song;
 //     the song (state and lanes) is the session's for these actions; "Los" plays it: every layer has a level where the lanes give it a note, the
-//     position line and the lanes move, the position shows no bar before the engine's clock moves; while it plays the fretboard (and its text
+//     position line and the lanes move, the position shows no bar before the engine's clock moves; the window minimised for a moment and restored
+//     leaves the page as it was (the same document, still the play page, the position moving on); while it plays the fretboard (and its text
 //     version), the wheel, the strip and the progression show the bar of position(); a restart from bar 1 shows no bar during its lead; every layer
 //     has a level at its first note on the song's own voices and again on the synth voices; with every layer on its synth voice and every layer
 //     effect on, the effects reach the session and the engine (levels, a peak moved by 1.5 dB) and the engine stays under 25 % load without a dropout.
@@ -37,6 +38,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 import de from '../app/ui/i18n/de.js';
 import { start as serveWeb } from '../../scripts/serve.js';
+import { showWindow } from './app-window.mjs';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const exe = process.argv[3] ?? join(repo, 'native/build/app/BackingtrackApp_artefacts/Release/Standalone/Backingtrack Generator.exe');
@@ -85,6 +87,8 @@ async function launch(folder, { prepare = null } = {}) {
   }
   if (!page) throw new Error('no page from the resource provider');
   run.page = page;
+  run.navigations = []; // the page's main frame navigating, with the time
+  page.on('framenavigated', (f) => { if (f === page.mainFrame()) run.navigations.push(`${Math.round(performance.now())} ms: ${f.url()}`); });
   page.on('console', (m) => { if (m.type() === 'error' && !unserved(m.location().url)) problems.push(`console: ${m.text()}`); });
   page.on('pageerror', (e) => problems.push(`page error: ${e.message}`));
   page.on('requestfailed', (r) => { if (!unserved(r.url())) problems.push(`request failed: ${r.url()}`); });
@@ -235,6 +239,20 @@ try {
   const dark = result.moves.demanded.filter((l) => !result.moves.lit.includes(l));
   if (!(watchTo - watchFrom > 4) || dark.length) problems.push(`(b) the lights do not flash with the beats and the notes: ${JSON.stringify(dark)} did not, in beats ${watchFrom} to ${watchTo} (lit: ${JSON.stringify(result.moves.lit)})`);
   delete result.moves.bars;
+
+  // the window minimised for a moment while the song plays, then restored, as a user does: the page stays loaded (the shell keeps it while the window
+  // is hidden). The same document (its timeOrigin), no navigation, the play page still shows, the position line has moved on, no second sync sent
+  const hiddenLook = () => page.evaluate(() => ({ origin: performance.timeOrigin, playPage: !document.getElementById('play')?.hidden,
+    position: document.getElementById('play-position')?.textContent ?? null, syncs: window.sent.filter((s) => s.type === 'sync').length })).catch((e) => ({ failed: e.message.split('\n')[0] }));
+  const navigatedBefore = run.navigations.length, beforeHidden = await hiddenLook();
+  showWindow(run.app.pid, 'minimise');
+  await sleep(1500);
+  showWindow(run.app.pid, 'restore');
+  await sleep(2000);
+  result.hidden = { before: beforeHidden, after: await hiddenLook(), navigations: run.navigations.slice(navigatedBefore) };
+  const h = result.hidden;
+  if (h.after.failed || h.after.origin !== h.before.origin || h.navigations.length || !h.after.playPage || h.after.position === h.before.position || h.after.syncs !== h.before.syncs)
+    problems.push(`(b) the window minimised and restored while it plays: the page did not stay as it was: ${JSON.stringify(h)}`);
 
   // while it plays, the fretboard, its text version, the wheel, the strip and the progression show the bar of the last position() the page got:
   // the fretboard its tones and roles, the wheel its sounding node in the first colour and the next in the second (the fill under the label),

@@ -6,7 +6,8 @@
 // the user's folder). At places of the song (inside every chord the analysis found, and before its end) the page shows what the core's answer to
 // the page's own last request says: it asks for the chord and the next chord it shows, and its fretboard (the drawn dots with their roles and labels,
 // the text version) and its wheel (the nodes marked as the chord that sounds and the next one) are the answer's. A click on a wheel node enters the
-// name the answer allows for that node into the bar; the scale select has the entries of tables(). The events forced into the other order: an
+// name the answer allows for that node into the bar; the scale select has the entries of tables(); the window minimised for a moment and restored
+// leaves the page with its song as it was. The events forced into the other order: an
 // analysis before the lists (tables) keeps its scale and throws nothing; a click on the wheel before any answer throws nothing, and an answer that
 // was lost is asked for again on pageshow. The pages share the language: the one opposite to the system's, chosen on the generator's page as the
 // app's strip chooses it, shows here; the system's, chosen here, shows on the generator's page after "Zum Generator", which leads there. No error
@@ -21,6 +22,7 @@ import de from '../app/ui/i18n/de.js';
 import en from '../app/ui/i18n/en.js';
 import TEXT from '../app/ui/track-text.js';
 import { renderSong } from './render-song.mjs';
+import { showWindow } from './app-window.mjs';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const exe = process.argv[2] ?? join(repo, 'native/build/app/BackingtrackApp_artefacts/Release/Standalone/Backingtrack Generator.exe');
@@ -123,6 +125,8 @@ try {
   page.on('console', (m) => { if (recording && m.type() === 'error') problems.push(`console: ${m.text()}`); });
   page.on('pageerror', (e) => { if (recording) problems.push(`page error: ${e.message}`); });
   page.on('requestfailed', (r) => { if (recording && !r.url().startsWith('blob:')) problems.push(`request failed: ${r.url()}`); });
+  const navigated = []; // the page's main frame navigating
+  page.on('framenavigated', (f) => { if (f === page.mainFrame()) navigated.push(f.url()); });
 
   // the language: the one opposite to the system's chosen on the generator's page, as the app's strip chooses it (a fresh profile shows the system's)
   await page.waitForLoadState('load').catch(() => {});
@@ -213,6 +217,19 @@ try {
   await page.locator('#reset').click();
   await sleep(300);
   await page.screenshot({ path: join(out, 'track-page.png') });
+
+  // the window minimised for a moment and restored, as a user does: the page stays loaded with the song and its view (the same document, no
+  // navigation, the song's name, its parts and the scale as before)
+  const view = () => page.evaluate(() => ({ origin: performance.timeOrigin, title: document.getElementById('title').textContent,
+    parts: [...document.getElementById('sections').children].map((b) => b.textContent), scale: document.getElementById('scale').value })).catch((e) => ({ failed: e.message.split('\n')[0] }));
+  const navigatedBefore = navigated.length, beforeHidden = await view();
+  showWindow(run.app.pid, 'minimise');
+  await sleep(1500);
+  showWindow(run.app.pid, 'restore');
+  await sleep(2000);
+  result.hidden = { before: beforeHidden, after: await view(), navigations: navigated.slice(navigatedBefore) };
+  if (result.hidden.after.failed || JSON.stringify(result.hidden.after) !== JSON.stringify(beforeHidden) || result.hidden.navigations.length || !beforeHidden.parts.length)
+    problems.push(`the window minimised and restored: the page did not stay as it was: ${JSON.stringify(result.hidden)}`);
 
   // the events in the other order, forced: the lists (tables) held back over a load and the analysis sent before them, as when it lands first
   await page.evaluate(() => sessionStorage.setItem('btg.hold', 'tables'));

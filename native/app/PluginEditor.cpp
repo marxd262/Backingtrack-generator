@@ -439,6 +439,9 @@ private:
         // the browser's profile (the pages' localStorage) beside the session's files: a check's BTG_STORAGE_DIR moves it too
         .withWinWebView2Options (juce::WebBrowserComponent::Options::WinWebView2().withUserDataFolder (FileStorage::defaultFolder().getChildFile ("WebView2")))
         .withNativeIntegrationEnabled()
+        // a minimised window keeps its page: JUCE's default blanks it (about:blank) and goes back on restore, a new load that lost what the page
+        // showed (its page, an open window) while the engine played on
+        .withKeepPageLoadedWhenBrowserIsHidden()
         .withResourceProvider ([this] (const juce::String& url) { return url.startsWith ("/media/video") ? video() : resource (url); })
         .withEventListener ("btg", [this] (const juce::var& message) { handle (message); }) };
 };

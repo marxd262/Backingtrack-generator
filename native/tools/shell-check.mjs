@@ -89,7 +89,7 @@ try {
   page.on('load', () => pageLog.push({ ms: Date.now() - began, what: 'load' }));
   page.on('crash', () => pageLog.push({ ms: Date.now() - began, what: 'the page crashed' }));
   page.on('close', () => pageLog.push({ ms: Date.now() - began, what: 'the page closed' }));
-  // the page's own listeners; set up again when the page navigates under the setup (JUCE reloads the page once when the window first shows)
+  // the page's own listeners; set up again when the page navigates under the setup (a load of the page while the app starts: see below)
   const setup = (fnvText) => {
     const backend = window.__JUCE__.backend;
     const fnvOf = new Function(`return ${fnvText}`)();
@@ -116,7 +116,9 @@ try {
     };
     window.lanes = async (number) => { for (let i = 0; i < 750 && !window.got.events.some((e) => e.number === number); i++) await window.wait(20); return window.got.events.find((e) => e.number === number) ?? null; };
   };
-  // JUCE loads the page again when the window first shows: wait until one document has stood for 1.5 s (the same timeOrigin twice), then set up
+  // Task 31 saw a second load of the page while the app started; the only way found in JUCE's code is a window hidden and shown again (its default,
+  // until Task 32d, blanked a hidden page and went back to it), which the shell no longer allows; six probed starts in Task 32d, three of them with
+  // the old default, showed no second load. The wait stays, harmless: until one document has stood for 1.5 s (the same timeOrigin twice), then set up
   let origin = null; // the document the check sets up in: another one at the end is a reload (also one that Playwright reports no navigation for)
   for (let i = 0; i < 20; i++) {
     await page.waitForLoadState('load').catch(() => {});

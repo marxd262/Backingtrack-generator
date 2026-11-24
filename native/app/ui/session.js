@@ -114,6 +114,6 @@ export const beatsNow = () => {
   return e.beats + (e.playing && !e.standing ? ((performance.now() - e.at) / 1000) * (e.bpm / 60) : 0);
 };
 
-// After every load (pageshow comes with the first load too, and when JUCE returns to the page with goBack): everything the page draws from. Its
-// answer carries its number: a hold of a control from before the return ends with it.
+// After every load (pageshow comes with the first load too, and when the browser returns to the page from its history with the back key): everything
+// the page draws from. Its answer carries its number: a hold of a control from before the return ends with it.
 addEventListener('pageshow', () => post('sync', { seq: ++sent }));
