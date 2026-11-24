@@ -45,6 +45,7 @@ for (const width of [1280, 360]) {
     await page.locator('#scale-select').selectOption('minorPentatonic');
     await setProgression(page, PROGRESSION);
     await page.locator('#tuning-tempo').fill('200');
+    await answered(page); // die Anzeige zeigt die Hand des Knopfs bis zur Antwort
     await expect(page.locator('#tuning-tempo-out')).toHaveText('200 bpm');
     if (width === 360) {
       await page.setViewportSize({ width, height: 740 });

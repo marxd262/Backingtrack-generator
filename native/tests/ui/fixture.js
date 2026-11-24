@@ -9,9 +9,24 @@ import { join } from 'node:path';
 import { test as base, expect, chromium } from '@playwright/test';
 
 const exe = join(import.meta.dirname, '../../build/app/BackingtrackApp_artefacts/Release/Standalone/Backingtrack Generator.exe');
+// The app runs on a Windows desktop of its own (native/platform/win/desktop_run.cpp): its window does not appear on the user's screen nor take
+// the keyboard focus; killing the program, or the end of the worker that started it, ends the app with its WebView2 (a job). BTG_SHOW=1 starts
+// the app itself, to watch a test.
+const desktopRun = join(import.meta.dirname, '../../build/platform/Release/btg_desktop_run.exe');
+const shown = process.env.BTG_SHOW === '1';
 // A start takes 1.3 to 2.6 s (160 starts measured: no step over 2 s). After this deadline the start fails, naming its step; ending the app
-// (at most 10 s) and removing the folder (at most 5 s) still fit in the fixture's 30 s.
+// (at most 10 s) and removing the folder (at most 5 s) still fit in the fixture's 30 s. The deadline holds for both tries of a start together
+// (below): a first try that stands without a page ends about 3 + 5 s after its spawn (the attach, measured up to 3.0 s, then NO_PAGE_MS), its
+// app is ended (well under 1 s, at most 10 s), and the second try has the rest of the 15 s; a start of 1.3 to 2.6 s fits in it. If the 15 s
+// are over when that app is ended, no second try is made.
 const START_S = 15;
+// shortcut: on a desktop of its own a start now and then stands with the app's WebView2 running and no page at all (`the browser's pages: []`;
+// 6 in about 1900 starts with the workers on one desktop, 1 in about 2150 with a desktop each, never in about 3000 on the user's desktop); why is
+// not known. Such a first try is ended after NO_PAGE_MS without any page and the app started once more on the same folder and port, with a line
+// in the log ("the app's start was tried again: …") to count it by; every other way a start stands, and every start with BTG_SHOW=1, fails at
+// the deadline as before, upgrade: when the cause is found. A normal start has a page 6 ms after the attach (mean of 88; at most 562 ms) and the
+// app's own page after 161 ms (at most 1112 ms).
+const NO_PAGE_MS = 5000;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const portOpen = (port) => fetch(`http://127.0.0.1:${port}/json/version`).then(() => true, () => false);
 // polled by time, not by frame: a page whose window is hidden draws no frames
@@ -20,17 +35,35 @@ const drawn = (page) => page.waitForFunction(() => /\S/.test(document.getElement
 // The app on `folder`, its page attached and ready, within START_S: drawn from the session's answer to its sync, in the language of `locale`
 // (WebView2's --lang sets navigator.language, which a page without a stored language takes), at `viewport`, with `reducedMotion`. Once it stands,
 // the page is loaded again with every problem recorded from the start of its document (the app loaded it before anything could attach). A start
-// that does not finish is not tried again (a hanging start of the app is to be known): the app is ended and the error names the step.
+// that does not finish is not tried again (a hanging start of the app is to be known): the app is ended and the error names the step. The one
+// exception: a first try on a desktop of its own whose WebView2 has had no page at all since the attach (NO_PAGE_MS above) is tried once more,
+// and says so.
 async function launch(options) {
-  const run = { app: null, browser: null, page: null, closing: false, step: 'check the app and its port' };
+  const fresh = () => ({ app: null, browser: null, page: null, closing: false, step: 'check the app and its port', since: Date.now() });
+  let run = fresh();
   let timer;
   const deadline = new Promise((_, reject) => {
     timer = setTimeout(() => reject(new Error(`the app's start did not finish within ${START_S} s, at the step: ${run.step}`)), START_S * 1000);
   });
+  deadline.catch(() => {}); // it may come while the first try's app is being ended, before the second try races it
   try {
-    await Promise.race([start(run, options), deadline]);
+    try {
+      await Promise.race([start(run, options, !shown), deadline]);
+    } catch (e) {
+      if (!e.noPage) throw e;
+      const stood = Date.now() - run.since;
+      run.step = `end the first try's app, its WebView2 without any page for ${e.noPage} ms after the attach`;
+      await quit(run, options.port);
+      run = fresh(); // already here: the outer catch would end the first try once more, 5 s for an exit that has come (kill() leaves exitCode null)
+      await Promise.race([deadline, null]); // the deadline came while that app was being ended: the start fails with it, no second try
+      console.log(`the app's start was tried again: port ${options.port}, the first try stood ${stood} ms, its WebView2 without any page for ${e.noPage} ms after the attach`);
+      await Promise.race([start(run, options, false), deadline]);
+    }
     return run;
   } catch (e) {
+    // what the browser shows instead, for a start that stood before the app's page was there
+    const pages = run.browser?.contexts().flatMap((c) => c.pages()).map((p) => p.url()) ?? null;
+    if (pages && !run.page) e.message += `; the browser's pages: ${JSON.stringify(pages)}`;
     await quit(run, options.port);
     throw e;
   } finally {
@@ -38,14 +71,20 @@ async function launch(options) {
   }
 }
 
-async function start(run, { folder, port, locale, viewport, reducedMotion, problems }) {
-  if (!existsSync(exe)) throw new Error(`no app at ${exe}: build it first (native/build.ps1)`);
+async function start(run, { folder, port, locale, viewport, reducedMotion, problems }, retry) {
+  for (const file of shown ? [exe] : [exe, desktopRun]) if (!existsSync(file)) throw new Error(`no app at ${file}: build it first (native/build.ps1)`);
   if (await portOpen(port)) throw new Error(`port ${port} is taken: does an app of an earlier run still run?`);
+  if (run.closing) return; // the deadline came meanwhile and quit() found no app to end: none is started after it
   // shortcut: every start reads the user's %APPDATA%\Backingtrack Generator\Backingtrack Generator.settings (JUCE's StandaloneFilterApp, as in
   // every check of native/tools); kill() keeps the app from writing it, upgrade: when the app gets its own window or a variable for that file.
   // Without SmartScreen: on a new profile WebView2 holds its port and folder until about 6.5 s after its start, also after the app was ended.
-  const app = (run.app = spawn(exe, [], { stdio: 'ignore', env: { ...process.env, BTG_MUTE: '1', BTG_STORAGE_DIR: folder,
-    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port} --lang=${locale} --disable-features=msSmartScreenProtection` } }));
+  // A 2D canvas drawn in software: an accelerated one goes over to software after the test's first reads (toDataURL), and the same drawing
+  // then has other pixels; a test that compares pictures of a canvas would compare the two ways of drawing it.
+  // shortcut: one desktop per worker (btg-tests-<port>): with the apps of all workers on one desktop, a start now and then never got its page (the
+  // WebView2's browser ran with no page for 15 s; 6 in about 1900 starts); with a desktop each it is rarer (1 in about 2150), not gone (such a
+  // start is tried once more: NO_PAGE_MS above); why is not known, upgrade: when the cause is found.
+  const app = (run.app = spawn(shown ? exe : desktopRun, shown ? [] : [`btg-tests-${port}`, exe], { stdio: 'ignore', env: { ...process.env, BTG_MUTE: '1', BTG_STORAGE_DIR: folder,
+    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port} --lang=${locale} --disable-features=msSmartScreenProtection --disable-accelerated-2d-canvas` } }));
   run.step = `attach to the app's WebView2 on port ${port}`;
   while (!run.browser) {
     if (run.closing) return; // the deadline came and quit() ended the app
@@ -55,10 +94,17 @@ async function start(run, { folder, port, locale, viewport, reducedMotion, probl
     run.browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`, { timeout: 3000 }).catch(() => null);
   }
   run.step = 'find the page of its own (juce.backend)';
+  const attached = Date.now();
   while (!run.page) {
     if (run.closing) return;
-    run.page = run.browser.contexts().flatMap((c) => c.pages()).find((p) => p.url().includes('juce.backend')) ?? null;
-    if (!run.page) await sleep(100);
+    const pages = run.browser.contexts().flatMap((c) => c.pages());
+    run.page = pages.find((p) => p.url().includes('juce.backend')) ?? null;
+    if (run.page) break;
+    // No second try once a page was seen: one that came and went is another failure. shortcut: a page is seen at a look only (every 100 ms), one
+    // that came and went between two looks is not, upgrade: the context's 'page' event, when a start shows that.
+    retry &&= !pages.length;
+    if (retry && Date.now() - attached > NO_PAGE_MS) throw Object.assign(new Error('no page'), { noPage: Date.now() - attached });
+    await sleep(100);
   }
   const page = run.page;
   run.step = 'the first drawing of the page';
@@ -67,7 +113,16 @@ async function start(run, { folder, port, locale, viewport, reducedMotion, probl
   await page.evaluate(() => document.fonts.ready); // nothing of the first load is under way when it loads again
   page.on('console', (m) => { if (!run.closing && m.type() === 'error') problems.push(`console: ${m.text()}`); });
   page.on('pageerror', (e) => { if (!run.closing) problems.push(`pageerror: ${e.message}`); });
-  page.on('requestfailed', (r) => { if (!run.closing) problems.push(`request failed: ${r.url()} ${r.failure()?.errorText ?? ''}`); });
+  // shortcut: the fixture's own reload is aborted now and then (about 1 start in 500, 6 ms after it was asked for; it is the only navigation asked
+  // for, and a whole new document with the init script loads all the same); who aborts it is not known: an aborted navigation belongs to no
+  // document, so a navigation that fails while the reload stands is not counted, every problem of the document that then loads is, upgrade: when
+  // the cause is found. Any other failed navigation names the step and the time.
+  const reloading = () => run.step === 'load the page again' || run.step === 'the drawing after the new load';
+  page.on('requestfailed', (r) => {
+    if (run.closing || (r.isNavigationRequest() && reloading())) return;
+    const where = r.isNavigationRequest() ? ` [a navigation, ${Date.now() - run.since} ms after the app's start, at the step: ${run.step}]` : '';
+    problems.push(`request failed: ${r.url()} ${r.failure()?.errorText ?? ''}${where}`);
+  });
   run.step = 'reduced motion, the viewport, the init script';
   if (reducedMotion) await page.emulateMedia({ reducedMotion });
   if (viewport) await page.setViewportSize(viewport);
@@ -91,6 +146,7 @@ async function start(run, { folder, port, locale, viewport, reducedMotion, probl
   run.step = 'the drawing after the new load';
   await drawn(page);
   if (viewport) expect(await page.evaluate(() => [innerWidth, innerHeight]), 'the viewport in the WebView').toEqual([viewport.width, viewport.height]);
+  run.step = 'the test';
 }
 
 async function quit(run, port) {

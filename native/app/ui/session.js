@@ -11,6 +11,9 @@ export const session = {
   voices: null, // Engine::voiceStatus per layer ("ready", "silent", "error: ...")
   reported: null, // derived().voices as they were when the voices' state last came
   voicesDue: false, // an answer's engine call sets voices or the track: its voices' state follows before the next answer
+  // "layer id/variant" of every voice the engine reported ready since this load: such a pack is ready again at once (voices-panel.js voiceLoad).
+  // shortcut: holds while the engine keeps every pack it read, upgrade: when the engine drops packs, the shell says which are loaded
+  loaded: new Set(),
   engine: { playing: false, standing: false, beats: 0, bpm: 120, peaks: {}, at: 0 },
 };
 
@@ -94,6 +97,7 @@ on('events', (m) => { session.lanes = { number: m.number, bpm: m.bpm, beats: m.b
 on('voices', (m) => {
   session.voices = m;
   session.reported = session.derived?.voices ?? null;
+  for (const [layer, v] of Object.entries(session.reported ?? {})) if (m[layer] === 'ready') session.loaded.add(`${layer} ${v.id}/${v.variant}`);
   session.voicesDue = false;
   tell('voices');
 });

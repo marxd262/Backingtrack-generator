@@ -22,12 +22,14 @@ const shownBar = async (page) => Number((await position(page).textContent()).mat
 async function chooseStyle(page, name) {
   await page.locator('#style-btn').click();
   await page.locator('#style-cards').getByRole('button', { name }).click();
+  await answered(page);
   await expect(page.locator('#style-btn')).toHaveText(name);
 }
 async function chooseTempo(page, bpm) {
   await page.locator('#tempo-btn').click();
   await page.locator('#tempo').fill(String(bpm));
   await page.keyboard.press('Escape');
+  await answered(page); // die Taste zeigt die Hand des Reglers bis zur Antwort
   await expect(page.locator('#tempo-btn')).toHaveText(`${bpm} bpm`);
 }
 

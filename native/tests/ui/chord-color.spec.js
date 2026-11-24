@@ -2,7 +2,7 @@
 // Portiert aus tests/e2e/chord-color.spec.js: die App lädt ihre Seite; was der Test aus src/core rechnete (die Folge des Seeds in einer Farbe),
 // rechnet der Kern der App (core.js); gelesen wird, wenn die Seite die Antworten auf ihre Aktionen zeigt; AudioContexts zählt count-helpers.js;
 // die Sprache wählt die Leiste der App.
-import { test, expect, answered, chooseLanguage, fromSession } from './fixture.js';
+import { test, expect, answered, chooseLanguage, fromSession, settled } from './fixture.js';
 import { addChordByName } from './chord-helpers.js';
 import { contexts, countContexts } from './count-helpers.js';
 import { core } from './core.js';
@@ -44,6 +44,7 @@ test('Septakkorde färben die Folge um, Dreiklänge stellen sie zurück', async 
   const seed = await seedOf(page);
   expect(await shown(page)).toEqual(await expected(page, AM, seed, 'triads'));
   await color(page, 'sevenths').click();
+  await answered(page);
   await expect(color(page, 'sevenths')).toHaveAttribute('aria-pressed', 'true');
   expect(await shown(page)).toEqual(await expected(page, AM, seed, 'sevenths'));
   expect((await shown(page)).every((n) => /7|m7b5/.test(n))).toBe(true);
@@ -109,6 +110,7 @@ test('während der Wiedergabe: Farbwahl startet neu im selben AudioContext', asy
   await expect(page.locator('#play-go')).toHaveText('Stopp');
   expect(await contexts(page)).toBe(1);
   await color(page, 'extended').click();
+  await settled(page);
   await expect(color(page, 'extended')).toHaveAttribute('aria-pressed', 'true');
   expect(await contexts(page)).toBe(1);
   await expect(page.locator('#play-go')).toHaveText('Stopp');
@@ -130,6 +132,7 @@ test('Griffbrett nennt gefärbte Akkorde mit ihren Tönen', async ({ page }) => 
 test('Tastatur und beide Sprachen ohne rohe Schlüssel', async ({ page }) => {
   await color(page, 'power').focus();
   await page.keyboard.press('Enter');
+  await answered(page);
   await expect(color(page, 'power')).toHaveAttribute('aria-pressed', 'true');
   await chooseLanguage(page, 'en');
   expect(await page.locator('#chord-color button').allTextContents()).toEqual(['Triads', 'Sevenths', 'Extended', 'Power chords']);

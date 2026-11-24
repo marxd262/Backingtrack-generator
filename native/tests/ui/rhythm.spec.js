@@ -1,0 +1,259 @@
+// Rhythmus-Gruppe der Spielseite (echte Seite der App): Taktart, Groove und Komplexität.
+// Portiert aus tests/e2e/rhythm.spec.js: die App lädt ihre Seite; Taktarten und Grooves je Taktart aus tables() der Sitzung, der Standard-Groove
+// je Taktart als Werte; gelesen wird, wenn die Seite die Antworten auf ihre Aktionen zeigt; AudioContexts und Instrumentensätze zählt
+// count-helpers.js; die Ereignisse mit Artikulation sind die des Verlaufs, den die Hülle der Seite schickt; die Sprache wählt die Leiste der App.
+import { test, expect, answered, chooseLanguage, fromSession, settled } from './fixture.js';
+import { chooseStyle, currentStyle } from './style-helpers.js';
+import { contexts, countContexts, sets } from './count-helpers.js';
+
+const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view|group|timbre|chord|chordGroup|chordColor|groove|meter)\.[A-Za-z.]+$/;
+// DEFAULT_GROOVE der Web-App (src/core/grooves.js 408): der Groove, den ein Taktartwechsel wählt, als Werte
+const DEFAULT_GROOVE = { '4/4': 'straight', '3/4': 'waltz', '6/8': 'ballad68', '12/8': 'shuffle', '5/4': 'fiveFour' };
+
+test.use({ locale: 'de-DE' });
+
+test.beforeEach(async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(page.locator('#go')).toHaveText(/\S/);
+  await countContexts(page);
+  await page.locator('#tune-btn').click();
+  await expect(page.locator('#play')).toBeVisible();
+  await expect(page.locator('#rack')).toBeVisible(); // Feintuning öffnet den Zustand Einstellen
+});
+
+const keys = async (page) => Object.keys((await fromSession(page, 'tables')).METERS);
+const groovesFor = async (page, key) => (await fromSession(page, 'tables')).groovesFor[key];
+const meter = (page, key) => page.locator(`#meter-chips [data-meter="${key}"]`);
+const chooseGroove = (page, id) => page.locator('#groove-select').selectOption(id);
+const grooveIds = (page) => page.locator('#groove-select option').evaluateAll((els) => els.map((el) => el.value));
+const complexity = (page) => page.locator('#complexity');
+const tempo = (page) => page.locator('#tuning-tempo');
+const progression = (page) => page.locator('#progression button');
+const pressedMeter = (page) => page.locator('#meter-chips [aria-pressed="true"]').getAttribute('data-meter');
+const pressedGroove = (page) => page.locator('#groove-select').inputValue();
+
+test('Modul Rhythmus: im Rack nach Harmonie und vor den Instrumenten, fünf Taktarten, 4/4 und Standard-Groove gedrückt, Komplexität 50 %', async ({ page }) => {
+  const order = await page.locator('#rack .rack-row > *').evaluateAll((els) => els.map((el) => el.id));
+  expect(order.indexOf('mod-rhythm')).toBe(order.indexOf('mod-harmony') + 1);
+  expect(order.indexOf('mod-rhythm')).toBeLessThan(order.indexOf('rack-instruments'));
+  await expect(page.locator('#mod-rhythm')).toBeVisible();
+  expect(await page.locator('#meter-chips button').allTextContents()).toEqual(await keys(page));
+  expect(await pressedMeter(page)).toBe('4/4');
+  expect(await pressedGroove(page)).toBe('straight');
+  expect(await grooveIds(page)).toEqual(await groovesFor(page, '4/4'));
+  await expect(complexity(page)).toHaveValue('50');
+  await expect(page.locator('#complexity-out')).toHaveText('50 %');
+});
+
+test('die Grooves folgen der Taktart, der Standard-Groove ist gewählt', async ({ page }) => {
+  for (const key of await keys(page)) {
+    await meter(page, key).click();
+    await answered(page);
+    expect(await pressedMeter(page)).toBe(key);
+    expect(await grooveIds(page)).toEqual(await groovesFor(page, key));
+    expect(await pressedGroove(page)).toBe(DEFAULT_GROOVE[key]);
+  }
+});
+
+test('Taktartwechsel: Akkorde bleiben, Tempo wird umgerechnet (Achtelgeschwindigkeit bleibt), Rückweg', async ({ page }) => {
+  const before = await progression(page).allTextContents();
+  await tempo(page).fill('100');
+  await meter(page, '3/4').click();
+  await answered(page); // das Tempo stünde auch vor der Antwort da
+  await expect(tempo(page)).toHaveValue('100');
+  await meter(page, '6/8').click();
+  await answered(page);
+  await expect(tempo(page)).toHaveValue('67');
+  expect(await progression(page).allTextContents()).toEqual(before);
+  // zurück zur vorigen Taktart ohne eigene Tempoänderung: das alte Tempo, keine Rundungsabweichung
+  await meter(page, '4/4').click();
+  await answered(page);
+  await expect(tempo(page)).toHaveValue('100');
+});
+
+test('Rückwechsel gibt das alte Tempo nur zurück, wenn das Tempo nicht verändert wurde', async ({ page }) => {
+  await tempo(page).fill('100');
+  await meter(page, '6/8').click();
+  await answered(page);
+  await expect(tempo(page)).toHaveValue('67');
+  await tempo(page).fill('70');
+  await meter(page, '4/4').click();
+  await answered(page);
+  await expect(tempo(page)).toHaveValue('105');
+});
+
+test('ein Stil in 6/8 oder 12/8 bringt sein Tempo in Achtelgeschwindigkeit mit, der Stil bleibt gewählt', async ({ page }) => {
+  await meter(page, '6/8').click();
+  await chooseStyle(page, 'blues');
+  await expect(tempo(page)).toHaveValue('59'); // 88 * 2/3
+  expect(await currentStyle(page)).toBe('blues');
+  await meter(page, '12/8').click();
+  await chooseStyle(page, 'funk');
+  await expect(tempo(page)).toHaveValue('67');
+  expect(await currentStyle(page)).toBe('funk');
+  await meter(page, '3/4').click(); // einfache Taktart: Stiltempo unverändert
+  await chooseStyle(page, 'blues');
+  await expect(tempo(page)).toHaveValue('88');
+});
+
+test('der Komplexitätsregler nennt seinen Wert mit aria-valuetext', async ({ page }) => {
+  await expect(complexity(page)).toHaveAttribute('aria-valuetext', '50 %');
+  await complexity(page).fill('80');
+  await answered(page); // die Hand zeigt 80 % bis zur Antwort
+  await expect(complexity(page)).toHaveAttribute('aria-valuetext', '80 %');
+});
+
+test('Wiedergabe in 3/4: ein Takt dauert drei Schläge, in 4/4 vier', async ({ page }) => {
+  test.setTimeout(60_000);
+  await tempo(page).fill('200');
+  await page.locator('#play-go').click();
+  await expect(page.locator('#play-go')).toHaveText('Stopp');
+  const barSeconds = async () => {
+    const stamps = await page.evaluate(() => new Promise((resolve) => {
+      const el = document.querySelector('#play-position');
+      const seen = new Map();
+      const observer = new MutationObserver(() => {
+        const n = Number((el.textContent.match(/^Takt (\d+)/) ?? [])[1]);
+        if (n && !seen.has(n)) seen.set(n, performance.now());
+        if (seen.size >= 4) { observer.disconnect(); resolve([...seen.entries()]); }
+      });
+      observer.observe(el, { childList: true, characterData: true, subtree: true });
+    }));
+    return (stamps.at(-1)[1] - stamps[1][1]) / (stamps.length - 2) / 1000;
+  };
+  const four = await barSeconds();
+  expect(four).toBeGreaterThan(1.0);
+  expect(four).toBeLessThan(1.4); // 4 Schläge bei 200 = 1,2 s
+  await meter(page, '3/4').click();
+  await settled(page); // der Neustart am Takt ist getan; die Wiedergabe liefe auch vorher
+  await expect(page.locator('#play-go')).toHaveText('Stopp');
+  const three = await barSeconds();
+  expect(three).toBeGreaterThan(0.75);
+  expect(three).toBeLessThan(1.05); // 3 Schläge bei 200 = 0,9 s
+  expect(await contexts(page)).toBe(1);
+  await page.locator('#play-go').click();
+});
+
+test('Groove und Komplexität wirken live: kein neuer Instrumentensatz, kein neuer AudioContext', async ({ page }) => {
+  await page.locator('#play-go').click();
+  await expect(page.locator('#play-go')).toHaveText('Stopp');
+  expect(await sets(page)).toBe(1);
+  await chooseGroove(page, 'latin');
+  await answered(page); // die Auswahl zeigt die Hand bis zur Antwort
+  expect(await pressedGroove(page)).toBe('latin');
+  await complexity(page).fill('90');
+  await answered(page);
+  await expect(page.locator('#complexity-out')).toHaveText('90 %');
+  await complexity(page).fill('10');
+  expect(await sets(page)).toBe(1);
+  expect(await contexts(page)).toBe(1);
+  await page.locator('#play-go').click();
+});
+
+test('Taktartwechsel während der Wiedergabe startet im selben AudioContext neu', async ({ page }) => {
+  await page.locator('#play-go').click();
+  await expect(page.locator('#play-go')).toHaveText('Stopp');
+  await meter(page, '12/8').click();
+  await settled(page); // der Neustart ist getan; "Stopp" stünde auch vorher da
+  await expect(page.locator('#play-go')).toHaveText('Stopp');
+  expect(await contexts(page)).toBe(1);
+  await page.locator('#play-go').click();
+});
+
+test('ein Stil-Klick lässt Taktart, Groove und Komplexität stehen', async ({ page }) => {
+  await meter(page, '12/8').click();
+  await chooseGroove(page, 'slowBlues');
+  await complexity(page).fill('80');
+  await chooseStyle(page, 'blues');
+  expect(await pressedMeter(page)).toBe('12/8');
+  expect(await pressedGroove(page)).toBe('slowBlues');
+  await expect(complexity(page)).toHaveValue('80');
+});
+
+test('Tastatur und beide Sprachen ohne rohe Schlüssel', async ({ page }) => {
+  await meter(page, '6/8').focus();
+  await page.keyboard.press('Enter');
+  await answered(page);
+  expect(await pressedMeter(page)).toBe('6/8');
+  // Tasten ‹ › der LCD-Auswahl: ein Eintrag weiter
+  const index = (await grooveIds(page)).indexOf('rock68');
+  await page.locator('#groove-select').selectOption({ index: index - 1 });
+  await page.locator('#mod-rhythm .lcd-btn').last().focus();
+  await page.keyboard.press('Enter');
+  await answered(page);
+  expect(await pressedGroove(page)).toBe('rock68');
+  await complexity(page).focus();
+  await page.keyboard.press('ArrowRight');
+  await answered(page);
+  await expect(complexity(page)).toHaveValue('51');
+  for (const lang of ['de', 'en']) {
+    await chooseLanguage(page, lang);
+    for (const text of await page.locator('#mod-rhythm').evaluate((el) => [...el.querySelectorAll('h3, h4, label, button, output')].map((n) => n.textContent.trim()))) {
+      expect(RAW_KEY.test(text), `${lang}: ${text}`).toBe(false);
+    }
+  }
+  await expect(page.locator('#groove-select option[value="rock68"]')).toHaveText('Rock (6/8)');
+  // Object.keys(GROOVES) der Web-App: jeder Groove steht in groovesFor seiner Taktart
+  expect(Object.values((await fromSession(page, 'tables')).groovesFor).flat()).toContain('rock68');
+});
+
+test('360 px: kein waagerechtes Scrollen, Chips mindestens 44 px hoch', async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 740 });
+  await expect(page.locator('#rack')).toBeVisible(); // Feintuning öffnet den Zustand Einstellen
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  expect(await page.locator('#mod-rhythm').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  for (const h of await page.locator('#meter-chips button, #groove-select, #mod-rhythm .lcd-btn').evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height))) {
+    expect(h).toBeGreaterThanOrEqual(43.5);
+  }
+});
+
+// Klang v2, Schritt 4: Lockerheit (Mikrotiming) neben der Komplexität
+test('Lockerheit: Knopf im Modul Rhythmus, Standard 50 %, ein neuer Wert steht in der Anzeige und im aria-valuetext', async ({ page }) => {
+  const loose = page.locator('#mod-rhythm #loose');
+  await expect(loose).toHaveValue('50');
+  await expect(page.locator('label[for="loose"]')).toHaveText('Lockerheit');
+  await loose.fill('80');
+  await answered(page); // die Hand zeigt 80 % bis zur Antwort; der Nachbar stünde auch vorher auf 50
+  await expect(page.locator('#loose-out')).toHaveText('80 %');
+  await expect(loose).toHaveAttribute('aria-valuetext', '80 %');
+  await expect(complexity(page)).toHaveValue('50'); // der Nachbar bleibt
+});
+
+// Phase 3: Verzierungen (Artikulations-Schicht) als vierter Knopf der Knopfzeile
+test('Verzierungen: Knopf im Modul Rhythmus, Standard 50 %, steht im Track, wirkt live ohne Neustart; 0 % spielt ohne Verzierungen', async ({ page }) => {
+  const knob = page.locator('#mod-rhythm #ornaments');
+  await expect(knob).toHaveValue('50');
+  await expect(page.locator('label[for="ornaments"]')).toHaveText('Verzierungen');
+  await expect(page.getByRole('slider', { name: 'Verzierungen' })).toHaveCount(1);
+  const track = async () => (await fromSession(page, 'state')).track;
+  expect((await track()).ornaments).toBeUndefined(); // Standard: nicht gesetzt (0,5)
+  // Töne und Schläge mit Artikulation im Verlauf, den die Hülle aus dem Track der Sitzung baut (die Web-App rechnete buildEvents auf dem Track
+  // der Seite mit ornaments 0 und 0,5): der letzte Verlauf, wenn die Hülle alles getan hat, was die Seite schickte (er kommt im selben Auftrag
+  // wie die Aufrufe der Engine nach einer Aktion, vor der Antwort auf settled)
+  const arts = async () => {
+    await settled(page);
+    return (await fromSession(page, 'lanes')).events.filter((e) => e.art).length;
+  };
+  expect(await arts()).toBeGreaterThan(0); // 0,5
+
+  await page.locator('#tuning-tempo').fill('200');
+  await page.locator('#play-go').click();
+  await expect(page.locator('#play-position')).toHaveText(/^Takt 1 von/, { timeout: 15_000 });
+  const before = { sets: await sets(page), contexts: await contexts(page) };
+  await knob.fill('0');
+  await answered(page); // die Hand zeigt 0 % bis zur Antwort
+  await expect(page.locator('#ornaments-out')).toHaveText('0 %');
+  await expect(knob).toHaveAttribute('aria-valuetext', '0 %');
+  expect((await track()).ornaments).toBe(0);
+  expect(await arts()).toBe(0); // 0 % spielt ohne Verzierungen
+  await expect(page.locator('#play-position')).toHaveText(/^Takt [2-9] von/, { timeout: 15_000 });
+  expect({ sets: await sets(page), contexts: await contexts(page) }).toEqual(before); // kein Neustart
+  await page.locator('#play-go').click();
+  // Doppelklick stellt 50 % wieder her; die Nachbarn bleiben
+  await page.locator('.knob:has(#ornaments)').dblclick();
+  await answered(page); // die Hand zeigt 50 % bis zur Antwort; Lockerheit stünde auch vorher auf 50
+  await expect(knob).toHaveValue('50');
+  await expect(page.locator('#loose')).toHaveValue('50');
+  await chooseLanguage(page, 'en');
+  await expect(page.locator('label[for="ornaments"]')).toHaveText('Ornaments');
+});

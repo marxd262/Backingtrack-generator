@@ -2,7 +2,7 @@
 // Wechsel live ohne Neustart, Percussion startet aus, beide Sprachen ohne rohe Schlüssel.
 // Portiert aus tests/e2e/jobs-ui.spec.js: die App lädt ihre Seite; die AudioContexts zählt count-helpers.js an den Meldungen der Hülle; die
 // Sprache wählt die Leiste der App.
-import { test, expect, chooseLanguage, settled } from './fixture.js';
+import { test, expect, answered, chooseLanguage, settled } from './fixture.js';
 import { chooseStyle, openSetup } from './style-helpers.js';
 import { contexts, countContexts } from './count-helpers.js';
 
@@ -75,8 +75,10 @@ test('die Tasten ‹ › am Display schalten die Aufgabe weiter, am Ende ist die
   const [prev, next] = await module(page, 'lead').locator('.inst-job .lcd-btn').all();
   await expect(prev).toBeDisabled();
   await next.click();
+  await answered(page); // die Auswahl zeigt die Hand bis zur Antwort
   await expect(job(page, 'lead')).toHaveValue('fills');
   await expect(prev).toBeEnabled();
   await job(page, 'lead').selectOption('riff'); // die letzte Aufgabe
+  await answered(page);
   await expect(next).toBeDisabled();
 });

@@ -36,6 +36,7 @@ test('Pfeil hoch erhöht um 1, aria-valuetext folgt, der Zeiger dreht mit', asyn
   const turn = () => knob(page).locator('svg g').getAttribute('transform');
   const before = await turn();
   await page.keyboard.press('ArrowUp');
+  await answered(page); // der Knopf zeigt die Hand bis zur Antwort
   await expect(complexity(page)).toHaveValue('51');
   await expect(complexity(page)).toHaveAttribute('aria-valuetext', '51 %');
   expect(await turn()).not.toBe(before);
@@ -49,9 +50,11 @@ test('Ziehen: 100 px nach oben sind 50 Punkte, Doppelklick setzt auf 50 zurück'
   await page.mouse.move(x, y - 50, { steps: 5 });
   await page.mouse.move(x, y - 100, { steps: 5 });
   await page.mouse.up();
+  await answered(page); // der Knopf zeigt die Hand bis zur Antwort
   await expect(complexity(page)).toHaveValue('70');
   await expect(page.locator('#complexity-out')).toHaveText('70 %');
   await knob(page).dblclick();
+  await answered(page);
   await expect(complexity(page)).toHaveValue('50');
 });
 
@@ -59,8 +62,10 @@ test('Mausrad: je Raste ein Schritt', async ({ page }) => {
   const { x, y } = await center(knob(page));
   await page.mouse.move(x, y);
   await page.mouse.wheel(0, -100);
+  await answered(page); // der Knopf zeigt die Hand bis zur Antwort
   await expect(complexity(page)).toHaveValue('51');
   await page.mouse.wheel(0, 100);
+  await answered(page);
   await expect(complexity(page)).toHaveValue('50');
 });
 
@@ -83,6 +88,7 @@ test('während der Wiedergabe bleibt der gehaltene Knopf stehen, auch wenn rende
   await page.mouse.move(x, y);
   await page.mouse.down();
   await page.mouse.move(x, y - 60, { steps: 6 }); // +30
+  await answered(page); // die Schritte sind beantwortet: der Knopf zeigte bis dahin die Hand
   await expect(complexity(page)).toHaveValue('80');
   const bar = await page.locator('#play-position').textContent();
   await expect(page.locator('#play-position')).not.toHaveText(bar); // mindestens ein Takt (und render) später
@@ -98,11 +104,14 @@ test('während der Wiedergabe bleibt der gehaltene Knopf stehen, auch wenn rende
 test('Bogen: bei 50 keiner, rechts der Mitte pink, links türkis', async ({ page }) => {
   await expect(arc(page)).toHaveCount(0);
   await complexity(page).fill('80');
+  await answered(page); // der Bogen zeigt die Hand bis zur Antwort
   await expect(arc(page)).toHaveCount(1);
   expect(await arc(page).evaluate((el) => getComputedStyle(el).stroke)).toBe('rgb(227, 70, 94)');
   await complexity(page).fill('20');
+  await answered(page);
   expect(await arc(page).evaluate((el) => getComputedStyle(el).stroke)).toBe('rgb(24, 162, 166)');
   await complexity(page).fill('50');
+  await answered(page);
   await expect(arc(page)).toHaveCount(0);
 });
 

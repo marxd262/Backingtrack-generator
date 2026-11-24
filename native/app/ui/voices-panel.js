@@ -12,11 +12,11 @@ const el = (tag, props = {}) => Object.assign(document.createElement(tag), props
 const same = (a, b) => a?.id === b?.id && a?.variant === b?.variant;
 
 /** Ladezustand der Sample-Stimme einer Schicht ('' für eine andere): lädt, solange eine Antwort sie gewählt hat und die Engine noch nicht gemeldet
- *  hat; sonst bereit oder nicht verfügbar nach der Meldung. */
+ *  hat (bereit, wenn die Engine sie seit dem Laden der Seite schon einmal bereit meldete); sonst bereit oder nicht verfügbar nach der Meldung. */
 export function voiceLoad(layer) {
   const voice = session.derived.voices[layer];
   if (session.tables.VOICES[layer][voice.id].kind !== 'sample') return '';
-  if (session.voicesDue && !same(voice, session.reported?.[layer])) return 'loading';
+  if (session.voicesDue && !same(voice, session.reported?.[layer])) return session.loaded.has(`${layer} ${voice.id}/${voice.variant}`) ? 'ready' : 'loading';
   const status = session.voices?.[layer] ?? '';
   return status === 'ready' ? 'ready' : status.startsWith('error') ? 'error' : '';
 }

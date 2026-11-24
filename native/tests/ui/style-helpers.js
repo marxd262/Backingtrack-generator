@@ -12,6 +12,12 @@ export async function openSetup(page) {
   await expect(page.locator('#rack')).toBeVisible();
 }
 
+/** Popover mit den Schlagworten (Modul Charakter) öffnen, falls zu; Klick daneben schließt es. */
+export async function openTags(page) {
+  const pop = page.locator('#tags-pop');
+  if (!(await pop.evaluate((el) => el.matches(':popover-open')))) await page.locator('#tags-btn').click();
+}
+
 // Fenster öffnen (falls zu), fn ausführen, Zustand wiederherstellen
 async function withWindow(page, fn) {
   const pop = page.locator('#profiles-pop');

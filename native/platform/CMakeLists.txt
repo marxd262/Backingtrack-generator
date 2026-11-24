@@ -2,6 +2,9 @@
 if(WIN32)
     add_library(btg_platform STATIC win/system_audio_win.cpp)
     target_link_libraries(btg_platform PRIVATE ole32 mfplat mfreadwrite mfuuid)
+    # starts a program on a Windows desktop of its own: the page tests' apps (native/tests/ui/fixture.js) stay off the user's screen
+    add_executable(btg_desktop_run win/desktop_run.cpp)
+    target_compile_options(btg_desktop_run PRIVATE /W4)
 else()
     add_library(btg_platform STATIC other/system_audio_other.cpp)
 endif()

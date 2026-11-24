@@ -88,8 +88,8 @@ test('Tastatur: Enter wählt den Grundton und fügt eine Art an, der Fokus bleib
 test('volle Folge (acht Akkorde): weitere Auswahl wird abgelehnt und gemeldet', async ({ page }) => {
   while ((await count(page)) < 8) await quality(page, 'Am').click();
   await quality(page, 'Am').click();
-  await expect(page.locator('#tuning-message')).toHaveText(/8/);
   await answered(page); // acht stünden auch vor der Antwort da
+  await expect(page.locator('#tuning-message')).toHaveText(/8/);
   await expect(progression(page)).toHaveCount(8);
 });
 
