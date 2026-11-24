@@ -11,7 +11,8 @@
     "start": "node scripts/serve.js",
     "test": "node --test tests/core",
     "test:ui": "playwright test --project=realtime --no-deps",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:app": "playwright test -c native/tests/ui"
   },
   "devDependencies": {
     "@playwright/test": "^1.65.0"
