@@ -390,7 +390,7 @@ export function initProfiles() {
     setText(pickLabel, t('ui.profileImportFile'));
     const problem = session.state.storage.profiles;
     show(storage, Boolean(problem));
-    setText(storage, problem ? t(`ui.storage.profiles.${problem}`) : '');
+    setText(storage, problem ? t(`ui.storage.profiles.${problem}`, { version: session.state.storage.profilesVersion }) : '');
     show(storageRow, problem === 'unreadable');
     setText(reload, t('ui.profileReload'));
     setText(status, local ? t(local) : messageText(p().message));

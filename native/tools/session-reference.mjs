@@ -12,8 +12,10 @@ const load = (file) => import(pathToFileURL(join(src, file)).href);
 // as a browser that never saved. It is state.js's `layoutStorage`, through which the web writes the profiles, the last session and the mixer: at a step whose
 // storage fails it throws as a full or locked browser storage does, and every setItem is logged as the core's btg::Storage write is (the name the core uses for
 // the key, the text, whether it took). navigator and crypto are node's own.
-// 'backingtrack.profiles.damaged' is no key of the web: the session keeps a damaged profiles.json under it (PROTOKOLL.md section 3a, below at `commit`).
-const NAMES = { 'backingtrack.profiles': 'profiles.json', 'backingtrack.session': 'session.json', 'backingtrack.mix': 'mix.json', 'backingtrack.profiles.damaged': 'profiles.damaged.json' };
+// 'backingtrack.profiles.damaged' and 'backingtrack.profiles.newer' are no keys of the web: the session keeps a damaged profiles.json and one of a newer version under
+// them (PROTOKOLL.md section 3a, below at `commit`).
+const NAMES = { 'backingtrack.profiles': 'profiles.json', 'backingtrack.session': 'session.json', 'backingtrack.mix': 'mix.json', 'backingtrack.profiles.damaged': 'profiles.damaged.json',
+  'backingtrack.profiles.newer': 'profiles.newer.json' };
 const KEYS = Object.fromEntries(Object.entries(NAMES).map(([key, name]) => [name, key]));
 const store = new Map();
 let writesFail = false, readsFail = false; // readsFail: false, 'none' (nothing is stored: getItem gives null) or 'throw' (the storage cannot be read)
@@ -71,8 +73,9 @@ let tree, selection, open, message, undo, last, resumed, legacy;
 let drag; // the own row being dragged (profile-drag.js), or null: profileDrag (PROTOKOLL.md section 3)
 let refusals; // progression-editor.js 11: how often addChord found the progression full (not exported: counted here where the real addChord refuses)
 let rollNote; // form-strip.js 37: "Neu würfeln" found every part locked
-// PROTOKOLL.md section 3a (ruled, the web has none of it): what is wrong with the storage per name, state().storage, and the damaged text of profiles.json until it is kept
-let problems, damagedText;
+// PROTOKOLL.md section 3a (ruled, the web has none of it): what is wrong with the storage per name, state().storage, and the damaged or newer text of profiles.json until
+// it is kept
+let problems, keepText;
 
 // play.js 35-46 for { ...state.track, layers: ALL_LAYERS } (app.js 128)
 function playerOf(trackInput) {
@@ -177,14 +180,17 @@ function select(id) {
 // page is loaded again and adds the same key to its message. `openNext`: the open folders importRaw sets before its commit (351), kept only if the commit holds.
 // PROTOKOLL.md section 3a, ruled against the web (whose storage never fails to read, and whose next save writes over a tree it could not use): after a profiles.json that
 // could not be read, every commit is refused and changes nothing (REFUSED, caught in apply), so that a text the session could not read is never written over; after a
-// damaged one, the first commit keeps its text under profiles.damaged.json before it writes the tree, and a failing write of that is the failing write of the tree.
+// damaged one, or one of a newer version (the user's decision of 2026-11-24, at loadProfiles), the first commit keeps its text under profiles.damaged.json or
+// profiles.newer.json before it writes the tree, and a failing write of that is the failing write of the tree.
 const REFUSED = new Error('refused');
+const KEPT = { damaged: 'profiles.damaged.json', newer: 'profiles.newer.json' };
 function commit(next, selectId, texts, undoable = false, openNext = open) {
   if (problems.profiles === 'unreadable') throw REFUSED;
-  if (problems.profiles === 'damaged') {
-    try { layoutStorage.setItem(KEYS['profiles.damaged.json'], damagedText); } catch { message = [msg('ui.profileNotStored')]; return; }
-    problems.profiles = 'damagedKept'; // once: it holds for the session, also if the tree's write fails below
-    damagedText = null;
+  const kept = KEPT[problems.profiles];
+  if (kept) {
+    try { layoutStorage.setItem(KEYS[kept], keepText); } catch { message = [msg('ui.profileNotStored')]; return; }
+    problems.profiles += 'Kept'; // damagedKept, newerKept: once, it holds for the session, also if the tree's write fails below
+    keepText = null;
   }
   if (!saveTree(layoutStorage, next)) { message = [msg('ui.profileNotStored')]; return; }
   undo = undoable ? { tree, selection } : null;
@@ -574,7 +580,7 @@ const ACTIONS = {
     run: () => {
       const stored = readStored('profiles.json');
       if (stored.problem) return;
-      ({ tree, problem: problems.profiles, damaged: damagedText } = loadProfiles(stored));
+      ({ tree, problem: problems.profiles, version: problems.profilesVersion, keep: keepText } = loadProfiles(stored));
       undo = null;
       drag = null;
     },
@@ -597,10 +603,11 @@ const ACTIONS = {
         try { if (localStorage.getItem(KEYS[name]) !== null) { said[field] = problems[field] === null ? 'stored' : 'failed'; return null; } } catch { said[field] = 'failed'; return null; }
         return text;
       };
-      if (problems.profiles !== null && a.profiles !== null) said.profiles = 'failed'; // an unreadable or damaged profiles.json stays as the page load found it
+      if (problems.profiles !== null && a.profiles !== null) said.profiles = 'failed'; // a profiles.json state().storage names (unreadable, damaged, newer, kept) stays as it is
       const profilesText = problems.profiles === null ? taken('profiles', 'profiles.json') : null;
       const loaded = profilesText === null ? null : loadProfiles({ text: profilesText, problem: null });
-      if (loaded) said.profiles = loaded.problem === null ? 'taken' : 'damaged';
+      if (loaded) said.profiles = loaded.problem === 'damaged' ? 'damaged' : 'taken'; // a newer tree is taken, and named and kept as the page load does
+      const treeTaken = loaded !== null && loaded.problem !== 'damaged';
       const sessionText = taken('session', 'session.json');
       const entry = sessionText === null ? null : loadLast(storeOf('session.json', sessionText));
       if (sessionText !== null) said.session = entry === null ? 'damaged' : 'taken';
@@ -608,13 +615,13 @@ const ACTIONS = {
       const raw = mixText === null ? null : parsedOrNone(mixText);
       const mixTaken = Boolean(raw && isObject(raw.value));
       if (mixText !== null) said.mix = mixTaken ? 'taken' : 'damaged';
-      if (loaded?.problem === null) {
+      if (treeTaken) {
         try { layoutStorage.setItem(KEYS['profiles.json'], profilesText); } catch {
           message = [msg('ui.profileNotStored')];
           for (const k of Object.keys(said)) if (said[k] === 'taken') said[k] = 'failed';
           return;
         }
-        tree = loaded.tree;
+        ({ tree, problem: problems.profiles, version: problems.profilesVersion, keep: keepText } = loaded);
         undo = null;
         drag = null;
       }
@@ -878,17 +885,22 @@ function readStored(name) {
 const storeOf = (name, text) => ({ getItem: (key) => (key === KEYS[name] ? text : null) }); // the text that was read, for a loader of the web
 const parsedOrNone = (text) => { try { return { value: JSON.parse(text) }; } catch { return null; } };
 const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
-// profiles.json is damaged when it is no JSON, or neither a list (the old flat list, taken over even when it is empty) nor an object with a list `items` (profile-store.js 57-58)
+// profiles.json is damaged when it is no JSON, or neither a list (the old flat list, taken over even when it is empty) nor an object with a list `items` (profile-store.js 57-58).
+// `keep`: the text to keep before the first write over it (commit); `version`: that of a newer tree, else null.
+// Against the web, on the user's decision of 2026-11-24 ("sichern, melden und dann überschreiben klingt gut"): a tree whose version is a number above the one saveTree writes
+// (STORED_VERSION, profile-store.js 10, not exported) is read as far as this version knows it, as the web reads it, named with its version ('newer') and kept as
+// profiles.newer.json before the first write over it, where the web writes over it in silence (src/ stays as it is)
 function loadProfiles({ text, problem }) {
-  if (problem) return { tree: newTree(), problem, damaged: null };
+  if (problem) return { tree: newTree(), problem, version: null, keep: null };
   const raw = text === null ? null : parsedOrNone(text);
-  if (text !== null && !(raw && (Array.isArray(raw.value) || (isObject(raw.value) && Array.isArray(raw.value.items))))) return { tree: newTree(), problem: 'damaged', damaged: text };
-  return { tree: loadTreeWithIds(text), problem: null, damaged: null };
+  if (text !== null && !(raw && (Array.isArray(raw.value) || (isObject(raw.value) && Array.isArray(raw.value.items))))) return { tree: newTree(), problem: 'damaged', version: null, keep: text };
+  const version = typeof raw?.value.version === 'number' && raw.value.version > 2 ? raw.value.version : null;
+  return { tree: loadTreeWithIds(text), problem: version === null ? null : 'newer', version, keep: version === null ? null : text };
 }
 /** A fresh page on the store (the session's constructor): the state literal with seed 1 and the stored mixer, the tree, the last session as the offer of "Weitermachen". */
 export function reload() {
   const mix = readStored('mix.json'), profiles = readStored('profiles.json'), session = readStored('session.json');
-  problems = { profiles: null, session: null, mix: null };
+  problems = { profiles: null, profilesVersion: null, session: null, mix: null };
   for (const key of Object.keys(state)) delete state[key];
   Object.assign(state, structuredClone(initial), { mix: loadMix(storeOf('mix.json', mix.text)), pan: loadPan(storeOf('mix.json', mix.text)) }); // state.js 84-85
   state.track.seed = 1;
@@ -898,7 +910,7 @@ export function reload() {
   rollNote = false;
   deriveBars();
   setFormTemplate('auto');
-  ({ tree, problem: problems.profiles, damaged: damagedText } = loadProfiles(profiles));
+  ({ tree, problem: problems.profiles, version: problems.profilesVersion, keep: keepText } = loadProfiles(profiles));
   selection = 'session';
   open = ['mine', 'factory'];
   message = null;

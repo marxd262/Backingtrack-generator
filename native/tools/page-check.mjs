@@ -25,7 +25,8 @@
 // Afterwards every action the page sent is played on btg_session (native/core/tools/session.cpp, after the app's own `start`): the state after each
 // is the one the page got; the times of the way page -> shell -> page are measured (no bar). Then the app starts once more on a folder where
 // mix.json and session.json are folders (unreadable, and mix.json cannot be written): the lines at the mixer and at the box of the last session say
-// so. Then the web's page (src/ui, served as the repository's interface tests serve it) in Playwright's Chromium at the WebView's size: its wheel
+// so; and on a folder whose profiles.json is a tree of version 99: the profile window names the version and shows what this version knows of it,
+// and after a save it names profiles.newer.json, which holds the old bytes, beside a profiles.json of version 2. Then the web's page (src/ui, served as the repository's interface tests serve it) in Playwright's Chromium at the WebView's size: its wheel
 // and fretboard have the boxes of this page's. Last, the one-time take-over: the old page's entries in the WebView's storage are sent once with
 // importLegacy, a second load sends nothing, and with the app's own texts stored other entries take nothing over; a storage whose profiles.json
 // cannot be read (or is damaged) at the first start leaves no mark, and a later start on a working storage takes the profiles.
@@ -959,6 +960,31 @@ try {
     problems.push(`storage: an unreadable session.json is not told at the box of the last session: ${JSON.stringify(atStart)}`);
   if (atStart.storage.mix !== 'unreadable' || atStart.mix !== text('ui.storage.mix.unreadable')) problems.push(`storage: an unreadable mix.json is not told at the mixer: ${JSON.stringify(atStart)}`);
   if (afterWrite.storage.mix !== 'notStored' || afterWrite.mix !== text('ui.storage.mix.notStored')) problems.push(`storage: a mix.json that cannot be written is not told at the mixer: ${JSON.stringify(afterWrite)}`);
+  // Task 32e, the user's decision of 2026-11-24: a stored tree of version 99 (a field and a part this version does not know): the profile window names it with the
+  // version and shows the profiles this version knows; after a save its line names profiles.newer.json, which holds the old bytes, and profiles.json is version 2
+  await quit();
+  const newerDir = join(work, 'newer');
+  mkdirSync(newerDir);
+  const newerTree = JSON.stringify({ version: 99, items: [{ id: 'n', type: 'profile', name: 'Aus neuerer Version ä', color: 'rot', parts: { tempo: { bpm: 100, meter: [4, 4], neu: 1 }, zukunft: { x: 1 } } }], extra: 1 });
+  writeFileSync(join(newerDir, 'profiles.json'), newerTree);
+  const newerApp = await launch(newerDir);
+  await newerApp.locator('#tune-btn').click(); // the play page, where the profile window opens
+  await newerApp.locator('#profiles-btn').click();
+  const newerLine = () => newerApp.evaluate(() => ({ line: document.getElementById('profile-storage').checkVisibility() ? document.getElementById('profile-storage').textContent : null,
+    storage: JSON.parse(window.got.state.at(-1).json).storage, rows: [...document.querySelectorAll('#profile-tree .tree-label')].map((l) => l.textContent) }));
+  await sleep(300);
+  const named = await newerLine();
+  await newerApp.evaluate(() => { const name = document.getElementById('profile-name'); name.value = 'Nach dem Speichern'; name.dispatchEvent(new Event('input', { bubbles: true })); });
+  await newerApp.locator('#profile-save').click();
+  await newerApp.evaluate(() => window.answered());
+  const keptNewer = await newerLine();
+  const fileOf = (name) => { try { return readFileSync(join(newerDir, name)); } catch { return null; } };
+  const keptBytes = fileOf('profiles.newer.json'), written = JSON.parse(fileOf('profiles.json') ?? 'null');
+  result.storage.newer = { named, kept: keptNewer, keptSame: keptBytes?.equals(Buffer.from(newerTree)) ?? null, written: written?.version ?? null };
+  if (named.storage.profiles !== 'newer' || named.storage.profilesVersion !== 99 || named.line !== tr('ui.storage.profiles.newer', { version: 99 }) || !named.rows.includes('Aus neuerer Version ä'))
+    problems.push(`storage: a stored tree of version 99 in the profile window: ${JSON.stringify(named)}`);
+  if (keptNewer.storage.profiles !== 'newerKept' || keptNewer.line !== tr('ui.storage.profiles.newerKept') || !keptNewer.rows.includes('Nach dem Speichern') || !keptNewer.rows.includes('Aus neuerer Version ä')
+    || !result.storage.newer.keptSame || written?.version !== 2) problems.push(`storage: after a save over a tree of version 99: ${JSON.stringify(result.storage.newer)}`);
 
   // ---------- the web's page (src/ui, served as the repository's interface tests serve it) in Playwright's Chromium, at the WebView's size and pixel
   // ratio, in German, the same variant: the wheel and the fretboard have the boxes of the app's page ----------

@@ -981,6 +981,87 @@ int main(int argc, char** argv) {
             check(once && st.files.at("profiles.damaged.json") == damaged && profilesOf(s).at("nodes") == 2 && stateOf(s).at("storage").at("profiles") == "damagedKept",
                   "profiles.damaged.json is written more than once, or saving does not work after it");
         }
+        // Task 32e, the user's decision of 2026-11-24 ("sichern, melden und dann überschreiben klingt gut"): a stored tree of a newer version (99, with a field and a part
+        // this version does not know) is read as far as this version knows it, named with its version and kept once, byte for byte, as profiles.newer.json before the first
+        // write of the tree; a failing keep refuses the change as a failing write of the tree does; a new session on the result names nothing
+        {
+            const std::string newer = R"({"version":99,"items":[{"id":"a","type":"profile","name":"A","color":"rot","parts":{"tempo":{"bpm":100,"meter":[4,4],"neu":1},"zukunft":{"x":1}}}],"extra":1})";
+            const std::string known = R"({"version":2,"items":[{"id":"a","type":"profile","name":"A","parts":{"tempo":{"bpm":100,"meter":[4,4]}}}]})"; // what this version knows of it
+            const auto fileOf = [](const SequenceStorage& f, const char* name) { const auto it = f.files.find(name); return it == f.files.end() ? std::string("(none)") : it->second; };
+            SequenceStorage st, own;
+            st.files["profiles.json"] = newer;
+            own.files["profiles.json"] = known;
+            btg::Session s(st), plain(own);
+            const json named = stateOf(s).at("storage");
+            check(profilesOf(s) == profilesOf(plain) && !s.exportFile("a", "A").empty() && s.exportFile("a", "A") == plain.exportFile("a", "A") && named.at("profiles") == "newer"
+                      && named.value("profilesVersion", json()) == 99 && st.log.empty(), "a stored tree of version 99 is not read as far as this version knows it, or not named with 99: " + named.dump());
+            const json save = json::parse(R"({"action":"saveProfile","name":"N","folder":null,"parts":["tempo"],"id":"n1"})");
+            st.failName = "profiles.newer.json";
+            btg::Session::Change c = s.apply(save.dump());
+            st.failName.clear();
+            check(st.log.size() == 1 && st.log.at(0).at(0) == "profiles.newer.json" && !st.files.count("profiles.newer.json") && st.files.at("profiles.json") == newer
+                      && profilesOf(s).at("message") == notStored && profilesOf(s).at("nodes") == 1 && c.profiles && stateOf(s).at("storage").at("profiles") == "newer",
+                  "a failing keep of profiles.newer.json does not refuse the change, or profiles.json is written");
+            st.log = json::array();
+            run(s, { save });
+            const json first = json::parse(st.files.at("profiles.json"));
+            check(st.log.size() == 2 && st.log.at(0).at(0) == "profiles.newer.json" && st.log.at(1).at(0) == "profiles.json"
+                      && fileOf(st, "profiles.newer.json") == newer && first.is_object() && first.at("version") == 2 && profilesOf(s).at("nodes") == 2
+                      && stateOf(s).at("storage").at("profiles") == "newerKept", "the next change does not keep the newer text byte for byte, then write the tree as version 2");
+            st.log = json::array();
+            run(s, { sel("session"), json::parse(R"({"action":"saveProfile","name":"M","folder":null,"parts":["tempo"],"id":"n2"})") });
+            check(st.log.size() == 1 && st.log.at(0).at(0) == "profiles.json" && fileOf(st, "profiles.newer.json") == newer && stateOf(s).at("storage").at("profiles") == "newerKept",
+                  "a second change writes profiles.newer.json again");
+            st.log = json::array();
+            btg::Session next(st);
+            const json nothing = stateOf(next).at("storage");
+            run(next, { json::parse(R"({"action":"saveProfile","name":"O","folder":null,"parts":["tempo"],"id":"n3"})") });
+            check(nothing.at("profiles").is_null() && nothing.contains("profilesVersion") && nothing.at("profilesVersion").is_null() && st.log.size() == 1 && st.log.at(0).at(0) == "profiles.json"
+                      && fileOf(st, "profiles.newer.json") == newer && profilesOf(next).at("nodes") == 4, "a new session on the tree written after a newer one names it, or writes profiles.newer.json");
+            // reloadProfiles after an unreadable start reads a newer tree as the constructor does
+            SequenceStorage later;
+            later.files["profiles.json"] = newer;
+            later.failReads = "throw";
+            btg::Session r(later);
+            later.failReads.clear();
+            r.apply(R"({"action":"reloadProfiles"})");
+            const json reread = stateOf(r).at("storage"); // session.json and mix.json were unreadable at the load too
+            check(reread.at("profiles") == "newer" && reread.value("profilesVersion", json()) == 99 && profilesOf(r).at("items") == profilesOf(plain).at("items") && later.log.empty(),
+                  "reloadProfiles does not name a newer tree: " + reread.dump());
+            run(r, { save });
+            check(fileOf(later, "profiles.newer.json") == newer && stateOf(r).at("storage").at("profiles") == "newerKept",
+                  "after reloadProfiles, a newer tree is not kept before the first write");
+            // importLegacy while the newer tree is named, and once it is kept: the app's own text lies under profiles.json, but state().storage names it: doubtful (the rule of
+            // Task 32c), so failed, nothing taken or written; the page sends it again at the next load
+            const std::string legacy = json { { "action", "importLegacy" }, { "profiles", known }, { "session", nullptr }, { "mix", nullptr } }.dump();
+            for (const bool kept : { false, true }) {
+                SequenceStorage held;
+                held.files["profiles.json"] = newer;
+                btg::Session h(held);
+                if (kept) run(h, { save });
+                const auto files = held.files;
+                const std::string view = h.profiles();
+                held.log = json::array();
+                h.apply(legacy);
+                check(json::parse(h.state()).at("legacy") == json { { "profiles", "failed" }, { "session", nullptr }, { "mix", nullptr } } && held.files == files && held.log.empty()
+                          && h.profiles() == view, std::string("importLegacy while the newer tree is ") + (kept ? "kept" : "named") + " takes the text, or does not say failed");
+            }
+            // a newer text of the old page into an empty storage: taken, and named and kept as a session made on it does
+            SequenceStorage empty;
+            btg::Session e(empty);
+            e.apply(json { { "action", "importLegacy" }, { "profiles", newer }, { "session", nullptr }, { "mix", nullptr } }.dump());
+            check(json::parse(e.state()).at("legacy").at("profiles") == "taken" && stateOf(e).at("storage") == named && fileOf(empty, "profiles.json") == newer,
+                  "a newer text of the old page is not taken, or not named as a session made on it names it");
+            run(e, { save });
+            check(fileOf(empty, "profiles.newer.json") == newer && stateOf(e).at("storage").at("profiles") == "newerKept",
+                  "a newer text taken over from the old page is written over without being kept");
+        }
+        // Task 32e: as before the task: a tree of version 2, one without a version, a version that is no number or not above 2; a newer text that is damaged is damaged
+        const auto version = [](const json& s) { return s.at("state").at("storage").at("profilesVersion"); };
+        for (const char* text : { R"({"version":2,"items":[]})", R"({"items":[]})", R"({"version":"99","items":[]})", R"({"version":1.5,"items":[]})" })
+            start({ { "profiles.json", text } }, "", std::string("a stored tree ") + text + " is named", [&](const json& s) { return problems(s, nullptr, nullptr, nullptr) && version(s).is_null(); });
+        start({ { "profiles.json", R"({"version":99,"items":5})" } }, "", "a newer text that is damaged is not damaged", [&](const json& s) { return problems(s, "damaged", nullptr, nullptr) && version(s).is_null(); });
+        start({ { "profiles.json", R"({"version":2.5,"items":[]})" } }, "", "a tree of version 2.5 is not named newer", [&](const json& s) { return problems(s, "newer", nullptr, nullptr) && version(s) == 2.5; });
         // a write of session.json or mix.json that fails is named until one holds; the memory keeps the new value
         {
             SequenceStorage st;
@@ -1104,12 +1185,14 @@ int main(int argc, char** argv) {
                                    R"({"action":"setLevel","channel":"pad","value":20})" }) s.apply(a);
             others = st.files;
         }
-        // state() without what importLegacy said of the texts (a session made on them says nothing), and what it said of each text that was sent
+        // state() without what importLegacy said of the texts (a session made on them says nothing), and what it said of each text that was sent; with `problems`
+        // (state().storage), a text whose name it names is said failed (Task 32e: a newer tree the session took and named)
         const auto rest = [](const btg::Session& s) { json j = json::parse(s.state()); j.erase("legacy"); return j; };
-        const auto said = [&](const btg::Session& s, const std::map<std::string, std::string>& texts, const char* want) {
+        const auto said = [&](const btg::Session& s, const std::map<std::string, std::string>& texts, const char* want, const json& problems = json()) {
             const json legacy = json::parse(s.state()).at("legacy");
             bool all = legacy.is_object();
-            for (const auto& [name, field] : FIELD) all = all && legacy.at(field) == (texts.count(name) ? json(want) : json());
+            for (const auto& [name, field] : FIELD)
+                all = all && legacy.at(field) == (texts.count(name) ? json(problems.is_object() && !problems.at(field).is_null() ? "failed" : want) : json());
             return all;
         };
         std::set<std::map<std::string, std::string>> tried;
@@ -1130,8 +1213,8 @@ int main(int argc, char** argv) {
                 const std::string profilesBefore = a.profiles();
                 const btg::Session::Change c = a.apply(legacyOf(texts));
                 const json problems = json::parse(b.state()).at("storage");
-                bool readable = true;
-                for (const auto& entry : texts) readable = readable && problems.at(FIELD.at(entry.first)).is_null();
+                bool readable = true; // Task 32e: a newer tree is read (and named), not unreadable or damaged
+                for (const auto& entry : texts) readable = readable && (problems.at(FIELD.at(entry.first)).is_null() || problems.at(FIELD.at(entry.first)) == "newer");
                 if (readable)
                     check(rest(a) == rest(b) && a.profiles() == b.profiles() && empty.files == made.files && c.mix == (texts.count("mix.json") > 0) && said(a, texts, "taken"),
                           "a session that took the texts is not one made on them, or does not say taken" + what);
@@ -1141,7 +1224,7 @@ int main(int argc, char** argv) {
                 const json stateAfter = rest(a);
                 const std::string profilesAfter = a.profiles();
                 const auto filesAfter = empty.files;
-                check(changeOf(a.apply(legacyOf(texts))) == changeOf({}) && rest(a) == stateAfter && a.profiles() == profilesAfter && empty.files == filesAfter && (!readable || said(a, texts, "stored")),
+                check(changeOf(a.apply(legacyOf(texts))) == changeOf({}) && rest(a) == stateAfter && a.profiles() == profilesAfter && empty.files == filesAfter && (!readable || said(a, texts, "stored", problems)),
                       "sent twice, the second changes something, or does not say stored" + what);
                 if (texts.size() > 1) continue;
                 const std::string& name = texts.begin()->first;

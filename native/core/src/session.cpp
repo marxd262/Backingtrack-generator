@@ -340,18 +340,26 @@ detail::MakeId freeIds(const Json& raw) {
     const auto k = std::make_shared<long long>(0);
     return [used, k] { std::string id; do id = std::to_string(++*k); while (used->count(id)); return id; };
 }
-// profiles.json as read, parsed once: the tree and what state().storage names; a damaged text is kept for profiles.damaged.json. Throws where treeOf throws (no input is known).
+// profiles.json as read, parsed once: the tree and what state().storage names; a damaged or newer text is kept for profiles.damaged.json or profiles.newer.json, `version`
+// is that of a newer tree. Throws where treeOf throws (no input is known).
 // shortcut: a text nested deeper than 64 levels counts as no JSON, so as damaged (track.cpp's reader), where the web reads it, upgrade: with the reader's limit
-struct LoadedTree { Json tree; Json problem; std::string damaged; };
+struct LoadedTree { Json tree; Json problem; std::string keep; Json version; };
 LoadedTree loadProfiles(const Stored& stored) {
-    if (stored.unreadable) return { detail::newTree(), "unreadable", "" };
-    if (!stored.text) return { detail::newTree(), Json(), "" };
+    if (stored.unreadable) return { detail::newTree(), "unreadable", "", Json() };
+    if (!stored.text) return { detail::newTree(), Json(), "", Json() };
     const Json raw = detail::parsedText(*stored.text);
     std::optional<Json> tree = detail::treeOf(raw, freeIds(raw));
-    if (!tree) return { detail::newTree(), "damaged", *stored.text };
-    return { std::move(*tree), Json(), "" };
+    if (!tree) return { detail::newTree(), "damaged", *stored.text, Json() };
+    // The user's decision of 2026-11-24 ("sichern, melden und dann überschreiben klingt gut"), against the web, which writes over it in silence: a tree whose version is
+    // a number above the one saveTree writes is read as far as this version knows it, named with its version and kept before the first write over it
+    const Json* version = detail::member(raw, "version");
+    if (version != nullptr && version->is_number() && version->get<double>() > detail::STORED_VERSION) return { std::move(*tree), "newer", *stored.text, *version };
+    return { std::move(*tree), Json(), "", Json() };
 }
-constexpr const char* DAMAGED_NAME = "profiles.damaged.json"; // where a damaged profiles.json is kept (PROTOKOLL.md section 3a)
+// where a damaged profiles.json and one of a newer version are kept (PROTOKOLL.md section 3a). shortcut: a later session keeps a second damaged or newer text over the
+// first (the shell's .bak holds that one until the next write), upgrade: if the user wants every one kept
+constexpr const char* DAMAGED_NAME = "profiles.damaged.json";
+constexpr const char* NEWER_NAME = "profiles.newer.json";
 
 // ---------- the handlers (app.js and the panels; session-reference.mjs names their lines) ----------
 
@@ -376,7 +384,7 @@ struct Step {
     const Json& problems;           // state().storage before the action
     Pending pending {};
     std::optional<Json> newTree {}, newUndo {}; // a commit's tree and undo, taken when its write holds
-    std::optional<LoadedTree> reloaded {};      // what reloadProfiles read (its tree is newTree)
+    std::optional<LoadedTree> reloaded {};      // what reloadProfiles read, or the tree importLegacy took (its tree is newTree)
     Json& t() { return trackOf(s); }
     Json& win() { return s["profiles"]; } // what profiles.js holds: selection, open, message
     void restartIfPlaying(bool inPlace) { c.restart = true; c.inPlace = inPlace; } // app.js 173-181
@@ -925,11 +933,16 @@ const std::map<std::string, ProfileHandler>& profileHandlers() {
                                     } catch (...) { said[field] = "failed"; return std::nullopt; }
                                     return text.get<std::string>();
                                 };
-                                if (x.problems.at("profiles").is_null()) { // an unreadable or damaged profiles.json stays as the constructor found it
+                                if (x.problems.at("profiles").is_null()) { // a profiles.json state().storage names (unreadable, damaged, newer, kept) stays as it is
                                     if (const auto text = taken("profiles", detail::PROFILES_NAME)) {
                                         LoadedTree loaded = loadProfiles({ text, false });
-                                        said["profiles"] = loaded.problem.is_null() ? "taken" : "damaged";
-                                        if (loaded.problem.is_null()) { x.pending.write(detail::PROFILES_NAME, *text); x.newTree = std::move(loaded.tree); x.newUndo = Json(); }
+                                        said["profiles"] = loaded.problem == "damaged" ? "damaged" : "taken"; // a newer tree is taken, and named and kept as the constructor does
+                                        if (loaded.problem != "damaged") {
+                                            x.pending.write(detail::PROFILES_NAME, *text);
+                                            x.newTree = std::move(loaded.tree);
+                                            x.newUndo = Json();
+                                            x.reloaded = std::move(loaded);
+                                        }
                                     }
                                 } else if (!x.a.at("profiles").is_null()) said["profiles"] = "failed";
                                 if (const auto text = taken("session", detail::SESSION_NAME)) {
@@ -1126,8 +1139,8 @@ struct Session::Memory {
     Json tree;            // the profiles { items }
     Json undo;            // what "Rückgängig" keeps: null or { tree, selection, message }
     Json last;            // the last session: null or { parts, bar, at }
-    Json storage;         // state().storage: { profiles, session, mix }
-    std::string damaged;  // the text of a damaged profiles.json, while it is not kept yet
+    Json storage;         // state().storage: { profiles, profilesVersion, session, mix }
+    std::string keep;     // the text of a damaged or newer profiles.json, while it is not kept yet
     std::string view;     // what profiles() gives
 };
 
@@ -1137,7 +1150,7 @@ struct Session::Memory {
 Session::Session(Storage& storage) : storage_(storage), memory_(std::make_unique<Memory>()) {
     Memory& m = *memory_;
     try {
-        m.storage = Json::object({ { "profiles", nullptr }, { "session", nullptr }, { "mix", nullptr } });
+        m.storage = Json::object({ { "profiles", nullptr }, { "profilesVersion", nullptr }, { "session", nullptr }, { "mix", nullptr } });
         m.state = startState(1); // its mixer and panorama are the defaults of an empty storage
         // profiles.js 42-47; `drag`: the row being dragged (profile-drag.js), none
         m.state["profiles"] = Json::object({ { "selection", "session" }, { "open", Json::array({ "mine", "factory" }) }, { "message", nullptr }, { "drag", nullptr } });
@@ -1157,7 +1170,8 @@ Session::Session(Storage& storage) : storage_(storage), memory_(std::make_unique
             LoadedTree loaded = loadProfiles(readStored(storage_, detail::PROFILES_NAME));
             m.tree = std::move(loaded.tree);
             m.storage["profiles"] = loaded.problem;
-            m.damaged = std::move(loaded.damaged);
+            m.storage["profilesVersion"] = loaded.version;
+            m.keep = std::move(loaded.keep);
         } catch (...) { m.tree = detail::newTree(); m.storage["profiles"] = "unreadable"; }
         try { // app.js 153
             const Stored last = readStored(storage_, detail::SESSION_NAME);
@@ -1255,10 +1269,11 @@ Session::Change Session::apply(const std::string& actionJson) {
             return named;
         };
         for (const auto& [name, text] : texts) {
-            if (name == detail::PROFILES_NAME && m.storage.at("profiles") == "damaged") { // the damaged text is kept once, before the first write of the tree
-                if (!written(storage_, DAMAGED_NAME, m.damaged)) return notStored();
-                m.storage["profiles"] = "damagedKept";
-                m.damaged.clear();
+            const Json problem = m.storage.at("profiles");
+            if (name == detail::PROFILES_NAME && (problem == "damaged" || problem == "newer")) { // the damaged or newer text is kept once, before the first write of the tree
+                if (!written(storage_, problem == "damaged" ? DAMAGED_NAME : NEWER_NAME, m.keep)) return notStored();
+                m.storage["profiles"] = problem.get<std::string>() + "Kept";
+                m.keep.clear();
             }
             const bool held = written(storage_, name, text);
             if (name == detail::PROFILES_NAME) { if (!held) return notStored(); }
@@ -1273,7 +1288,11 @@ Session::Change Session::apply(const std::string& actionJson) {
         m.state = std::move(s);
         m.last = std::move(last);
         if (step.newTree) { m.tree = std::move(*step.newTree); m.undo = std::move(*step.newUndo); }
-        if (step.reloaded) { m.storage["profiles"] = step.reloaded->problem; m.damaged = std::move(step.reloaded->damaged); }
+        if (step.reloaded) {
+            m.storage["profiles"] = step.reloaded->problem;
+            m.storage["profilesVersion"] = step.reloaded->version;
+            m.keep = std::move(step.reloaded->keep);
+        }
         if (window) c.profiles = rebuild(m.view, m.state, m.tree, m.undo);
         return c;
     } catch (...) { // a helper that throws where the web would coerce (harmony.h, form_internal.h): the action changes nothing

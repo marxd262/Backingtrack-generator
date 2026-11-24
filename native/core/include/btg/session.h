@@ -10,8 +10,8 @@ namespace btg {
 // web keeps in the browser's storage. The page sends actions as JSON text and shows state(); the actions, their fields, the fields of state() and what is
 // stored when are listed in native/PROTOKOLL.md. Control thread only.
 
-// What the shell provides: lasting storage by name (profiles.json, session.json, mix.json, profiles.damaged.json). The app writes files, a browser shell later its
-// own store.
+// What the shell provides: lasting storage by name (profiles.json, session.json, mix.json, profiles.damaged.json, profiles.newer.json). The app writes files, a browser
+// shell later its own store.
 struct Storage {
     virtual ~Storage() = default;
     // nothing (nullopt) only when nothing is stored under the name; a storage that cannot read what is stored (locked, no permission, an error of the medium) throws.

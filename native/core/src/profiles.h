@@ -114,6 +114,7 @@ void writeSession(Json& state, const Json& session);
 inline constexpr const char* PROFILES_NAME = "profiles.json";
 inline constexpr const char* SESSION_NAME = "session.json";
 inline constexpr const char* MIX_NAME = "mix.json";
+inline constexpr int STORED_VERSION = 2; // profile-store.js 10: the `version` saveTree writes into profiles.json
 // Domain: `session` as captureParts, `bar` and `at` numbers (the web: Date.now(); the core has no clock, the caller gives it). Writes { parts, bar, at } as JSON text; a write that
 // fails is ignored (the web: no storage); returns the entry.
 Json saveLast(Storage& storage, const Json& session, const Json& bar, const Json& at);

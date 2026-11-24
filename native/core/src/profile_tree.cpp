@@ -557,7 +557,7 @@ Json loadTree(Storage& storage, const MakeId& makeId) {
 
 bool saveTree(Storage& storage, const Json& tree) {
     if (tree.is_null()) return false; // the web: tree.items throws inside its try
-    Json stored = Json::object({ { "version", 2 } });
+    Json stored = Json::object({ { "version", STORED_VERSION } });
     if (const Json* items = member(tree, "items")) stored["items"] = *items;
     return storage.write(PROFILES_NAME, stringify(stored));
 }

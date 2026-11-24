@@ -1603,6 +1603,8 @@ add('presetDrive', presetDrive, [...VOICES.chords.organ.variants, 'nope', '', nu
       { id: '', type: 'folder', name: '  ', items: [{ id: '1', ...tiny('Eins', 4) }, { id: 3, ...tiny('Zahl', 5) }] }, { id: '2', type: 'note', name: 'x' }, { type: 'profile', name: 'Leer', parts: {} },
       { id: 'lang', ...tiny(`${'n'.repeat(70)}`, 6) }] }),
     JSON.stringify({ version: 2, items: chain(9, [tiny('unten')]) }), JSON.stringify({ version: 2, items: Array.from({ length: 1001 }, (_, i) => ({ id: `k${i}`, ...tiny(`K${i}`) })) })];
+  const NEWER = JSON.stringify({ version: 99, items: [{ id: 'n', type: 'profile', name: 'Neu', color: 'rot', parts: { tempo: { bpm: 100, meter: [4, 4], neu: 1 }, zukunft: { x: 1 } } },
+    { id: 'o', type: 'folder', name: 'Ordner', neu: true, items: [] }], extra: 1 }); // Task 32e
   const RESTARTS = [
     build([save('Erst'), () => { early = ref.storage.text('profiles.json'); return sel('mine'); }, folderAdd('F'), sel('session'), save('Zweit'), act('setLevel', { channel: 'drums', value: 35 }),
       act('setPan', { layer: 'lead', value: -60 }), act('newVariant', { variant: 77 }), act('rememberSession', { bar: 33, at: 1700000000000 }), act('newVariant', { variant: 78 }),
@@ -1622,6 +1624,18 @@ add('presetDrive', presetDrive, [...VOICES.chords.organ.variants, 'nope', '', nu
       { restart: true, stored: { 'mix.json': null } }, act('resume', { playing: null })]),
     build([probe('session', 'Aktuelle Sitzung'), probe('mine', 'Meine Profile'), probe('factory', 'x'), probe('factory:funk', 'Funk-Rock'), probe('factory:nope', 'x'), probe('nope', 'x'), probe('', 'x'),
       save('P'), () => probe(idOf('P'), 'egal'), sel('mine'), folderAdd('Leer'), () => probe(idOf('Leer'), 'x'), probe('mine', 'Meine Profile'), probe('session', 'Name mit "Zeichen" \\ und \n Zeile')]),
+    // Task 32e, the user's decision of 2026-11-24 ("sichern, melden und dann überschreiben klingt gut"): a stored tree of version 99 with fields and a part this version does
+    // not know is read as far as this version knows it and named with its version; the first change keeps its text as profiles.newer.json, then writes version 2 (a keep
+    // that fails or throws refuses the change, the next keeps and writes), a second keeps nothing, a new session on the result names nothing; read again after an
+    // unreadable start; importLegacy while it is named and once kept (failed), and of a newer text into an empty storage (taken, named, kept); a newer text that is
+    // damaged, a version that is a text, 2 and 2.5
+    build([{ restart: true, stored: { 'profiles.json': NEWER } }, act('start', { variant: 70 }), sel('mine'), fail(folderAdd('A')), fail(folderAdd('A'), 'throw'), folderAdd('A'),
+      sel('session'), save('B'), { restart: true }, act('start', { variant: 71 }), sel('session'), save('C'),
+      { restart: true, stored: { 'profiles.json': NEWER, 'profiles.newer.json': null }, failReads: 'throw' }, act('start', { variant: 72 }), act('reloadProfiles'), sel('session'), save('D'),
+      { restart: true, stored: { 'profiles.json': NEWER } }, legacy(NEWER, null, null), sel('session'), save('E'), legacy(NEWER, null, null),
+      { restart: true, stored: { 'profiles.json': null, 'profiles.newer.json': null } }, act('start', { variant: 73 }), legacy(NEWER, null, null), sel('session'), save('F'),
+      ...['{"version":99,"items":5}', '{"version":"99","items":[]}', '{"version":2,"items":[]}', '{"version":2.5,"items":[]}']
+        .flatMap((text, i) => [{ restart: true, stored: { 'profiles.json': text, 'profiles.newer.json': null } }, act('start', { variant: 74 + i }), sel('session'), save(`G${i}`)])]),
   ];
   for (const steps of RESTARTS) sequence(steps);
   // Fix wave of Phase 6 (F4): the web's two notices, fields of state() now. "Folge voll" (notice, refusals): set by addChord at 8 chords, kept by the actions that do not

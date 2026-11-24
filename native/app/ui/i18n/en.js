@@ -290,6 +290,8 @@ export default {
   'ui.storage.profiles.unreadable': 'The saved profiles could not be read. Until they can, the app saves no profiles.',
   'ui.storage.profiles.damaged': 'The saved profiles are damaged. The next save keeps them as profiles.damaged.json.',
   'ui.storage.profiles.damagedKept': 'The damaged profiles are kept in profiles.damaged.json.',
+  'ui.storage.profiles.newer': 'The saved profiles come from a newer version of the app (format version {version}); what this version knows of them is shown. The next save keeps them as profiles.newer.json before it overwrites them.',
+  'ui.storage.profiles.newerKept': 'The profiles of the newer version are kept in profiles.newer.json.',
   'ui.profileReload': 'Read again',
   'ui.variant': 'Variant',
   'ui.language': 'Language',
