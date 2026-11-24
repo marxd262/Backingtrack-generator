@@ -145,6 +145,9 @@ const BASE = [
   guitar('bass all 0.5', 'bass', knobs(0.5, 0.5, 0.5)),
   guitar('chords all 0.5 44.1 kHz', 'chords', knobs(0.5, 0.5, 0.5), { rate: 44100 }),
   guitar('chords all 0.5 96 kHz', 'chords', knobs(0.5, 0.5, 0.5), { rate: 96000 }),
+  // Task 32g: the lead with fuzz and overdrive at 1 is silent in the web's chain too (the overdrive's output stays below the fuzz's bias, the
+  // Fuzz Face curve sits at its end and the 35 Hz highpass takes that constant away); at fuzz 0.5 its level is falling
+  guitar('lead fuzz 1 overdrive 1', 'lead', knobs(1, 1)), guitar('lead fuzz 0.5 overdrive 1', 'lead', knobs(0.5, 1)),
 ];
 const all = knobs(0.5, 0.5, 0.5), off = knobs();
 const TIME = [

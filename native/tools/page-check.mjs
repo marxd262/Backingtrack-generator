@@ -360,9 +360,9 @@ try {
   // has every turned field at 1; with every effect on bass, chords and pad have a level, the peak of at least one of them moves by 1.5 dB or more
   // against the pass without (the old bar: the engine runs the effects), and the engine's load (the slowly falling peak of its block's share) is at
   // most 25 % with no dropout in either pass. Then the knobs back where they were.
-  // shortcut: the lead is left out of the levels and the 1.5 dB: with fuzz and overdrive both at 100 the lead on synth/classic gives no level in the
-  // app (a finding in the engine, Task 32d's report, being followed up); its peaks are in the result (load.lead), upgrade: when the engine is fixed
-  // the lead joins the assertion
+  // shortcut: the lead is left out of the levels and the 1.5 dB: with fuzz and overdrive both at 100 the lead's chain is silent, in the web app as
+  // in the core (the overdrive's output stays below the fuzz's bias; fx-compare.mjs holds it with "lead fuzz 1 overdrive 1"); its peaks are in the
+  // result (load.lead), upgrade: when the web app's sound changes there, the lead joins the assertion
   const FX = ['bass', 'chords', 'pad'];
   const played = await page.evaluate(() => { const e = window.got.events.at(-1); return { bpm: e.bpm, beats: e.beats, events: JSON.parse(e.json) }; });
   const starts = (layer, beat) => played.events.some((e) => e.layer === layer && (e.type === 'note' || e.type === 'hit')
