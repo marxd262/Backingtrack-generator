@@ -15,12 +15,13 @@
 //     the load stays at most 25 % with no dropout. Then two drags of 60 actions (a fader, a timbre knob) and `stop`: the last answer and the stop's
 //     effect within 1.0 s. What happens to the page (a navigation, a crash, a close, the app's end) is recorded with its time; after the setup it is
 //     a problem. Writes the result to .superpowers/native-screens/shell-check.json and prints it.
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
+import { startApp } from './app-window.mjs';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const exe = process.argv[2] ?? join(repo, 'native/build/app/BackingtrackApp_artefacts/Release/Standalone/Backingtrack Generator.exe');
@@ -67,7 +68,7 @@ const problems = [];
 const result = {};
 const began = Date.now(), pageLog = [];
 let setupDone = Infinity; // the index in pageLog from which an entry is a problem
-const app = spawn(exe, [], { env: { ...process.env, BTG_MUTE: '1', BTG_STORAGE_DIR: storage, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${PORT}` }, stdio: 'ignore' });
+const app = startApp(exe, `btg-tools-${PORT}`, { env: { ...process.env, BTG_MUTE: '1', BTG_STORAGE_DIR: storage, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${PORT}` }, stdio: 'ignore' });
 let killed = false;
 app.on('exit', (code, signal) => { if (!killed) pageLog.push({ ms: Date.now() - began, what: `the app ended by itself (code ${code}, signal ${signal})` }); });
 let browser;

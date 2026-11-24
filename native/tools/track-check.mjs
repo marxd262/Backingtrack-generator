@@ -6,7 +6,7 @@
 // The app runs muted (BTG_MUTE) and analyses every file anew (BTG_NO_CACHE), unless BTG_KEEP=1 asks for the kept results. Needs ffmpeg for the format test files.
 // It runs on a storage folder of its own (BTG_STORAGE_DIR, removed afterwards with the rendered song): the developer's profiles are never touched.
 // Its debug port 9333 is ui-check.mjs's too: the two cannot run at once.
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 import { SCALES } from '../../src/core/music.js';
 import { renderSong } from './render-song.mjs';
+import { startApp } from './app-window.mjs';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const storage = mkdtempSync(join(tmpdir(), 'btg-track-check-'));
@@ -33,7 +34,7 @@ for (const [type, args] of Object.entries(formats)) {
 }
 writeFileSync(join(work, 'broken.mp3'), 'this is not audio');
 
-const app = spawn(exe, [], { env: { ...process.env, BTG_MUTE: '1', ...(process.env.BTG_KEEP ? {} : { BTG_NO_CACHE: '1' }), BTG_STORAGE_DIR: storage, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${PORT}` }, stdio: 'ignore' });
+const app = startApp(exe, `btg-tools-${PORT}`, { env: { ...process.env, BTG_MUTE: '1', ...(process.env.BTG_KEEP ? {} : { BTG_NO_CACHE: '1' }), BTG_STORAGE_DIR: storage, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${PORT}` }, stdio: 'ignore' });
 let browser;
 try {
   for (let i = 0; !browser && i < 40; i++) {

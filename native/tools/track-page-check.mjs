@@ -12,7 +12,6 @@
 // was lost is asked for again on pageshow. The pages share the language: the one opposite to the system's, chosen on the generator's page as the
 // app's strip chooses it, shows here; the system's, chosen here, shows on the generator's page after "Zum Generator", which leads there. No error
 // in the page's console. Writes .superpowers/native-screens/track-page-check.json and prints it.
-import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -22,7 +21,7 @@ import de from '../app/ui/i18n/de.js';
 import en from '../app/ui/i18n/en.js';
 import TEXT from '../app/ui/track-text.js';
 import { renderSong } from './render-song.mjs';
-import { showWindow } from './app-window.mjs';
+import { showWindow, startApp } from './app-window.mjs';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const exe = process.argv[2] ?? join(repo, 'native/build/app/BackingtrackApp_artefacts/Release/Standalone/Backingtrack Generator.exe');
@@ -108,7 +107,7 @@ try {
   const wav = renderSong(work);
   const folder = join(work, 'storage');
   mkdirSync(folder);
-  const app = spawn(exe, [], { env: { ...process.env, BTG_MUTE: '1', BTG_NO_CACHE: '1', BTG_STORAGE_DIR: folder, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${PORT}` }, stdio: 'ignore' });
+  const app = startApp(exe, `btg-tools-${PORT}`, { env: { ...process.env, BTG_MUTE: '1', BTG_NO_CACHE: '1', BTG_STORAGE_DIR: folder, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${PORT}` }, stdio: 'ignore' });
   run = { app, browser: null };
   for (let i = 0; !run.browser && i < 40; i++) {
     await sleep(500);
@@ -223,9 +222,9 @@ try {
   const view = () => page.evaluate(() => ({ origin: performance.timeOrigin, title: document.getElementById('title').textContent,
     parts: [...document.getElementById('sections').children].map((b) => b.textContent), scale: document.getElementById('scale').value })).catch((e) => ({ failed: e.message.split('\n')[0] }));
   const navigatedBefore = navigated.length, beforeHidden = await view();
-  showWindow(run.app.pid, 'minimise');
+  showWindow(run.app, 'minimise');
   await sleep(1500);
-  showWindow(run.app.pid, 'restore');
+  showWindow(run.app, 'restore');
   await sleep(2000);
   result.hidden = { before: beforeHidden, after: await view(), navigations: navigated.slice(navigatedBefore) };
   if (result.hidden.after.failed || JSON.stringify(result.hidden.after) !== JSON.stringify(beforeHidden) || result.hidden.navigations.length || !beforeHidden.parts.length)

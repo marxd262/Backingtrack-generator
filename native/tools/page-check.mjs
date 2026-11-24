@@ -31,7 +31,7 @@
 // importLegacy, a second load sends nothing, and with the app's own texts stored other entries take nothing over; a storage whose profiles.json
 // cannot be read (or is damaged) at the first start leaves no mark, and a later start on a working storage takes the profiles.
 // Writes .superpowers/native-screens/page-check.json and prints it.
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -39,7 +39,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 import de from '../app/ui/i18n/de.js';
 import { start as serveWeb } from '../../scripts/serve.js';
-import { showWindow } from './app-window.mjs';
+import { showWindow, startApp } from './app-window.mjs';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const exe = process.argv[3] ?? join(repo, 'native/build/app/BackingtrackApp_artefacts/Release/Standalone/Backingtrack Generator.exe');
@@ -74,7 +74,7 @@ let run = null; // { app, browser, page } of the app that runs
 // page send recorded from the start of the document, the page drawn from the answer to its sync. `prepare(page)`: runs once in the page before the
 // reload that starts the recording (to put something into its storage).
 async function launch(folder, { prepare = null } = {}) {
-  const app = spawn(exe, [], { env: { ...process.env, BTG_MUTE: '1', BTG_STORAGE_DIR: folder, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${PORT}` }, stdio: 'ignore' });
+  const app = startApp(exe, `btg-tools-${PORT}`, { env: { ...process.env, BTG_MUTE: '1', BTG_STORAGE_DIR: folder, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${PORT}` }, stdio: 'ignore' });
   run = { app, browser: null, page: null };
   for (let i = 0; !run.browser && i < 40; i++) {
     await sleep(500);
@@ -246,9 +246,9 @@ try {
   const hiddenLook = () => page.evaluate(() => ({ origin: performance.timeOrigin, playPage: !document.getElementById('play')?.hidden,
     position: document.getElementById('play-position')?.textContent ?? null, syncs: window.sent.filter((s) => s.type === 'sync').length })).catch((e) => ({ failed: e.message.split('\n')[0] }));
   const navigatedBefore = run.navigations.length, beforeHidden = await hiddenLook();
-  showWindow(run.app.pid, 'minimise');
+  showWindow(run.app, 'minimise');
   await sleep(1500);
-  showWindow(run.app.pid, 'restore');
+  showWindow(run.app, 'restore');
   await sleep(2000);
   result.hidden = { before: beforeHidden, after: await hiddenLook(), navigations: run.navigations.slice(navigatedBefore) };
   const h = result.hidden;

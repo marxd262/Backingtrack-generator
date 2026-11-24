@@ -2,18 +2,14 @@
 // started as the checks in native/tools start it: muted (BTG_MUTE), on that folder (BTG_STORAGE_DIR; the WebView2 profile with the pages'
 // localStorage lies in it too), with the WebView2 debug port (9340 + the worker's index), attached with Playwright over CDP; ended with kill()
 // after the browser is closed, the folder removed. Tests import test and expect from here; `page` is the app's generator page, ready.
-import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test as base, expect, chromium } from '@playwright/test';
+import { shown, startApp } from '../../tools/app-window.mjs';
 
 const exe = join(import.meta.dirname, '../../build/app/BackingtrackApp_artefacts/Release/Standalone/Backingtrack Generator.exe');
-// The app runs on a Windows desktop of its own (native/platform/win/desktop_run.cpp): its window does not appear on the user's screen nor take
-// the keyboard focus; killing the program, or the end of the worker that started it, ends the app with its WebView2 (a job). BTG_SHOW=1 starts
-// the app itself, to watch a test.
-const desktopRun = join(import.meta.dirname, '../../build/platform/Release/btg_desktop_run.exe');
-const shown = process.env.BTG_SHOW === '1';
+// The app runs on a Windows desktop of its own (startApp; BTG_SHOW=1 starts the app itself, to watch a test).
 // A start takes 1.3 to 2.6 s (160 starts measured: no step over 2 s). After this deadline the start fails, naming its step; ending the app
 // (at most 10 s) and removing the folder (at most 5 s) still fit in the fixture's 30 s. The deadline holds for both tries of a start together
 // (below): a first try that stands without a page ends about 3 + 5 s after its spawn (the attach, measured up to 3.0 s, then NO_PAGE_MS), its
@@ -72,7 +68,6 @@ async function launch(options) {
 }
 
 async function start(run, { folder, port, locale, viewport, reducedMotion, problems }, retry) {
-  for (const file of shown ? [exe] : [exe, desktopRun]) if (!existsSync(file)) throw new Error(`no app at ${file}: build it first (native/build.ps1)`);
   if (await portOpen(port)) throw new Error(`port ${port} is taken: does an app of an earlier run still run?`);
   if (run.closing) return; // the deadline came meanwhile and quit() found no app to end: none is started after it
   // shortcut: every start reads the user's %APPDATA%\Backingtrack Generator\Backingtrack Generator.settings (JUCE's StandaloneFilterApp, as in
@@ -83,7 +78,7 @@ async function start(run, { folder, port, locale, viewport, reducedMotion, probl
   // shortcut: one desktop per worker (btg-tests-<port>): with the apps of all workers on one desktop, a start now and then never got its page (the
   // WebView2's browser ran with no page for 15 s; 6 in about 1900 starts); with a desktop each it is rarer (1 in about 2150), not gone (such a
   // start is tried once more: NO_PAGE_MS above); why is not known, upgrade: when the cause is found.
-  const app = (run.app = spawn(shown ? exe : desktopRun, shown ? [] : [`btg-tests-${port}`, exe], { stdio: 'ignore', env: { ...process.env, BTG_MUTE: '1', BTG_STORAGE_DIR: folder,
+  const app = (run.app = startApp(exe, `btg-tests-${port}`, { stdio: 'ignore', env: { ...process.env, BTG_MUTE: '1', BTG_STORAGE_DIR: folder,
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port} --lang=${locale} --disable-features=msSmartScreenProtection --disable-accelerated-2d-canvas` } }));
   run.step = `attach to the app's WebView2 on port ${port}`;
   while (!run.browser) {
