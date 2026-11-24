@@ -1,21 +1,26 @@
 // Checks the app's page for the user's own songs (native/app/ui/track.html, Task 32c: what its fretboard and wheel show comes from the core,
-// chordDisplays) against the old one (native/app/web/track.html) in the real app, in one step (after native/build.ps1 with the app):
+// chordDisplays) in the real app, in one step (after native/build.ps1 with the app):
 //   node native/tools/track-page-check.mjs [app.exe]
-// btg_render renders a generator song (the funk test track with chords and pad on a progression of sevenths, a half-diminished chord and the
-// major dominant) to a WAV in a temporary folder. The app, muted and on a storage folder of its own (BTG_STORAGE_DIR, removed afterwards with its
-// WebView2 profile), loads it as the user's own song on the old page, analyses and plays it; then a second app run does the same with
-// BTG_UI_NEW=1 on the new page. At the same places of the song both show the same chord and next chord, the same tones on the fretboard (the drawn
-// dots with their roles and labels, and the text version), the same wheel (its pixels, and the nodes marked as the chord that sounds and the next
-// one); clicks on wheel nodes enter the same chords into the bar; the scale select has the same entries; neither page's console has an error.
-// The new pages share the language: English chosen on the generator's page (as the app's strip chooses it) shows on the own songs' page, and
-// German chosen there shows on the generator's page after "Zum Generator".
-// Writes .superpowers/native-screens/track-page-check.json and prints it.
-import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+// A generator song (render-song.mjs: btg_render, in a temporary folder) is loaded as the user's own song, analysed and played. The app runs muted,
+// on a storage folder of its own (BTG_STORAGE_DIR, removed afterwards with its WebView2 profile) and analyses anew (BTG_NO_CACHE: nothing is kept in
+// the user's folder). At places of the song (inside every chord the analysis found, and before its end) the page shows what the core's answer to
+// the page's own last request says: it asks for the chord and the next chord it shows, and its fretboard (the drawn dots with their roles and labels,
+// the text version) and its wheel (the nodes marked as the chord that sounds and the next one) are the answer's. A click on a wheel node enters the
+// name the answer allows for that node into the bar; the scale select has the entries of tables(). The events forced into the other order: an
+// analysis before the lists (tables) keeps its scale and throws nothing; a click on the wheel before any answer throws nothing, and an answer that
+// was lost is asked for again on pageshow. The pages share the language: the one opposite to the system's, chosen on the generator's page as the
+// app's strip chooses it, shows here; the system's, chosen here, shows on the generator's page after "Zum Generator", which leads there. No error
+// in the page's console. Writes .superpowers/native-screens/track-page-check.json and prints it.
+import { spawn } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
+import de from '../app/ui/i18n/de.js';
+import en from '../app/ui/i18n/en.js';
+import TEXT from '../app/ui/track-text.js';
+import { renderSong } from './render-song.mjs';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const exe = process.argv[2] ?? join(repo, 'native/build/app/BackingtrackApp_artefacts/Release/Standalone/Backingtrack Generator.exe');
@@ -35,15 +40,73 @@ async function quit() {
   run.app.kill();
   await gone;
   run = null;
-  for (let i = 0; i < 40 && (await fetch(`http://127.0.0.1:${PORT}/json/version`).then(() => true, () => false)); i++) await sleep(250); // the debug port, free again
 }
 
-// The app on a folder of its own, attached, on its page for own songs (the new one with BTG_UI_NEW=1); errors are recorded from the page's second load
-// (leaving the generator's page cuts its requests off)
-async function launch(fresh) {
-  const folder = join(work, fresh ? 'new' : 'old');
+// Before every load of the page: what it sends (window.sent) and what the shell sends it (window.got), and the shell's events of one kind held back
+// while the tab's sessionStorage names it (btg.hold): window.release() hands them to the page, window.drop() forgets them (an answer that was lost)
+function record() {
+  const backend = window.__JUCE__.backend;
+  window.sent = [];
+  window.got = { chordDisplays: [], analysis: [], engine: [] };
+  for (const name of Object.keys(window.got)) {
+    backend.addEventListener(name, (m) => { const list = window.got[name]; list.push({ ...m, at: performance.now() }); if (list.length > 600) list.splice(0, 300); });
+  }
+  const emit = backend.emitEvent.bind(backend);
+  backend.emitEvent = (name, data) => { window.sent.push({ ...data, at: performance.now() }); emit(name, data); };
+  window.bridge = (type, data = {}) => emit('btg', { type, ...data });
+  const fromShell = backend.emitByBackend.bind(backend);
+  let held = [];
+  backend.emitByBackend = (event, payload) => (event === sessionStorage.getItem('btg.hold') ? held.push([event, payload]) : fromShell(event, payload));
+  window.release = () => { sessionStorage.removeItem('btg.hold'); for (const [event, payload] of held) fromShell(event, payload); held = []; };
+  window.drop = () => { sessionStorage.removeItem('btg.hold'); const n = held.length; held = []; return n; };
+}
+
+// What the page shows at the playhead against the core's answer to its last request: the chord and the next chord it shows and asked for, the
+// board's visible dots (string:fret:roles:label) and text version, and the wheel's nodes marked in pink (the chord that sounds) and teal (the next
+// one), sampled in each node above its label, all as the answer gives them
+const look = (page) => page.evaluate(async () => {
+  const { layoutWheel } = await import('/app/wheel-geometry.js');
+  const { t } = await import('/app/i18n/index.js');
+  const request = window.sent.findLast((s) => s.type === 'chordDisplays');
+  const answer = window.got.chordDisplays.find((m) => m.seq === request?.seq);
+  const a = answer?.json ? JSON.parse(answer.json) : null;
+  const text = (id) => document.getElementById(id).textContent;
+  const asked = JSON.parse(request.json);
+  const shown = { chord: text('chord'), next: text('next') };
+  if (!a) return { shown, asked: { current: asked.current, next: asked.next }, answered: false };
+  const degrees = document.getElementById('labels-degrees').getAttribute('aria-pressed') === 'true';
+  const roles = (n) => [n.scale && 'scale', n.current && n.next ? 'both' : n.current ? 'current' : n.next && 'next', n.root && 'root', !n.scale && 'outside'].filter(Boolean).join(' ');
+  const part = (k, chord, tones) => t(k, { chord, notes: tones.join(', ') });
+  const canvas = document.getElementById('wheel'), ctx = canvas.getContext('2d'), ratio = canvas.width / canvas.clientWidth;
+  const near = (rgb, [r, g, b]) => Math.abs(rgb[0] - r) + Math.abs(rgb[1] - g) + Math.abs(rgb[2] - b) < 40;
+  const marks = layoutWheel(canvas.clientWidth).nodes.map((n, k) => {
+    const rgb = ctx.getImageData(Math.round(n.x * ratio), Math.round((n.y - 0.7 * n.r) * ratio), 1, 1).data;
+    return near(rgb, [0xe3, 0x46, 0x5e]) ? `${k}:now` : near(rgb, [0x18, 0xa2, 0xa6]) ? `${k}:next` : null;
+  }).filter(Boolean);
+  const place = (i) => (a.wheel.nodes[i].ring === 'outer' ? 0 : 12) + a.wheel.nodes[i].index;
+  return {
+    shown, asked: { current: asked.current, next: asked.next }, answered: true,
+    board: [...document.querySelectorAll('#fretboard svg g.fret-note:not([hidden])')].map((g) => `${g.dataset.string}:${g.dataset.fret}:${g.dataset.role}:${g.querySelector('text').textContent}`).sort().join(' '),
+    boardWanted: a.fretboard.map((n) => `${n.string}:${n.fret}:${roles(n)}:${degrees ? n.degree : n.name}`).sort().join(' '),
+    text: text('fretboard-text'),
+    textWanted: !a.notes ? '' : a.nextNotes ? `${part('ui.fretboardNow', a.name, a.notes)}. ${part('ui.fretboardNext', a.nextName, a.nextNotes)}` : part('ui.fretboardNow', a.name, a.notes),
+    marks: marks.sort().join(' '),
+    marksWanted: [a.at.current !== null && `${place(a.at.current)}:now`, a.at.next !== null && `${place(a.at.next)}:next`].filter(Boolean).sort().join(' '),
+  };
+});
+// the differences of a look() from what the page asked and the answer gave, as text; empty when there is none
+const wrong = (s) => (!s.answered ? ['no answer to its last request'] : [
+  s.asked.current !== (s.shown.chord === '–' ? null : s.shown.chord) && `it shows the chord ${s.shown.chord} and asked for ${s.asked.current}`,
+  s.asked.next !== (s.shown.next === '–' ? null : s.shown.next) && `it shows the next chord ${s.shown.next} and asked for ${s.asked.next}`,
+  s.board !== s.boardWanted && 'the fretboard is not the answer\'s', s.text !== s.textWanted && `its text version is "${s.text}", the answer's "${s.textWanted}"`,
+  s.marks !== s.marksWanted && `the wheel marks ${s.marks}, the answer ${s.marksWanted}`,
+].filter(Boolean));
+
+try {
+  const wav = renderSong(work);
+  const folder = join(work, 'storage');
   mkdirSync(folder);
-  const app = spawn(exe, [], { env: { ...process.env, BTG_UI_NEW: fresh ? '1' : '', BTG_MUTE: '1', BTG_NO_CACHE: '1', BTG_STORAGE_DIR: folder, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${PORT}` }, stdio: 'ignore' });
+  const app = spawn(exe, [], { env: { ...process.env, BTG_MUTE: '1', BTG_NO_CACHE: '1', BTG_STORAGE_DIR: folder, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${PORT}` }, stdio: 'ignore' });
   run = { app, browser: null };
   for (let i = 0; !run.browser && i < 40; i++) {
     await sleep(500);
@@ -56,146 +119,143 @@ async function launch(fresh) {
     if (!page) await sleep(250);
   }
   if (!page) throw new Error('no page from the resource provider');
-  const name = fresh ? 'new page' : 'old page';
-  let recording = false;
-  page.on('console', (m) => { if (recording && m.type() === 'error') problems.push(`${name}, console: ${m.text()}`); });
-  page.on('pageerror', (e) => { if (recording) problems.push(`${name}, page error: ${e.message}`); });
-  page.on('requestfailed', (r) => { if (recording && !r.url().startsWith('blob:')) problems.push(`${name}, request failed: ${r.url()}`); });
+  let recording = false; // from the own songs' page's second load on (leaving the generator's page cuts its requests off)
+  page.on('console', (m) => { if (recording && m.type() === 'error') problems.push(`console: ${m.text()}`); });
+  page.on('pageerror', (e) => { if (recording) problems.push(`page error: ${e.message}`); });
+  page.on('requestfailed', (r) => { if (recording && !r.url().startsWith('blob:')) problems.push(`request failed: ${r.url()}`); });
+
+  // the language: the one opposite to the system's chosen on the generator's page, as the app's strip chooses it (a fresh profile shows the system's)
   await page.waitForLoadState('load').catch(() => {});
-  // the language: on the new pages English is chosen on the generator's page as the app's strip chooses it (the own songs' page must show it,
-  // check() reads it); the old pages are simply set to German
-  await page.evaluate((l) => (l === 'en' ? window.__JUCE__.backend.emitByBackend('language', JSON.stringify(l)) : localStorage.setItem('backingtrack.lang', l)), fresh ? 'en' : 'de');
-  const url = new URL(fresh ? '/app/track.html' : '/native/track.html', page.url()).href;
+  await page.waitForFunction(() => document.getElementById('variant')?.value, null, { timeout: 15000 });
+  const system = await page.evaluate(async () => (await import('/app/i18n/index.js')).detectLanguage(navigator.language));
+  const chosen = system === 'de' ? 'en' : 'de';
+  await page.evaluate((l) => window.__JUCE__.backend.emitByBackend('language', JSON.stringify(l)), chosen);
+  await page.waitForFunction((l) => document.documentElement.lang === l, chosen, { timeout: 5000 });
+  await page.addInitScript(record);
+  const url = new URL('/app/track.html', page.url()).href;
   await page.goto(url).catch(async () => { await sleep(1500); await page.goto(url); });
   const ready = () => page.waitForFunction(() => document.getElementById('scale').options.length > 0 && document.querySelector('#fretboard svg'), null, { timeout: 15000 });
   await ready();
   recording = true;
   await page.reload();
   await ready();
-  return page;
-}
+  // drawn in the chosen language: the title, and a text the page writes (the static page has none)
+  result.languages = { system, chosen, opened: await page.evaluate(() => ({ lang: document.documentElement.lang, title: document.title, open: document.getElementById('open').textContent })) };
+  if (JSON.stringify(result.languages.opened) !== JSON.stringify({ lang: chosen, title: TEXT[chosen]['track.title'], open: TEXT[chosen]['track.open'] }))
+    problems.push(`the language chosen on the generator's page does not show here: ${JSON.stringify(result.languages)}`);
+  // the system's language chosen here, as the strip does: the comparisons below read it, and the generator's page shows it after "Zum Generator"
+  await page.evaluate((l) => window.__JUCE__.backend.emitByBackend('language', JSON.stringify(l)), system);
+  await sleep(300);
 
-// What the page shows at the playhead: the chord and the next one, the board's visible dots (string:fret:roles:label), its text version, the wheel's
-// pixels (a hash of them) and the nodes it marks as the chord that sounds (pink) and the next one (teal), sampled in each node above its label
-const shown = (page) => page.evaluate(async () => {
-  const { layoutWheel } = await import('/app/wheel-geometry.js');
-  const text = (id) => document.getElementById(id).textContent;
-  const board = [...document.querySelectorAll('#fretboard svg .fret-note')].filter((g) => !g.hasAttribute('hidden')).map((g) => `${g.dataset.string}:${g.dataset.fret}:${g.dataset.role}:${g.textContent}`);
-  const canvas = document.getElementById('wheel'), ctx = canvas.getContext('2d'), ratio = canvas.width / canvas.clientWidth;
-  const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < pixels.length; i += 1) { hash ^= pixels[i]; hash = Math.imul(hash, 0x01000193) >>> 0; }
-  const near = (rgb, [r, g, b]) => Math.abs(rgb[0] - r) + Math.abs(rgb[1] - g) + Math.abs(rgb[2] - b) < 40;
-  const marks = layoutWheel(canvas.clientWidth).nodes.map((n, k) => {
-    const rgb = ctx.getImageData(Math.round(n.x * ratio), Math.round((n.y - 0.7 * n.r) * ratio), 1, 1).data;
-    return near(rgb, [0xe3, 0x46, 0x5e]) ? `${k}:now` : near(rgb, [0x18, 0xa2, 0xa6]) ? `${k}:next` : null;
-  }).filter(Boolean);
-  return { chord: text('chord'), next: text('next'), board, boardText: text('fretboard-text'), wheel: hash.toString(16), marks };
-});
-
-async function check(fresh, wav) {
-  const page = await launch(fresh);
-  // the two pages share the language: the one chosen on the generator's page shows here; German chosen here (as the strip does) shows on the
-  // generator's page after "Zum Generator" (below), and the comparisons read German on both runs
-  const languages = { opened: await page.evaluate(() => document.documentElement.lang) };
-  if (fresh) await page.evaluate(() => window.__JUCE__.backend.emitByBackend('language', JSON.stringify('de')));
-  await page.evaluate(() => {
-    const backend = window.__JUCE__.backend;
-    window.log = { engine: [], analysis: [] };
-    backend.addEventListener('engine', (m) => { window.log.engine.push({ ...m, at: performance.now() }); if (window.log.engine.length > 600) window.log.engine.splice(0, 300); });
-    backend.addEventListener('analysis', (m) => window.log.analysis.push(m));
-    window.bridge = (type, data = {}) => backend.emitEvent('btg', { type, ...data });
-  });
+  // the song, loaded as the user's own, analysed
   const analysis = await page.evaluate(async (path) => {
     const name = path.split(/[\\/]/).pop();
     window.bridge('loadFile', { path });
     for (let i = 0; i < 1200; i++) {
       await new Promise((r) => setTimeout(r, 100));
-      const done = window.log.analysis.find((a) => a.name === name);
-      if (done) return { json: done.json, seconds: done.seconds };
+      const done = window.got.analysis.find((a) => a.name === name);
+      if (done) return { ...done, at: undefined };
     }
     return null;
   }, wav);
-  if (!analysis) throw new Error(`${fresh ? 'new' : 'old'} page: the song was not analysed`);
+  if (!analysis) throw new Error('the song was not analysed');
   await sleep(500);
-  const seen = { analysis: analysis.json, languages };
-  seen.scales = await page.evaluate(() => [...document.getElementById('scale').options].map((o) => `${o.value}=${o.textContent}`));
-  seen.scale = await page.locator('#scale').inputValue();
-  seen.edits = await page.evaluate(() => [...document.getElementById('edit').options].map((o) => o.value));
+  const analysed = JSON.parse(analysis.json);
+  result.song = { key: `${analysed.key.root} ${analysed.key.mode}`, scale: analysed.scale, chords: [...new Set(analysed.chords.map((c) => c.chord))] };
+
+  // the scale select: the entries of tables(), in the page's language, the analysis' scale chosen
+  result.scales = await page.evaluate(async () => {
+    const { session } = await import('/app/session.js');
+    const { t } = await import('/app/i18n/index.js');
+    const options = [...document.getElementById('scale').options].map((o) => `${o.value}=${o.textContent}`);
+    return { same: JSON.stringify(options) === JSON.stringify(session.tables.SCALES.map((id) => `${id}=${t(`scale.${id}`)}`)), count: options.length, value: document.getElementById('scale').value };
+  });
+  if (!result.scales.same || result.scales.value !== analysed.scale) problems.push(`the scale select: ${JSON.stringify(result.scales)}, the analysis' scale ${analysed.scale}`);
+
   // it plays: the transport moves and the display follows
   await page.evaluate(() => window.bridge('playFile', { from: 0, rate: 1 }));
   await sleep(2500);
-  seen.playing = await page.evaluate(() => { const e = window.log.engine.at(-1); return { playing: e.playing, beats: +e.beats.toFixed(2), chord: document.getElementById('chord').textContent }; });
+  result.playing = await page.evaluate(() => { const e = window.got.engine.at(-1); return { playing: e.playing, beats: +e.beats.toFixed(2), chord: document.getElementById('chord').textContent }; });
   await page.evaluate(() => window.bridge('stop'));
   await sleep(300);
-  // the places: inside every chord the analysis found (a quarter second after its start) and just before the end
-  const chords = JSON.parse(analysis.json).chords;
-  seen.places = [];
-  for (const t of [...chords.map((c) => c.t + 0.25), analysis.seconds - 0.5]) {
-    await page.evaluate((beats) => window.bridge('seek', { beats }), t);
-    await sleep(350);
-    seen.places.push({ t: +t.toFixed(2), ...(await shown(page)) });
-  }
-  // clicks on wheel nodes at one place: C, Am, the outer node on B, E, F#, each with what the bar at the playhead stores and shows then
-  const at = chords[Math.floor(chords.length / 2)].t + 0.25;
-  await page.evaluate((beats) => window.bridge('seek', { beats }), at);
-  await sleep(350);
-  seen.clicks = [];
-  for (const k of [0, 12, 5, 4, 6]) {
-    const place = await page.evaluate(async (node) => {
-      const { layoutWheel } = await import('/app/wheel-geometry.js');
-      const n = layoutWheel(document.getElementById('wheel').clientWidth).nodes[node];
-      return { x: n.x, y: n.y };
-    }, k);
-    await page.locator('#wheel').click({ position: place });
-    await sleep(400);
-    seen.clicks.push({ node: k, stored: await page.evaluate(() => Object.entries(localStorage).filter(([key]) => key.startsWith('btg.track.')).map(([, v]) => v)), ...(await shown(page)) });
-  }
-  await page.screenshot({ path: join(out, `track-page-${fresh ? 'new' : 'old'}.png`) });
-  // "Zum Generator" leads to the generator's page of the same kind
-  await Promise.all([page.waitForURL(/index\.html/, { timeout: 15000 }), page.locator('#generator').click()]);
-  seen.generator = new URL(page.url()).pathname;
-  await page.waitForFunction(() => document.getElementById('variant')?.value, null, { timeout: 15000 }).catch(() => {}); // the generator's page drawn
-  languages.back = await page.evaluate(() => document.documentElement.lang);
-  await quit();
-  return seen;
-}
+  if (!result.playing.playing || result.playing.beats < 1 || result.playing.chord === '–') problems.push(`the song does not play: ${JSON.stringify(result.playing)}`);
 
-try {
-  // the song: the funk test track with chords and pad on, 16 bars of a progression with sevenths, a half-diminished chord and the major dominant
-  const { form, ...base } = JSON.parse(readFileSync(join(repo, 'native/core/tests/track-funk.json'), 'utf8'));
-  const song = { ...base, key: { root: 'A', mode: 'minor' }, length: 16, layers: { ...base.layers, chords: true, pad: true },
-    bars: [['A', 'min7'], ['D', 'min7'], ['G', 'dom7'], ['C', 'maj7'], ['F', 'maj7'], ['B', 'm7b5'], ['E', 'dom7'], ['A', 'min']].map(([root, quality]) => ({ chord: { root, quality }, beats: 4 })) };
-  writeFileSync(join(work, 'song.json'), JSON.stringify(song));
-  const wav = join(work, 'song.wav');
-  const rendered = spawnSync(join(repo, 'native/build/core/Release/btg_render.exe'), [join(work, 'song.json'), join(repo, 'src/assets/samples'), wav], { encoding: 'utf8' });
-  if (rendered.status !== 0) throw new Error(`btg_render failed: ${rendered.stdout}${rendered.stderr}`);
-  const old = await check(false, wav);
-  const fresh = await check(true, wav);
-  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-  const analysed = JSON.parse(old.analysis);
-  result.song = { key: `${analysed.key.root} ${analysed.key.mode}`, scale: old.scale, chords: [...new Set(analysed.chords.map((c) => c.chord))], places: old.places.length };
-  result.playing = { old: old.playing, new: fresh.playing };
-  if (!same(old.analysis, fresh.analysis)) problems.push('the two app runs analysed the song differently: the pages cannot be compared');
-  if (!old.playing.playing || old.playing.beats < 1 || !fresh.playing.playing || fresh.playing.beats < 1 || fresh.playing.chord === '–') problems.push(`the song does not play: ${JSON.stringify(result.playing)}`);
-  for (const field of ['scales', 'scale', 'edits']) if (!same(old[field], fresh[field])) problems.push(`the ${field} differ: old ${JSON.stringify(old[field])}, new ${JSON.stringify(fresh[field])}`);
-  result.scales = fresh.scales.length;
-  // at each place every field the same; and the old page shows something there (a board with dots, a marked node), so that two empty pages do not pass
-  const fields = ['chord', 'next', 'board', 'boardText', 'wheel', 'marks'];
-  result.places = Object.fromEntries(fields.map((f) => [f, `${old.places.filter((p, i) => same(p[f], fresh.places[i]?.[f])).length}/${old.places.length}`]));
-  old.places.forEach((p, i) => {
-    const q = fresh.places[i];
-    for (const f of fields) if (!same(p[f], q?.[f])) problems.push(`at ${p.t} s the ${f} differs: old ${JSON.stringify(p[f]).slice(0, 300)}, new ${JSON.stringify(q?.[f]).slice(0, 300)}`);
+  // the places: inside every chord the analysis found (a quarter second after its start) and just before the end
+  const seek = async (t) => { await page.evaluate((beats) => window.bridge('seek', { beats }), t); await sleep(350); };
+  const places = [];
+  for (const t of [...analysed.chords.map((c) => c.t + 0.25), analysis.seconds - 0.5]) {
+    await seek(t);
+    places.push({ t: +t.toFixed(2), ...(await look(page)) });
+  }
+  for (const p of places) for (const w of wrong(p)) problems.push(`at ${p.t} s ${w}`);
+  result.places = { count: places.length, withDots: places.filter((p) => p.board).length, withNext: places.filter((p) => p.asked.next).length, withMarks: places.filter((p) => p.marks).length };
+  if (!result.places.withDots || !result.places.withNext || !result.places.withMarks) problems.push(`the page shows no board, no next chord or no marked node: ${JSON.stringify(result.places)}`);
+
+  // clicks on wheel nodes at one place: each enters the name the answer allows for the node into the bar at the playhead, and the page shows it
+  await seek(analysed.chords[Math.floor(analysed.chords.length / 2)].t + 0.25);
+  result.clicks = [];
+  for (let i = 0; i < 4; i++) {
+    const node = await page.evaluate(async (n) => {
+      const { layoutWheel } = await import('/app/wheel-geometry.js');
+      const a = JSON.parse(window.got.chordDisplays.at(-1).json);
+      const shown = document.getElementById('chord').textContent;
+      const allowed = a.wheel.nodes.filter((x) => x.allowed && x.allowed.name !== shown), d = allowed[n % allowed.length];
+      const p = layoutWheel(document.getElementById('wheel').clientWidth).nodes[(d.ring === 'outer' ? 0 : 12) + d.index];
+      return { name: d.allowed.name, x: p.x, y: p.y };
+    }, i * 2);
+    await page.locator('#wheel').click({ position: { x: node.x, y: node.y } });
+    await sleep(400);
+    const after = await page.evaluate(() => ({ chord: document.getElementById('chord').textContent,
+      stored: Object.entries(localStorage).filter(([key]) => key.startsWith('btg.track.')).flatMap(([, v]) => Object.values(JSON.parse(v).edits ?? {})) }));
+    result.clicks.push({ allowed: node.name, ...after });
+    if (after.chord !== node.name || !after.stored.includes(node.name)) problems.push(`a click on the node of ${node.name}: the bar shows ${after.chord}, stored ${JSON.stringify(after.stored)}`);
+  }
+  await page.locator('#reset').click();
+  await sleep(300);
+  await page.screenshot({ path: join(out, 'track-page.png') });
+
+  // the events in the other order, forced: the lists (tables) held back over a load and the analysis sent before them, as when it lands first
+  await page.evaluate(() => sessionStorage.setItem('btg.hold', 'tables'));
+  await page.reload();
+  await page.waitForLoadState('load');
+  await sleep(500);
+  // with another scale than the list's first entry (the song's own, minor pentatonic, is the first: a select that lost it would show it all the same)
+  const early = { ...analysis, json: JSON.stringify({ ...analysed, scale: 'dorian' }) };
+  await page.evaluate((m) => window.__JUCE__.backend.emitByBackend('analysis', JSON.stringify(m)), early);
+  await sleep(500);
+  // the select as the lists build it, read in the same turn (the analysis the page then asks for again with `hello` cannot have come yet)
+  result.analysisFirst = await page.evaluate(() => {
+    const before = { options: document.getElementById('scale').options.length, title: document.getElementById('title').textContent };
+    window.release();
+    return { ...before, scale: document.getElementById('scale').value };
   });
-  result.shownOnOld = { withDots: old.places.filter((p) => p.board.length).length, withMarks: old.places.filter((p) => p.marks.length).length, withText: old.places.filter((p) => p.boardText).length, kinds: [...new Set(old.places.map((p) => p.chord))] };
-  if (!result.shownOnOld.withDots || !result.shownOnOld.withMarks || !result.shownOnOld.withText) problems.push(`the old page shows no board, text or marked node: ${JSON.stringify(result.shownOnOld)}`);
-  result.clicks = old.clicks.map((c, i) => ({ node: c.node, chord: c.chord, same: same(c, fresh.clicks[i]) }));
-  old.clicks.forEach((c, i) => { if (!same(c, fresh.clicks[i])) problems.push(`a click on node ${c.node}: old ${JSON.stringify(c).slice(0, 300)}, new ${JSON.stringify(fresh.clicks[i]).slice(0, 300)}`); });
-  if (old.clicks.every((c) => !c.stored.length)) problems.push('no click on the wheel entered a chord on the old page');
-  result.languages = { old: old.languages, new: fresh.languages };
-  if (fresh.languages.opened !== 'en' || fresh.languages.back !== 'de') problems.push(`the new pages do not share the language (English chosen on the generator's page, German on the own songs' page): ${JSON.stringify(fresh.languages)}`);
-  result.generator = { old: old.generator, new: fresh.generator };
-  if (old.generator !== '/ui/index.html' || fresh.generator !== '/app/index.html') problems.push(`"Zum Generator" leads to ${JSON.stringify(result.generator)}`);
+  await ready();
+  await sleep(500);
+  if (result.analysisFirst.options !== 0 || result.analysisFirst.title !== analysis.name || result.analysisFirst.scale !== 'dorian')
+    problems.push(`an analysis before the lists: ${JSON.stringify(result.analysisFirst)} (its scale: dorian)`);
+  // ... and every answer to the page's questions lost over a load: a click on the wheel before any answer, then the page shown again (pageshow)
+  await page.evaluate(() => sessionStorage.setItem('btg.hold', 'chordDisplays'));
+  await page.reload();
+  await ready();
+  await page.waitForFunction(() => window.got.analysis.length && window.sent.some((s) => s.type === 'chordDisplays' && JSON.parse(s.json).current), null, { timeout: 15000 });
+  await sleep(300);
+  const top = await page.evaluate(async () => { const { layoutWheel } = await import('/app/wheel-geometry.js'); const n = layoutWheel(document.getElementById('wheel').clientWidth).nodes[0]; return { x: n.x, y: n.y }; });
+  await page.locator('#wheel').click({ position: top });
+  await sleep(300);
+  const lost = await page.evaluate(() => ({ dropped: window.drop(), asked: window.sent.filter((s) => s.type === 'chordDisplays').length }));
+  await page.evaluate(() => dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+  await sleep(500);
+  const again = await look(page);
+  result.lostAnswers = { ...lost, askedAfter: await page.evaluate(() => window.sent.filter((s) => s.type === 'chordDisplays').length), wrong: wrong(again) };
+  if (!(lost.dropped > 0) || result.lostAnswers.askedAfter <= lost.asked || result.lostAnswers.wrong.length || !again.marks)
+    problems.push(`answers lost, then pageshow: ${JSON.stringify(result.lostAnswers)}`);
+
+  // "Zum Generator" leads to the generator's page, drawn (from the session: its variant; its title is written by the page) in the language chosen here
+  await Promise.all([page.waitForURL(/\/app\/index\.html$/, { timeout: 15000 }), page.locator('#generator').click()]);
+  await page.waitForFunction(() => document.getElementById('variant')?.value, null, { timeout: 15000 });
+  result.languages.back = await page.evaluate(() => ({ path: location.pathname, lang: document.documentElement.lang, title: document.title }));
+  if (JSON.stringify(result.languages.back) !== JSON.stringify({ path: '/app/index.html', lang: system, title: { de, en }[system]['ui.title'] }))
+    problems.push(`"Zum Generator" or the language chosen on the own songs' page: ${JSON.stringify(result.languages.back)}`);
 } catch (error) {
   problems.push(`the check stopped: ${error.message.split('\n')[0]}`);
 } finally {

@@ -14,7 +14,7 @@ export function createWheel(canvas, state, onPick) {
   canvas.addEventListener('click', (e) => {
     const l = layoutWheel(canvas.clientWidth);
     const node = hitTest(l, e.offsetX, e.offsetY);
-    const chord = node && current.wheel.nodes.find((d) => placeOf(l, d) === node).allowed;
+    const chord = node && current.wheel.nodes.find((d) => placeOf(l, d) === node)?.allowed; // vor der ersten Antwort hat das Rad keine Knoten
     if (chord) onPick({ ...chord });
   });
 

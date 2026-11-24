@@ -736,7 +736,7 @@ function wheelAt(key, chord, next) {
   return { current, next: following === current ? null : following, nextShort: next ? chordShort(next) : null };
 }
 
-// ---------- the page of the user's own songs (native/app/web/track.js): what its displays show for a chord in a key (PROTOKOLL.md section 4b, chordDisplays) ----------
+// ---------- the old page of the user's own songs (native/app/web/track.js, removed in Task 32d; in git before it): what its displays show for a chord in a key (PROTOKOLL.md section 4b, chordDisplays) ----------
 // track.js 19-20 and 25-31, mirrored (the page touches the shell and the DOM when it loads): the names of the bar's select, and a chord name of the analysis as the app's chord
 // object and back. Against the old page, which threw there: a name without a root, or one that is no text, is no chord (null; the old page took String(name)), and a symbol
 // is looked up among KINDS' own keys only ('constructor' is no symbol: major, as any unknown one)

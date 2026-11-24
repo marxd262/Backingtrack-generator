@@ -166,7 +166,9 @@ void BackingtrackProcessor::mix (const juce::var& state) {
     }
 }
 
-// the transport plays the session's song from the start of `bar` (the core's barStart), after the web's lead of 0.15 s (see `play`); throws as barStart
+// the transport plays the session's song from the start of `bar` (the core's barStart), after the web's lead of 0.15 s; throws as barStart
+// shortcut: every start of the generator is delayed by the web app's 0.15 s (play.js LEAD), during which the clock stands and the sum's
+// compressors settle on silence, upgrade: when a start must sound at once, age the chain's state by that time instead (a loaded file has none).
 void BackingtrackProcessor::playFrom (const std::string& song, int bar, double bpm, bool inPlace) {
     const double beats = btg::barStart (song, bar);
     playsFile = false;
@@ -231,10 +233,14 @@ std::string BackingtrackProcessor::exportNow (const std::string& key, const std:
     return session.exportFile (key, name);
 }
 
+// shortcut: packs read from the repository of the build machine (BTG_WEB_ROOT); a release installs them next to the program (Task 34).
+static const char* const packsPath = BTG_WEB_ROOT "/assets/samples";
+
+juce::File BackingtrackProcessor::packsFolder() { return juce::File (packsPath); }
+
 std::shared_ptr<const btg::Pack> BackingtrackProcessor::pack (const std::string& id) {
     auto& held = packs[id];
-    // shortcut: packs read from the repository of the build machine (BTG_WEB_ROOT); a release installs them next to the program (Task 34).
-    if (held == nullptr) held = btg::loadPackFiles (BTG_WEB_ROOT "/assets/samples", id);
+    if (held == nullptr) held = btg::loadPackFiles (packsPath, id);
     return held;
 }
 

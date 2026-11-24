@@ -46,6 +46,7 @@ public:
     // Sample packs by id, read once and kept for the app's life (the engine's tones point into them). Loader thread only;
     // throws like btg::loadPackFiles.
     std::shared_ptr<const btg::Pack> pack (const std::string& id);
+    static juce::File packsFolder(); // where pack() reads them, with the packs' licence texts (LICENSE-*.md)
     // Speed of the loaded track (1 = as recorded). Here, not in the editor: the queued messages playFile and fileRate set and
     // read it, so it is touched on the loader thread only.
     double fileRate = 1.0;
@@ -112,9 +113,6 @@ private:
     std::map<std::string, std::shared_ptr<const btg::Pack>> packs;
 
 public:
-    // The number of the newest timbre and of the newest tuning message the page sent (PluginEditor.cpp handle(): a queued one of them that
-    // finds a newer number here when its job starts is not run).
-    std::atomic<juce::uint64> newestTimbre { 0 }, newestTuning { 0 };
     // Work that reads packs or builds the song, and the transport with it, in the order the page sent it (PluginEditor.cpp, `queued`).
     // The last member: destroyed first, so a job still running never touches a member that is gone.
     juce::ThreadPool loader { juce::ThreadPoolOptions{}.withThreadName ("loader").withNumberOfThreads (1) };

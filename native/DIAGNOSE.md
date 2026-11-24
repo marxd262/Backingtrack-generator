@@ -29,7 +29,7 @@ Die Vermutung der Anleitung („das Modell liefert gleichmäßige Schläge, eine
 
 **Warum der erste Zwischenschlag bleibt:** Die Regel vergleicht den üblichen Abstand in der Umgebung mit dem halben üblichen Abstand des Tracks und lässt 6 % zu. Das Modell gibt Zeiten in Schritten von 20 ms aus. Am Abschnittsanfang ist der Median der Umgebung 0,42 s, der halbe übliche Abstand 0,39 s: 7,7 % daneben, also „nicht schnell“. Der wahre Wert wäre 0,395 s. Die Regel scheitert am Zeitraster, nicht an der Musik.
 
-**Folge für das angezeigte Tempo:** Die Seite rechnet das Tempo aus den 8 Schlägen um die Abspielstelle ([track.js](app/web/track.js)). Jeder überzählige Schlag und jeder Wechsel auf die Zwischen-Achtel verschiebt diese Zahl. Neue Messgröße `tempo steady`: Bei „Letting Go“ weicht das Tempo an 14,7 % der Schläge um mehr als 3 % ab, höchstens um +33,8 % (102 statt 76 bpm). Alle anderen echten Tracks liegen bei höchstens 3,0 %.
+**Folge für das angezeigte Tempo:** Die Seite rechnet das Tempo aus den 8 Schlägen um die Abspielstelle ([track.js](app/ui/track.js)). Jeder überzählige Schlag und jeder Wechsel auf die Zwischen-Achtel verschiebt diese Zahl. Neue Messgröße `tempo steady`: Bei „Letting Go“ weicht das Tempo an 14,7 % der Schläge um mehr als 3 % ab, höchstens um +33,8 % (102 statt 76 bpm). Alle anderen echten Tracks liegen bei höchstens 3,0 %.
 
 **Andere Tracks mit Eingriff der Regeln** (`beats-compare.mjs`):
 
@@ -81,7 +81,7 @@ Bei „Late Night Groove“ läuft das Muster über zwei Takte: Gm auf der Eins,
 
 ## (b) Die Positionsanzeige der App
 
-Der Weg der Position: Der Audio-Thread zählt `Transport::beats_` je Block weiter (ein „Schlag“ ist eine Sekunde des Tracks). Ein Timer im Fenster liest den Wert 30-mal je Sekunde und schickt ihn an die Seite. Die Seite merkt sich die Ankunft mit `performance.now()` und rechnet zwischen zwei Nachrichten weiter ([track.js:41](app/web/track.js#L41)). Akkord und Takt werden direkt aus `beats` und `bars` der Analyse bestimmt, nicht aus `bpm`.
+Der Weg der Position: Der Audio-Thread zählt `Transport::beats_` je Block weiter (ein „Schlag“ ist eine Sekunde des Tracks). Ein Timer im Fenster liest den Wert 30-mal je Sekunde und schickt ihn an die Seite. Die Seite merkt sich die Ankunft mit `performance.now()` und rechnet zwischen zwei Nachrichten weiter ([track.js:32](app/ui/track.js#L32)). Akkord und Takt werden direkt aus `beats` und `bars` der Analyse bestimmt, nicht aus `bpm`.
 
 Gemessen in der echten App, stumm, mit „Letting Go“ (`position-check.mjs`; die Seite fragt die Engine zweimal je Sekunde nach ihrer Position):
 

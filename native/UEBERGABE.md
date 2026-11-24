@@ -34,7 +34,7 @@ Der Generator ist nicht Teil dieses Laufs (dafür gibt es die Web-Version als R�
 | Trefferquoten | `node native/tools/analysis-score.mjs <Ordner> [...]` |
 | generierter Testsatz | `node native/tools/analysis-set.mjs` nach `native/build/analysis-set` |
 | Akkordanzeige aus Videos schneiden | `node native/tools/chord-frames.mjs` |
-| Oberfläche in der echten App prüfen | `node native/tools/ui-check.mjs`, `node native/tools/track-check.mjs <track>` |
+| Oberfläche in der echten App prüfen | `node native/tools/ui-check.mjs [Variante]`, `node native/tools/track-page-check.mjs`, `node native/tools/track-check.mjs [track]` (ohne Track ein gerenderter Song) |
 
 Echte Testtracks und Labels: `C:\dev\samples-raw\analysis-tests\` (außerhalb des Repos; Format in `LIESMICH-labels.txt` dort). Videos unter `video\`. `yt-dlp` liegt unter `%LOCALAPPDATA%\Microsoft\WinGet\Packages\yt-dlp.yt-dlp_*\yt-dlp.exe`. Python mit Demucs und PyTorch: `C:\dev\samples-raw\tools\demucs-venv` (nur zum Messen).
 

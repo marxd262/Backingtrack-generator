@@ -1,9 +1,10 @@
-// Checks the page for a loaded track inside the real app (WebView2 debug port, Playwright): file formats,
+// Checks the page for a loaded track (native/app/ui/track.html) inside the real app (WebView2 debug port, Playwright): file formats,
 // time to load and analyse, the display against the playback position, the lane (scroll, zoom, jump, loop),
 // the speed control and the corrections.
-//   node native/tools/track-check.mjs <track.mp3> [app.exe] [output folder]
+//   node native/tools/track-check.mjs [track.mp3] [app.exe] [output folder]
+// Without a track it renders a generator song of 96 bars, 230 s (render-song.mjs), and checks with that.
 // The app runs muted (BTG_MUTE) and analyses every file anew (BTG_NO_CACHE), unless BTG_KEEP=1 asks for the kept results. Needs ffmpeg for the format test files.
-// It runs on a storage folder of its own (BTG_STORAGE_DIR, removed afterwards): the developer's profiles are never touched.
+// It runs on a storage folder of its own (BTG_STORAGE_DIR, removed afterwards with the rendered song): the developer's profiles are never touched.
 // Its debug port 9333 is ui-check.mjs's too: the two cannot run at once.
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -11,10 +12,12 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
+import { SCALES } from '../../src/core/music.js';
+import { renderSong } from './render-song.mjs';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-if (!process.argv[2]) throw new Error('usage: track-check.mjs <track.mp3> [app.exe] [output folder]');
-const source = resolve(process.argv[2]);
+const storage = mkdtempSync(join(tmpdir(), 'btg-track-check-'));
+const source = process.argv[2] ? resolve(process.argv[2]) : renderSong(storage, 96);
 const exe = process.argv[3] ?? join(repo, 'native/build/app/BackingtrackApp_artefacts/Release/Standalone/Backingtrack Generator.exe');
 const out = process.argv[4] ?? join(repo, '.superpowers/native-screens');
 const work = join(repo, 'native/build/format-test');
@@ -30,7 +33,6 @@ for (const [type, args] of Object.entries(formats)) {
 }
 writeFileSync(join(work, 'broken.mp3'), 'this is not audio');
 
-const storage = mkdtempSync(join(tmpdir(), 'btg-track-check-'));
 const app = spawn(exe, [], { env: { ...process.env, BTG_MUTE: '1', ...(process.env.BTG_KEEP ? {} : { BTG_NO_CACHE: '1' }), BTG_STORAGE_DIR: storage, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${PORT}` }, stdio: 'ignore' });
 let browser;
 try {
@@ -59,7 +61,7 @@ try {
     window.engineNow = () => window.log.engine.at(-1);
   });
   // The generator page may still be loading; a navigation that cuts into that ends on the web view's error page.
-  const trackPage = new URL('/native/track.html', page.url()).href;
+  const trackPage = new URL('/app/track.html', page.url()).href;
   await page.waitForLoadState('load').catch(() => {});
   await page.goto(trackPage).catch(async () => { await sleep(1500); await page.goto(trackPage); });
   await page.locator('#open').waitFor({ state: 'visible', timeout: 15000 });
@@ -236,8 +238,7 @@ try {
   await sleep(400);
   result.edit.afterReload = await text('chord');
   // every scale of the list: the fretboard marks as many different notes as the scale has steps
-  result.scales = await page.evaluate(async () => {
-    const { SCALES } = await import('/core/music.js');
+  result.scales = await page.evaluate(async (SCALES) => {
     const select = document.getElementById('scale'), wrong = [];
     for (const [id, steps] of Object.entries(SCALES)) {
       select.value = id;
@@ -248,7 +249,7 @@ try {
       if (select.value !== id || shown !== steps.length || !sound) wrong.push(`${id}: ${shown} notes for ${steps.length} steps`);
     }
     return { count: Object.keys(SCALES).length, wrong };
-  });
+  }, SCALES); // the web's scales (src/core/music.js): the steps the select's entries must show
   if (result.scales.wrong.length) problems.push(`scales on the fretboard: ${result.scales.wrong.join('; ')}`);
   const parts = () => page.locator('#sections button').allInnerTexts();
   result.shift = { before: (await parts()).slice(0, 3) };

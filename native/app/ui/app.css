@@ -1,9 +1,9 @@
 /* Rack-Optik: Farben, Schrift und Maße nur hier über Variablen. Akzente nur Türkis und Pink; Grau, Schwarz und das grüne LCD sonst.
    Die alten Namen (--paper, --ink, --accent ...) bleiben, Leinwände lesen sie über cssColors() (canvas.js). */
-@font-face { font-family: Barlow; font-weight: 400; font-display: swap; src: url('../assets/fonts/barlow-400.woff2') format('woff2'); }
-@font-face { font-family: Barlow; font-weight: 500; font-display: swap; src: url('../assets/fonts/barlow-500.woff2') format('woff2'); }
-@font-face { font-family: Barlow; font-weight: 600; font-display: swap; src: url('../assets/fonts/barlow-600.woff2') format('woff2'); }
-@font-face { font-family: 'Share Tech Mono'; font-weight: 400; font-display: swap; src: url('../assets/fonts/share-tech-mono-400.woff2') format('woff2'); }
+@font-face { font-family: Barlow; font-weight: 400; font-display: swap; src: url('assets/fonts/barlow-400.woff2') format('woff2'); }
+@font-face { font-family: Barlow; font-weight: 500; font-display: swap; src: url('assets/fonts/barlow-500.woff2') format('woff2'); }
+@font-face { font-family: Barlow; font-weight: 600; font-display: swap; src: url('assets/fonts/barlow-600.woff2') format('woff2'); }
+@font-face { font-family: 'Share Tech Mono'; font-weight: 400; font-display: swap; src: url('assets/fonts/share-tech-mono-400.woff2') format('woff2'); }
 
 :root {
   --teal: #18a2a6;

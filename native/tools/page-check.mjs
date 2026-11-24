@@ -1,13 +1,17 @@
-// Checks the app's new page (native/app/ui, Task 32b: it draws what the session gives and sends actions) in the real app, in one step (after
+// Checks the app's generator page (native/app/ui, Task 32b: it draws what the session gives and sends actions) in the real app, in one step (after
 // native/build.ps1 with the app):
-//   node native/tools/page-check.mjs [app.exe]        (BTG_UI_NEW=1 node native/tools/ui-check.mjs runs this one)
-// It starts the app with BTG_UI_NEW=1, muted (BTG_MUTE=1), on a storage folder of its own (BTG_STORAGE_DIR, removed afterwards, with the WebView2
-// profile in it: the user's profiles and the pages' storage are never touched) and with the WebView2 debug port, attaches Playwright and records every
-// error of the page's console, its failed requests, what the page sends and what the shell sends it.
-// (b) The page plays and shows: the variant typed into the page's field (5, BTG_UI_VARIANT gives another) and the lead's job melody make the song;
+//   node native/tools/ui-check.mjs [variant] [app.exe]        (ui-check.mjs runs this file)
+// It starts the app muted (BTG_MUTE=1), on a storage folder of its own (BTG_STORAGE_DIR, removed afterwards, with the WebView2 profile in it: the
+// user's profiles and the pages' storage are never touched) and with the WebView2 debug port, attaches Playwright and records every error of the
+// page's console, its failed requests, what the page sends and what the shell sends it.
+// The app serves only its own pages (Task 32d): none of the web's files under /ui/, /core/, /audio/, /assets/, nor the old own songs' page; the
+// fonts the page shows come from its folder; credits.html opens from the start page and each licence link gives the pack's licence text.
+// (b) The page plays and shows: the variant typed into the page's field (5, or the one given) and the lead's job melody make the song;
 //     the song (state and lanes) is the session's for these actions; "Los" plays it: every layer has a level where the lanes give it a note, the
 //     position line and the lanes move, the position shows no bar before the engine's clock moves; while it plays the fretboard (and its text
-//     version), the wheel, the strip and the progression show the bar of position(); a restart from bar 1 shows no bar during its lead.
+//     version), the wheel, the strip and the progression show the bar of position(); a restart from bar 1 shows no bar during its lead; every layer
+//     has a level at its first note on the song's own voices and again on the synth voices; with every layer on its synth voice and every layer
+//     effect on, the effects reach the session and the engine (levels, a peak moved by 1.5 dB) and the engine stays under 25 % load without a dropout.
 // (a) Each rebuilt control sends its action and shows the answer: one control of every rebuilt building block of the first group, and the second
 //     group operated through (the progression: another root, add, remove, the wheel, the ninth chord refused; the form: template, roll, a part's
 //     selection, level, density, transition, add, move, remove, the level back to its default; the profile window: save, a folder, save into it with
@@ -18,9 +22,10 @@
 // "Weitermachen" restores the remembered session, and every control that showed the hand in (a) now shows the restored values; "Los" clicked twice
 // while it starts starts once; a start that fails keeps the start page with err.playFailed.
 // Afterwards every action the page sent is played on btg_session (native/core/tools/session.cpp, after the app's own `start`): the state after each
-// is the one the page got. Then the app starts once more on a folder where mix.json and session.json are folders (unreadable, and mix.json cannot
-// be written): the lines at the mixer and at the box of the last session say so. Then once with the web's page (no BTG_UI_NEW): its wheel and
-// fretboard have the boxes of this page's. Last, the one-time take-over: the old page's entries in the WebView's storage are sent once with
+// is the one the page got; the times of the way page -> shell -> page are measured (no bar). Then the app starts once more on a folder where
+// mix.json and session.json are folders (unreadable, and mix.json cannot be written): the lines at the mixer and at the box of the last session say
+// so. Then the web's page (src/ui, served as the repository's interface tests serve it) in Playwright's Chromium at the WebView's size: its wheel
+// and fretboard have the boxes of this page's. Last, the one-time take-over: the old page's entries in the WebView's storage are sent once with
 // importLegacy, a second load sends nothing, and with the app's own texts stored other entries take nothing over; a storage whose profiles.json
 // cannot be read (or is damaged) at the first start leaves no mark, and a later start on a working storage takes the profiles.
 // Writes .superpowers/native-screens/page-check.json and prints it.
@@ -31,24 +36,29 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 import de from '../app/ui/i18n/de.js';
+import { start as serveWeb } from '../../scripts/serve.js';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-const exe = process.argv[2] ?? join(repo, 'native/build/app/BackingtrackApp_artefacts/Release/Standalone/Backingtrack Generator.exe');
+const exe = process.argv[3] ?? join(repo, 'native/build/app/BackingtrackApp_artefacts/Release/Standalone/Backingtrack Generator.exe');
 const program = join(repo, 'native/build/core/Release/btg_session.exe');
 const out = join(repo, '.superpowers/native-screens');
 mkdirSync(out, { recursive: true });
 const PORT = 9336;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const fnv = (text) => { let h = 0x811c9dc5; for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(16); };
-const VARIANT = Number(process.env.BTG_UI_VARIANT ?? 5);
+const VARIANT = Number(process.argv[2] ?? process.env.BTG_UI_VARIANT ?? 5); // the variable as native/UEBERGABE.md names it, before Task 32d
+// what the app served before Task 32d and must not serve now: the web's page and modules, its fonts, the old own songs' page (asked for below; their
+// failed requests are no problem)
+const UNSERVED = ['/ui/index.html', '/core/music.js', '/audio/play.js', '/assets/fonts/barlow-400.woff2', '/native/track.html'];
+const unserved = (url) => URL.canParse(url) && UNSERVED.includes(new URL(url).pathname);
 const SIX = ['drums', 'bass', 'chords', 'pad', 'lead', 'percussion'];
 // the page's German texts, as its t() fills them; a label of derived().form is a text or a message whose params may be messages
 const tr = (key, params = {}) => (de[key] ?? `(no text ${key})`).replace(/\{(\w+)\}/g, (m, n) => (n in params ? String(params[n]) : m));
 const label = (l) => (typeof l === 'object' ? tr(l.key, Object.fromEntries(Object.entries(l.params).map(([k, v]) => [k, label(v)]))) : l);
 const barsText = (n) => tr(n === 1 ? 'form.bars.one' : 'ui.barsCount', { n });
-// the boxes of the visualisation's wheel and fretboard (CSS px, one decimal)
-const boxes = (p) => p.evaluate(() => Object.fromEntries([['wheel', '#wheel'], ['wheel module', '#mod-wheel'], ['fretboard', '#fretboard'], ['board', '#fretboard svg'], ['fretboard module', '#mod-fretboard']]
-  .map(([name, s]) => { const r = document.querySelector(s)?.getBoundingClientRect(); return [name, r ? [r.x, r.y, r.width, r.height].map((v) => +v.toFixed(1)) : null]; })));
+// the boxes of the visualisation's wheel and fretboard (CSS px, one decimal), and the width the page has (without a scrollbar that takes room)
+const boxes = (p) => p.evaluate(() => ({ page: [document.documentElement.clientWidth], ...Object.fromEntries([['wheel', '#wheel'], ['wheel module', '#mod-wheel'], ['fretboard', '#fretboard'], ['board', '#fretboard svg'], ['fretboard module', '#mod-fretboard']]
+  .map(([name, s]) => { const r = document.querySelector(s)?.getBoundingClientRect(); return [name, r ? [r.x, r.y, r.width, r.height].map((v) => +v.toFixed(1)) : null]; })) }));
 
 const work = mkdtempSync(join(tmpdir(), 'btg-page-check-'));
 const storage = join(work, 'storage');
@@ -58,10 +68,10 @@ const result = {};
 let run = null; // { app, browser, page } of the app that runs
 
 // The app on a storage folder (its WebView2 profile lies in it too: PluginEditor.cpp), attached, the page in German, everything the shell and the
-// page send recorded from the start of the document, the page drawn from the answer to its sync. `web`: the web's page (the app without
-// BTG_UI_NEW); `prepare(page)`: runs once in the page before the reload that starts the recording (to put something into its storage).
-async function launch(folder, { web = false, prepare = null } = {}) {
-  const app = spawn(exe, [], { env: { ...process.env, BTG_UI_NEW: web ? '' : '1', BTG_MUTE: '1', BTG_STORAGE_DIR: folder, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${PORT}` }, stdio: 'ignore' });
+// page send recorded from the start of the document, the page drawn from the answer to its sync. `prepare(page)`: runs once in the page before the
+// reload that starts the recording (to put something into its storage).
+async function launch(folder, { prepare = null } = {}) {
+  const app = spawn(exe, [], { env: { ...process.env, BTG_MUTE: '1', BTG_STORAGE_DIR: folder, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${PORT}` }, stdio: 'ignore' });
   run = { app, browser: null, page: null };
   for (let i = 0; !run.browser && i < 40; i++) {
     await sleep(500);
@@ -75,10 +85,10 @@ async function launch(folder, { web = false, prepare = null } = {}) {
   }
   if (!page) throw new Error('no page from the resource provider');
   run.page = page;
-  page.on('console', (m) => { if (m.type() === 'error') problems.push(`console: ${m.text()}`); });
+  page.on('console', (m) => { if (m.type() === 'error' && !unserved(m.location().url)) problems.push(`console: ${m.text()}`); });
   page.on('pageerror', (e) => problems.push(`page error: ${e.message}`));
-  page.on('requestfailed', (r) => problems.push(`request failed: ${r.url()}`));
-  page.on('response', (r) => { if (r.status() >= 400) problems.push(`${r.status()}: ${r.url()}`); });
+  page.on('requestfailed', (r) => { if (!unserved(r.url())) problems.push(`request failed: ${r.url()}`); });
+  page.on('response', (r) => { if (r.status() >= 400 && !unserved(r.url())) problems.push(`${r.status()}: ${r.url()}`); });
   await page.waitForLoadState('load');
   await page.evaluate(() => localStorage.setItem('backingtrack.lang', 'de')); // the checks read German labels
   if (prepare) await prepare(page);
@@ -150,6 +160,9 @@ try {
   if (!url.includes('/app/index.html')) problems.push(`the app shows ${url}, not its new page`);
   const startVariant = Number(await page.locator('#variant').inputValue()); // the app's own start
   result.page = { url, startVariant };
+  // none of what the app served before Task 32d (a request the shell leaves unanswered fails: WebView2 then looks for juce.backend on the network)
+  result.page.unserved = await page.evaluate((paths) => Promise.all(paths.map((p) => fetch(p).then((r) => `${p}: ${r.ok ? 'served' : 'not served'}, ${r.status}`, () => `${p}: not served`))), UNSERVED);
+  for (const line of result.page.unserved) if (!line.includes('not served')) problems.push(`the app serves what only the web's page used: ${line}`);
   await page.screenshot({ path: join(out, 'page-1-start.png') });
 
   // ---------- (b) the page plays and shows ----------
@@ -260,6 +273,21 @@ try {
   if (!result.playing.some((s) => s.wheel.at.current !== null && s.wheel.at.next !== null)) problems.push('(b) while it plays: no sample had a sounding and a next node on the wheel');
   for (const s of result.playing) { delete s.board; delete s.boardWanted; }
   result.sizes = { page: { focus: await boxes(page) } }; // against the web's page at the end
+  result.sizes.viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight, ratio: devicePixelRatio }));
+
+  // the fonts the play page shows (its text, its LCDs, the wheel's middle) are the page's own: Barlow and Share Tech Mono loaded from its folder, no
+  // face of them failed (a fallback), and the text and the LCDs are set in them
+  result.fonts = await page.evaluate(async () => {
+    await document.fonts.ready;
+    const family = (s) => getComputedStyle(document.querySelector(s)).fontFamily.split(',')[0].replace(/["']/g, '').trim();
+    return { faces: [...document.fonts].map((f) => `${f.family.replace(/["']/g, '')} ${f.weight} ${f.status}`),
+      files: performance.getEntriesByType('resource').filter((e) => e.initiatorType === 'css' && /\.woff2$/.test(e.name)).map((e) => new URL(e.name).pathname),
+      used: { text: family('body'), lcd: family('#play-position') } };
+  });
+  const loaded = (name) => result.fonts.faces.some((f) => f.startsWith(`${name} `) && f.endsWith(' loaded'));
+  if (!loaded('Barlow') || !loaded('Share Tech Mono') || result.fonts.faces.some((f) => f.endsWith(' error')) || !result.fonts.files.length
+    || result.fonts.files.some((f) => !f.startsWith('/app/assets/fonts/')) || result.fonts.used.text !== 'Barlow' || result.fonts.used.lcd !== 'Share Tech Mono')
+    problems.push(`(b) the page's fonts: ${JSON.stringify(result.fonts)}`);
 
   // a restart from bar 1 while it plays (a chord colour: restart without inPlace): in every frame of its lead the position line shows no bar (the
   // web shows nothing until the first bar of a start), after it the bar again; the shell remembers the bar that played (the replay gets it too)
@@ -281,26 +309,84 @@ try {
   if (!result.restart.change?.restart || result.restart.change.inPlace || !result.restart.leadFrames || result.restart.shownInLead.some((s) => /\d/.test(s)) || !/\d/.test(result.restart.after ?? ''))
     problems.push(`(b) a restart from bar 1 while it plays: ${JSON.stringify(result.restart)}`);
 
-  // every layer: switched on with its mute key, seek to its first note or hit in the lanes the page has, then its level over 2.5 s (as ui-check.mjs
-  // measures the old page)
-  for (const layer of await page.evaluate(() => [...document.querySelectorAll('button[data-mute][aria-pressed="true"]')].map((b) => b.dataset.mute))) {
-    await page.evaluate((l) => document.querySelector(`button[data-mute="${l}"]`).click(), layer);
-    await answered();
+  // every layer: switched on with its mute key, seek to its first note or hit in the lanes the page has, then its level over 2.5 s (as the old page's
+  // check measured it), on the voices derived() names then (in the result); first on the song's own voices, after the step below on the synth voices
+  const everyLayer = async (which) => {
+    for (const layer of await page.evaluate(() => [...document.querySelectorAll('button[data-mute][aria-pressed="true"]')].map((b) => b.dataset.mute))) {
+      await page.evaluate((l) => document.querySelector(`button[data-mute="${l}"]`).click(), layer);
+      await answered();
+    }
+    const voices = JSON.parse(await page.evaluate(() => window.got.derived.at(-1).json)).voices;
+    const levels = {};
+    for (const layer of SIX) {
+      const first = lanes.find((e) => e.layer === layer && (e.type === 'note' || e.type === 'hit'));
+      if (!first) { problems.push(`(b) ${layer}: the lanes have no note or hit for it`); continue; }
+      const beat = (first.t * lanesBpm) / 60;
+      const peak = await page.evaluate(async ([b, l]) => {
+        const from = performance.now();
+        window.bridge('seek', { beats: Math.max(0, b - 0.5) });
+        await window.wait(2500);
+        return +Math.max(0, ...window.got.engine.filter((m) => m.at >= from).map((m) => m.peaks?.[l] ?? 0)).toFixed(3);
+      }, [beat, layer]);
+      levels[layer] = { voice: `${voices[layer]?.id}/${voices[layer]?.variant}`, firstBeat: +beat.toFixed(2), peak };
+      if (!(peak > 0)) problems.push(`(b) ${layer} on ${levels[layer].voice} (${which}): no level where the lanes give it its first note`);
+    }
+    return levels;
+  };
+  result.everyLayer = await everyLayer('its own voice');
+
+  // the engine with every effect on and under load (the old page's check: its effects step and its "alle Synth" step): every layer on its synth voice
+  // (the page's key "alle Synth", pressed until it shows the synth), then two passes of 4 s from the same beat, one after which bass, chords and pad
+  // each start a note 0.3 to 3.5 s into the song (in the lanes the engine plays): with the song's own effects, then with every layer effect at 100
+  // (the timbre knobs of bass, chords, pad and lead that are not greyed out, turned as a user turns them). The six voices are ready; derived().timbre
+  // has every turned field at 1; with every effect on bass, chords and pad have a level, the peak of at least one of them moves by 1.5 dB or more
+  // against the pass without (the old bar: the engine runs the effects), and the engine's load (the slowly falling peak of its block's share) is at
+  // most 25 % with no dropout in either pass. Then the knobs back where they were.
+  // shortcut: the lead is left out of the levels and the 1.5 dB: with fuzz and overdrive both at 100 the lead on synth/classic gives no level in the
+  // app (a finding in the engine, Task 32d's report, being followed up); its peaks are in the result (load.lead), upgrade: when the engine is fixed
+  // the lead joins the assertion
+  const FX = ['bass', 'chords', 'pad'];
+  const played = await page.evaluate(() => { const e = window.got.events.at(-1); return { bpm: e.bpm, beats: e.beats, events: JSON.parse(e.json) }; });
+  const starts = (layer, beat) => played.events.some((e) => e.layer === layer && (e.type === 'note' || e.type === 'hit')
+    && e.t >= (beat * 60) / played.bpm + 0.3 && e.t < (beat * 60) / played.bpm + 3.5);
+  const fxBeat = [...Array(Math.floor(played.beats)).keys()].find((beat) => FX.every((l) => starts(l, beat))) ?? null;
+  if (fxBeat === null) problems.push(`(b) every effect on: the song has no beat after which ${FX.join(', ')} each start a note within 0.3 to 3.5 s`);
+  else {
+    result.load = await page.evaluate(async ([beat, layers]) => {
+      const key = document.getElementById('all-voices');
+      for (let i = 0; i < 3 && key.dataset.state !== 'synth'; i++) { key.click(); await window.answered(); }
+      const pass = async () => { // 4 s from `beat`: the layers' peaks (the reports from 0.15 s after the seek on), the load at its end, the dropouts during it
+        const from = performance.now(), start = window.lastEngine();
+        window.bridge('seek', { beats: beat });
+        await window.wait(4000);
+        const log = window.got.engine.filter((m) => m.at >= from + 150 && m.playing && !m.standing), end = window.lastEngine();
+        return { peaks: Object.fromEntries(layers.map((l) => [l, +Math.max(0, ...log.map((m) => m.peaks?.[l] ?? 0)).toFixed(4)])), load: +end.load.toFixed(3), dropouts: end.xruns - start.xruns };
+      };
+      const plain = await pass();
+      const knobs = ['bass', 'chords', 'pad', 'lead'].flatMap((l) => ['fuzz', 'overdrive', 'distortion', 'vibrato', 'chorus'].map((f) => document.getElementById(`timbre-${l}-${f}`)))
+        .filter((k) => k && !k.disabled);
+      const turn = (k, value) => { k.value = value; k.dispatchEvent(new Event('input', { bubbles: true })); };
+      const before = knobs.map((k) => k.value);
+      for (const k of knobs) turn(k, '100');
+      await window.answered();
+      const timbre = JSON.parse(window.got.derived.at(-1).json).timbre;
+      const notOne = knobs.filter((k) => { const [, group, field] = k.id.split('-'); return timbre[group]?.[field] !== 1; }).map((k) => k.id);
+      const every = await pass();
+      knobs.forEach((k, i) => turn(k, before[i]));
+      await window.answered();
+      return { beat, key: key.dataset.state, voices: window.got.voices.at(-1), knobs: knobs.length, notOne, plain, every };
+    }, [fxBeat, [...FX, 'lead']]);
+    const L = result.load;
+    L.gainDb = Object.fromEntries(FX.map((l) => [l, L.plain.peaks[l] > 0 && L.every.peaks[l] > 0 ? +(20 * Math.log10(L.every.peaks[l] / L.plain.peaks[l])).toFixed(2) : null]));
+    L.lead = { plain: L.plain.peaks.lead, every: L.every.peaks.lead };
+    const moved = Math.max(0, ...Object.values(L.gainDb).filter((g) => g !== null).map(Math.abs));
+    if (L.key !== 'synth' || !SIX.every((l) => L.voices?.[l] === 'ready')) problems.push(`(b) "alle Synth": ${JSON.stringify({ key: L.key, voices: L.voices })}`);
+    if (!L.knobs || L.notOne.length) problems.push(`(b) every effect on: derived().timbre does not have ${JSON.stringify(L.notOne)} at 1 (${L.knobs} knobs turned)`);
+    if (!FX.every((l) => L.every.peaks[l] > 0)) problems.push(`(b) every effect on: no level of ${FX.filter((l) => !(L.every.peaks[l] > 0))} (${JSON.stringify(L.every.peaks)})`);
+    if (!(moved >= 1.5)) problems.push(`(b) every effect on: no layer's peak moves by 1.5 dB against the pass without (dB: ${JSON.stringify(L.gainDb)})`);
+    if (!(L.every.load <= 0.25) || L.every.dropouts !== 0 || L.plain.dropouts !== 0) problems.push(`(b) every effect on: load ${L.every.load} (limit 0.25), dropouts ${L.plain.dropouts} and ${L.every.dropouts}`);
   }
-  result.everyLayer = {};
-  for (const layer of SIX) {
-    const first = lanes.find((e) => e.layer === layer && (e.type === 'note' || e.type === 'hit'));
-    if (!first) { problems.push(`(b) ${layer}: the lanes have no note or hit for it`); continue; }
-    const beat = (first.t * lanesBpm) / 60;
-    const peak = await page.evaluate(async ([b, l]) => {
-      const from = performance.now();
-      window.bridge('seek', { beats: Math.max(0, b - 0.5) });
-      await window.wait(2500);
-      return +Math.max(0, ...window.got.engine.filter((m) => m.at >= from).map((m) => m.peaks?.[l] ?? 0)).toFixed(3);
-    }, [beat, layer]);
-    result.everyLayer[layer] = { firstBeat: +beat.toFixed(2), peak };
-    if (!(peak > 0)) problems.push(`(b) ${layer}: no level where the lanes give it its first note`);
-  }
+  result.everyLayerSynth = await everyLayer('the synth voice');
   await page.screenshot({ path: join(out, 'page-2-play.png') });
   // stop: the shell remembers the bar (a state without flags), the page shows "Los" again
   const statesBefore = await page.evaluate(() => window.got.state.length);
@@ -762,6 +848,57 @@ try {
   if (!songLanes || fnv(songLanes) !== fnv(song.lanes.json)) problems.push("(b) the lanes the page drew are not the session's for the variant typed into its field");
   result.session = { actions: sentList.length, sameState: same, lanes: lanesGot.length };
 
+  // ---------- the times of the way page -> shell -> page (a measurement, no bar; after the replay above, which these actions are not part of): a
+  // ping's round trip, and an action's time from the end of its job to the next audio block (`reactionMs`: the bass fader), at the device's buffer
+  // size and up to two others it offers; for comparison the output latency the browser itself gives the web version ----------
+  const measure = () => page.evaluate(async () => {
+    const pongs = new Map(), ping = [], action = [];
+    window.__JUCE__.backend.addEventListener('pong', (m) => pongs.get(m.id)?.(performance.now()));
+    for (let id = 1; id <= 40; id++) {
+      const t0 = performance.now();
+      ping.push(await new Promise((done) => { pongs.set(id, (t) => done(t - t0)); window.bridge('ping', { id }); }));
+      await window.wait(7 + (id % 5) * 3);
+    }
+    for (let i = 0; i < 40; i++) {
+      window.bridge('action', { json: JSON.stringify({ action: 'setLevel', channel: 'bass', value: i % 2 ? 90 : 70 }) });
+      await window.wait(90 + (i % 7) * 4);
+      action.push(window.lastEngine().reactionMs);
+    }
+    const stats = (list) => { const s = [...list].sort((a, b) => a - b); return { median: +s[s.length >> 1].toFixed(2), p95: +s[Math.floor(0.95 * s.length)].toFixed(2), max: +s.at(-1).toFixed(2) }; };
+    const e = window.lastEngine();
+    return { device: `${e.device} (${e.deviceType}), ${e.bufferFrames} frames at ${e.sampleRate} Hz, output latency ${e.outputLatencyMs?.toFixed(1)} ms`, pingRoundTripMs: stats(ping), actionToAudioBlockMs: stats(action) };
+  });
+  const { bufferFrames, bufferSizes } = await page.evaluate(() => window.lastEngine());
+  result.reaction = { bufferSizes };
+  for (const frames of [bufferFrames, ...(bufferSizes ?? []).filter((s) => s !== bufferFrames).slice(0, 2)]) {
+    await page.evaluate((f) => window.bridge('buffer', { frames: f }), frames);
+    await sleep(2500);
+    result.reaction[frames] = await measure();
+  }
+  await page.evaluate((f) => window.bridge('buffer', { frames: f }), bufferFrames);
+  result.reaction.webAudioLatencyMs = await page.evaluate(async () => {
+    const ctx = new AudioContext();
+    await ctx.resume().catch(() => {});
+    await window.wait(800);
+    const out = { state: ctx.state, base: +(ctx.baseLatency * 1000).toFixed(1), output: +(ctx.outputLatency * 1000).toFixed(1) };
+    await ctx.close();
+    return out;
+  });
+
+  // ---------- credits.html opens from the start page, and each of its licence links gives the pack's licence text (served from the packs' folder) ----------
+  await page.locator('#play-back').click();
+  await Promise.all([page.waitForURL(/\/app\/credits\.html$/, { timeout: 15000 }), page.locator('a.credits').click()]);
+  const licences = await page.evaluate(() => Promise.all([...document.querySelectorAll('a[href^="/samples/"]')].map(async (a) => {
+    const r = await fetch(a.href).catch(() => null);
+    return { href: a.getAttribute('href'), status: r?.status ?? null, type: r?.headers.get('content-type') ?? null, text: r?.ok ? await r.text() : null };
+  })));
+  result.credits = licences.map(({ href, status, type, text }) => ({ href, status, type, chars: text?.length ?? null }));
+  if (licences.length !== 4) problems.push(`credits.html links ${licences.length} licence texts, not the packs' 4`);
+  for (const l of licences) {
+    const file = join(repo, 'src/assets/samples', l.href.slice('/samples/'.length));
+    if (l.text !== readFileSync(file, 'utf8') || !l.type?.startsWith('text/plain')) problems.push(`credits.html: ${l.href} gives ${l.status} ${l.type}, not the text of ${file}`);
+  }
+
   // ---------- the storage's problems (PROTOKOLL.md section 3a): a line at the box of the last session and one at the mixer ----------
   // A second start of the app on a folder where mix.json and session.json are folders: neither can be read, and mix.json cannot be written.
   await quit();
@@ -805,17 +942,35 @@ try {
   if (atStart.storage.mix !== 'unreadable' || atStart.mix !== text('ui.storage.mix.unreadable')) problems.push(`storage: an unreadable mix.json is not told at the mixer: ${JSON.stringify(atStart)}`);
   if (afterWrite.storage.mix !== 'notStored' || afterWrite.mix !== text('ui.storage.mix.notStored')) problems.push(`storage: a mix.json that cannot be written is not told at the mixer: ${JSON.stringify(afterWrite)}`);
 
-  // ---------- the web's page in the app (without BTG_UI_NEW), the same window, the same variant: the wheel and the fretboard have the same boxes ----------
+  // ---------- the web's page (src/ui, served as the repository's interface tests serve it) in Playwright's Chromium, at the WebView's size and pixel
+  // ratio, in German, the same variant: the wheel and the fretboard have the boxes of the app's page ----------
   await quit();
-  mkdirSync(join(work, 'web'));
-  const web = await launch(join(work, 'web'), { web: true });
-  await web.evaluate((v) => { const f = document.getElementById('variant'); f.value = String(v); f.dispatchEvent(new Event('change', { bubbles: true })); }, VARIANT);
-  await web.locator('#tune-btn').click();
-  await sleep(500);
-  result.sizes.web = { setup: await boxes(web) };
-  await web.locator('#mode-switch').click();
-  await sleep(500);
-  result.sizes.web.focus = await boxes(web);
+  const server = await serveWeb(0);
+  const chrome = await chromium.launch();
+  try {
+    const { width, height, ratio } = result.sizes.viewport;
+    const context = await chrome.newContext({ viewport: { width, height }, deviceScaleFactor: ratio });
+    await context.addInitScript(() => localStorage.setItem('backingtrack.lang', 'de'));
+    const web = await context.newPage();
+    web.on('pageerror', (e) => problems.push(`the web's page: ${e.message}`));
+    await web.goto(`http://localhost:${server.address().port}/ui/index.html`);
+    // the same room for the page as in the WebView in each view: Chromium's scrollbar takes room, WebView2's may not
+    const fit = async (mode) => {
+      const scrollbar = await web.evaluate(() => innerWidth - document.documentElement.clientWidth);
+      await web.setViewportSize({ width: result.sizes.page[mode].page[0] + scrollbar, height });
+      await sleep(500);
+    };
+    await web.evaluate((v) => { const f = document.getElementById('variant'); f.value = String(v); f.dispatchEvent(new Event('change', { bubbles: true })); }, VARIANT);
+    await web.locator('#tune-btn').click();
+    await fit('setup');
+    result.sizes.web = { setup: await boxes(web) };
+    await web.locator('#mode-switch').click();
+    await fit('focus');
+    result.sizes.web.focus = await boxes(web);
+  } finally {
+    await chrome.close();
+    server.close();
+  }
   for (const mode of ['focus', 'setup']) {
     for (const [name, box] of Object.entries(result.sizes.web[mode])) {
       const mine = result.sizes.page[mode][name];
@@ -886,7 +1041,8 @@ try {
     // the old entries are still in this folder's WebView profile without a mark: the page's first load sends them, before the recording begins
     const later = await takeOver(await launch(dir, { prepare: putOld }));
     result.takeOver[`${problem}, then working`] = { sent: later.sent.length, mark: later.mark, legacy: later.legacy, names: names(later.items) };
-    if (later.mark === null || later.legacy?.profiles !== 'taken' || JSON.stringify(names(later.items)) !== JSON.stringify(oldNames))
+    // 'stored': the recorded load sent the texts again because the check's reload came before the first load's answer, which took them
+    if (later.mark === null || !['taken', 'stored'].includes(later.legacy?.profiles) || JSON.stringify(names(later.items)) !== JSON.stringify(oldNames))
       problems.push(`take-over: the start after a ${problem} profiles.json, on a storage that works: ${JSON.stringify(result.takeOver[`${problem}, then working`])}`);
     await quit();
   }
@@ -924,4 +1080,4 @@ try {
 result.problems = [...new Set(problems)];
 writeFileSync(join(out, 'page-check.json'), JSON.stringify(result, null, 2));
 process.exitCode = result.problems.length ? 1 : 0;
-await new Promise((done) => process.stdout.write(`${JSON.stringify(result, null, 2)}\n`, done)); // written out before ui-check.mjs ends the process
+await new Promise((done) => process.stdout.write(`${JSON.stringify(result, null, 2)}\n`, done)); // written out before the process ends

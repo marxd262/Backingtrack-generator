@@ -1,10 +1,11 @@
-// Diagnosis: does the track page show the place the engine plays? Runs the real app muted with BTG_POSITION_LOG
+// Diagnosis: does the own songs' page show the place the engine plays? Runs the real app muted with BTG_POSITION_LOG
 // (WebView2 debug port, Playwright), loads a track, plays stretches of it and sums up the log the page writes:
 // shown position against the engine's, twice a second.
-//   node native/tools/position-check.mjs <track> [seconds per stretch, default 40] [start seconds ...]
+//   node native/tools/position-check.mjs [track] [seconds per stretch, default 40] [start seconds ...]
+// Without a track it renders a generator song of 96 bars, 230 s (render-song.mjs), and loads that.
 // Writes native/build/position/position.log (the raw samples) and app-analysis.json (the analysis as the app made it,
 // to compare with btg_analyze). By hand, with sound: start the app with BTG_POSITION_LOG=<file> set and play.
-// The app runs on a storage folder of its own (BTG_STORAGE_DIR, removed afterwards): the developer's profiles are never touched.
+// The app runs on a storage folder of its own (BTG_STORAGE_DIR, removed afterwards with the rendered song): the developer's profiles are never touched.
 // Its debug port 9334 is shell-check.mjs's too: the two cannot run at once.
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -12,10 +13,11 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
+import { renderSong } from './render-song.mjs';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-if (!process.argv[2]) throw new Error('usage: position-check.mjs <track> [seconds per stretch] [start seconds ...]');
-const source = resolve(process.argv[2]), stretch = Number(process.argv[3] ?? 40);
+const storage = mkdtempSync(join(tmpdir(), 'btg-position-check-'));
+const source = process.argv[2] ? resolve(process.argv[2]) : renderSong(storage, 96), stretch = Number(process.argv[3] ?? 40);
 const starts = process.argv.slice(4).map(Number);
 const exe = join(repo, 'native/build/app/BackingtrackApp_artefacts/Release/Standalone/Backingtrack Generator.exe');
 const work = join(repo, 'native/build/position'), log = join(work, 'position.log');
@@ -25,7 +27,6 @@ const PORT = 9334;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const median = (v) => [...v].sort((a, b) => a - b)[Math.floor(v.length / 2)];
 
-const storage = mkdtempSync(join(tmpdir(), 'btg-position-check-'));
 const app = spawn(exe, [], { env: { ...process.env, BTG_MUTE: '1', BTG_NO_CACHE: '1', BTG_POSITION_LOG: log, BTG_STORAGE_DIR: storage, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${PORT}` }, stdio: 'ignore' });
 let browser;
 try {
@@ -34,7 +35,7 @@ try {
   let page;
   for (let i = 0; !page && i < 40; i++) { page = browser.contexts().flatMap((c) => c.pages()).find((p) => p.url().includes('juce.backend')); if (!page) await sleep(250); }
   if (!page) throw new Error('no page from the resource provider');
-  const trackPage = new URL('/native/track.html', page.url()).href;
+  const trackPage = new URL('/app/track.html', page.url()).href;
   await page.waitForLoadState('load').catch(() => {});
   await page.goto(trackPage).catch(async () => { await sleep(1500); await page.goto(trackPage); });
   await page.locator('#open').waitFor({ state: 'visible', timeout: 15000 });

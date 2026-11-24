@@ -6,7 +6,7 @@
 // Fretboard, chord wheel, their texts and the remembered choices (language, labels, fret spacing) are the
 // generator's own (this folder), so both pages look and behave alike. What they show for the chords at the
 // playhead comes from the core (chordDisplays, native/PROTOKOLL.md section 4b), the lists of the selects from
-// tables(): the page parses and builds no chord name and holds no scale.
+// tables(): the page builds no chord name and holds no scale; it reads a name's root and minor third only to compare bars (`plain`).
 import { createFretboardModule } from './fretboard.js';
 import { createWheel } from './wheel.js';
 import { loadLayout, saveLayout } from './layout-state.js';
@@ -40,9 +40,9 @@ const showBoard = () => fretboard?.update(boardView);
 const wheel = createWheel($('wheel'), { key: { root: 'A', mode: 'minor' }, wheel: { nodes: [], path: [] }, at: null }, (chord) => editBar(chord.name));
 // What the displays show: the core's answer to the page's last question (a late answer to an older one is dropped). The numbers start at this
 // load's time, so that an answer to the page before is none here.
-const asked = { seq: Date.now() % 1e9, key: null };
+const asked = { seq: Date.now() % 1e9, key: null, request: { key: { root: 'A', mode: 'minor' }, scale: 'minorPentatonic', chords: [], current: null, next: null } };
 function ask(request) {
-  Object.assign(asked, { seq: asked.seq + 1, key: request.key });
+  Object.assign(asked, { seq: asked.seq + 1, key: request.key, request });
   send('chordDisplays', { seq: asked.seq, json: JSON.stringify(request) });
 }
 on('chordDisplays', (m) => {
@@ -51,7 +51,8 @@ on('chordDisplays', (m) => {
   if (track) { boardView = answer; showBoard(); }
   wheel.update({ key: asked.key, wheel: answer.wheel, at: answer.at });
 });
-ask({ key: { root: 'A', mode: 'minor' }, scale: 'minorPentatonic', chords: [], current: null, next: null });
+// the last question again after every load and every return to the page: an answer lost while the browser was hidden is not sent again
+addEventListener('pageshow', () => ask(asked.request));
 
 // ---------- derive bars, chord changes and repeating parts ----------
 
@@ -62,7 +63,7 @@ ask({ key: { root: 'A', mode: 'minor' }, scale: 'minorPentatonic', chords: [], c
 // nearly as far as the best one wins: a long pattern is often a short one played twice.
 // shortcut: the page reads root and minor third from a chord's name to compare bars (the bars, the corrections and the parts of an own song are
 // still computed here), upgrade: when the bars and parts of an own song are computed in the core
-const plain =(label) => label.split(' ').map((c) => (/^([A-G][#b]?)(m(?!aj))?/.exec(c) ?? [c]).slice(1).join('') || c).join(' ');
+const plain = (label) => label.split(' ').map((c) => (/^([A-G][#b]?)(m(?!aj))?/.exec(c) ?? [c]).slice(1).join('') || c).join(' ');
 function findSections(labels, keys) {
   const most = (list) => { const votes = {}; for (const x of list) votes[x] = (votes[x] ?? 0) + 1; return Object.keys(votes).sort((x, y) => votes[y] - votes[x])[0]; };
   // from bar i on: how many bars follow the pattern `ref` (whole repeats; a few misses are forgiven)
@@ -313,6 +314,8 @@ function build() {
   new ResizeObserver(() => fretboard.resize()).observe($('fretboard'));
   $('edit').append(...BAR_CHORDS.map((c) => Object.assign(document.createElement('option'), { value: c, textContent: c })));
   $('scale').append(...SCALES.map((id) => Object.assign(document.createElement('option'), { value: id })));
+  if (track) $('scale').value = fix.scale ?? track.analysis.scale; // an analysis that came before the lists: its scale, now that the select has it
+  shown.state = null; // draw() sets the bar's chord in its select, now that it has them
   language(lang);
   send('hello'); // the app sends the analysis of the loaded track again
 }
@@ -441,7 +444,7 @@ function draw() {
     set('pattern-label', s && s.repeats >= 2 ? tr('track.patternAt', { name: s.name, turn: Math.floor((bar - s.first) / s.pattern.length) + 1, repeats: s.repeats }) : tr('track.noPattern'));
     $('pattern').replaceChildren(...(s && s.repeats >= 2 ? s.pattern : []).map((p, i) => Object.assign(document.createElement('li'), { textContent: p, className: i === (bar - s.first) % s.pattern.length ? 'on' : '' })));
     [...$('sections').children].forEach((b) => b.classList.toggle('on', b.dataset.name === s?.name));
-    if (session.tables.BAR_CHORDS.includes(bars[bar]?.label)) $('edit').value = bars[bar].label;
+    if (session.tables?.BAR_CHORDS.includes(bars[bar]?.label)) $('edit').value = bars[bar].label; // the lists come with the answer to sync
   }
   if (!$('mod-video').hidden) { // the picture follows the engine: same place, same speed
     const video = $('video');

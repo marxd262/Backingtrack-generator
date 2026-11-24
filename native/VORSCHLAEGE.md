@@ -34,7 +34,7 @@ Ursachen und Belege stehen in [DIAGNOSE.md](DIAGNOSE.md). Stand nach Phase 1 (20
 - **Was:** Die Analyse bestimmt heute einen Akkord je Schlag. Vorgezogene Akkorde (auf dem Achtel vor dem Schlag) erscheinen deshalb einen halben Schlag zu spät. Vorschlag: den Chroma je halbem Schlag rechnen und einen Wechsel auf das Achtel legen, wenn die zweite Hälfte des Schlags schon zum neuen Akkord gehört.
 - **Warum:** Das ist der größte Teil des Versatzes, den der Nutzer sieht. „Late Night Groove“: 63 % der Wechsel mehr als 0,3 s zu spät, Median +486 ms gegen das Audio. „Letting Go“: 35 %.
 - **Erwartet:** `timing` im Satz „echt“ deutlich besser (heute 78,8 % innerhalb 0,3 s). `root` steigt mit, weil jeder verspätete Wechsel 0,4 s falschen Akkord bedeutet.
-- **Entscheidung nötig, weil:** `chords[].t` läge nicht mehr immer auf einem Schlag. Die Seite baut ihre Anzeige aus Akkorden je Schlag ([track.js](app/web/track.js), `byBeat`); sie müsste Wechsel zwischen den Schlägen übernehmen. Das ändert die Schnittstelle zur App.
+- **Entscheidung nötig, weil:** `chords[].t` läge nicht mehr immer auf einem Schlag. Die Seite baut ihre Anzeige aus Akkorden je Schlag ([track.js](app/ui/track.js), `byBeat`); sie müsste Wechsel zwischen den Schlägen übernehmen. Das ändert die Schnittstelle zur App.
 - **Aufwand:** mittel in `analysis.cpp`, klein bis mittel in der Seite.
 - **Ein erster Versuch ohne Umbau hat nichts gezeigt:** Mit Achteln als Schlägen an die heutige Analyse übergeben, bleiben fast alle Wechsel auf den Vierteln (bei „Letting Go“ 12 von 227), weil die Wechselkosten Taktanfang und Taktmitte bevorzugen. Es braucht eine eigene Regel.
 

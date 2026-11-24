@@ -2,7 +2,7 @@
 //   node native/tools/shell-check.mjs [app.exe]
 // It starts the app muted (BTG_MUTE=1) on a storage folder of its own (BTG_STORAGE_DIR: a fresh folder in the temp directory, removed afterwards, so
 // that the user's profiles are never touched), with the WebView2 debug port, attaches Playwright as ui-check.mjs does and talks to the shell through
-// the page's bridge (the page of today stays idle: nothing here clicks it). Its debug port 9334 is position-check.mjs's too: the two cannot run at once.
+// the bridge of the app's page (the page stays idle: nothing here clicks it). Its debug port 9334 is position-check.mjs's too: the two cannot run at once.
 // (a) The same actions, played once directly on a session (btg_session, native/core/tools/session.cpp) and once sent to the app as `action`
 //     messages, give the same texts after each: `state` (and its flags), `profiles`, the lanes (`events`); then the same exports and the same
 //     files in the storage folder. Before them, `sync` gives the state, the profile view, the lanes the state names and the voices' state.
@@ -11,7 +11,8 @@
 //     (the sound), the e-piano for the chords and the organ's drive (the fine values) change the chords' level between two passes over the same
 //     span; a restart in place starts again at the bar that played, with the new song; an own profile loaded restarts from bar 1; stop remembers
 //     the bar; "Weitermachen" plays from the bar it restored; in 3/4 and 6/8 the starts lie where the lanes put the bars. Each measure fails when the
-//     shell leaves out the engine call of its flag. Then two drags of 60 actions (a fader, a timbre knob) and `stop`: the last answer and the stop's
+//     shell leaves out the engine call of its flag. The string voices (from an imported profile) have a level, and with every layer effect at 100
+//     the load stays at most 25 % with no dropout. Then two drags of 60 actions (a fader, a timbre knob) and `stop`: the last answer and the stop's
 //     effect within 1.0 s. What happens to the page (a navigation, a crash, a close, the app's end) is recorded with its time; after the setup it is
 //     a problem. Writes the result to .superpowers/native-screens/shell-check.json and prints it.
 import { spawn, spawnSync } from 'node:child_process';
@@ -437,7 +438,7 @@ try {
   if (!(busy > 0 && busy <= 4 * (bpm / 60 + 2)) || idle !== 0) problems.push(`(b) position: ${JSON.stringify(b.position)}`);
 
   // a drag: 60 actions of one control as fast as the bridge takes them, then `stop`, while the session's song plays. The bar, set before measuring
-  // (the old page's timbre bursts in ui-check.mjs): the stop's effect (the engine's first report that it does not play) and the answer of the
+  // (the old page's check had it for its timbre bursts, before Task 32d): the stop's effect (the engine's first report that it does not play) and the answer of the
   // last action at most 1.0 s after the first send.
   const burst = (texts) => page.evaluate(async (list) => {
     const states = window.got.state.length;
@@ -469,6 +470,29 @@ try {
   await page.evaluate(() => window.bridge('playSession'));
   const stringsReady = await page.evaluate((n) => window.next('voices', n, 20000), voicesBeforePlay);
   await sleep(1500);
+  // ... the string voices themselves (the bars of the old page's check, its string step, which sent them with the old `track` message): a pass of
+  // 2.5 s at a beat where bass and chords each start a note gives both a level; the same pass with every layer effect at 100 (setTimbre on bass,
+  // chords, pad and lead) keeps the engine's load at most 25 % with no dropout; then the effects back (resetTimbre). An `export` waits for the jobs
+  // before it (the engine builds the string voices' tones anew for each step of the sound), so that the passes and the drag below start on an idle queue
+  const settled = async () => {
+    const n = await page.evaluate(() => window.got.export.length);
+    await page.evaluate(() => window.bridge('export', { key: 'session', name: 'Warten' }));
+    await page.evaluate((k) => window.next('export', k, 20000), n);
+  };
+  const stringBeat = busyBeat(await lanesNow(), await page.evaluate(() => window.got.events.at(-1).bpm), ['bass', 'chords']);
+  const stringPlain = stringBeat === null ? null : await pass(stringBeat, 2500);
+  const fxGroups = ['bass', 'chords', 'pad', 'lead'], fxTaken = [];
+  for (const group of fxGroups) for (const field of ['fuzz', 'overdrive', 'distortion', 'vibrato', 'chorus']) if ((await act(A('setTimbre', { group, field, value: 100 }))).state?.change?.sound) fxTaken.push(`${group}.${field}`);
+  await settled();
+  const fxStart = await lastEngine();
+  const stringFx = stringBeat === null ? null : await pass(stringBeat, 2500);
+  const fxEnd = await lastEngine();
+  for (const group of fxGroups) await act(A('resetTimbre', { group }));
+  await settled();
+  b.strings = { beat: stringBeat, plain: stringPlain && { bass: stringPlain.bass, chords: stringPlain.chords }, effectsTaken: fxTaken.length,
+    withEffects: stringFx && { bass: stringFx.bass, chords: stringFx.chords }, load: +fxEnd.load.toFixed(3), dropouts: fxEnd.xruns - fxStart.xruns };
+  if (stringBeat === null || !(stringPlain.bass > 0) || !(stringPlain.chords > 0)) problems.push(`(b) the string voices have no level: ${JSON.stringify(b.strings)}`);
+  if (fxTaken.length !== 20 || !(b.strings.load <= 0.25) || b.strings.dropouts !== 0) problems.push(`(b) the string voices with every effect on: ${JSON.stringify(b.strings)} (load at most 0.25, no dropout)`);
   const stringKnob = await burst(Array.from({ length: 60 }, (_, i) => A('setTimbre', { group: 'chords', field: 'brightness', value: 20 + i })));
   const stringEnd = JSON.parse(await page.evaluate(() => window.got.state.filter((s) => s.change).at(-1).json)).track.timbre?.chords?.brightness ?? null;
   b.drag = { fader, knob, stringKnob: { ...stringKnob, voices: `${stringVoices.bass.id}/${stringVoices.bass.variant} ${stringVoices.chords.id}/${stringVoices.chords.variant}`,
