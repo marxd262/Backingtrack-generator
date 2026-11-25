@@ -8,7 +8,7 @@
 // (masterParams) hält btg_logic_tests gegen die Web-App.
 import { test, expect, answered, fromSession, settled } from './fixture.js';
 import { chooseStyle, currentStyle, openSetup, openTags } from './style-helpers.js';
-import { contexts, countContexts } from './count-helpers.js';
+import { contexts, countContexts, lastSent, record } from './count-helpers.js';
 
 const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view|group|timbre)\.[A-Za-z.]+$/;
 const BAR_TIMEOUT = 10_000;
@@ -50,22 +50,6 @@ const position = (page) => page.locator('#play-position');
 const playGo = (page) => page.locator('#play-go');
 const shownBar = async (page) => Number((await position(page).textContent()).match(/^Takt (\d+) von \d+$/)?.[1] ?? NaN);
 const value = async (page, g, f) => { await answered(page); return slider(page, g, f).inputValue(); };
-// was die Seite der Sitzung schickt (die Aktionen, window.__sent) und mit welchen Merkern die Hülle antwortet (window.__answers), ab jetzt
-const record = (page) => page.evaluate(() => {
-  const got = (window.__sent = []);
-  const answers = (window.__answers = []);
-  const backend = window.__JUCE__.backend;
-  const emit = backend.emitEvent.bind(backend);
-  backend.emitEvent = (name, data) => { if (data?.type === 'action') got.push({ seq: data.seq, ...JSON.parse(data.json) }); return emit(name, data); };
-  backend.addEventListener('state', (m) => { if (m.change) answers.push({ seq: m.seq, ...m.change }); });
-});
-// die letzte geschickte Aktion `action` mit den Merkern der Antwort, die sie deckt (die Hülle lässt den Schritt eines Knopfs aus, dem der
-// nächste desselben Knopfs folgt: dessen Antwort deckt ihn)
-const lastSent = (page, action) => page.evaluate((name) => {
-  const a = window.__sent.findLast((x) => x.action === name);
-  const answer = a && window.__answers.find((x) => x.seq >= a.seq);
-  return a && { ...a, sound: answer?.sound ?? null };
-}, action);
 
 async function playFast(page) {
   await page.locator('#tuning-tempo').fill('200');

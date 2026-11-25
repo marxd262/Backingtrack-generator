@@ -172,8 +172,10 @@ test('Regler und gleich lange Form während der Wiedergabe: kein Neustart; neue 
   expect(await contexts(page)).toBe(1);
 
   const live = async (label, change) => {
-    const before = await shownBar(page);
+    // erst leeren, dann den Takt lesen (die Web-App in umgekehrter Folge): ein Taktwechsel dazwischen fehlte sonst der Aufzeichnung, und eine
+    // leere Aufzeichnung ließe expectContinuous scheitern
     await positionsSince(page);
+    const before = await shownBar(page);
     await change();
     await settled(page); // die Engine hat getan, was die Änderung auslöst (ein Neustart käme nach der Antwort): die Taktzeile zeigt es bis hier
     await expectContinuous(page, before, label);
@@ -192,8 +194,8 @@ test('Regler und gleich lange Form während der Wiedergabe: kein Neustart; neue 
   });
 
   // neue Zielgröße: andere Länge, also genau ein Neustart (ein Instrumentensatz mehr), an der gleichen Stelle
+  await positionsSince(page); // erst leeren, dann den Takt lesen (wie oben)
   const before = await shownBar(page);
-  await positionsSince(page);
   await target(page).selectOption('48');
   await expect(position(page)).toHaveText(/^Takt \d+ von 48$/, { timeout: BAR_TIMEOUT });
   await settled(page); // der Neustart ist getan: wo er beginnt, steht bis hier in der Taktzeile

@@ -50,6 +50,45 @@ export const contexts = async (page) => {
 
 export const sets = async (page) => (await contexts(page)) + (await page.evaluate(() => window.__playback.restarts));
 
+// Where the web tests saw at the audio nodes that a value arrives (setTargetAtTime, AudioParam.value): what the page sends the session (the
+// actions, window.__sent) and with which flags the shell answers (window.__answers), from now on (timbre.spec.js, mixer.spec.js).
+export const record = (page) => page.evaluate(() => {
+  const got = (window.__sent = []);
+  const answers = (window.__answers = []);
+  const backend = window.__JUCE__.backend;
+  const emit = backend.emitEvent.bind(backend);
+  backend.emitEvent = (name, data) => { if (data?.type === 'action') got.push({ seq: data.seq, ...JSON.parse(data.json) }); return emit(name, data); };
+  backend.addEventListener('state', (m) => { if (m.change) answers.push({ seq: m.seq, ...m.change }); });
+});
+/** The last action `action` sent, with the flag `flag` of the answer covering it (the shell drops the step of a knob the next step of the same
+ *  knob follows: that one's answer covers it). */
+export const lastSent = (page, action, flag = 'sound') => page.evaluate(([name, f]) => {
+  const a = window.__sent.findLast((x) => x.action === name);
+  const answer = a && window.__answers.find((x) => x.seq >= a.seq);
+  return a && { ...a, [f]: answer?.[f] ?? null };
+}, [action, flag]);
+
+/** The web's AudioContext that throws (a start that fails), as page-check.mjs makes it: from the next load on, every playSession the page posts is
+ *  held back and answered as the shell answers a start that fails, by an engine report with the start's number (`run`) that does not play;
+ *  window.__failedStarts counts the answers (the page has drawn each when the count shows it). No start of the session's song fails in the shell
+ *  without a change of native/core (PROTOKOLL.md section 7, playSession).
+ *  shortcut: the shell's own report of a failed start is faked in the page, not made by the shell (no check holds that report), upgrade: when a
+ *  start of the session's song can be made to fail in the app. */
+export const failStarts = (page) => page.addInitScript(() => {
+  const backend = window.__JUCE__.backend;
+  let last = null;
+  window.__failedStarts = 0;
+  backend.addEventListener('engine', (m) => { last = m; });
+  const emit = backend.emitEvent.bind(backend);
+  backend.emitEvent = (name, data) => {
+    if (data?.type !== 'playSession') return emit(name, data);
+    setTimeout(() => {
+      backend.emitByBackend('engine', JSON.stringify({ ...last, run: data.seq, playing: false, standing: false, error: 'no audio' }));
+      window.__failedStarts++;
+    }, 50);
+  };
+});
+
 const position = (page) => page.locator('#play-position');
 
 // Zeichnet jeden Text der Taktzeile auf (window.__positions), auch kurze Zwischenstände wie die leere Zeile beim Neustart
