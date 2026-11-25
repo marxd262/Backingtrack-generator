@@ -1,8 +1,9 @@
-// How the checks of native/tools and the page tests (native/tests/ui/fixture.js) start the app, and the app's main window minimised and restored
-// through Win32 (ShowWindowAsync on the app's main window, from PowerShell), for the checks that hide the window as a user does (page-check.mjs,
-// track-page-check.mjs).
+// How the checks of native/tools and the page tests (native/tests/ui/fixture.js) start the app, never two at the same instant, and the app's main
+// window minimised and restored through Win32 (ShowWindowAsync on the app's main window, from PowerShell), for the checks that hide the window as a
+// user does (page-check.mjs, track-page-check.mjs).
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { join } from 'node:path';
 
 // btg_desktop_run <desktop> <exe> [arguments...] (native/platform/win/desktop_run.cpp) starts the program on the Windows desktop of that name (it
@@ -12,11 +13,51 @@ import { join } from 'node:path';
 const desktopRun = join(import.meta.dirname, '../build/platform/Release/btg_desktop_run.exe');
 export const shown = process.env.BTG_SHOW === '1';
 
+// Apps spawned through the runner within about 100 ms of each other now and then stand with their WebView2 running and no page at all (Task 33g:
+// a probe that starts four apps a round through startApp, each on a desktop of its own; spawned at once 20 and 23 of 100 starts without a page,
+// 100 ms apart 2 of 100, 300 ms apart 0 of 100; on the user's desktop never, in about 3000 starts). Why two such WebView2 block each other is not
+// known. So no two spawns through the runner come closer than this, over every process on this machine: 300 ms measured safe, with a margin (with
+// it, the same probe: 1 of 300; the fixture of the page tests still tries such a start once more).
+export const START_GAP_MS = 500;
+// The gate is a listening socket on this port of 127.0.0.1 (exclusive: not shared through a cluster's primary): one process at a time can hold it,
+// and the system frees it when that process ends, also when it is killed, so no lock is left over to be taken over. Its holder spawns and keeps
+// it START_GAP_MS longer; a connection to it is closed at once. The port lies far from the debug ports of the checks in native/tools (9333 to
+// 9337), of the page tests (9340 + the worker's index) and of the start probe (9350 to 9353), and below Windows' dynamic ports (49152 on).
+// shortcut: a fixed port: another program that listens on it holds up every start for GATE_WAIT_MS and then fails it (the error names the port),
+// upgrade: when that happens, the port from a variable. shortcut: the gate is not first come, first served (every waiter tries again each 20 ms,
+// and a newcomer may win); a start of the page tests waited at most 1.7 s (four workers; 158 of 377 starts waited), upgrade: when more processes
+// than these start apps at once and a wait comes near GATE_WAIT_MS.
+export const GATE_PORT = 39417;
+const GATE_WAIT_MS = 10_000;
+
+/** Runs `spawnApp` once no other caller of passGate on this machine has run its own within START_GAP_MS, and gives what it gives. */
+export async function passGate(spawnApp) {
+  const until = Date.now() + GATE_WAIT_MS;
+  const take = () => new Promise((resolve, reject) => {
+    const server = createServer((stray) => stray.destroy()).once('error', (e) => (e.code === 'EADDRINUSE' ? resolve(null) : reject(e)));
+    server.listen({ port: GATE_PORT, host: '127.0.0.1', exclusive: true }, () => resolve(server));
+  });
+  let gate;
+  while (!(gate = await take())) {
+    if (Date.now() > until) throw new Error(`startApp: the port ${GATE_PORT} of its gate stayed taken for ${GATE_WAIT_MS / 1000} s: by another program?`);
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  try {
+    return spawnApp();
+  } finally {
+    // by the clock from here: a timer counts from the start of the event loop's turn, which may lie before the spawn
+    const free = Date.now() + START_GAP_MS;
+    const release = () => (Date.now() < free ? setTimeout(release, free - Date.now()) : gate.close());
+    release();
+  }
+}
+
 /** Starts the app `exe` as spawn(exe, [], options) does, through the runner on the desktop `desktop` (one per debug port: no two apps share one),
- *  or itself with BTG_SHOW=1; gives the spawned child (the runner: its exit code is the app's, kill() ends the app). */
-export function startApp(exe, desktop, options) {
+ *  START_GAP_MS after any other start through the runner on this machine, or itself with BTG_SHOW=1 (at once: on the user's desktop coincident
+ *  starts never failed); gives the spawned child (the runner: its exit code is the app's, kill() ends the app). */
+export async function startApp(exe, desktop, options) {
   for (const file of shown ? [exe] : [exe, desktopRun]) if (!existsSync(file)) throw new Error(`no app at ${file}: build it first (native/build.ps1)`);
-  return shown ? spawn(exe, [], options) : spawn(desktopRun, [desktop, exe], options);
+  return shown ? spawn(exe, [], options) : passGate(() => spawn(desktopRun, [desktop, exe], options));
 }
 
 const SW = { minimise: 6, restore: 9 };

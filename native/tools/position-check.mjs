@@ -27,7 +27,7 @@ const PORT = 9334;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const median = (v) => [...v].sort((a, b) => a - b)[Math.floor(v.length / 2)];
 
-const app = startApp(exe, `btg-tools-${PORT}`, { env: { ...process.env, BTG_MUTE: '1', BTG_NO_CACHE: '1', BTG_POSITION_LOG: log, BTG_STORAGE_DIR: storage, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${PORT}` }, stdio: 'ignore' });
+const app = await startApp(exe, `btg-tools-${PORT}`, { env: { ...process.env, BTG_MUTE: '1', BTG_NO_CACHE: '1', BTG_POSITION_LOG: log, BTG_STORAGE_DIR: storage, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${PORT}` }, stdio: 'ignore' });
 let browser;
 try {
   for (let i = 0; !browser && i < 40; i++) { await sleep(500); browser = await chromium.connectOverCDP(`http://127.0.0.1:${PORT}`).catch(() => null); }

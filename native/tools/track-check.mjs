@@ -34,7 +34,7 @@ for (const [type, args] of Object.entries(formats)) {
 }
 writeFileSync(join(work, 'broken.mp3'), 'this is not audio');
 
-const app = startApp(exe, `btg-tools-${PORT}`, { env: { ...process.env, BTG_MUTE: '1', ...(process.env.BTG_KEEP ? {} : { BTG_NO_CACHE: '1' }), BTG_STORAGE_DIR: storage, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${PORT}` }, stdio: 'ignore' });
+const app = await startApp(exe, `btg-tools-${PORT}`, { env: { ...process.env, BTG_MUTE: '1', ...(process.env.BTG_KEEP ? {} : { BTG_NO_CACHE: '1' }), BTG_STORAGE_DIR: storage, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${PORT}` }, stdio: 'ignore' });
 let browser;
 try {
   for (let i = 0; !browser && i < 40; i++) {

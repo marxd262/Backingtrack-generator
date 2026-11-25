@@ -74,7 +74,7 @@ let run = null; // { app, browser, page } of the app that runs
 // page send recorded from the start of the document, the page drawn from the answer to its sync. `prepare(page)`: runs once in the page before the
 // reload that starts the recording (to put something into its storage).
 async function launch(folder, { prepare = null } = {}) {
-  const app = startApp(exe, `btg-tools-${PORT}`, { env: { ...process.env, BTG_MUTE: '1', BTG_STORAGE_DIR: folder, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${PORT}` }, stdio: 'ignore' });
+  const app = await startApp(exe, `btg-tools-${PORT}`, { env: { ...process.env, BTG_MUTE: '1', BTG_STORAGE_DIR: folder, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${PORT}` }, stdio: 'ignore' });
   run = { app, browser: null, page: null };
   for (let i = 0; !run.browser && i < 40; i++) {
     await sleep(500);

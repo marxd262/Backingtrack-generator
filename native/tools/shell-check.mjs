@@ -68,7 +68,7 @@ const problems = [];
 const result = {};
 const began = Date.now(), pageLog = [];
 let setupDone = Infinity; // the index in pageLog from which an entry is a problem
-const app = startApp(exe, `btg-tools-${PORT}`, { env: { ...process.env, BTG_MUTE: '1', BTG_STORAGE_DIR: storage, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${PORT}` }, stdio: 'ignore' });
+const app = await startApp(exe, `btg-tools-${PORT}`, { env: { ...process.env, BTG_MUTE: '1', BTG_STORAGE_DIR: storage, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${PORT}` }, stdio: 'ignore' });
 let killed = false;
 app.on('exit', (code, signal) => { if (!killed) pageLog.push({ ms: Date.now() - began, what: `the app ended by itself (code ${code}, signal ${signal})` }); });
 let browser;

@@ -10,18 +10,23 @@ import { shown, startApp } from '../../tools/app-window.mjs';
 
 const exe = join(import.meta.dirname, '../../build/app/BackingtrackApp_artefacts/Release/Standalone/Backingtrack Generator.exe');
 // The app runs on a Windows desktop of its own (startApp; BTG_SHOW=1 starts the app itself, to watch a test).
-// A start takes 1.3 to 2.6 s (160 starts measured: no step over 2 s). After this deadline the start fails, naming its step; ending the app
-// (at most 10 s) and removing the folder (at most 5 s) still fit in the fixture's 30 s. The deadline holds for both tries of a start together
-// (below): a first try that stands without a page ends about 3 + 5 s after its spawn (the attach, measured up to 3.0 s, then NO_PAGE_MS), its
-// app is ended (well under 1 s, at most 10 s), and the second try has the rest of the 15 s; a start of 1.3 to 2.6 s fits in it. If the 15 s
-// are over when that app is ended, no second try is made.
+// A start takes 1.3 to 2.6 s (160 starts measured: no step over 2 s), and startApp may hold its spawn back behind the other workers' spawns
+// (START_GAP_MS apart, app-window.mjs; in a run 158 of 377 starts waited, at most 1.7 s). After this deadline the start fails, naming its step;
+// ending the app (at most 10 s) and removing the folder (at most 5 s) still fit in the fixture's 30 s, so the deadline cannot grow. It holds for
+// both tries of a start together (below). At the measured maxima the second try has no time to spare: the first try's wait at the gate (1.7 s),
+// its attach (3.0 s) and NO_PAGE_MS (5 s), and ending its app (well under 1 s, at most 10 s) leave about 4.3 s, which the second try's wait at
+// the gate (1.7 s) and its start (2.6 s) take whole; a second try with less is ended by the deadline. If the 15 s are over when the first try's
+// app is ended, no second try is made.
 const START_S = 15;
-// shortcut: on a desktop of its own a start now and then stands with the app's WebView2 running and no page at all (`the browser's pages: []`;
-// 6 in about 1900 starts with the workers on one desktop, 1 in about 2150 with a desktop each, never in about 3000 on the user's desktop); why is
-// not known. Such a first try is ended after NO_PAGE_MS without any page and the app started once more on the same folder and port, with a line
-// in the log ("the app's start was tried again: …") to count it by; every other way a start stands, and every start with BTG_SHOW=1, fails at
-// the deadline as before, upgrade: when the cause is found. A normal start has a page 6 ms after the attach (mean of 88; at most 562 ms) and the
-// app's own page after 161 ms (at most 1112 ms).
+// shortcut: of two apps spawned within about 100 ms of each other on desktops of their own, one now and then stands with its WebView2 running and
+// no page at all (`the browser's pages: []`; Task 33g's probe, at START_GAP_MS in app-window.mjs: spawned at once in 20 and 23 of 100 starts,
+// 100 ms apart in 2 of 100, 300 ms apart in 0 of 100; never in about 3000 starts on the user's desktop, coincident ones too). startApp keeps
+// every two spawns START_GAP_MS apart (the probe then: 1 of 300); not known is why such WebView2 block each other, and whether a WebView2 of
+// another program that starts at the same instant does the same. So a first try that has no page NO_PAGE_MS after the attach is still ended
+// and the app started once more on the same folder and port, with a line in the log ("the app's start was tried again: …") to count it by; every
+// other way a start stands, and every start with BTG_SHOW=1, fails at the deadline as before, upgrade: when it is known what blocks a WebView2
+// that starts beside another. A normal start has a page 6 ms after the attach (mean of 88; at most 562 ms) and the app's own page after 161 ms
+// (at most 1112 ms).
 const NO_PAGE_MS = 5000;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const portOpen = (port) => fetch(`http://127.0.0.1:${port}/json/version`).then(() => true, () => false);
@@ -75,13 +80,15 @@ async function start(run, { folder, port, locale, viewport, reducedMotion, probl
   // Without SmartScreen: on a new profile WebView2 holds its port and folder until about 6.5 s after its start, also after the app was ended.
   // A 2D canvas drawn in software: an accelerated one goes over to software after the test's first reads (toDataURL), and the same drawing
   // then has other pixels; a test that compares pictures of a canvas would compare the two ways of drawing it.
-  // shortcut: one desktop per worker (btg-tests-<port>): with the apps of all workers on one desktop, a start now and then never got its page (the
-  // WebView2's browser ran with no page for 15 s; 6 in about 1900 starts); with a desktop each it is rarer (1 in about 2150), not gone (such a
-  // start is tried once more: NO_PAGE_MS above); why is not known, upgrade: when the cause is found.
+  // One desktop per worker (btg-tests-<port>): with the apps of all workers on one desktop a start without a page came more often (6 in about
+  // 1900 starts, against 1 in about 2150 with a desktop each). Such starts come from spawns that coincide (NO_PAGE_MS above), which startApp now
+  // keeps apart; whether one desktop for all would do as well with that is not measured.
   const downloads = join(folder, 'downloads');
   mkdirSync(downloads, { recursive: true });
-  const app = (run.app = startApp(exe, `btg-tests-${port}`, { stdio: 'ignore', env: { ...process.env, BTG_MUTE: '1', BTG_STORAGE_DIR: folder,
+  run.step = 'wait at the gate of startApp (no two spawns within START_GAP_MS)';
+  const app = (run.app = await startApp(exe, `btg-tests-${port}`, { stdio: 'ignore', env: { ...process.env, BTG_MUTE: '1', BTG_STORAGE_DIR: folder,
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port} --lang=${locale} --disable-features=msSmartScreenProtection --disable-accelerated-2d-canvas` } }));
+  if (run.closing) { app.kill(); return; } // the deadline came during the wait, and quit() found no app to end
   run.step = `attach to the app's WebView2 on port ${port}`;
   while (!run.browser) {
     if (run.closing) return; // the deadline came and quit() ended the app
