@@ -1,0 +1,1562 @@
+// Profil-Fenster neben dem Mischpult: Baum (Aktuelle Sitzung, Werksprofile, Meine Profile), Sitzung speichern und laden, Teile-Auswahl,
+// Werksprofile laden, Überschreiben, Umbenennen, Löschen, Ordner, Export/Import nach Auswahl, Alles sichern, Rückgängig, Tastatur, breit und schmal
+// (echte Seite der App).
+// Portiert aus tests/e2e/profiles.spec.js: die App lädt ihre Seite; den gespeicherten Baum (die Web-App: localStorage backingtrack.profiles) hält
+// die App als profiles.json in ihrem Ordner: gelesen, wenn die Seite die Antworten auf ihre Aktionen zeigt, vorgegeben (auch kaputt) mit dem
+// Neustart der App, und dass er gemerkt ist, beweist ein Neustart. Eine Datei, die die Seite herunterlädt, landet im Ordner des Tests (fixture.js).
+// Die Sprache wählt die Leiste der App. Was die Web-App in einem eigenen Browser-Kontext prüfte (360 px, Touch), läuft auf der Seite des Tests,
+// die frisch ist wie jener Kontext; Touch schaltet eine CDP-Sitzung der Seite ein.
+import { existsSync, readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { test, expect, answered, chooseLanguage, fromSession, settled } from './fixture.js';
+
+test.use({ locale: 'de-DE' });
+
+// Das Fenster steht, wenn sein Öffnen gelaufen ist: die Seite setzt den Fokus auf den Tabstopp des Baums mit dem toggle des Popovers (eine Aufgabe
+// nach dem Öffnen), und der Browser scrollt den Baum mit dem nächsten Bild zu ihm. Auf dem Desktop der Tests kommt das manchmal erst nach
+// toBeVisible: ein scrollIntoView des Tests davor scrollte es zurück (gesehen in „Touch über Chromes echte Eingabe“, 2 von 3 ganzen Läufen)
+const openWindow = async (page) => {
+  await page.locator('#profiles-btn').click();
+  await expect(page.locator('#profiles-pop')).toBeVisible();
+  await page.waitForFunction(() => document.getElementById('profile-tree').contains(document.activeElement), null, { polling: 50 });
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+};
+
+// Die Web-App machte für diese Tests eine Seite in einem eigenen Kontext (ohne gemerkten Zustand) und ließ die Seite aus beforeEach liegen: hier
+// ist es die Seite des Tests selbst, ohne den Schritt aus beforeEach
+const OWN_PAGE = new Set([
+  '360 px: kein waagerechtes Scrollen, Baum über dem Feld, Knöpfe und Zeilen mindestens 44 px hoch',
+  'Touch über Chromes echte Eingabe (CDP): langes Drücken und Ziehen legt ab, schnelles Wischen am Griff scrollt nur',
+  'Touch (CDP), 360 px: ist der Baum zu kurz zum Scrollen, schiebt ein Wischen am Griff das Fenster',
+  'Touch: kurzes Tippen auf den Griff wählt nur die Zeile',
+]);
+
+let app; // die App des Tests: ihr Ordner hält profiles.json
+test.beforeEach(async ({ page, app: own }, testInfo) => {
+  app = own;
+  if (OWN_PAGE.has(testInfo.title)) return;
+  await page.locator('#tune-btn').click();
+  await expect(page.locator('#play')).toBeVisible();
+  await openWindow(page);
+});
+
+const STYLES = ['Funk-Rock', 'Psychedelischer Indie', 'Träumerisch, langsam', 'Blues-Shuffle', 'Classic Rock', 'Hardrock', 'Reggae', 'Country', 'Pop-Punk'];
+const tempo = (page) => page.locator('#tuning-tempo-out');
+const message = (page) => page.locator('#profile-message');
+const items = (page) => page.locator('#profile-tree [role="treeitem"]');
+const item = (page, name) => page.getByRole('treeitem', { name, exact: true });
+// ein Klick, eine Taste oder eine Eingabe, die eine Aktion schickt, und die Antwort darauf (die Seite der App zeichnet mit ihr, die der Web-App sofort)
+const acted = async (page, done) => { await done; await answered(page); };
+const setTempo = async (page, bpm) => {
+  await page.locator('#profiles-pop').evaluate((el) => el.hidePopover());
+  await acted(page, page.locator('#tuning-tempo').fill(String(bpm)));
+  await openWindow(page);
+};
+const saveSession = async (page, name) => {
+  await acted(page, item(page, 'Aktuelle Sitzung').click());
+  await page.getByLabel('Name des Profils').fill(name);
+  await acted(page, page.locator('#profile-save').click());
+};
+const load = async (page, name) => {
+  await acted(page, item(page, name).click());
+  await acted(page, page.locator('#profile-load').click());
+};
+// der gespeicherte Baum: profiles.json im Ordner der App, wenn die Seite die Antworten zeigt (geschrieben wird in der Aktion); ohne Datei null
+const stored = async (page) => {
+  await answered(page);
+  const file = join(app.folder, 'profiles.json');
+  return existsSync(file) ? readFileSync(file, 'utf8') : null;
+};
+// Teile eines gespeicherten Profils
+const storedParts = async (page, name) => {
+  const walk = (list) => list.flatMap((x) => (x.type === 'folder' ? walk(x.items) : [x]));
+  return Object.keys(walk(JSON.parse(await stored(page)).items).find((x) => x.name === name).parts);
+};
+const info = (page) => page.locator('#profile-panel-info');
+const undo = (page) => page.locator('#profile-undo');
+// Unterordner im gewählten Ordner anlegen (wählt den neuen Ordner)
+// tiefe Zeilen am Namen anklicken: die Mitte der Zeile liegt dort schon auf dem Pfeil zum Auf-/Zuklappen
+const pickRow = (page, name) => acted(page, item(page, name).locator('.tree-label').click());
+const newFolder = async (page, parent, name) => {
+  await pickRow(page, parent);
+  await page.locator('#profile-subfolder').click();
+  await page.getByLabel('Name des Ordners').fill(name);
+  await acted(page, page.locator('#profile-folder-add').click());
+};
+// Sitzung in einem eigenen Ordner speichern (Ordner-Auswahl nach dem Text ohne Einrückung)
+const saveIn = async (page, name, folderName) => {
+  await acted(page, item(page, 'Aktuelle Sitzung').click());
+  await page.locator('#profile-folder').evaluate((s, n) => { s.value = [...s.options].find((o) => o.textContent.trim() === n).value; }, folderName);
+  await page.getByLabel('Name des Profils').fill(name);
+  await acted(page, page.locator('#profile-save').click());
+};
+// die Datei, die die Seite herunterlädt (Playwright legt sie in den Ordner des Tests, fixture.js)
+const downloadJson = async (page, button) => {
+  const [download] = await Promise.all([page.waitForEvent('download'), page.locator(button).click()]);
+  return { name: download.suggestedFilename(), text: await readFile(await download.path(), 'utf8') };
+};
+// "Kopieren": den Text gibt die Hülle (export, in ihrer Schlange nach den Aktionen); settled wartet, bis er im Feld steht
+const copied = async (page) => {
+  await page.locator('#profile-copy').click();
+  await settled(page);
+  return JSON.parse(await page.locator('#profile-text').inputValue());
+};
+// gespeicherten Baum vorgeben und das Fenster neu öffnen (eigene Ordner sind dann zugeklappt); hoch genug, dass der Baum nicht scrollt.
+// Die Web-App legte ihn in den localStorage und lud neu; hier startet die App neu auf dem Ordner mit diesem profiles.json: die neue Seite
+const seed = async (nodes, height = 1500) => {
+  const page = await app.restart({ 'profiles.json': JSON.stringify({ version: 2, items: nodes }) });
+  await page.setViewportSize({ width: 1280, height });
+  await page.locator('#tune-btn').click();
+  await openWindow(page);
+  return page;
+};
+const prof = (id, name) => ({ id, type: 'profile', name, parts: { tempo: { bpm: 90 } } });
+const dir = (id, name, nodes = []) => ({ id, type: 'folder', name, items: nodes });
+const deep = (i) => dir(`d${i}`, `D${i}`, i < 8 ? [deep(i + 1)] : []); // D1 … D8, D8 auf Ebene 8
+// A > B > C (3 Ebenen hoch), D1 … D8, Z mit einem Profil P, P oben
+const FIXTURE = [dir('a', 'A', [dir('b', 'B', [dir('c', 'C')])]), deep(1), dir('z', 'Z', [prof('zp', 'P')]), prof('p', 'P')];
+const names = (list) => list.map((n) => n.name);
+const storedTree = async (page) => JSON.parse(await stored(page));
+const moveOptions = async (page) => (await page.locator('#profile-move-to option').allTextContents()).map((o) => o.trim());
+const grip = (page, name) => item(page, name).locator('.drag-handle');
+const center = async (locator) => { const b = await locator.boundingBox(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; };
+// Maus: am Griff drücken, in Schritten zum Ziel, dort (noch nicht) loslassen
+const mouseTo = async (page, from, to) => {
+  const a = await center(from);
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down();
+  const b = await center(to);
+  await page.mouse.move(b.x, b.y, { steps: 8 });
+};
+// Touch: synthetische PointerEvents (pointerType touch) am Element unter dem Punkt, wie der Browser sie schickt
+const pointer = (page, type, { x, y }, extra = {}) => page.evaluate(({ type, x, y, extra }) => {
+  document.elementFromPoint(x, y).dispatchEvent(new PointerEvent(type, {
+    bubbles: true, cancelable: true, composed: true, pointerId: 11, pointerType: 'touch', isPrimary: true, clientX: x, clientY: y, buttons: type === 'pointerup' ? 0 : 1, ...extra,
+  }));
+}, { type, x, y, extra });
+const touch = (page, type, at) => pointer(page, type, at);
+const toBottom = (tree) => tree.evaluate((t) => { t.scrollTop = t.scrollHeight; return t.scrollTop; });
+const markers = (page) => page.locator('#profile-tree [data-drop], #profile-tree [data-dragging]');
+const buzz = (page) => page.evaluate(() => { window.__buzz = []; navigator.vibrate = (p) => { window.__buzz.push(p); return true; }; });
+// Die Web-App machte für die Touch-Tests einen Kontext mit hasTouch; die App hat eine WebView: auf einer neuen App mit diesem profiles.json
+// schaltet eine CDP-Sitzung der Seite Touch ein (Emulation), dann lädt die Seite neu (sie lädt mit Touch); gibt die Seite und die Sitzung
+const touchPage = async (nodes, viewport) => {
+  const page = await app.restart({ 'profiles.json': JSON.stringify({ version: 2, items: nodes }) });
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true });
+  if (viewport) await page.setViewportSize(viewport);
+  await page.evaluate(() => document.fonts.ready); // nichts vom Laden davor ist unterwegs, wenn sie neu lädt (wie fixture.js; sonst bricht eine Schrift ab)
+  await page.reload();
+  await expect(page.locator('#go')).toHaveText(/\S/); // gezeichnet aus der Antwort auf sync
+  return { page, cdp };
+};
+
+test('Fenster zeigt den Baum: Aktuelle Sitzung (gewählt), Werksprofile mit 9 Stilen, Meine Profile; englisch übersetzt', async ({ page }) => {
+  await expect(page.locator('#profile-tree')).toHaveAttribute('role', 'tree');
+  await expect(items(page)).toHaveText(['Aktuelle Sitzung', 'Werksprofile', ...STYLES, 'Meine Profile']);
+  await expect(item(page, 'Aktuelle Sitzung')).toHaveAttribute('aria-selected', 'true');
+  await expect(item(page, 'Aktuelle Sitzung')).toHaveAttribute('aria-level', '1');
+  await expect(item(page, 'Werksprofile')).toHaveAttribute('aria-expanded', 'true');
+  await expect(item(page, 'Reggae')).toHaveAttribute('aria-level', '2');
+  await expect(item(page, 'Meine Profile')).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.locator('#profile-tree [tabindex="0"]')).toHaveCount(1);
+  await expect(page.locator('#profile-session-summary')).toContainText('100 bpm');
+  await page.locator('#profiles-pop').evaluate((el) => el.hidePopover());
+  await chooseLanguage(page, 'en');
+  await openWindow(page);
+  await expect(items(page).first()).toHaveText('Current session');
+  await expect(item(page, 'My profiles')).toBeVisible();
+});
+
+test('Sitzung speichern legt das Profil in „Meine Profile“ an und wählt es; Laden stellt das Tempo wieder her; bleibt nach dem Neuladen', async ({ page }) => {
+  await page.getByLabel('Name des Profils').fill('Test A');
+  await page.getByLabel('Ordner', { exact: true }).selectOption({ label: 'Meine Profile' });
+  await acted(page, page.locator('#profile-save').click());
+  await expect(message(page)).toContainText('Test A');
+  await expect(item(page, 'Test A')).toHaveAttribute('aria-selected', 'true');
+  await expect(item(page, 'Test A')).toHaveAttribute('aria-level', '2');
+  await expect(item(page, 'Test A')).toBeFocused();
+  await setTempo(page, 77);
+  await expect(tempo(page)).toHaveText('77 bpm');
+  await load(page, 'Test A');
+  await expect(tempo(page)).toHaveText('100 bpm');
+  await expect(message(page)).toHaveText('Profil übernommen.');
+  // gemerkt im Ordner der App (profiles.json): ein Neustart der App
+  page = await app.restart();
+  await page.locator('#tune-btn').click();
+  await openWindow(page);
+  await expect(items(page).last()).toHaveText('Test A');
+});
+
+test('Teile-Auswahl: eingeklappt, 10 Kästchen, „Nur Klang“ speichert nur die Klang-Teile, Laden lässt das Tempo unberührt', async ({ page }) => {
+  const picker = page.locator('#profile-save-parts');
+  await expect(picker).not.toHaveAttribute('open');
+  await expect(picker.locator('summary')).toHaveText('Inhalt: Alles');
+  await expect(picker.locator('input[type="checkbox"]').first()).toBeHidden();
+  await picker.locator('summary').click();
+  await expect(picker.locator('input[type="checkbox"]')).toHaveCount(10);
+  for (const box of await picker.locator('input[type="checkbox"]').all()) await expect(box).toBeVisible();
+  await expect(page.getByRole('checkbox', { name: 'Tempo', exact: true })).toBeChecked();
+  await picker.getByRole('button', { name: 'Nur Klang' }).click();
+  await expect(picker.locator('summary')).toHaveText('Inhalt: 3 von 10');
+  await expect(page.getByRole('checkbox', { name: 'Tempo', exact: true })).not.toBeChecked();
+  await expect(page.getByRole('checkbox', { name: 'Mischpult', exact: true })).toBeChecked();
+  await page.getByLabel('Name des Profils').fill('Klang');
+  await acted(page, page.locator('#profile-save').click());
+  await expect(item(page, 'Klang')).toHaveAttribute('aria-selected', 'true');
+  expect(await storedParts(page, 'Klang')).toEqual(['sound', 'voices', 'mixer']);
+  await setTempo(page, 77);
+  await load(page, 'Klang');
+  await expect(message(page)).toHaveText('Profil übernommen.');
+  await expect(tempo(page)).toHaveText('77 bpm');
+  // „Nichts“ speichert nichts
+  await acted(page, item(page, 'Aktuelle Sitzung').click());
+  await picker.getByRole('button', { name: 'Nichts' }).click();
+  await expect(picker.locator('summary')).toHaveText('Inhalt: 0 von 10');
+  await page.getByLabel('Name des Profils').fill('Leer');
+  await acted(page, page.locator('#profile-save').click());
+  await expect(message(page)).toContainText('mindestens einen Teil');
+  await expect(item(page, 'Leer')).toHaveCount(0);
+});
+
+test('„Nur Rhythmus“ in 4/4 gespeichert, in 6/8 geladen: das Tempo wird umgerechnet wie beim Taktartwechsel', async ({ page }) => {
+  await page.locator('#profile-save-parts').evaluate((el) => { el.open = true; });
+  await presetParts(page, 'Nur Rhythmus');
+  await saveSession(page, 'Rh'); // 4/4, 100 bpm
+  await page.locator('#profiles-pop').evaluate((el) => el.hidePopover());
+  if (!(await page.locator('#rack').isVisible())) await page.locator('#mode-switch').click(); // Zustand Einstellen
+  await acted(page, page.locator('#meter-chips [data-meter="6/8"]').click());
+  await acted(page, page.locator('#tuning-tempo').fill('50'));
+  await openWindow(page);
+  await load(page, 'Rh');
+  await expect(tempo(page)).toHaveText('67 bpm'); // dieselbe Achtelgeschwindigkeit wie 100 in 4/4
+  await expect(page.locator('#meter-chips [aria-pressed="true"]')).toHaveAttribute('data-meter', '6/8');
+});
+
+test('Werksprofil laden: Stil, Tempo und Kurzbeschreibung wie früher der Stil-Chip', async ({ page }) => {
+  await load(page, 'Reggae');
+  await expect(tempo(page)).toHaveText('76 bpm');
+  await acted(page, item(page, 'Aktuelle Sitzung').click());
+  await expect(page.locator('#profile-session-summary')).toContainText('Stil: Reggae');
+  await load(page, 'Funk-Rock');
+  await expect(tempo(page)).toHaveText('100 bpm');
+  await acted(page, item(page, 'Aktuelle Sitzung').click());
+  await expect(page.locator('#profile-session-summary')).toContainText('Stil: Funk');
+});
+
+test('Werksprofil: Kopie in „Meine Profile“, gleichnamig mit „ (2)“; Austausch kopiert die Stil-Teile', async ({ page }) => {
+  await acted(page, item(page, 'Blues-Shuffle').click());
+  await acted(page, page.locator('#profile-factory-copy').click());
+  await expect(item(page, 'Blues-Shuffle').last()).toHaveAttribute('aria-selected', 'true'); // die Kopie ist gewählt
+  await acted(page, item(page, 'Blues-Shuffle').first().click());
+  await acted(page, page.locator('#profile-factory-copy').click());
+  await expect(items(page).filter({ hasText: 'Blues-Shuffle' })).toHaveText(['Blues-Shuffle', 'Blues-Shuffle', 'Blues-Shuffle (2)']);
+  expect(await storedParts(page, 'Blues-Shuffle')).toEqual(['tempo', 'style', 'sound', 'voices']);
+  await acted(page, item(page, 'Blues-Shuffle').first().click()); // Austausch des Werksprofils
+  const file = await copied(page);
+  expect(file.format).toBe('backingtrack-profile');
+  expect(file.parts.style.style).toBe('blues');
+  expect(file.parts.tempo.bpm).toBe(88);
+  expect(file.parts.sound).toEqual({ timbre: {} });
+});
+
+test('Gleichnamig speichern und ohne Namen: Meldung, nichts ersetzt, die Liste bleibt bei einem Eintrag', async ({ page }) => {
+  await acted(page, page.locator('#profile-save').click());
+  await expect(message(page)).toHaveText('Bitte einen Namen eingeben.');
+  await saveSession(page, 'A');
+  await setTempo(page, 66);
+  await saveSession(page, 'a');
+  await expect(message(page)).toContainText('Mit Sitzung überschreiben');
+  await expect(items(page).filter({ hasText: /^a$/i })).toHaveCount(1);
+  await load(page, 'A');
+  await expect(tempo(page)).toHaveText('100 bpm');
+});
+
+test('Tastatur: ein Tabstopp, Pfeil ab/auf, Rechts/Links klappt Ordner und springt, Pos1/Ende, Enter wählt', async ({ page }) => {
+  const focused = (name) => expect(item(page, name)).toBeFocused();
+  await focused('Aktuelle Sitzung');
+  await page.keyboard.press('ArrowDown');
+  await focused('Werksprofile');
+  await page.keyboard.press('ArrowRight');
+  await focused('Funk-Rock');
+  await page.keyboard.press('ArrowLeft');
+  await focused('Werksprofile');
+  await acted(page, page.keyboard.press('ArrowLeft'));
+  await expect(item(page, 'Werksprofile')).toHaveAttribute('aria-expanded', 'false');
+  await expect(items(page)).toHaveCount(3);
+  await focused('Werksprofile');
+  await acted(page, page.keyboard.press('ArrowRight'));
+  await expect(item(page, 'Werksprofile')).toHaveAttribute('aria-expanded', 'true');
+  await expect(items(page)).toHaveCount(12);
+  await page.keyboard.press('End');
+  await focused('Meine Profile');
+  await page.keyboard.press('ArrowUp');
+  await focused('Pop-Punk');
+  await acted(page, page.keyboard.press('Enter'));
+  await expect(item(page, 'Pop-Punk')).toHaveAttribute('aria-selected', 'true');
+  await expect(item(page, 'Aktuelle Sitzung')).toHaveAttribute('aria-selected', 'false');
+  await expect(page.locator('#profile-load')).toBeVisible();
+  await focused('Pop-Punk');
+  await expect(page.locator('#profile-tree [tabindex="0"]')).toHaveCount(1);
+  await page.keyboard.press('Home');
+  await focused('Aktuelle Sitzung');
+  await acted(page, page.keyboard.press(' '));
+  await expect(item(page, 'Aktuelle Sitzung')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#profile-save')).toBeVisible();
+});
+
+test('Namen mit HTML erscheinen als Text', async ({ page }) => {
+  await saveSession(page, '<b>x</b>');
+  await expect(item(page, '<b>x</b>')).toHaveText('<b>x</b>');
+  await expect(page.locator('#profile-tree b, #profile-panel b')).toHaveCount(0);
+  await expect(page.locator('#profile-panel-title')).toHaveText('<b>x</b>');
+});
+
+test('Import: ein kopiertes Profil mit anderem Tempo wird in „Meine Profile“ aufgenommen und gewählt, Laden setzt das Tempo', async ({ page }) => {
+  const p = await copied(page);
+  expect(p.format).toBe('backingtrack-profile');
+  expect(Object.keys(p.parts)).toHaveLength(10);
+  p.name = 'Von Freund';
+  p.parts.tempo.bpm = 77;
+  p.parts.extra = { zukunft: 1 };
+  await page.locator('#profile-text').fill(JSON.stringify(p));
+  await acted(page, page.locator('#profile-import-text').click());
+  await expect(message(page)).toContainText('Von Freund');
+  await expect(item(page, 'Von Freund')).toHaveAttribute('aria-selected', 'true');
+  await expect(item(page, 'Von Freund')).toHaveAttribute('aria-level', '2');
+  await expect(tempo(page)).toHaveText('100 bpm'); // aufgenommen, nicht geladen
+  await acted(page, page.locator('#profile-load').click());
+  await expect(tempo(page)).toHaveText('77 bpm');
+});
+
+test('Import aus einer Datei; zu große Datei und kein JSON werden abgelehnt, ohne etwas zu ändern', async ({ page }) => {
+  const p = await copied(page);
+  p.name = 'Datei';
+  p.parts.tempo.bpm = 91;
+  await page.locator('#profile-import-file').setInputFiles({ name: 'profil.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(p)) });
+  await expect(item(page, 'Datei')).toHaveAttribute('aria-selected', 'true');
+  await acted(page, item(page, 'Aktuelle Sitzung').click());
+  await page.locator('#profile-text').fill('kein json');
+  await acted(page, page.locator('#profile-import-text').click());
+  await expect(message(page)).toContainText('kein gültiges Profil');
+  // die Seite liest eine Datei über 5 000 000 Bytes nicht und schickt die Aktion gleich mit der Größe
+  await acted(page, page.locator('#profile-import-file').setInputFiles({ name: 'gross.json', mimeType: 'application/json', buffer: Buffer.alloc(5_000_001, 32) }));
+  await expect(message(page)).toContainText('kein gültiges Profil');
+  await expect(items(page)).toHaveCount(13);
+  await expect(item(page, 'Aktuelle Sitzung')).toHaveAttribute('aria-selected', 'true');
+  await expect(tempo(page)).toHaveText('100 bpm');
+});
+
+test('Laden während der Wiedergabe: sie läuft mit den neuen Werten weiter', async ({ page }) => {
+  test.slow(); // je beobachtetem Zustand ein ganzer Takt
+  await setTempo(page, 120);
+  await saveSession(page, 'Live');
+  await page.locator('#profiles-pop').evaluate((el) => el.hidePopover());
+  await page.locator('#play-go').click();
+  await expect(page.locator('#play-position')).toHaveText(/Takt \d+ von/);
+  await setTempo(page, 150);
+  await load(page, 'Live');
+  await expect(tempo(page)).toHaveText('120 bpm');
+  await settled(page); // der Neustart, den das Laden beim Spielen auslöst, ist getan; "Stopp" stünde auch vorher da
+  await expect(page.locator('#play-go')).toHaveText('Stopp');
+  await load(page, 'Funk-Rock');
+  await expect(tempo(page)).toHaveText('100 bpm');
+  await settled(page);
+  await expect(page.locator('#play-go')).toHaveText('Stopp');
+  // render() läuft je Takt: im Fenster ändert sich dabei nichts am DOM, auch nicht mit offener Teile-Auswahl und „Rückgängig“
+  await saveSession(page, 'Weg');
+  await acted(page, page.locator('#profile-delete').click());
+  await expect(undo(page)).toBeVisible();
+  await acted(page, item(page, 'Live').click());
+  await page.locator('#profile-overwrite').click();
+  await expect(page.locator('#profile-overwrite-parts')).toHaveAttribute('open', '');
+  // je Zustand: einen Taktwechsel lang beobachten, kein einziger Eingriff ins DOM des Fensters
+  const quiet = async (what) => {
+    await settled(page); // die Seite hat jede Antwort gezeichnet: beobachtet wird, was die Wiedergabe allein schreibt
+    await page.evaluate(() => {
+      window.__observer?.disconnect();
+      window.__mutations = 0;
+      window.__observer = new MutationObserver((list) => { window.__mutations += list.length; });
+      window.__observer.observe(document.getElementById('profiles'), { subtree: true, childList: true, attributes: true, characterData: true });
+    });
+    const bar = await page.locator('#play-position').textContent();
+    await expect(page.locator('#play-position')).not.toHaveText(bar, { timeout: 10_000 });
+    expect(await page.evaluate(() => window.__mutations), what).toBe(0);
+  };
+  await quiet('Profil mit Teile-Auswahl und Rückgängig');
+  await newFolder(page, 'Meine Profile', 'Box');
+  await saveIn(page, 'Drin', 'Box');
+  await acted(page, item(page, 'Box').click());
+  await quiet('Ordner');
+  await page.locator('#profile-delete').click();
+  await expect(page.locator('#profile-delete-ask')).toBeVisible();
+  await quiet('Rückfrage beim Löschen');
+  await page.locator('#profile-subfolder').click();
+  await expect(page.getByLabel('Name des Ordners')).toBeVisible();
+  await quiet('Feld für den Unterordner');
+  await pickRow(page, 'Drin'); // Box selbst hat kein Ziel (oben liegt es schon)
+  await page.locator('#profile-move').click();
+  await expect(page.locator('#profile-move-to')).toBeVisible();
+  await quiet('Verschieben nach');
+  await acted(page, item(page, 'Meine Profile').click());
+  await quiet('Meine Profile');
+});
+
+test('1280 px: zwei Spalten, Baum links, Feld rechts und deutlich breiter, Fenster höchstens 56 rem und im Bild', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const pop = await page.locator('#profiles-pop').boundingBox();
+  const tree = await page.locator('#profile-tree').boundingBox();
+  const panel = await page.locator('#profile-panel').boundingBox();
+  expect(pop.width).toBeLessThanOrEqual(56 * 16);
+  expect(pop.x).toBeGreaterThanOrEqual(0);
+  expect(pop.x + pop.width).toBeLessThanOrEqual(1280);
+  expect(tree.x + tree.width).toBeLessThanOrEqual(panel.x);
+  expect(Math.abs(tree.y - panel.y)).toBeLessThan(2);
+  expect(tree.width).toBeGreaterThanOrEqual(15 * 16 - 1);
+  expect(tree.width).toBeLessThanOrEqual(20 * 16 + 1);
+  expect(panel.width).toBeGreaterThan(tree.width * 1.3);
+});
+
+test('360 px: kein waagerechtes Scrollen, Baum über dem Feld, Knöpfe und Zeilen mindestens 44 px hoch', async ({ page }) => {
+  // die Seite des Tests ist frisch (die Web-App: ein eigener Kontext ohne gemerkten Zustand, 360 × 740)
+  await page.setViewportSize({ width: 360, height: 740 });
+  await page.locator('#go').click(); // über Los: Spielseite im Fokus
+  await expect(page.locator('#play')).toBeVisible();
+  await openWindow(page);
+  await page.locator('#profile-save-parts').evaluate((el) => { el.open = true; });
+  await saveSession(page, 'Ein sehr langer Profilname der umbrechen muss weil er nicht passt');
+  await acted(page, item(page, 'Aktuelle Sitzung').click());
+  const noScrollX = () => page.evaluate(() => {
+    const pop = document.getElementById('profiles-pop');
+    return document.documentElement.scrollWidth <= document.documentElement.clientWidth && pop.scrollWidth <= pop.clientWidth;
+  });
+  expect(await noScrollX()).toBe(true);
+  const tree = await page.locator('#profile-tree').boundingBox();
+  const panel = await page.locator('#profile-panel').boundingBox();
+  expect(tree.y + tree.height).toBeLessThanOrEqual(panel.y);
+  for (const sel of ['#profile-save', '#profile-file', '#profile-copy', '#profile-import-text', '#profile-save-parts summary', '#profile-save-parts [data-preset="sound"]']) {
+    expect((await page.locator(sel).boundingBox()).height, sel).toBeGreaterThanOrEqual(44);
+  }
+  for (const row of await items(page).all()) expect((await row.boundingBox()).height).toBeGreaterThanOrEqual(44);
+  // Teile: die ganze Zeile (Beschriftung samt Kästchen) ist die Trefferfläche, nicht nur das 1,5-rem-Kästchen
+  const list = await page.locator('#profile-save-parts .profile-part-list').boundingBox();
+  for (const label of await page.locator('#profile-save-parts .profile-part label').all()) {
+    const b = await label.boundingBox();
+    expect(b.height).toBeGreaterThanOrEqual(44);
+    expect(b.width).toBeGreaterThan(list.width * 0.9);
+  }
+  const tempoBox = page.getByRole('checkbox', { name: 'Tempo', exact: true });
+  await page.locator('#profile-save-parts .profile-part label').nth(1).click({ position: { x: 200, y: 10 } });
+  await expect(tempoBox).not.toBeChecked();
+  await load(page, 'Country');
+  expect(await noScrollX()).toBe(true);
+  expect((await page.locator('#profile-load').boundingBox()).height).toBeGreaterThanOrEqual(44);
+  // eigenes Profil und Ordner: alle Knöpfe 44 px, kein waagerechtes Scrollen, auch mit offenen Feldern
+  await acted(page, items(page).filter({ hasText: 'Ein sehr langer Profilname' }).click()); // auf 60 Zeichen gekürzt
+  await page.locator('#profile-overwrite').click();
+  expect(await noScrollX()).toBe(true);
+  for (const sel of ['#profile-load', '#profile-overwrite', '#profile-overwrite-go', '#profile-rename', '#profile-delete', '#profile-file', '#profile-copy', '#profile-backup']) {
+    expect((await page.locator(sel).boundingBox()).height, sel).toBeGreaterThanOrEqual(44);
+  }
+  await page.locator('#profile-rename').click();
+  expect((await page.locator('#profile-rename-go').boundingBox()).height).toBeGreaterThanOrEqual(44);
+  const handle = await items(page).filter({ hasText: 'Ein sehr langer Profilname' }).locator('.drag-handle').boundingBox();
+  expect(handle.width).toBeGreaterThanOrEqual(44);
+  expect(handle.height).toBeGreaterThanOrEqual(44);
+  await acted(page, page.locator('#profile-delete').click());
+  expect(await noScrollX()).toBe(true);
+  expect((await undo(page).boundingBox()).height).toBeGreaterThanOrEqual(44);
+  await page.locator('#profile-subfolder').click();
+  await page.getByLabel('Name des Ordners').fill('Ordner mit einem ebenfalls sehr langen Namen, der umbricht');
+  await acted(page, page.locator('#profile-folder-add').click());
+  await expect(item(page, 'Ordner mit einem ebenfalls sehr langen Namen, der umbricht')).toHaveAttribute('aria-selected', 'true');
+  await page.locator('#profile-subfolder').click();
+  expect(await noScrollX()).toBe(true);
+  for (const sel of ['#profile-subfolder', '#profile-folder-add', '#profile-rename', '#profile-delete', '#profile-import-text', '#profile-backup']) {
+    expect((await page.locator(sel).boundingBox()).height, sel).toBeGreaterThanOrEqual(44);
+  }
+  // Unterordner darin: „Verschieben nach …“ mit offener Auswahl
+  await page.getByLabel('Name des Ordners').fill('U');
+  await acted(page, page.locator('#profile-folder-add').click());
+  await page.locator('#profile-move').click();
+  expect(await noScrollX()).toBe(true);
+  for (const sel of ['#profile-move', '#profile-move-to', '#profile-move-go']) {
+    expect((await page.locator(sel).boundingBox()).height, sel).toBeGreaterThanOrEqual(44);
+  }
+});
+
+test('defekter gespeicherter Baum: leerer Baum, keine Konsolenfehler', async ({ page }) => {
+  // die Web-App legte den Text in den localStorage und lud neu; hier liegt er als profiles.json im Ordner, und die App startet neu
+  for (const garbage of ['{kaputt', '{"version":2,"items":[null,5,{"type":"profile"},{"type":"folder","name":"ohne items"}]}', '"x"']) {
+    page = await app.restart({ 'profiles.json': garbage });
+    await page.locator('#tune-btn').click();
+    await openWindow(page);
+    await expect(items(page), garbage).toHaveCount(12);
+    await expect(items(page).last()).toHaveText('Meine Profile');
+  }
+});
+
+test('gespeicherte Ids wie die festen Schlüssel (session, mine, factory, factory:…) verdrängen keine Zeile; Ordner-Auswahl zeigt die Verschachtelung', async ({ page }) => {
+  const p = (id, name) => ({ id, type: 'profile', name, parts: { tempo: { bpm: 90 } } });
+  const nodes = [p('session', 'P1'), p('factory:reggae', 'P2'), p('factory:zzz', 'P3'),
+    { id: 'mine', type: 'folder', name: 'Ordner', items: [p('session', 'Innen'), { id: 'factory', type: 'folder', name: 'Unter', items: [] }] }];
+  page = await app.restart({ 'profiles.json': JSON.stringify({ version: 2, items: nodes }) });
+  await page.locator('#tune-btn').click();
+  await openWindow(page);
+  await expect(page.locator('#profile-tree [role="treeitem"]')).toHaveText(['Aktuelle Sitzung', 'Werksprofile', ...STYLES, 'Meine Profile', 'Ordner', 'P1', 'P2', 'P3']);
+  await acted(page, item(page, 'Ordner').locator('.tree-twisty').click());
+  await expect(item(page, 'Innen')).toHaveAttribute('aria-level', '3');
+  await expect(item(page, 'Unter')).toHaveAttribute('aria-level', '3');
+  for (const name of ['P1', 'P2', 'P3']) {
+    await acted(page, item(page, name).click());
+    await expect(item(page, name)).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('#profile-tree [aria-selected="true"]')).toHaveCount(1);
+    await expect(page.locator('#profile-panel-title')).toHaveText(name);
+  }
+  await setTempo(page, 120);
+  await load(page, 'P3'); // eigenes Profil, nicht applyStyle('zzz')
+  await expect(tempo(page)).toHaveText('90 bpm');
+  await expect(message(page)).toHaveText('Profil übernommen.');
+  await acted(page, item(page, 'Aktuelle Sitzung').click());
+  await expect(page.locator('#profile-save')).toBeVisible();
+  // Ordner-Auswahl: jede Ebene ist weiter eingerückt (geschützte Leerzeichen, die <option> nicht zusammenzieht)
+  const options = await page.locator('#profile-folder option').allTextContents();
+  expect(options.map((o) => o.trim())).toEqual(['Meine Profile', 'Ordner', 'Unter']);
+  const indent = (o) => o.length - o.trimStart().length;
+  expect(indent(options[1])).toBeGreaterThan(indent(options[0]));
+  expect(indent(options[2])).toBeGreaterThan(indent(options[1]));
+  expect(options[2].startsWith(' ')).toBe(true);
+});
+
+test('Mit Sitzung überschreiben: Haken beginnen mit den Teilen des Profils, „Nur Rhythmus“ ändert nur diese, der Rest bleibt; Rückgängig', async ({ page }) => {
+  await page.locator('#profile-save-parts').evaluate((el) => { el.open = true; });
+  await presetParts(page, 'Nur Klang');
+  await saveSession(page, 'Teil');
+  await expect(info(page)).toHaveText('Inhalt: Klangregler, Stimmen & Aufgaben, Mischpult');
+  await expect(page.locator('#profile-overwrite-parts')).toBeHidden(); // erst auf Knopfdruck
+  await setTempo(page, 77);
+  await acted(page, item(page, 'Teil').click());
+  await page.locator('#profile-overwrite').click();
+  const picker = page.locator('#profile-overwrite-parts');
+  await expect(picker).toHaveAttribute('open', '');
+  await expect(picker.locator('summary')).toHaveText('Inhalt: 3 von 10');
+  await expect(picker.getByRole('checkbox', { name: 'Mischpult', exact: true })).toBeChecked();
+  await expect(picker.getByRole('checkbox', { name: 'Tempo', exact: true })).not.toBeChecked();
+  await picker.getByRole('button', { name: 'Nur Rhythmus' }).click();
+  await acted(page, page.locator('#profile-overwrite-go').click());
+  await expect(message(page)).toHaveText('Profil Teil überschrieben.');
+  await expect(picker).toBeHidden();
+  await expect(info(page)).toHaveText('Inhalt: Tempo, Rhythmus & Länge, Klangregler, Stimmen & Aufgaben, Mischpult');
+  expect(await storedParts(page, 'Teil')).toEqual(['tempo', 'rhythm', 'sound', 'voices', 'mixer']);
+  await setTempo(page, 120);
+  await load(page, 'Teil');
+  await expect(tempo(page)).toHaveText('77 bpm');
+  // ohne Haken: Meldung; mit „Variante“ dazu, dann Rückgängig: nur der Baum, die Sitzung bleibt
+  await page.locator('#profile-overwrite').click();
+  await picker.getByRole('button', { name: 'Nichts' }).click();
+  await acted(page, page.locator('#profile-overwrite-go').click());
+  await expect(message(page)).toContainText('mindestens einen Teil');
+  await picker.getByRole('checkbox', { name: 'Variante', exact: true }).check();
+  await acted(page, page.locator('#profile-overwrite-go').click());
+  await expect(info(page)).toContainText('Variante');
+  await acted(page, undo(page).click());
+  await expect(info(page)).toHaveText('Inhalt: Tempo, Rhythmus & Länge, Klangregler, Stimmen & Aufgaben, Mischpult');
+  await expect(item(page, 'Teil')).toHaveAttribute('aria-selected', 'true');
+  await expect(tempo(page)).toHaveText('77 bpm');
+  expect(await storedParts(page, 'Teil')).toEqual(['tempo', 'rhythm', 'sound', 'voices', 'mixer']);
+});
+
+test('Umbenennen: Feld mit dem alten Namen, vergebener und leerer Name mit Meldung, nichts ersetzt; kein Rückgängig', async ({ page }) => {
+  await saveSession(page, 'Eins');
+  await saveSession(page, 'Zwei');
+  await page.locator('#profile-rename').click();
+  const field = page.getByLabel('Neuer Name');
+  await expect(field).toHaveValue('Zwei');
+  await expect(field).toBeFocused();
+  await field.fill('eins');
+  await acted(page, page.locator('#profile-rename-go').click());
+  await expect(message(page)).toHaveText('Im Ordner gibt es schon „eins“. Bitte einen anderen Namen wählen.');
+  await expect(items(page).filter({ hasText: /^(eins|zwei)$/i })).toHaveText(['Eins', 'Zwei']);
+  await field.fill('   ');
+  await acted(page, field.press('Enter'));
+  await expect(message(page)).toHaveText('Bitte einen Namen eingeben.');
+  await field.fill('Drei');
+  await acted(page, field.press('Enter'));
+  await expect(message(page)).toHaveText('Umbenannt in Drei.');
+  await expect(item(page, 'Drei')).toHaveAttribute('aria-selected', 'true');
+  await expect(item(page, 'Drei')).toBeFocused();
+  await expect(item(page, 'Zwei')).toHaveCount(0);
+  await expect(page.locator('#profile-panel-title')).toHaveText('Drei');
+  await expect(field).toBeHidden();
+  await expect(undo(page)).toBeHidden();
+  expect(JSON.parse(await stored(page)).items.map((n) => n.name)).toEqual(['Drei', 'Eins']);
+});
+
+test('Profil löschen: sofort weg, Auswahl beim Ordner; „Rückgängig“ stellt es samt Auswahl her und speichert', async ({ page }) => {
+  await saveSession(page, 'Weg');
+  await expect(undo(page)).toBeHidden();
+  await acted(page, page.locator('#profile-delete').click());
+  await expect(item(page, 'Weg')).toHaveCount(0);
+  await expect(message(page)).toHaveText('„Weg“ gelöscht.');
+  await expect(item(page, 'Meine Profile')).toHaveAttribute('aria-selected', 'true');
+  await expect(undo(page)).toHaveText('Rückgängig');
+  expect(JSON.parse(await stored(page)).items).toEqual([]);
+  await acted(page, undo(page).click());
+  await expect(item(page, 'Weg')).toHaveAttribute('aria-selected', 'true');
+  await expect(item(page, 'Weg')).toBeFocused();
+  await expect(message(page)).toHaveText('Rückgängig gemacht.');
+  await expect(undo(page)).toBeHidden();
+  expect(await storedParts(page, 'Weg')).toHaveLength(10);
+  // gemerkt im Ordner der App: ein Neustart der App
+  page = await app.restart();
+  await page.locator('#tune-btn').click();
+  await openWindow(page);
+  await expect(item(page, 'Weg')).toBeVisible();
+});
+
+test('Die Meldung einer Aktion mit „Rückgängig“ bleibt beim Wechseln der Auswahl; beide gehen erst zusammen', async ({ page }) => {
+  await saveSession(page, 'Weg');
+  await saveSession(page, 'Bleibt');
+  await acted(page, item(page, 'Weg').click());
+  await acted(page, page.locator('#profile-delete').click());
+  await expect(message(page)).toHaveText('„Weg“ gelöscht.');
+  for (const name of ['Aktuelle Sitzung', 'Reggae', 'Bleibt']) {
+    await acted(page, item(page, name).click());
+    await expect(message(page), name).toHaveText('„Weg“ gelöscht.');
+    await expect(undo(page), name).toBeVisible();
+  }
+  // Umbenennen hat kein Rückgängig: es verwirft das alte samt seiner Meldung
+  await page.locator('#profile-rename').click();
+  await page.getByLabel('Neuer Name').fill('Neu');
+  await acted(page, page.locator('#profile-rename-go').click());
+  await expect(message(page)).toHaveText('Umbenannt in Neu.');
+  await expect(undo(page)).toBeHidden();
+  await acted(page, item(page, 'Aktuelle Sitzung').click());
+  await expect(message(page)).toHaveText('');
+});
+
+test('Leerer Ordner und leeres „Alles sichern“: „Nichts zu sichern.“, keine Datei, nichts im Textfeld', async ({ page }) => {
+  let downloads = 0;
+  page.on('download', () => downloads++);
+  await page.locator('#profile-backup').click();
+  await expect(message(page)).toHaveText('Nichts zu sichern.');
+  const nothing = async (name) => {
+    for (const button of ['#profile-file', '#profile-copy']) {
+      await acted(page, item(page, 'Aktuelle Sitzung').click()); // Meldung leeren
+      await pickRow(page, name);
+      await expect(message(page)).toHaveText('');
+      await page.locator(button).click();
+      await expect(message(page), `${name} ${button}`).toHaveText('Nichts zu sichern.');
+    }
+  };
+  await nothing('Meine Profile'); // leerer Baum
+  await newFolder(page, 'Meine Profile', 'Leer');
+  await nothing('Leer');
+  await settled(page); // jeder Export ist beantwortet (die Seite hätte den Text dann ins Feld geschrieben)
+  await expect(page.locator('#profile-text')).toHaveValue('');
+  await page.waitForTimeout(300);
+  expect(downloads).toBe(0);
+  // mit Inhalt wieder wie gewohnt
+  await saveIn(page, 'P', 'Leer');
+  await acted(page, item(page, 'Leer').click());
+  expect((await copied(page)).items.map((n) => n.name)).toEqual(['P']);
+  await page.locator('#profiles-pop').evaluate((el) => el.hidePopover());
+  await chooseLanguage(page, 'en');
+  await openWindow(page);
+  await pickRow(page, 'My profiles');
+  await page.locator('#profile-subfolder').click();
+  await page.locator('#profile-folder-name').fill('Empty');
+  await acted(page, page.locator('#profile-folder-add').click());
+  await expect(item(page, 'Empty')).toHaveAttribute('aria-selected', 'true');
+  await page.locator('#profile-file').click();
+  await expect(message(page)).toHaveText('Nothing to back up.');
+});
+
+test('Ordner: anlegen, bis Tiefe 8 verschachteln (9. Ebene abgelehnt), Löschen mit Inhalt fragt nach, Rückgängig stellt den genauen Teilbaum her', async ({ page }) => {
+  await acted(page, item(page, 'Meine Profile').click());
+  await expect(page.locator('#profile-panel-title')).toHaveText('Meine Profile');
+  await expect(info(page)).toHaveText('0 Profile, 0 Unterordner');
+  await expect(page.locator('#profile-subfolder')).toBeVisible();
+  await expect(page.locator('#profile-rename')).toBeHidden();
+  await expect(page.locator('#profile-delete')).toBeHidden();
+  let parent = 'Meine Profile';
+  for (let i = 1; i <= 8; i++) {
+    await newFolder(page, parent, `E${i}`);
+    await expect(message(page)).toHaveText(`Ordner E${i} angelegt.`);
+    await expect(item(page, `E${i}`)).toHaveAttribute('aria-selected', 'true');
+    await expect(item(page, `E${i}`)).toHaveAttribute('aria-level', String(i + 1));
+    parent = `E${i}`;
+  }
+  await newFolder(page, 'E8', 'E9');
+  await expect(message(page)).toHaveText('So tief lassen sich Ordner nicht verschachteln (höchstens 8 Ebenen).');
+  await expect(item(page, 'E9')).toHaveCount(0);
+  // vergebener und leerer Name beim Unterordner
+  await newFolder(page, 'E1', 'e2');
+  await expect(message(page)).toHaveText('Im Ordner gibt es schon „e2“. Bitte einen anderen Namen wählen.');
+  await page.getByLabel('Name des Ordners').fill('');
+  await acted(page, page.locator('#profile-folder-add').click());
+  await expect(message(page)).toHaveText('Bitte einen Namen eingeben.');
+  await saveIn(page, 'P', 'E2');
+  await acted(page, item(page, 'E2').click());
+  await expect(info(page)).toHaveText('1 Profil, 6 Unterordner');
+  await acted(page, item(page, 'Meine Profile').click());
+  await expect(info(page)).toHaveText('1 Profil, 8 Unterordner');
+  // Löschen mit Inhalt: Rückfrage, Abbrechen ändert nichts
+  await acted(page, item(page, 'E2').click());
+  const before = await stored(page);
+  await page.locator('#profile-delete').click();
+  await expect(page.locator('#profile-delete-ask')).toHaveText('Ordner mit 7 Einträgen löschen?');
+  await expect(page.getByRole('button', { name: 'Abbrechen' })).toBeFocused();
+  for (const name of ['Ja, löschen', 'Abbrechen']) await expect(page.getByRole('button', { name })).toHaveAccessibleDescription('Ordner mit 7 Einträgen löschen?');
+  await acted(page, page.getByRole('button', { name: 'Abbrechen' }).click());
+  await expect(page.locator('#profile-delete-ask')).toBeHidden();
+  await expect(item(page, 'E2')).toHaveAttribute('aria-selected', 'true');
+  expect(await stored(page)).toBe(before);
+  await page.locator('#profile-delete').click();
+  await acted(page, page.getByRole('button', { name: 'Ja, löschen' }).click());
+  await expect(item(page, 'E2')).toHaveCount(0);
+  await expect(item(page, 'P')).toHaveCount(0);
+  await expect(item(page, 'E1')).toHaveAttribute('aria-selected', 'true');
+  await expect(message(page)).toHaveText('„E2“ gelöscht.');
+  await acted(page, undo(page).click());
+  await expect(item(page, 'E2')).toHaveAttribute('aria-selected', 'true');
+  expect(await stored(page)).toBe(before);
+  // leerer Ordner: sofort gelöscht, Auswahl beim Elternordner
+  await pickRow(page, 'E8');
+  await acted(page, page.locator('#profile-delete').click());
+  await expect(page.locator('#profile-delete-ask')).toBeHidden();
+  await expect(item(page, 'E8')).toHaveCount(0);
+  await expect(item(page, 'E7')).toHaveAttribute('aria-selected', 'true');
+  // Ordner umbenennen
+  await acted(page, item(page, 'E1').click());
+  await page.locator('#profile-rename').click();
+  await page.getByLabel('Neuer Name').fill('Erste');
+  await acted(page, page.locator('#profile-rename-go').click());
+  await expect(item(page, 'Erste')).toHaveAttribute('aria-selected', 'true');
+});
+
+test('Export folgt der Auswahl: Sitzung mit 10 Teilen, Profil nur mit seinen Teilen, Ordner samt Unterordnern ohne Ids', async ({ page }) => {
+  let file = await copied(page);
+  expect(file.format).toBe('backingtrack-profile');
+  expect(file.name).toBe('Aktuelle Sitzung');
+  expect(Object.keys(file.parts)).toHaveLength(10);
+  await newFolder(page, 'Meine Profile', 'Ordner');
+  await newFolder(page, 'Ordner', 'Unter');
+  await acted(page, item(page, 'Aktuelle Sitzung').click());
+  await page.locator('#profile-save-parts').evaluate((el) => { el.open = true; });
+  await presetParts(page, 'Nur Rhythmus');
+  await saveIn(page, 'Rh', 'Ordner');
+  await expect(item(page, 'Rh')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#profile-file')).toHaveText('Als Datei');
+  file = await copied(page);
+  expect(file.format).toBe('backingtrack-profile');
+  expect(file.name).toBe('Rh');
+  expect(Object.keys(file.parts)).toEqual(['tempo', 'rhythm']);
+  await acted(page, item(page, 'Ordner').click());
+  await expect(page.locator('#profile-file')).toHaveText('Ordner als Datei');
+  await expect(page.locator('#profile-copy')).toHaveText('Ordner kopieren');
+  file = await copied(page);
+  expect(file.format).toBe('backingtrack-folder');
+  expect(file.name).toBe('Ordner');
+  expect(file.items.map((n) => [n.type, n.name])).toEqual([['folder', 'Unter'], ['profile', 'Rh']]);
+  expect(file.items[0].items).toEqual([]);
+  expect(Object.keys(file.items[1].parts)).toEqual(['tempo', 'rhythm']);
+  expect(JSON.stringify(file)).not.toContain('"id"');
+  await acted(page, item(page, 'Meine Profile').click());
+  file = await copied(page);
+  expect(file.name).toBe('Meine Profile');
+  expect(file.items.map((n) => n.name)).toEqual(['Ordner']);
+  // als Datei: Werksprofil
+  await acted(page, item(page, 'Reggae').click());
+  const { name, text } = await downloadJson(page, '#profile-file');
+  expect(name).toMatch(/\.json$/);
+  expect(JSON.parse(text).parts.style.style).toBe('reggae');
+});
+
+test('„Alles sichern“ ist bei jeder Auswahl sichtbar und lädt „Meine Profile“ als Ordner-Datei mit allen Einträgen herunter', async ({ page }) => {
+  await saveSession(page, 'A1');
+  await newFolder(page, 'Meine Profile', 'F');
+  await saveIn(page, 'B1', 'F');
+  for (const name of ['Aktuelle Sitzung', 'Werksprofile', 'Reggae', 'F', 'B1', 'Meine Profile']) {
+    await acted(page, item(page, name).click());
+    await expect(page.locator('#profile-backup')).toHaveText('Alles sichern');
+    await expect(page.locator('#profile-backup')).toBeVisible();
+  }
+  await acted(page, item(page, 'B1').click());
+  const { name, text } = await downloadJson(page, '#profile-backup');
+  expect(name).toMatch(/\.json$/);
+  const file = JSON.parse(text);
+  expect(file.format).toBe('backingtrack-folder');
+  expect(file.name).toBe('Meine Profile');
+  expect(file.items.map((n) => [n.type, n.name])).toEqual([['folder', 'F'], ['profile', 'A1']]);
+  expect(file.items[0].items.map((n) => n.name)).toEqual(['B1']);
+  expect(Object.keys(file.items[1].parts)).toHaveLength(10);
+  await expect(item(page, 'B1')).toHaveAttribute('aria-selected', 'true');
+});
+
+test('„Alles sichern“ und wieder einlesen: derselbe Baum samt Profil auf Ebene 8, kein neuer Ordner „Meine Profile“, nichts „ungültig“', async ({ page }) => {
+  const chain = (i) => (i < 8 ? dir(`r${i}`, `R${i}`, [chain(i + 1)]) : prof('r8', 'R8')); // R1 … R7, Profil R8 auf Ebene 8
+  page = await seed([chain(1), dir('z', 'Z', [prof('zp', 'P')]), prof('p', 'P')]);
+  const before = await storedTree(page);
+  const { text } = await downloadJson(page, '#profile-backup');
+  expect(JSON.parse(text).backup).toBe(true);
+  page = await seed([]);
+  await acted(page, item(page, 'Meine Profile').click());
+  await page.locator('#profile-import-file').setInputFiles({ name: 'sicherung.json', mimeType: 'application/json', buffer: Buffer.from(text) });
+  await expect(message(page)).toHaveText('Sicherung mit 3 Profilen aufgenommen.');
+  const strip = (list) => list.map(({ id, ...n }) => (n.type === 'folder' ? { ...n, items: strip(n.items) } : n));
+  expect(strip((await storedTree(page)).items)).toEqual(strip(before.items));
+});
+
+test('Import in einen tiefen Ordner: was tiefer als 8 Ebenen läge, wird übersprungen und gemeldet (nicht als „ungültig“)', async ({ page }) => {
+  page = await seed(FIXTURE);
+  for (let i = 1; i <= 5; i++) await acted(page, item(page, `D${i}`).locator('.tree-twisty').click());
+  await pickRow(page, 'D6');
+  const leaf = { type: 'profile', name: 'V4', parts: { tempo: { bpm: 90 } } };
+  await page.locator('#profile-text').fill(JSON.stringify({ format: 'backingtrack-folder', version: 1, name: 'V1', items: [{ type: 'folder', name: 'V2', items: [{ type: 'folder', name: 'V3', items: [leaf] }] }] }));
+  await acted(page, page.locator('#profile-import-text').click());
+  await expect(message(page)).toHaveText('Ordner V1 mit 0 Profilen aufgenommen. 2 Einträge wurden übersprungen (zu tief verschachtelt oder zu viele Einträge).');
+  await expect(item(page, 'V1')).toHaveAttribute('aria-level', '8'); // Ebene 7 unter „Meine Profile“
+});
+
+test('Import einer Ordner-Datei in einen anderen Ordner: Struktur, „ (2)“ bei gleichem Namen, Auswahl bleibt, Meldung nennt die Zahl; Rückgängig', async ({ page }) => {
+  await newFolder(page, 'Meine Profile', 'Quelle');
+  await saveIn(page, 'P1', 'Quelle');
+  await newFolder(page, 'Quelle', 'Innen');
+  await saveIn(page, 'P2', 'Innen');
+  await newFolder(page, 'Meine Profile', 'Ziel');
+  await newFolder(page, 'Ziel', 'Quelle');
+  await acted(page, item(page, 'Quelle').first().click());
+  const { text } = await downloadJson(page, '#profile-file');
+  await acted(page, item(page, 'Ziel').click());
+  await expect(page.locator('#profile-import-text')).toHaveText('In den Ordner importieren');
+  await page.locator('#profile-import-file').setInputFiles({ name: 'quelle.json', mimeType: 'application/json', buffer: Buffer.from(text) });
+  await expect(message(page)).toHaveText('Ordner Quelle (2) mit 2 Profilen aufgenommen.');
+  await expect(item(page, 'Ziel')).toHaveAttribute('aria-selected', 'true');
+  await expect(item(page, 'Quelle (2)')).toHaveAttribute('aria-level', '3');
+  const ziel = JSON.parse(await stored(page)).items.find((n) => n.name === 'Ziel');
+  expect(ziel.items.map((n) => n.name)).toEqual(['Quelle', 'Quelle (2)']);
+  const copy = ziel.items[1];
+  expect(copy.items.map((n) => [n.type, n.name])).toEqual([['folder', 'Innen'], ['profile', 'P1']]);
+  expect(copy.items[0].items.map((n) => n.name)).toEqual(['P2']);
+  await acted(page, undo(page).click());
+  await expect(item(page, 'Quelle (2)')).toHaveCount(0);
+  await expect(item(page, 'Ziel')).toHaveAttribute('aria-selected', 'true');
+});
+
+test('Import in einen Ordner: ein einzelnes Profil wird dort aufgenommen und gewählt; unbekannte Zusatzfelder auf jeder Ebene stören nicht', async ({ page }) => {
+  await newFolder(page, 'Meine Profile', 'Ziel');
+  await page.locator('#profile-text').fill(JSON.stringify({ format: 'backingtrack-profile', version: 9, name: 'Fremd', neu: 1, parts: { tempo: { bpm: 81, zukunft: true }, kommt: { a: 1 } } }));
+  await acted(page, page.locator('#profile-import-text').click());
+  await expect(message(page)).toContainText('Profil Fremd aufgenommen.');
+  await expect(item(page, 'Fremd')).toHaveAttribute('aria-selected', 'true');
+  await expect(item(page, 'Fremd')).toHaveAttribute('aria-level', '3');
+  await expect(info(page)).toHaveText('Inhalt: Tempo');
+  await expect(undo(page)).toBeVisible();
+  await acted(page, item(page, 'Ziel').click());
+  await page.locator('#profile-text').fill(JSON.stringify({
+    format: 'backingtrack-folder', version: 7, name: 'Paket', farbe: 'rot',
+    items: [{ type: 'profile', name: 'X', stern: 5, parts: { tempo: { bpm: 90 }, neu: {} } }, { type: 'folder', name: 'U', icon: 'x', items: [] }],
+  }));
+  await acted(page, page.locator('#profile-import-text').click());
+  await expect(message(page)).toContainText('Ordner Paket mit 1 Profil aufgenommen.');
+  await expect(item(page, 'Ziel')).toHaveAttribute('aria-selected', 'true');
+  const ziel = JSON.parse(await stored(page)).items.find((n) => n.name === 'Ziel');
+  const paket = ziel.items.find((n) => n.name === 'Paket');
+  expect(paket.items.map((n) => [n.type, n.name])).toEqual([['folder', 'U'], ['profile', 'X']]);
+  expect(paket.items[1].parts).toEqual({ tempo: { bpm: 90 } });
+});
+
+test('Werksprofil kopieren: „Funk-Rock“, beim zweiten Mal „Funk-Rock (2)“, mit den Teilen Tempo, Stil, Klangregler, Stimmen', async ({ page }) => {
+  await acted(page, item(page, 'Funk-Rock').click());
+  await acted(page, page.locator('#profile-factory-copy').click());
+  await acted(page, item(page, 'Funk-Rock').first().click());
+  await acted(page, page.locator('#profile-factory-copy').click());
+  await expect(items(page).filter({ hasText: 'Funk-Rock' })).toHaveText(['Funk-Rock', 'Funk-Rock', 'Funk-Rock (2)']);
+  expect(await storedParts(page, 'Funk-Rock (2)')).toEqual(['tempo', 'style', 'sound', 'voices']);
+  await expect(item(page, 'Funk-Rock (2)')).toHaveAttribute('aria-selected', 'true');
+  await expect(item(page, 'Funk-Rock (2)')).toBeFocused();
+  await expect(info(page)).toHaveText('Inhalt: Tempo, Stil & Schlagworte, Klangregler, Stimmen & Aufgaben');
+  await expect(page.locator('#profile-overwrite')).toBeVisible();
+});
+
+test('Werksprofil kopieren bei zugeklapptem „Meine Profile“: der Ordner geht auf, die Kopie ist gewählt', async ({ page }) => {
+  await acted(page, item(page, 'Meine Profile').locator('.tree-twisty').click());
+  await expect(item(page, 'Meine Profile')).toHaveAttribute('aria-expanded', 'false');
+  await acted(page, item(page, 'Reggae').click());
+  await acted(page, page.locator('#profile-factory-copy').click());
+  await expect(item(page, 'Meine Profile')).toHaveAttribute('aria-expanded', 'true');
+  await expect(item(page, 'Reggae')).toHaveCount(2);
+  await expect(item(page, 'Reggae').last()).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#profile-overwrite')).toBeVisible();
+});
+
+test('Dateinamen folgen der Sprache: profil/ordner auf Deutsch, profile/folder auf Englisch, mit Datum', async ({ page }) => {
+  await saveSession(page, 'A');
+  const named = async (button, kind) => expect((await downloadJson(page, button)).name).toMatch(new RegExp(`^backingtrack-${kind}-\\d{4}-\\d{2}-\\d{2}\\.json$`));
+  await named('#profile-file', 'profil');
+  await named('#profile-backup', 'ordner');
+  await page.locator('#profiles-pop').evaluate((el) => el.hidePopover());
+  await chooseLanguage(page, 'en');
+  await openWindow(page);
+  await named('#profile-file', 'profile');
+  await named('#profile-backup', 'folder');
+});
+
+test('englisch: Felder für eigene Profile und Ordner übersetzt', async ({ page }) => {
+  await saveSession(page, 'E');
+  await page.locator('#profiles-pop').evaluate((el) => el.hidePopover());
+  await chooseLanguage(page, 'en');
+  await openWindow(page);
+  await acted(page, item(page, 'E').click());
+  await expect(info(page)).toHaveText(/^Contents: /);
+  await expect(page.locator('#profile-overwrite')).toHaveText('Overwrite with session …');
+  await acted(page, item(page, 'My profiles').click());
+  await expect(info(page)).toHaveText('1 profile, 0 subfolders');
+  await expect(page.locator('#profile-backup')).toHaveText('Back up everything');
+});
+
+// --- Verschieben ---
+
+test('Verschieben nach …: nur bei eigenen Einträgen; die Auswahl lässt sich selbst, Nachfahren, zu tiefe Ziele und den eigenen Ordner weg', async ({ page }) => {
+  page = await seed(FIXTURE);
+  for (const name of ['Aktuelle Sitzung', 'Werksprofile', 'Reggae', 'Meine Profile']) {
+    await acted(page, item(page, name).click());
+    await expect(page.locator('#profile-move'), name).toBeHidden();
+  }
+  // Ordner A (3 Ebenen hoch): ohne A, B, C, ohne „Meine Profile“ (liegt schon dort), ohne D6 … D8 (wäre tiefer als 8)
+  await acted(page, item(page, 'A').click());
+  await expect(page.locator('#profile-move')).toHaveText('Verschieben nach …');
+  await expect(page.locator('#profile-move-to')).toBeHidden();
+  await page.locator('#profile-move').click();
+  await expect(page.locator('#profile-move')).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByLabel('Verschieben nach', { exact: true })).toBeFocused();
+  expect(await moveOptions(page)).toEqual(['D1', 'D2', 'D3', 'D4', 'D5', 'Z']);
+  await expect(page.locator('#profile-move-go')).toHaveText('Verschieben');
+  // Profil P oben: alle Ordner außer D8 (Profil wäre auf Ebene 9); Einrückung je Ebene
+  await acted(page, item(page, 'P').click());
+  await expect(page.locator('#profile-move-to')).toBeHidden(); // Auswahl wechseln schließt das Feld
+  await page.locator('#profile-move').click();
+  expect(await moveOptions(page)).toEqual(['A', 'B', 'C', 'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'Z']);
+  const raw = await page.locator('#profile-move-to option').allTextContents();
+  const indent = (o) => o.length - o.trimStart().length;
+  expect(indent(raw[1])).toBeGreaterThan(indent(raw[0]));
+  // Profil in Z (dort liegt ein P): „Meine Profile“ ist Ziel, Z nicht
+  await acted(page, item(page, 'Z').locator('.tree-twisty').click());
+  await acted(page, page.locator('[data-key="zp"] .tree-label').click());
+  await page.locator('#profile-move').click();
+  expect(await moveOptions(page)).toContain('Meine Profile');
+  expect(await moveOptions(page)).not.toContain('Z');
+  await page.locator('#profiles-pop').evaluate((el) => el.hidePopover());
+  await chooseLanguage(page, 'en');
+  await openWindow(page);
+  await expect(page.locator('#profile-move')).toHaveText('Move to …');
+  await expect(page.locator('#profile-move-go')).toHaveText('Move');
+  expect(await moveOptions(page)).toContain('My profiles');
+});
+
+test('Verschieben nach …: Profil mit Namenskonflikt „ (2)“ und Ordner samt Inhalt; Auswahl folgt, Ziel offen; Rückgängig stellt Baum und Auswahl her', async ({ page }) => {
+  page = await seed(FIXTURE);
+  const before = await stored(page);
+  await acted(page, item(page, 'P').click());
+  await page.locator('#profile-move').click();
+  await page.locator('#profile-move-to').selectOption('z');
+  await acted(page, page.locator('#profile-move-go').click());
+  await expect(message(page)).toHaveText('„P“ nach „Z“ verschoben, dort heißt es „P (2)“ (der Name war vergeben).');
+  await expect(item(page, 'P (2)')).toHaveAttribute('aria-selected', 'true');
+  await expect(item(page, 'P (2)')).toHaveAttribute('aria-level', '3');
+  await expect(item(page, 'P (2)')).toBeFocused();
+  await expect(item(page, 'Z')).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.locator('#profile-move-to')).toBeHidden();
+  let tree = await storedTree(page);
+  expect(names(tree.items)).toEqual(['A', 'D1', 'Z']);
+  expect(names(tree.items[2].items)).toEqual(['P', 'P (2)']);
+  await acted(page, undo(page).click());
+  await expect(message(page)).toHaveText('Rückgängig gemacht.');
+  await expect(page.locator('[data-key="p"]')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('[data-key="p"]')).toHaveAttribute('aria-level', '2');
+  await expect(page.locator('[data-key="p"]')).toHaveText('P');
+  expect(await stored(page)).toBe(before);
+  // Ordner B (mit C) aus A nach D1
+  await acted(page, item(page, 'A').locator('.tree-twisty').click());
+  await pickRow(page, 'B');
+  await page.locator('#profile-move').click();
+  await page.locator('#profile-move-to').selectOption('d1');
+  await acted(page, page.locator('#profile-move-go').click());
+  await expect(message(page)).toHaveText('„B“ nach „D1“ verschoben.');
+  await expect(item(page, 'B')).toHaveAttribute('aria-selected', 'true');
+  await expect(item(page, 'D1')).toHaveAttribute('aria-expanded', 'true');
+  tree = await storedTree(page);
+  expect(tree.items[0].items).toEqual([]);
+  expect(names(tree.items[1].items)).toEqual(['B', 'D2']);
+  expect(names(tree.items[1].items[0].items)).toEqual(['C']);
+  await acted(page, undo(page).click());
+  await expect(item(page, 'B')).toHaveAttribute('aria-selected', 'true');
+  expect(await stored(page)).toBe(before);
+});
+
+test('Tastatur: Verschieben ohne Griff; der Griff ist kein Tabstopp, die Zeile behält ihren Namen', async ({ page }) => {
+  page = await seed(FIXTURE);
+  await expect(item(page, 'Aktuelle Sitzung')).toBeFocused();
+  await page.keyboard.press('End');
+  await expect(item(page, 'P')).toBeFocused();
+  await acted(page, page.keyboard.press('Enter'));
+  await expect(item(page, 'P')).toHaveAttribute('aria-selected', 'true');
+  await expect(grip(page, 'P')).toHaveCount(1);
+  await expect(grip(page, 'P')).not.toHaveAttribute('tabindex');
+  await expect(grip(page, 'P')).toHaveAttribute('aria-hidden', 'true'); // Bildschirmleser nehmen „Verschieben nach …“
+  expect(await grip(page, 'P').evaluate((g) => getComputedStyle(g).touchAction)).toBe('none');
+  for (const part of ['.tree-label', '.tree-twisty']) {
+    expect(await item(page, 'P').locator(part).evaluate((g) => getComputedStyle(g).touchAction), part).not.toBe('none'); // der Finger scrollt dort wie gewohnt
+  }
+  expect(await item(page, 'P').evaluate((g) => getComputedStyle(g).touchAction)).not.toBe('none');
+  await expect(item(page, 'P')).toHaveAccessibleName('P');
+  await page.keyboard.press('Tab');
+  expect(await page.evaluate(() => document.getElementById('profile-tree').contains(document.activeElement))).toBe(false);
+  await page.locator('#profile-move').focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#profile-move-to')).toBeFocused();
+  await page.locator('#profile-move-to').selectOption('a');
+  await page.keyboard.press('Tab');
+  await expect(page.locator('#profile-move-go')).toBeFocused();
+  await acted(page, page.keyboard.press('Enter'));
+  await expect(message(page)).toHaveText('„P“ nach „A“ verschoben.');
+  await expect(item(page, 'P')).toBeFocused();
+  await expect(item(page, 'P')).toHaveAttribute('aria-level', '3');
+});
+
+test('Ziehen mit der Maus: Griff nur an eigenen Einträgen; auf einen Ordner ablegen verschiebt, Auswahl folgt, Ordner offen, „ (2)“; Rückgängig', async ({ page }) => {
+  page = await seed(FIXTURE);
+  for (const name of ['Aktuelle Sitzung', 'Werksprofile', 'Reggae', 'Meine Profile']) await expect(grip(page, name), name).toHaveCount(0);
+  for (const name of ['A', 'D1', 'Z', 'P']) await expect(grip(page, name), name).toHaveCount(1);
+  await expect(items(page)).toHaveText(['Aktuelle Sitzung', 'Werksprofile', ...STYLES, 'Meine Profile', 'A', 'D1', 'Z', 'P']); // der Griff hat keinen Text
+  const before = await stored(page);
+  await mouseTo(page, grip(page, 'A'), item(page, 'D1'));
+  await expect(item(page, 'A')).toHaveAttribute('data-dragging', 'true');
+  await expect(item(page, 'D1')).toHaveAttribute('data-drop', 'ok');
+  await acted(page, page.mouse.up());
+  await expect(message(page)).toHaveText('„A“ nach „D1“ verschoben.');
+  await expect(item(page, 'A')).toHaveAttribute('aria-selected', 'true');
+  await expect(item(page, 'A')).toHaveAttribute('aria-level', '3');
+  await expect(item(page, 'D1')).toHaveAttribute('aria-expanded', 'true');
+  await expect(markers(page)).toHaveCount(0);
+  expect(names((await storedTree(page)).items[0].items)).toEqual(['A', 'D2']);
+  await acted(page, undo(page).click());
+  expect(await stored(page)).toBe(before);
+  // Namenskonflikt
+  await mouseTo(page, grip(page, 'P'), item(page, 'Z'));
+  await acted(page, page.mouse.up());
+  await expect(message(page)).toHaveText('„P“ nach „Z“ verschoben, dort heißt es „P (2)“ (der Name war vergeben).');
+  await expect(item(page, 'P (2)')).toHaveAttribute('aria-selected', 'true');
+  await expect(item(page, 'Z')).toHaveAttribute('aria-expanded', 'true');
+});
+
+test('Ziehen auf ungültige Ziele (selbst, Nachfahren, eigener Ordner, Werksprofil, Sitzung): data-drop="no", Loslassen ändert nichts; Esc bricht ab', async ({ page }) => {
+  page = await seed(FIXTURE);
+  await acted(page, item(page, 'A').locator('.tree-twisty').click());
+  await acted(page, item(page, 'B').locator('.tree-twisty').click());
+  const before = await stored(page);
+  const a = await center(grip(page, 'A'));
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down();
+  for (const name of ['A', 'B', 'C', 'Meine Profile', 'Reggae', 'Werksprofile', 'Aktuelle Sitzung']) {
+    const b = await center(item(page, name).locator('.tree-label'));
+    await page.mouse.move(b.x, b.y, { steps: 4 });
+    await expect(item(page, name), name).toHaveAttribute('data-drop', 'no');
+    await expect(page.locator('#profile-tree [data-drop]')).toHaveCount(1); // nur die Zeile unter dem Zeiger
+  }
+  const c = await center(item(page, 'C').locator('.tree-label'));
+  await page.mouse.move(c.x, c.y, { steps: 4 });
+  await acted(page, page.mouse.up());
+  await expect(markers(page)).toHaveCount(0);
+  expect(await stored(page)).toBe(before);
+  await expect(item(page, 'Aktuelle Sitzung')).toHaveAttribute('aria-selected', 'true');
+  await expect(message(page)).toHaveText('');
+  // Esc mitten im Ziehen: Markierung weg, Loslassen (auch auf dem gültigen Ziel) tut nichts: Auswahl, offenes Feld, Meldung
+  // bleiben, das Fenster bleibt offen
+  await pickRow(page, 'B');
+  await page.locator('#profile-rename').click();
+  await page.getByLabel('Neuer Name').fill('');
+  await acted(page, page.locator('#profile-rename-go').click());
+  await expect(message(page)).toHaveText('Bitte einen Namen eingeben.');
+  await mouseTo(page, grip(page, 'P'), item(page, 'Z'));
+  await expect(item(page, 'Z')).toHaveAttribute('data-drop', 'ok');
+  await acted(page, page.keyboard.press('Escape'));
+  await expect(markers(page)).toHaveCount(0);
+  const z = await center(item(page, 'Z'));
+  await page.mouse.move(z.x, z.y + 3);
+  await acted(page, page.mouse.up());
+  await expect(markers(page)).toHaveCount(0);
+  expect(await stored(page)).toBe(before);
+  await expect(page.locator('#profiles-pop')).toBeVisible();
+  await expect(item(page, 'B')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#profile-tree [aria-selected="true"]')).toHaveCount(1);
+  await expect(page.getByLabel('Neuer Name')).toBeVisible();
+  await expect(message(page)).toHaveText('Bitte einen Namen eingeben.');
+  // Esc ohne Loslassen danach: der nächste gewöhnliche Klick wählt wieder ganz normal
+  await mouseTo(page, grip(page, 'P'), item(page, 'Z'));
+  await page.keyboard.press('Escape');
+  await page.mouse.up(); // der Klick danach gehört noch zum abgebrochenen Ziehen und wird geschluckt
+  await page.waitForTimeout(50);
+  await acted(page, item(page, 'Z').locator('.tree-label').click());
+  await expect(item(page, 'Z')).toHaveAttribute('aria-selected', 'true');
+});
+
+test('Maus: ein verlorenes Loslassen (Taste schon oben, etwa nach Fensterwechsel) beendet den Druck, statt beim Überfahren zu ziehen', async ({ page }) => {
+  page = await seed(FIXTURE);
+  const before = await stored(page);
+  const at = await center(grip(page, 'P'));
+  await pointer(page, 'pointerdown', at, { pointerType: 'mouse', buttons: 1 });
+  const z = await center(item(page, 'Z').locator('.tree-label'));
+  await pointer(page, 'pointermove', z, { pointerType: 'mouse', buttons: 0 }); // Taste schon oben
+  await expect(markers(page)).toHaveCount(0);
+  await pointer(page, 'pointermove', { x: z.x + 20, y: z.y }, { pointerType: 'mouse', buttons: 0 });
+  await pointer(page, 'pointerup', z, { pointerType: 'mouse', buttons: 0 });
+  await answered(page);
+  await expect(markers(page)).toHaveCount(0);
+  expect(await stored(page)).toBe(before);
+  // Fenster verliert den Fokus mitten im Ziehen: Abbruch
+  await pointer(page, 'pointerdown', at, { pointerType: 'mouse', buttons: 1 });
+  await pointer(page, 'pointermove', z, { pointerType: 'mouse', buttons: 1 });
+  await expect(item(page, 'Z')).toHaveAttribute('data-drop', 'ok');
+  await acted(page, page.evaluate(() => window.dispatchEvent(new Event('blur'))));
+  await expect(markers(page)).toHaveCount(0);
+  await pointer(page, 'pointerup', z, { pointerType: 'mouse', buttons: 0 });
+  expect(await stored(page)).toBe(before);
+});
+
+test('Ziehen am Rand: der Baum scrollt mit', async ({ page }) => {
+  page = await seed(FIXTURE, 560);
+  const tree = page.locator('#profile-tree');
+  await expect.poll(() => toBottom(tree)).toBeGreaterThan(100); // erst wenn das Fenster steht
+  const bottom = await toBottom(tree);
+  const box = await tree.boundingBox();
+  const a = await center(grip(page, 'P'));
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down();
+  await page.mouse.move(a.x, box.y + 6, { steps: 6 });
+  await expect.poll(() => tree.evaluate((t) => t.scrollTop)).toBeLessThan(bottom - 60);
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+});
+
+test('Touch: Bewegen vor 400 ms scrollt den Baum und zieht nie, auch nicht nach längerem Halten', async ({ page }) => {
+  page = await seed(FIXTURE, 560);
+  await buzz(page);
+  const tree = page.locator('#profile-tree');
+  await expect.poll(() => toBottom(tree)).toBeGreaterThan(100); // erst wenn das Fenster steht
+  const bottom = await toBottom(tree);
+  const before = await stored(page);
+  const at = await center(grip(page, 'A')); // drei Zeilen über dem Ende: der Finger bleibt im Bild
+  await touch(page, 'pointerdown', at);
+  await touch(page, 'pointermove', { x: at.x, y: at.y + 5 }); // innerhalb der Toleranz
+  await touch(page, 'pointermove', { x: at.x, y: at.y + 30 });
+  await touch(page, 'pointermove', { x: at.x, y: at.y + 60 });
+  expect(await tree.evaluate((t) => t.scrollTop)).toBeLessThan(bottom - 40);
+  await page.waitForTimeout(550);
+  await touch(page, 'pointermove', { x: at.x, y: at.y + 80 });
+  await expect(markers(page)).toHaveCount(0);
+  await touch(page, 'pointerup', { x: at.x, y: at.y + 80 });
+  await page.waitForTimeout(450);
+  await answered(page);
+  await expect(markers(page)).toHaveCount(0);
+  expect(await stored(page)).toBe(before);
+  expect(await page.evaluate(() => window.__buzz)).toEqual([]);
+});
+
+test('Touch: 400 ms Halten ohne Bewegung, dann Ziehen legt auf einem Ordner ab (mit Vibrieren); Loslassen außerhalb und pointercancel brechen ab', async ({ page }) => {
+  page = await seed(FIXTURE);
+  await buzz(page);
+  const before = await stored(page);
+  // Loslassen außerhalb des Baums
+  let at = await center(grip(page, 'P'));
+  await touch(page, 'pointerdown', at);
+  await page.waitForTimeout(250);
+  await expect(markers(page)).toHaveCount(0); // noch kein Ziehen
+  await page.waitForTimeout(300);
+  await expect(item(page, 'P')).toHaveAttribute('data-dragging', 'true');
+  expect((await page.evaluate(() => window.__buzz)).length).toBe(1);
+  const outside = await center(page.locator('#profile-panel-title'));
+  await touch(page, 'pointermove', outside);
+  await acted(page, touch(page, 'pointerup', outside));
+  await expect(markers(page)).toHaveCount(0);
+  expect(await stored(page)).toBe(before);
+  // pointercancel mitten im Ziehen
+  await touch(page, 'pointerdown', at);
+  await page.waitForTimeout(500);
+  const z = await center(item(page, 'Z').locator('.tree-label'));
+  await touch(page, 'pointermove', z);
+  await expect(item(page, 'Z')).toHaveAttribute('data-drop', 'ok');
+  await acted(page, touch(page, 'pointercancel', z));
+  await expect(markers(page)).toHaveCount(0);
+  expect(await stored(page)).toBe(before);
+  // Halten, Ziehen, Ablegen auf D1
+  at = await center(grip(page, 'P'));
+  await touch(page, 'pointerdown', at);
+  await page.waitForTimeout(500);
+  const d1 = await center(item(page, 'D1').locator('.tree-label'));
+  await touch(page, 'pointermove', { x: at.x, y: (at.y + d1.y) / 2 });
+  await touch(page, 'pointermove', d1);
+  await expect(item(page, 'D1')).toHaveAttribute('data-drop', 'ok');
+  await acted(page, touch(page, 'pointerup', d1));
+  await expect(message(page)).toHaveText('„P“ nach „D1“ verschoben.');
+  await expect(item(page, 'P')).toHaveAttribute('aria-selected', 'true');
+  await expect(item(page, 'D1')).toHaveAttribute('aria-expanded', 'true');
+  expect(names((await storedTree(page)).items[1].items)).toEqual(['D2', 'P']);
+});
+
+test('Touch: leichtes Zittern innerhalb von 8 px während des Haltens zieht trotzdem', async ({ page }) => {
+  page = await seed(FIXTURE);
+  const at = await center(grip(page, 'P'));
+  await touch(page, 'pointerdown', at);
+  for (const [dx, dy] of [[3, 2], [-4, 5], [6, -5], [-2, -7]]) { // alle innerhalb von 8 px um den Startpunkt
+    await page.waitForTimeout(100);
+    await touch(page, 'pointermove', { x: at.x + dx, y: at.y + dy });
+  }
+  await page.waitForTimeout(150);
+  await expect(item(page, 'P')).toHaveAttribute('data-dragging', 'true');
+  const z = await center(item(page, 'Z').locator('.tree-label'));
+  await touch(page, 'pointermove', z);
+  await touch(page, 'pointerup', z);
+  await expect(message(page)).toHaveText('„P“ nach „Z“ verschoben, dort heißt es „P (2)“ (der Name war vergeben).');
+});
+
+test('Touch über Chromes echte Eingabe (CDP): langes Drücken und Ziehen legt ab, schnelles Wischen am Griff scrollt nur', async () => {
+  const many = Array.from({ length: 14 }, (_, i) => prof(`q${i}`, `Q${String(i).padStart(2, '0')}`));
+  const { page, cdp } = await touchPage([...FIXTURE, ...many], { width: 1280, height: 1500 });
+  await page.locator('#tune-btn').click();
+  await openWindow(page);
+  const send = (type, points) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: points });
+  // schnelles Wischen nach oben am Griff: der Baum scrollt, nichts wird gezogen
+  await page.setViewportSize({ width: 1280, height: 560 });
+  const tree = page.locator('#profile-tree');
+  await item(page, 'Q05').evaluate((r) => r.scrollIntoView({ block: 'end' }));
+  const top0 = await tree.evaluate((t) => t.scrollTop);
+  const q = await center(grip(page, 'Q05'));
+  await send('touchStart', [q]);
+  for (let i = 1; i <= 10; i++) { await send('touchMove', [{ x: q.x, y: q.y - i * 15 }]); await page.waitForTimeout(16); }
+  await page.waitForTimeout(500);
+  await expect(markers(page)).toHaveCount(0);
+  await send('touchEnd', []);
+  expect(await tree.evaluate((t) => t.scrollTop)).toBeGreaterThan(top0 + 100);
+  // langes Drücken auf P, dann zu D1
+  await page.setViewportSize({ width: 1280, height: 1500 });
+  await tree.evaluate((t) => { t.scrollTop = 0; });
+  const before = await stored(page);
+  const a = await center(grip(page, 'P'));
+  const d = await center(item(page, 'D1').locator('.tree-label'));
+  await send('touchStart', [a]);
+  await page.waitForTimeout(550);
+  await expect(item(page, 'P')).toHaveAttribute('data-dragging', 'true');
+  for (let i = 1; i <= 10; i++) { await send('touchMove', [{ x: a.x + (d.x - a.x) * i / 10, y: a.y + (d.y - a.y) * i / 10 }]); await page.waitForTimeout(16); }
+  await expect(item(page, 'D1')).toHaveAttribute('data-drop', 'ok');
+  await send('touchEnd', []);
+  await expect(message(page)).toHaveText('„P“ nach „D1“ verschoben.');
+  expect(await stored(page)).not.toBe(before);
+  await expect(item(page, 'P')).toHaveAttribute('aria-selected', 'true');
+});
+
+test('Touch (CDP), 360 px: ist der Baum zu kurz zum Scrollen, schiebt ein Wischen am Griff das Fenster', async () => {
+  const { page, cdp } = await touchPage(FIXTURE, { width: 360, height: 640 });
+  await page.locator('#go').click(); // über Los: Spielseite im Fokus
+  await expect(page.locator('#play')).toBeVisible();
+  await openWindow(page);
+  await acted(page, item(page, 'Werksprofile').locator('.tree-twisty').click());
+  const tree = page.locator('#profile-tree');
+  const pop = page.locator('#profiles-pop');
+  expect(await tree.evaluate((t) => t.scrollHeight <= t.clientHeight)).toBe(true); // der Baum selbst scrollt nicht
+  expect(await pop.evaluate((p) => p.scrollHeight - p.clientHeight)).toBeGreaterThan(150);
+  const before = await stored(page);
+  const send = (type, points) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: points });
+  const q = await center(grip(page, 'P'));
+  await send('touchStart', [q]);
+  for (let i = 1; i <= 8; i++) { await send('touchMove', [{ x: q.x, y: q.y - i * 15 }]); await page.waitForTimeout(16); }
+  await send('touchEnd', []);
+  expect(await pop.evaluate((p) => p.scrollTop)).toBeGreaterThan(80);
+  await expect(markers(page)).toHaveCount(0);
+  expect(await stored(page)).toBe(before);
+});
+
+test('Touch: kurzes Tippen auf den Griff wählt nur die Zeile', async () => {
+  const { page, cdp } = await touchPage(FIXTURE);
+  await page.locator('#tune-btn').click();
+  await openWindow(page);
+  await page.evaluate(() => { window.__types = []; document.addEventListener('pointerdown', (e) => window.__types.push(e.pointerType)); });
+  const before = await stored(page);
+  // tap() der Web-App: Playwright tippt nur in einem Kontext mit hasTouch; hier, was tap() tut: den Griff ins Bild holen (er liegt unter dem
+  // Rand der 720 px), dann dieselben CDP-Ereignisse
+  await grip(page, 'Z').scrollIntoViewIfNeeded();
+  const at = await center(grip(page, 'Z'));
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [at] });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await answered(page);
+  await expect(item(page, 'Z')).toHaveAttribute('aria-selected', 'true');
+  await expect(item(page, 'Z')).toHaveAttribute('aria-expanded', 'false');
+  await page.waitForTimeout(450);
+  await expect(markers(page)).toHaveCount(0);
+  expect(await stored(page)).toBe(before);
+  expect(await page.evaluate(() => window.__types)).toEqual(['touch']);
+});
+
+// ---------- Teil „Songform“ (zehnter Teil) ----------
+
+const hideWindow = (page) => page.locator('#profiles-pop').evaluate((el) => el.hidePopover());
+const setupOpen = async (page) => {
+  if (!(await page.locator('#rack').isVisible())) await page.locator('#mode-switch').click(); // Zustand Einstellen
+  await expect(page.locator('#form-template')).toBeVisible();
+};
+const formTemplate = (page) => page.locator('#form-template');
+const formTarget = (page) => page.locator('#length');
+const stripParts = (page) => page.locator('#form-strip [role="option"]');
+// Schnellwahl im eingeklappten Inhalt der Speichern-Zeile
+const presetParts = async (page, name) => {
+  await page.locator('#profile-save-parts').evaluate((el) => { el.open = true; });
+  await page.locator('#profile-save-parts').getByRole('button', { name }).click();
+};
+// Form, Länge, Zielgröße, Regler der Sitzung, wenn die Seite die Antworten zeigt (die Web-App las ihren Zustand)
+const sessionForm = async (page) => {
+  await answered(page);
+  const s = await fromSession(page, 'state');
+  const f = s.track.form;
+  return { form: f ?? null, length: s.track.length, target: s.formTarget, feel: s.formFeel, sum: f ? f.sections.reduce((n, x) => n + x.bars, 0) : null };
+};
+// Form ändern wie ein Nutzer: Fenster zu, Zielgröße wählen (würfelt alles neu), Fenster wieder auf
+const changeTarget = async (page, bars) => {
+  await hideWindow(page);
+  await setupOpen(page);
+  await acted(page, formTarget(page).selectOption(String(bars)));
+  await openWindow(page);
+};
+// Teil 1 sperren und Dynamik setzen, damit Sperre und Regler im Profil stecken
+const lockFirstAndSetDynamics = async (page, value) => {
+  await hideWindow(page);
+  await setupOpen(page);
+  await acted(page, stripParts(page).first().click());
+  await acted(page, page.locator('#part-lock').click());
+  await acted(page, page.locator('#form-dynamics').fill(String(value)));
+  await openWindow(page);
+};
+
+test('Profil mit Songform: Teile, Regler und Sperren kommen beim Laden zurück; Streifen und Auswahl zeigen sie', async ({ page }) => {
+  await lockFirstAndSetDynamics(page, 90);
+  const saved = await sessionForm(page);
+  expect(saved.form.sections[0].locked).toBe(true);
+  expect(saved.form.feel.dynamics).toBe(0.9);
+  await saveSession(page, 'MitForm');
+  expect(await storedParts(page, 'MitForm')).toContain('form');
+  expect(await storedParts(page, 'MitForm')).toHaveLength(10);
+  await changeTarget(page, 24);
+  const changed = await sessionForm(page);
+  expect(changed.form.sections).not.toEqual(saved.form.sections);
+  await load(page, 'MitForm');
+  await expect(message(page)).toHaveText('Profil übernommen.');
+  const after = await sessionForm(page);
+  expect(after.form).toEqual(saved.form);
+  expect(after.length).toBe(after.sum);
+  expect(after.target).toBe(saved.target);
+  expect(after.feel.dynamics).toBe(0.9);
+  await hideWindow(page);
+  await expect(formTemplate(page)).toHaveValue('auto');
+  await expect(formTarget(page)).toHaveValue(String(saved.target));
+  await expect(page.locator('#form-dynamics')).toHaveValue('90');
+  await expect(stripParts(page)).toHaveCount(saved.form.sections.length);
+  await expect(stripParts(page).first()).toHaveClass(/\blocked\b/);
+});
+
+test('Profil mit kleinerer Form laden, während im Streifen ein hinterer Teil gewählt ist: Auswahl rückt zurück, nichts bricht', async ({ page }) => {
+  await changeTarget(page, 24);
+  await saveSession(page, 'Klein');
+  const small = await sessionForm(page);
+  await changeTarget(page, 192);
+  await hideWindow(page);
+  await setupOpen(page);
+  const count = await stripParts(page).count();
+  expect(count).toBeGreaterThan(small.form.sections.length);
+  await acted(page, stripParts(page).last().click());
+  await expect(stripParts(page).last()).toHaveAttribute('aria-selected', 'true');
+  await openWindow(page);
+  await load(page, 'Klein');
+  await hideWindow(page);
+  await expect(stripParts(page)).toHaveCount(small.form.sections.length);
+  await expect(page.locator('#form-strip [role="option"][aria-selected="true"]')).toHaveCount(1);
+  await expect(formTarget(page)).toHaveValue('24');
+  expect((await sessionForm(page)).length).toBe(small.sum);
+});
+
+test('Profil ohne Teil Songform lässt die Form unberührt', async ({ page }) => {
+  await acted(page, item(page, 'Aktuelle Sitzung').click());
+  await presetParts(page, 'Nur Klang');
+  await page.getByLabel('Name des Profils').fill('Klang');
+  await acted(page, page.locator('#profile-save').click());
+  expect(await storedParts(page, 'Klang')).toEqual(['sound', 'voices', 'mixer']);
+  await hideWindow(page);
+  await setupOpen(page);
+  await acted(page, formTemplate(page).selectOption('blues'));
+  await lockFirstAndSetDynamics(page, 20);
+  const before = await sessionForm(page);
+  await load(page, 'Klang');
+  expect(await sessionForm(page)).toEqual(before);
+  await hideWindow(page);
+  await expect(formTemplate(page)).toHaveValue('blues');
+  await expect(page.locator('#form-dynamics')).toHaveValue('20');
+});
+
+test('geladenes rhythm.length ohne Teil Songform würfelt die Form für die nächste Zielgröße neu; Länge, Auswahl und Anzeige stimmen, auch beim Spielen', async ({ page }) => {
+  await changeTarget(page, 48);
+  await acted(page, item(page, 'Aktuelle Sitzung').click());
+  await presetParts(page, 'Nur Rhythmus');
+  await page.getByLabel('Name des Profils').fill('Rhythmus48');
+  await acted(page, page.locator('#profile-save').click());
+  expect(await storedParts(page, 'Rhythmus48')).toEqual(['tempo', 'rhythm']);
+  await changeTarget(page, 192);
+  await hideWindow(page);
+  await acted(page, page.locator('#tuning-tempo').fill('200'));
+  await page.locator('#play-go').click();
+  await expect(page.locator('#play-go')).toHaveText('Stopp');
+  await expect.poll(() => page.locator('#play-position').textContent(), { timeout: 10_000 }).toMatch(/^Takt \d+ von \d+$/);
+  await openWindow(page);
+  await load(page, 'Rhythmus48');
+  await hideWindow(page);
+  const after = await sessionForm(page);
+  expect(after.form).not.toBeNull();
+  expect(after.length).toBe(after.sum);
+  expect(Math.abs(after.sum - 48)).toBeLessThanOrEqual(8);
+  expect(after.target).toBe(48);
+  await expect(formTarget(page)).toHaveValue('48');
+  await expect(formTemplate(page)).toHaveValue('auto');
+  await expect(stripParts(page)).toHaveCount(after.form.sections.length);
+  await settled(page); // der Neustart, den das Laden beim Spielen auslöst, ist getan; "Stopp" stünde auch vorher da
+  await expect(page.locator('#play-go')).toHaveText('Stopp');
+  await expect(page.locator('#play-position')).toHaveText(new RegExp(`^Takt \\d+ von ${after.sum}$`), { timeout: 10_000 });
+  await page.locator('#play-go').click();
+});
+
+test('Ohne Form: der Teil Songform ist nicht wählbar und fehlt im Profil; ein Profil ohne ihn lässt die Form unberührt, ein Profil mit ihm bringt sie zurück; rhythm.length setzt nur die Länge', async ({ page }) => {
+  await saveSession(page, 'MitForm');
+  const withForm = await sessionForm(page);
+  await hideWindow(page);
+  await setupOpen(page);
+  await acted(page, formTemplate(page).selectOption('off'));
+  await openWindow(page);
+  await acted(page, item(page, 'Aktuelle Sitzung').click());
+  const picker = page.locator('#profile-save-parts');
+  await expect(picker.locator('summary')).toHaveText('Inhalt: 9 von 10');
+  await picker.locator('summary').click();
+  await expect(page.getByRole('checkbox', { name: 'Songform', exact: true })).toBeDisabled();
+  await expect(page.getByRole('checkbox', { name: 'Songform', exact: true })).not.toBeChecked();
+  await page.getByLabel('Name des Profils').fill('OhneForm');
+  await acted(page, page.locator('#profile-save').click());
+  expect(await storedParts(page, 'OhneForm')).not.toContain('form');
+  expect(await storedParts(page, 'OhneForm')).toHaveLength(9);
+  // „Alles“ wählt den nicht vorhandenen Teil nicht mit
+  await acted(page, item(page, 'Aktuelle Sitzung').click());
+  await picker.getByRole('button', { name: 'Alles' }).click();
+  await expect(picker.locator('summary')).toHaveText('Inhalt: 9 von 10');
+  // Profil mit Form: zurück
+  await load(page, 'MitForm');
+  expect((await sessionForm(page)).form).toEqual(withForm.form);
+  await hideWindow(page);
+  await expect(formTemplate(page)).toHaveValue('auto');
+  await openWindow(page);
+  // Profil ohne Form-Teil (auch wenn es bei „Ohne Form“ entstand): Form bleibt
+  await load(page, 'OhneForm');
+  expect((await sessionForm(page)).form).toEqual(withForm.form);
+  // Ohne Form + nur Länge: Länge gesetzt, keine Form entsteht
+  await hideWindow(page);
+  await acted(page, formTemplate(page).selectOption('off'));
+  await openWindow(page);
+  await acted(page, item(page, 'Aktuelle Sitzung').click());
+  await presetParts(page, 'Nur Rhythmus');
+  await page.getByLabel('Name des Profils').fill('NurLaenge');
+  await acted(page, page.locator('#profile-save').click());
+  await hideWindow(page);
+  await acted(page, formTarget(page).selectOption('48'));
+  await openWindow(page);
+  await load(page, 'NurLaenge');
+  await hideWindow(page);
+  const off = await sessionForm(page);
+  expect(off.form).toBeNull();
+  expect(off.length).toBe(96);
+  await expect(formTemplate(page)).toHaveValue('off');
+  await expect(formTarget(page)).toHaveValue('96');
+});
+
+test('Dateien von früher (Version 1 mit track, Version 2 mit 9 Teilen) lassen sich importieren und laden die Form nicht an', async ({ page }) => {
+  await acted(page, item(page, 'Aktuelle Sitzung').click());
+  const bars = [['A', 'min'], ['D', 'min']].map(([root, quality]) => ({ chord: { root, quality }, beats: 4 }));
+  const v1 = { format: 'backingtrack-profile', version: 1, track: { key: { root: 'A', mode: 'minor' }, bpm: 88, bars, tags: {}, timbre: {}, seed: 3, variety: true, meter: [4, 4], length: 24, layers: {}, voices: {}, jobs: {} }, scale: 'minorPentatonic', style: 'funk', chordColor: 'triads', chordColorFromStyle: true, mix: { master: 0.7 } };
+  await page.locator('#profile-text').fill(JSON.stringify(v1));
+  await acted(page, page.locator('#profile-import-text').click());
+  await expect(item(page, 'Importiert')).toHaveAttribute('aria-selected', 'true');
+  expect(await storedParts(page, 'Importiert')).not.toContain('form');
+  expect(await storedParts(page, 'Importiert')).toContain('harmony');
+  await acted(page, item(page, 'Aktuelle Sitzung').click());
+  const v2 = { format: 'backingtrack-profile', version: 2, name: 'Alt2', parts: { tempo: { bpm: 70, meter: [4, 4] }, mixer: { mix: { master: 0.6 } }, zukunft: { x: 1 } } };
+  await page.locator('#profile-text').fill(JSON.stringify(v2));
+  await acted(page, page.locator('#profile-import-text').click());
+  await expect(item(page, 'Alt2')).toHaveAttribute('aria-selected', 'true');
+  expect(await storedParts(page, 'Alt2')).toEqual(['tempo', 'mixer']);
+  const before = await sessionForm(page);
+  await load(page, 'Alt2');
+  await expect(tempo(page)).toHaveText('70 bpm');
+  const after = await sessionForm(page);
+  expect(after.form).toEqual(before.form);
+  await load(page, 'Importiert');
+  await expect(tempo(page)).toHaveText('88 bpm');
+});
+
+test('Export und Import eines Profils mit Songform: Rundlauf; „Alles sichern“ enthält den Teil', async ({ page }) => {
+  await lockFirstAndSetDynamics(page, 75);
+  const saved = await sessionForm(page);
+  await saveSession(page, 'Form');
+  await acted(page, item(page, 'Form').click());
+  const file = await copied(page);
+  expect(Object.keys(file.parts)).toHaveLength(10);
+  expect(file.parts.form.form.sections).toEqual(saved.form.sections);
+  expect(file.parts.form.form.feel.dynamics).toBe(0.75);
+  // zurück in „Meine Profile“ unter neuem Namen, Form dazwischen ändern, Kopie laden
+  await acted(page, item(page, 'Aktuelle Sitzung').click());
+  file.name = 'Kopie';
+  await page.locator('#profile-text').fill(JSON.stringify(file));
+  await acted(page, page.locator('#profile-import-text').click());
+  await expect(item(page, 'Kopie')).toHaveAttribute('aria-selected', 'true');
+  expect(await storedParts(page, 'Kopie')).toContain('form');
+  await changeTarget(page, 24);
+  await load(page, 'Kopie');
+  expect((await sessionForm(page)).form).toEqual(saved.form);
+  // alles sichern
+  await acted(page, item(page, 'Meine Profile').click());
+  const { text } = await downloadJson(page, '#profile-backup');
+  const backup = JSON.parse(text);
+  expect(backup.items.map((n) => n.name)).toEqual(['Form', 'Kopie']);
+  for (const n of backup.items) expect(n.parts.form.form.sections).toEqual(saved.form.sections);
+  // und wieder einlesen
+  await acted(page, item(page, 'Aktuelle Sitzung').click());
+  await page.locator('#profile-text').fill(text);
+  await acted(page, page.locator('#profile-import-text').click());
+  await expect(message(page)).not.toContainText('ungültig');
+});
+
+test('Überschreiben: ein Profil ohne Songform bekommt ihn nicht angehakt, auch wenn die Form erst später wieder da ist', async ({ page }) => {
+  await acted(page, item(page, 'Aktuelle Sitzung').click());
+  await presetParts(page, 'Nur Klang');
+  await page.getByLabel('Name des Profils').fill('Klang');
+  await acted(page, page.locator('#profile-save').click());
+  await hideWindow(page);
+  await setupOpen(page);
+  await acted(page, formTemplate(page).selectOption('off'));
+  await openWindow(page);
+  await acted(page, item(page, 'Klang').click());
+  await page.locator('#profile-overwrite').click();
+  const box = page.locator('#profile-overwrite-parts').getByRole('checkbox', { name: 'Songform', exact: true });
+  await expect(box).toBeDisabled();
+  await hideWindow(page);
+  await acted(page, formTemplate(page).selectOption('auto'));
+  await openWindow(page);
+  await expect(box).toBeEnabled();
+  await expect(box).not.toBeChecked();
+  await expect(page.locator('#profile-overwrite-parts summary')).toHaveText('Inhalt: 3 von 10');
+  await acted(page, page.locator('#profile-overwrite-go').click());
+  expect(await storedParts(page, 'Klang')).toEqual(['sound', 'voices', 'mixer']);
+});

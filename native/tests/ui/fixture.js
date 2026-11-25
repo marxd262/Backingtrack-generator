@@ -2,7 +2,7 @@
 // started as the checks in native/tools start it: muted (BTG_MUTE), on that folder (BTG_STORAGE_DIR; the WebView2 profile with the pages'
 // localStorage lies in it too), with the WebView2 debug port (9340 + the worker's index), attached with Playwright over CDP; ended with kill()
 // after the browser is closed, the folder removed. Tests import test and expect from here; `page` is the app's generator page, ready.
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test as base, expect, chromium } from '@playwright/test';
@@ -78,6 +78,8 @@ async function start(run, { folder, port, locale, viewport, reducedMotion, probl
   // shortcut: one desktop per worker (btg-tests-<port>): with the apps of all workers on one desktop, a start now and then never got its page (the
   // WebView2's browser ran with no page for 15 s; 6 in about 1900 starts); with a desktop each it is rarer (1 in about 2150), not gone (such a
   // start is tried once more: NO_PAGE_MS above); why is not known, upgrade: when the cause is found.
+  const downloads = join(folder, 'downloads');
+  mkdirSync(downloads, { recursive: true });
   const app = (run.app = startApp(exe, `btg-tests-${port}`, { stdio: 'ignore', env: { ...process.env, BTG_MUTE: '1', BTG_STORAGE_DIR: folder,
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port} --lang=${locale} --disable-features=msSmartScreenProtection --disable-accelerated-2d-canvas` } }));
   run.step = `attach to the app's WebView2 on port ${port}`;
@@ -85,8 +87,10 @@ async function start(run, { folder, port, locale, viewport, reducedMotion, probl
     if (run.closing) return; // the deadline came and quit() ended the app
     if (app.exitCode !== null) throw new Error(`the app ended at its start (exit code ${app.exitCode})`);
     await sleep(100);
-    // an attempt that stands (its default waits 30 s) is made again
-    run.browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`, { timeout: 3000 }).catch(() => null);
+    // an attempt that stands (its default waits 30 s) is made again. Downloads go into the test's folder, never to the user's Downloads: at every
+    // attach Playwright sends Browser.setDownloadBehavior (allowAndName) with artifactsDir as the place; a download is then a `download` event
+    // whose path() is that file
+    run.browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`, { timeout: 3000, artifactsDir: downloads }).catch(() => null);
   }
   run.step = 'find the page of its own (juce.backend)';
   const attached = Date.now();
@@ -102,6 +106,17 @@ async function start(run, { folder, port, locale, viewport, reducedMotion, probl
     await sleep(100);
   }
   const page = run.page;
+  // Over a session of the browser, which stays open with it; only once the page is there: a WebView2 without any page has no browser context yet
+  // ("Browser context management is not supported", seen once), and that start is to get its second try above.
+  // The download place once more, set by the fixture itself (the same as Playwright's at the attach): a Playwright that changed its default would
+  // otherwise first show as a file in the user's Downloads.
+  // The clipboard is the user's (the tests' desktops share it): the browser refuses the page's writes ("Kopieren"; the page then marks the text in
+  // its field). shortcut: the page's branch of a copy that succeeds (ui.profileCopied) never runs in the tests, upgrade: when the tests get a
+  // clipboard of their own (a window station of their own, or a stand-in for navigator.clipboard)
+  run.step = 'set the download place, deny writes to the clipboard';
+  const cdp = await run.browser.newBrowserCDPSession();
+  await cdp.send('Browser.setDownloadBehavior', { behavior: 'allowAndName', downloadPath: downloads });
+  await cdp.send('Browser.setPermission', { permission: { name: 'clipboard-write' }, setting: 'denied' });
   run.step = 'the first drawing of the page';
   await drawn(page);
   run.step = 'the fonts of the first load';

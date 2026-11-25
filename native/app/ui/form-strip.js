@@ -41,8 +41,13 @@ export function initFormStrip({ page, current }) {
   const act = (action, control) => send(action, control).then(() => options[selected()]?.el.scrollIntoView({ inline: 'nearest', block: 'nearest' }));
   const edit = (field, value, control) => act({ action: 'editPart', field, value }, control);
 
+  // Wahl eines Teils; eine Taste zählt vom zuletzt gewählten, solange dessen Antwort aussteht (der Fokus folgt erst ihr): zwei schnelle Tasten
+  // sind zwei Schritte, wie in der Web-App
+  const chooser = {};
+  let chosen = 0;
   function choose(i, focus) {
-    send({ action: 'selectPart', index: i }).then(() => { if (focus) options[i]?.el.focus(); });
+    chosen = i;
+    send({ action: 'selectPart', index: i }, chooser).then(() => { if (focus) options[i]?.el.focus(); });
   }
 
   strip.addEventListener('click', (e) => {
@@ -55,6 +60,7 @@ export function initFormStrip({ page, current }) {
   // Loslassen an die Sitzung (ein Neustart statt einer je Takt); bis zur Antwort zeigt er die gezogene Länge
   let drag = null; // { x, bars, px, max, shown }
   let held = 0; // die Länge, bei der die Hand losließ, bis ihre Aktion beantwortet ist
+  let stepped = 0; // die zuletzt geschickte Länge des Teils (Griff oder −/+), von der −/+ zählt, solange ihre Antwort aussteht
   grip.addEventListener('pointerdown', (e) => {
     const f = form();
     if (!f || e.button !== 0) return;
@@ -75,7 +81,7 @@ export function initFormStrip({ page, current }) {
     const { bars, shown } = drag;
     drag = null;
     if (shown !== bars) {
-      held = shown;
+      held = stepped = shown;
       send({ action: 'editPart', field: 'bars', value: shown }, grip);
     }
     renderStrip();
@@ -83,8 +89,9 @@ export function initFormStrip({ page, current }) {
   grip.addEventListener('pointerup', release);
   grip.addEventListener('pointercancel', release);
   strip.addEventListener('keydown', (e) => {
-    const i = options.findIndex((o) => o.el === e.target);
-    if (i < 0 || e.altKey || e.ctrlKey || e.metaKey) return; // Alt+Pfeil (Zurück im Browser) und Co. bleiben dem Browser
+    const at = options.findIndex((o) => o.el === e.target);
+    if (at < 0 || e.altKey || e.ctrlKey || e.metaKey) return; // Alt+Pfeil (Zurück im Browser) und Co. bleiben dem Browser
+    const i = holds(chooser) ? chosen : at;
     const last = options.length - 1;
     const to = { ArrowRight: Math.min(i + 1, last), ArrowDown: Math.min(i + 1, last), ArrowLeft: Math.max(i - 1, 0), ArrowUp: Math.max(i - 1, 0), Home: 0, End: last, Enter: i, ' ': i }[e.key];
     if (to === undefined) return;
@@ -94,14 +101,25 @@ export function initFormStrip({ page, current }) {
 
   typeSel.addEventListener('change', () => edit('type', typeSel.value, typeSel));
   transitionSel.addEventListener('change', () => edit('transition', transitionSel.value, transitionSel));
-  $('part-crash').addEventListener('click', (e) => edit('crash', e.currentTarget.getAttribute('aria-pressed') !== 'true'));
+  // Crash schaltet vom zuletzt geschickten Wert um, solange dessen Antwort aussteht (zwei schnelle Klicks: an und wieder aus)
+  const crash = $('part-crash');
+  let crashed = false;
+  crash.addEventListener('click', () => { crashed = !(holds(crash) ? crashed : crash.getAttribute('aria-pressed') === 'true'); edit('crash', crashed, crash); });
   $('part-level').addEventListener('input', (e) => edit('level', Number(e.target.value), e.target));
   $('part-density').addEventListener('input', (e) => edit('density', Number(e.target.value), e.target));
   $('part-level-reset').addEventListener('click', () => edit('level', null));
   $('part-density-reset').addEventListener('click', () => edit('density', null));
   const bars = () => form()?.blocks[selected()]?.bars ?? 0;
-  $('part-shorter').addEventListener('click', () => edit('bars', bars() - 1));
-  $('part-longer').addEventListener('click', () => edit('bars', bars() + 1));
+  // −/+ zählen vom zuletzt geschickten Wert (auch dem eines Ziehens am Griff), solange seine Antwort aussteht: zwei schnelle Klicks sind zwei
+  // Schritte, wie in der Web-App; ein Schritt hält an den Grenzen des Teils an (1 bis maxBars, wie das Ziehen)
+  const stepper = {};
+  const step = (d) => {
+    const base = holds(stepper) || holds(grip) ? stepped : bars();
+    stepped = Math.min(form()?.parts[selected()]?.maxBars ?? 64, Math.max(1, base + d));
+    edit('bars', stepped, stepper);
+  };
+  $('part-shorter').addEventListener('click', () => step(-1));
+  $('part-longer').addEventListener('click', () => step(1));
   $('part-lock').addEventListener('click', () => act({ action: 'toggleLock' }));
   $('part-delete').addEventListener('click', () => act({ action: 'deletePart' }));
   $('part-left').addEventListener('click', () => act({ action: 'movePart', dir: -1 }));
