@@ -69,12 +69,25 @@ let hadBar = false;
 let fromStart = false;
 const current = () => playing() && hadBar;
 let starting = false; // "Los" geschickt, die Engine hat den Start noch nicht gemeldet: ein zweiter Klick tut nichts (wie in der Web-App, solange die Packs laden)
+// "Stopp" geschickt, die Engine hat noch nicht gemeldet, dass sie steht, und kein Start kam danach: ein Klick bis dahin startet, wie in der Web-App
+// (stop() setzt state.playing sofort)
+let stopped = false;
+// Takt, Akkord, Countdown und Lichter gehen mit dem Klick aus, wie in stop() der Web-App: startet ein zweiter Klick gleich neu, kommt oft keine
+// Meldung, dass die Engine steht, und der Vorlauf zeigte sonst den alten Lauf
+function stop() {
+  post('stop');
+  stopped = true;
+  hadBar = false;
+  for (const layer of [...sounding.keys()]) endSound(layer);
+  render();
+}
 let startFailed = false; // der letzte Start spielte nicht (die Web-App: err.playFailed), bis zum nächsten Start oder Weitermachen
 let errorsHidden = false; // die Web-App löscht die Fehler eines Weitermachens, wenn eine Wiedergabe beginnt (app.js 122 der Web-App)
 listen((what) => {
   if (what === 'state' && session.change) fromStart = session.change.restart && !session.change.inPlace;
   if (what === 'playing') {
     if (!playing()) {
+      stopped = false;
       hadBar = false;
       for (const layer of [...sounding.keys()]) endSound(layer);
     } else {
@@ -199,21 +212,27 @@ async function playSession() {
   render();
   const report = await start();
   starting = false;
+  stopped = false; // die Meldung des Starts kommt nach dem Stopp davor
   startFailed = !report.playing;
   render();
   return report.playing;
 }
-// Los auf der Startseite: im Stand starten und zur Spielseite, beim Spielen stoppen und bleiben; gescheitert: die Meldung steht auf der Startseite
+// Los auf der Startseite: im Stand starten und zur Spielseite, beim Spielen stoppen und bleiben; gescheitert: die Meldung steht auf der Startseite.
+// shortcut: ein Klick, solange die Engine einen Start noch nicht gemeldet hat, tut nichts, auch wenn sie schon spielt; in der Web-App ist der Start
+// sofort da (die Packs geladen) und der Klick hält an, so enden drei schnelle Klicks beim Spielen hier spielend, dort gestoppt, upgrade: wenn die
+// Hülle einen Start schon in seiner ersten Meldung nennt oder ein Nutzer darauf stößt
 $('go').addEventListener('click', async () => {
-  if (playing()) {
-    post('stop');
+  if (starting) return;
+  if (playing() && !stopped) {
+    stop();
     return;
   }
-  if (!starting && (await playSession())) openFrom('go', { mode: 'focus' });
+  if (await playSession()) openFrom('go', { mode: 'focus' });
 });
 $('play-go').addEventListener('click', () => {
-  if (playing()) post('stop');
-  else if (!starting) playSession();
+  if (starting) return;
+  if (playing() && !stopped) stop();
+  else playSession();
 });
 $('tune-btn').addEventListener('click', () => openFrom('tune-btn', { mode: 'setup' }));
 $('to-play').addEventListener('click', () => openFrom('to-play'));

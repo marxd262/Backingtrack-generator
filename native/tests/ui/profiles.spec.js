@@ -1560,3 +1560,159 @@ test('Überschreiben: ein Profil ohne Songform bekommt ihn nicht angehakt, auch 
   await acted(page, page.locator('#profile-overwrite-go').click());
   expect(await storedParts(page, 'Klang')).toEqual(['sound', 'voices', 'mixer']);
 });
+
+// ---------- Eingaben schneller als die Antwort (Task 33f): jede wirkt auf das, was die davor hinterließ, wie in der Web-App ----------
+// Die Seite der Web-App zeichnet das Fenster mit jeder Eingabe sofort neu (src/ui/profiles.js commit 157–167, onToggle 53–57); die Seite der App
+// zeichnet mit der Antwort der Sitzung. Beide Eingaben kommen hier in einer Aufgabe der Seite: keine Antwort kann dazwischen kommen.
+const twice = (page, id) => page.evaluate((i) => { const b = document.getElementById(i); b.click(); b.click(); }, id);
+const keys = (page, ...names) => page.evaluate((list) => {
+  for (const key of list) document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+}, names);
+
+test('Zwei schnelle Klicks auf „Löschen“ bei einem Profil in einem Ordner mit mehr Inhalt: das Profil ist weg, dann fragt das Fenster nach dem Ordner', async ({ page }) => {
+  // die Web-App: der erste Klick löscht das Profil und wählt den Ordner (remove 257–261), der zweite findet ihn mit Inhalt und fragt (263–268)
+  page = await seed([dir('z', 'Z', [prof('zp', 'P'), prof('zq', 'Q')])]);
+  await acted(page, item(page, 'Z').locator('.tree-twisty').click());
+  await pickRow(page, 'P');
+  await acted(page, twice(page, 'profile-delete'));
+  await expect(page.locator('#profile-delete-ask')).toHaveText('Ordner mit 1 Eintrag löschen?');
+  await expect(page.getByRole('button', { name: 'Abbrechen' })).toBeFocused();
+  await expect(item(page, 'Z')).toHaveAttribute('aria-selected', 'true');
+  await expect(item(page, 'P')).toHaveCount(0);
+  await expect(item(page, 'Q')).toBeVisible();
+  await expect(message(page)).toHaveText('„P“ gelöscht.');
+  const tree = (await storedTree(page)).items;
+  expect(names(tree)).toEqual(['Z']);
+  expect(names(tree[0].items)).toEqual(['Q']);
+});
+
+test('Zwei schnelle Klicks auf „Löschen“ bei einem Profil direkt in „Meine Profile“: nur das Profil ist weg, „Rückgängig“ holt es zurück', async ({ page }) => {
+  // die Web-App: der erste Klick löscht und wählt „Meine Profile“ (remove 260), dort gibt es kein „Löschen“ (show(del, own), 418): der zweite trifft keine Taste
+  page = await seed([dir('z', 'Z', [prof('zp', 'Innen')]), prof('p', 'Solo')]);
+  await pickRow(page, 'Solo');
+  await acted(page, twice(page, 'profile-delete'));
+  await expect(item(page, 'Solo')).toHaveCount(0);
+  await expect(item(page, 'Meine Profile')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#profile-delete')).toBeHidden();
+  await expect(page.locator('#profile-delete-ask')).toBeHidden();
+  await expect(message(page)).toHaveText('„Solo“ gelöscht.');
+  expect(names((await storedTree(page)).items)).toEqual(['Z']);
+  await acted(page, undo(page).click());
+  await expect(item(page, 'Solo')).toHaveAttribute('aria-selected', 'true');
+  expect(names((await storedTree(page)).items).sort()).toEqual(['Solo', 'Z']);
+});
+
+test('Zwei schnelle Klicks auf „Ja, löschen“: nur der Ordner, nach dem gefragt war, ist weg, der Ordner darüber bleibt mit seinem Inhalt', async ({ page }) => {
+  // die Web-App: der erste Klick löscht, wählt den Ordner darüber und schließt die Rückfrage (remove 260, commit 160, gezeichnet 423): „Ja, löschen“ ist mit ihr weg
+  page = await seed([dir('o', 'Oben', [dir('u', 'Unten', [prof('up', 'P')]), prof('oq', 'Q')])]);
+  await acted(page, item(page, 'Oben').locator('.tree-twisty').click());
+  await pickRow(page, 'Unten');
+  await page.locator('#profile-delete').click();
+  await expect(page.locator('#profile-delete-ask')).toHaveText('Ordner mit 1 Eintrag löschen?');
+  await acted(page, twice(page, 'profile-delete-yes'));
+  await expect(item(page, 'Unten')).toHaveCount(0);
+  await expect(item(page, 'Oben')).toHaveAttribute('aria-selected', 'true');
+  await expect(item(page, 'Q')).toBeVisible();
+  await expect(page.locator('#profile-delete-ask')).toBeHidden();
+  await expect(message(page)).toHaveText('„Unten“ gelöscht.');
+  const tree = (await storedTree(page)).items;
+  expect(names(tree)).toEqual(['Oben']);
+  expect(names(tree[0].items)).toEqual(['Q']);
+});
+
+test('Zwei schnelle Klicks auf „Überschreiben“: „Rückgängig“ stellt das Profil von vorher her', async ({ page }) => {
+  // die Web-App: der erste Klick überschreibt und schließt das Feld (commit 160, gezeichnet 419), die Taste ist mit ihm weg; „Rückgängig“ hält
+  // den Baum von vor dem Überschreiben (208)
+  page = await seed([prof('p', 'Alt')]);
+  await setTempo(page, 77);
+  await pickRow(page, 'Alt');
+  await page.locator('#profile-overwrite').click();
+  await acted(page, twice(page, 'profile-overwrite-go'));
+  await expect(message(page)).toHaveText('Profil Alt überschrieben.');
+  await expect(page.locator('#profile-overwrite-parts')).toBeHidden();
+  expect((await storedTree(page)).items[0].parts.tempo.bpm).toBe(77);
+  await acted(page, undo(page).click());
+  expect((await storedTree(page)).items[0].parts.tempo.bpm).toBe(90);
+});
+
+test('Zwei schnelle Klicks auf „Anlegen“ eines Unterordners: ein neuer Ordner, keiner in ihm', async ({ page }) => {
+  // die Web-App: der erste Klick legt an, wählt den neuen Ordner und schließt das Feld (doSubfolder 226–231, commit 160, gezeichnet 421): die Taste ist mit ihm weg
+  await pickRow(page, 'Meine Profile');
+  await page.locator('#profile-subfolder').click();
+  await page.getByLabel('Name des Ordners').fill('Neu');
+  await acted(page, twice(page, 'profile-folder-add'));
+  await expect(item(page, 'Neu')).toHaveCount(1);
+  await expect(item(page, 'Neu')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#profile-folder-name')).toBeHidden();
+  const tree = (await storedTree(page)).items;
+  expect(names(tree)).toEqual(['Neu']);
+  expect(tree[0].items).toEqual([]);
+});
+
+// ein Klick auf die Zeile `key` des Baums und gleich darauf auf die Taste `id`, in einer Aufgabe der Seite
+const rowThen = (page, key, id) => page.evaluate(([k, i]) => {
+  document.querySelector(`#profile-tree [data-key="${k}"] .tree-label`).click();
+  document.getElementById(i).click();
+}, [key, id]);
+
+test('Klick auf einen Ordner mit Inhalt und gleich „Löschen“: das Fenster fragt nach dem Ordner, nichts ist gelöscht', async ({ page }) => {
+  // die Web-App: der Klick wählt den Ordner und zeichnet sofort (onSelect 52), „Löschen“ findet ihn mit Inhalt und fragt (263–268)
+  page = await seed([prof('p', 'P'), dir('z', 'Z', [prof('zq', 'Q')])]);
+  await pickRow(page, 'P');
+  await acted(page, rowThen(page, 'z', 'profile-delete'));
+  await expect(page.locator('#profile-delete-ask')).toHaveText('Ordner mit 1 Eintrag löschen?');
+  await expect(item(page, 'Z')).toHaveAttribute('aria-selected', 'true');
+  await expect(item(page, 'P')).toBeVisible();
+  const tree = (await storedTree(page)).items;
+  expect(names(tree).sort()).toEqual(['P', 'Z']);
+  expect(names(tree.find((n) => n.name === 'Z').items)).toEqual(['Q']);
+});
+
+test('Klick auf ein anderes Profil und gleich „Überschreiben“: keines ist überschrieben, das Feld ist zu', async ({ page }) => {
+  // die Web-App: der Klick wählt das andere Profil und schließt das Feld (onSelect 52: mode null, gezeichnet 419), „Überschreiben“ ist mit ihm weg
+  page = await seed([prof('a', 'A'), prof('b', 'B')]);
+  await setTempo(page, 77);
+  await pickRow(page, 'A');
+  await page.locator('#profile-overwrite').click();
+  await expect(page.locator('#profile-overwrite-parts')).toBeVisible();
+  await acted(page, rowThen(page, 'b', 'profile-overwrite-go'));
+  await expect(item(page, 'B')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#profile-overwrite-parts')).toBeHidden();
+  await expect(message(page)).toHaveText('');
+  expect((await storedTree(page)).items.map((n) => n.parts.tempo.bpm)).toEqual([90, 90]);
+});
+
+// der Baum: Z (zu) mit „Innen“, dahinter „Außen“; die Zeile Z hat den Fokus und den Tabstopp (gewählt per Klick)
+const treeOnZ = async () => {
+  const page = await seed([dir('z', 'Z', [prof('zi', 'Innen')]), prof('za', 'Außen')]);
+  await pickRow(page, 'Z');
+  await expect(item(page, 'Z')).toBeFocused();
+  await expect(item(page, 'Z')).toHaveAttribute('aria-expanded', 'false');
+  return page;
+};
+
+test('Baum: zweimal schnell Pfeil rechts auf einem zugeklappten Ordner klappt ihn auf und geht auf sein erstes Kind', async ({ page }) => {
+  // die Web-App: die erste Taste klappt auf und zeichnet sofort (onToggle 53–57), die zweite findet ihn offen und geht aufs erste Kind (profile-tree-view.js 96–99)
+  page = await treeOnZ();
+  await acted(page, keys(page, 'ArrowRight', 'ArrowRight'));
+  await expect(item(page, 'Z')).toHaveAttribute('aria-expanded', 'true');
+  await expect(item(page, 'Innen')).toBeFocused();
+});
+
+test('Baum: zweimal schnell Pfeil links auf einem offenen Ordner klappt ihn zu und geht auf die Zeile darüber', async ({ page }) => {
+  // die Web-App: die erste Taste klappt zu (onToggle 53–57), die zweite findet ihn zu und geht auf die Elternzeile (profile-tree-view.js 100–102)
+  page = await treeOnZ();
+  await acted(page, keys(page, 'ArrowRight'));
+  await expect(item(page, 'Z')).toHaveAttribute('aria-expanded', 'true');
+  await acted(page, keys(page, 'ArrowLeft', 'ArrowLeft'));
+  await expect(item(page, 'Z')).toHaveAttribute('aria-expanded', 'false');
+  await expect(item(page, 'Meine Profile')).toBeFocused();
+});
+
+test('Baum: Pfeil rechts und gleich Pfeil ab auf einem zugeklappten Ordner gehen auf sein erstes Kind', async ({ page }) => {
+  // die Web-App: Pfeil rechts klappt auf und zeichnet sofort (onToggle 53–57), Pfeil ab geht auf die nächste Zeile, das erste Kind (profile-tree-view.js 92)
+  page = await treeOnZ();
+  await acted(page, keys(page, 'ArrowRight', 'ArrowDown'));
+  await expect(item(page, 'Z')).toHaveAttribute('aria-expanded', 'true');
+  await expect(item(page, 'Innen')).toBeFocused();
+});

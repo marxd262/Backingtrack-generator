@@ -56,9 +56,10 @@ export function initProfiles() {
   const p = () => session.profiles;
 
   // eine Aktion des Fensters; mit ihrer Antwort (und dem neuen profiles()) taken() und das Feld zu, wenn sie übernommen ist, sonst refusedThen()
+  let out = null; // die Antwort auf die letzte, solange sie aussteht
   function act(action, { taken, refusedThen } = {}) {
     local = null;
-    return send(action).then(() => {
+    const answer = send(action).then(() => {
       if (refused(p().message)) refusedThen?.();
       else {
         mode = null;
@@ -66,12 +67,22 @@ export function initProfiles() {
       }
       render();
     });
+    out = answer;
+    answer.then(() => { if (out === answer) out = null; });
+    return answer;
+  }
+  // Eine Taste, die aus der Auswahl entscheidet oder mit ihrem Feld verschwindet, wirkt erst auf das Fenster, das die Antworten auf die Aktionen
+  // davor zeichnen, und gar nicht, wenn sie mit ihnen verschwand: die Seite der Web-App zeichnet sofort, ein zweites schnelles „Löschen“ findet
+  // dort die Rückfrage zum Ordner, ein zweites „Ja, löschen“ keine Rückfrage mehr
+  async function whenAnswered(key, fn) {
+    while (out) await out;
+    if (key.checkVisibility()) fn();
   }
 
   // --- Aufbau ---
   const treeBox = el('div', { className: 'profile-tree', id: 'profile-tree' });
   const view = createTreeView(treeBox, {
-    onSelect: (key) => { mode = null; local = null; send({ action: 'profileSelect', key }); },
+    onSelect: (key) => { mode = null; act({ action: 'profileSelect', key }); },
     onToggle: (key) => send({ action: 'profileToggle', key }),
   });
   // der gewählte Eintrag hat seine Zeile (der Fokus folgt ihr, wie commit der Web-App: der gedrückte Knopf ist mit dem Feld verschwunden)
@@ -113,7 +124,7 @@ export function initProfiles() {
   const renameForm = fieldForm(el('input', { type: 'text', id: 'profile-rename-name', maxLength: LIMITS.name, autocomplete: 'off' }), 'profile-rename-go',
     (value) => act({ action: 'renameNode', name: value }, { taken: focusSelection, refusedThen: () => renameForm.input.focus() }));
   const subfolderForm = fieldForm(el('input', { type: 'text', id: 'profile-folder-name', maxLength: LIMITS.name, autocomplete: 'off' }), 'profile-folder-add',
-    (value) => act({ action: 'addFolder', name: value, id: newId() }, { taken: focusSelection, refusedThen: () => subfolderForm.input.focus() }));
+    (value) => whenAnswered(subfolderForm.form, () => act({ action: 'addFolder', name: value, id: newId() }, { taken: focusSelection, refusedThen: () => subfolderForm.input.focus() })));
   const moveForm = fieldForm(el('select', { id: 'profile-move-to' }), 'profile-move-go', (value) => move(selected().node.id, value || null));
   const ask = el('p', { className: 'profile-ask', id: 'profile-delete-ask' });
   const yes = button('profile-delete-yes');
@@ -193,7 +204,7 @@ export function initProfiles() {
   }));
 
   // nur die angehakten Teile werden ersetzt, die übrigen Teile des Profils bleiben
-  overwriteGo.addEventListener('click', () => act({ action: 'overwriteProfile', parts: overwritePicker.getIds() }, { taken: focusSelection }));
+  overwriteGo.addEventListener('click', () => whenAnswered(overwriteGo, () => act({ action: 'overwriteProfile', parts: overwritePicker.getIds() }, { taken: focusSelection })));
 
   rename.addEventListener('click', toggle('rename', () => { renameForm.input.value = selected().node.name; }));
   subfolder.addEventListener('click', toggle('subfolder', () => { subfolderForm.input.value = ''; }));
@@ -205,6 +216,8 @@ export function initProfiles() {
   // Ziehen am Griff: die Sitzung nennt, wohin sich der gezogene Eintrag ablegen lässt (profiles().drag.targets); das Ablegen ist moveNode
   const dragger = attachDrag(treeBox, {
     canDrag: (key) => find(p().items, key) !== null, // nur eigene Einträge; feste Schlüssel sind nie Ids
+    // shortcut: ein Ablegen, bevor die Antwort auf profileDrag die Ziele brachte (wenige Millisekunden nach dem Beginn des Ziehens), bricht ab, statt
+    // zu verschieben (die Web-App kennt die Ziele sofort), upgrade: wenn ein Ablegen so schnell vorkommt (ein Stift, ein Test) oder die Antwort länger braucht
     canDrop: (key, target) => p().drag?.key === key && p().drag.targets.includes(target),
     onStart: (key) => send({ action: 'profileDrag', key }),
     onDrop: (key, target) => {
@@ -216,14 +229,14 @@ export function initProfiles() {
 
   // Löschen wählt danach den Elternordner
   const remove = () => act({ action: 'deleteNode' }, { taken: focusSelection });
-  del.addEventListener('click', () => {
+  del.addEventListener('click', () => whenAnswered(del, () => {
     const { node } = selected();
     if (node.type === 'profile' || !node.items.length) { remove(); return; }
     mode = 'confirm';
     render();
     no.focus(); // sicherer Standard
-  });
-  yes.addEventListener('click', remove);
+  }));
+  yes.addEventListener('click', () => whenAnswered(yes, remove));
   no.addEventListener('click', () => { mode = null; render(); del.focus(); });
 
   // --- Laden ---

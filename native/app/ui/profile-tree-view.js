@@ -82,32 +82,43 @@ export function createTreeView(container, { onSelect, onToggle, onKeyNav }) {
     else onSelect(r.key);
   });
 
-  container.addEventListener('keydown', (e) => {
-    const row = e.target.closest('[role="treeitem"]');
-    const i = row ? rows.findIndex((x) => x.key === row.dataset.key) : -1;
-    if (i < 0 || e.altKey || e.ctrlKey || e.metaKey) return;
+  // die Taste `key` auf der Zeile i; gibt, was onToggle gibt, wenn sie auf- oder zuklappt
+  function press(key, i) {
     const r = rows[i];
     let to = null;
-    switch (e.key) {
+    switch (key) {
       case 'ArrowDown': to = rows[i + 1]; break;
       case 'ArrowUp': to = rows[i - 1]; break;
       case 'Home': to = rows[0]; break;
       case 'End': to = rows.at(-1); break;
       case 'ArrowRight': // zu: aufklappen; offen: erstes Kind
-        if (r.expandable && !r.expanded) onToggle(r.key);
-        else if (r.expanded && rows[i + 1]?.depth > r.depth) to = rows[i + 1];
+        if (r.expandable && !r.expanded) return onToggle(r.key);
+        if (r.expanded && rows[i + 1]?.depth > r.depth) to = rows[i + 1];
         break;
       case 'ArrowLeft': // offen: zuklappen; sonst: Elternzeile
-        if (r.expandable && r.expanded) onToggle(r.key);
-        else to = rows.slice(0, i).findLast((x) => x.depth < r.depth);
+        if (r.expandable && r.expanded) return onToggle(r.key);
+        to = rows.slice(0, i).findLast((x) => x.depth < r.depth);
         break;
-      case 'Enter': case ' ': onSelect(r.key); break;
-      default: return;
+      default: onSelect(r.key); // Enter, Leertaste
     }
-    e.preventDefault();
     if (to) {
       focusKey(to.key);
       onKeyNav?.(to.key);
+    }
+  }
+
+  // Ein Auf- oder Zuklappen per Taste zeichnet erst die Antwort darauf (die Web-App sofort): Tasten bis dahin warten der Reihe nach auf sie und
+  // wirken auf die Zeile mit dem Tabstopp in den Zeilen, die sie bringt, so wirkt jede auf das, was die Taste davor hinterließ
+  let pending = null;
+  container.addEventListener('keydown', (e) => {
+    const row = e.target.closest('[role="treeitem"]');
+    const i = row ? rows.findIndex((x) => x.key === row.dataset.key) : -1;
+    if (i < 0 || e.altKey || e.ctrlKey || e.metaKey || !['ArrowDown', 'ArrowUp', 'Home', 'End', 'ArrowRight', 'ArrowLeft', 'Enter', ' '].includes(e.key)) return;
+    e.preventDefault();
+    const done = pending ? pending.then(() => press(e.key, rows.findIndex((x) => x.key === stop))) : press(e.key, i);
+    if (done) {
+      pending = done;
+      done.then(() => { if (pending === done) pending = null; });
     }
   });
 

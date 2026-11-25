@@ -439,3 +439,61 @@ test('Akkordkreis: jetziger Akkord pink, nächster türkis gefüllt; darunter di
   }, { timeout: 3 * BAR_TIMEOUT, intervals: [50] }).toBe(true);
   await playGo(page).click();
 });
+
+// ---------- Eingaben schneller als die Antwort (Task 33f): jede zählt, wie in der Web-App ----------
+// Die Seite der Web-App hält mit dem Klick an (src/ui/app.js stop() 159–167 setzt state.playing sofort auf false); die Seite der App erfährt es aus
+// der nächsten Meldung der Engine. Beide Klicks kommen hier in einer Aufgabe der Seite: keine Meldung kann dazwischen kommen. Gespielt wird, wenn die
+// Hülle alles getan hat (settled); ein neuer Start trägt eine neue Nummer (run).
+const twice = (page, id) => page.evaluate((i) => { const b = document.getElementById(i); b.click(); b.click(); }, id);
+
+test('Zwei schnelle Klicks auf Stopp auf der Spielseite: die Wiedergabe hält an und beginnt von vorn, im Vorlauf steht nichts vom alten Lauf', async ({ page }) => {
+  // die Web-App: der erste Klick hält an und leert Takt, Akkord und Countdown (stop() 159–168: state.current null), der zweite findet
+  // state.playing falsch und startet (play-go, app.js 325–329); Takt und Akkord kommen erst wieder mit dem ersten Takt (onBar 136)
+  await page.locator('#tune-btn').click();
+  await playGo(page).click();
+  await expect(page.locator('#play-position')).toHaveText(/^Takt \d+ von 96$/, { timeout: BAR_TIMEOUT });
+  await settled(page);
+  const { run } = await fromSession(page, 'engine');
+  // was die Seite bei jeder Meldung der Engine zeigt, von den Klicks bis zur ersten, die nach Stand oder Vorlauf wieder läuft (dort zeichnet
+  // sie den ersten Takt des neuen Starts); die Meldungen alter Läufe kommen davor
+  await page.evaluate(() => {
+    const got = (window.__lead = []);
+    let phase = 'old';
+    window.__JUCE__.backend.addEventListener('engine', (m) => {
+      if (phase === 'done') return;
+      if (!m.playing || m.standing) phase = 'between';
+      else if (phase === 'between') { phase = 'done'; return; }
+      got.push(['play-position', 'play-now', 'play-countdown'].map((id) => document.getElementById(id).textContent).join(' | '));
+    });
+    const b = document.getElementById('play-go');
+    b.click();
+    b.click();
+  });
+  await settled(page);
+  const lead = await page.evaluate(() => window.__lead);
+  const engine = await fromSession(page, 'engine');
+  expect(engine.playing).toBe(true);
+  expect(engine.run).toBeGreaterThan(run);
+  expect(lead.length, 'Meldungen zwischen den Klicks und dem ersten Takt').toBeGreaterThan(0);
+  expect(lead.filter((shown) => shown !== ' |  | '), 'Takt, Akkord, Countdown bei diesen Meldungen').toEqual([]);
+  await expect(playGo(page)).toHaveText('Stopp');
+  await playGo(page).click();
+});
+
+test('Zwei schnelle Klicks auf Stopp auf der Startseite: die Wiedergabe hält an, beginnt von vorn und öffnet die Spielseite', async ({ page }) => {
+  // die Web-App: der erste Klick hält an und bleibt (go, app.js 316–320), der zweite startet und öffnet die Spielseite (321–322)
+  await page.locator('#go').click();
+  await expect(playGo(page)).toHaveText('Stopp');
+  await page.locator('#play-back').click();
+  await expect(start(page)).toBeVisible();
+  await settled(page);
+  const { run } = await fromSession(page, 'engine');
+  await twice(page, 'go');
+  await settled(page);
+  const engine = await fromSession(page, 'engine');
+  expect(engine.playing).toBe(true);
+  expect(engine.run).toBeGreaterThan(run);
+  await expect(play(page)).toBeVisible();
+  await expect(playGo(page)).toHaveText('Stopp');
+  await playGo(page).click();
+});
