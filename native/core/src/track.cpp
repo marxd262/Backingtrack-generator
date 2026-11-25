@@ -787,6 +787,7 @@ bool isValidFormValue(const Json& form) { return isValidForm(form); }
 double formLengthOf(const Json& form) { return formLength(&form); }
 std::string jsStringOf(const Json* v) { return jsString(v); }
 bool isObjectPrototypeNameOf(const std::string& name) { return isObjectPrototypeName(name); }
+bool isArrayIndexOf(const std::string& key) { return isIndex(key); }
 Json spreadValue(const Json& source) { Json out = Json::object(); spread(out, &source); return out; }
 Json normalizedTrack(const Json& track) { return normalizeTrackValue(track); }
 Json trackErrors(const Json& track) { return validateTrackValue(track); }

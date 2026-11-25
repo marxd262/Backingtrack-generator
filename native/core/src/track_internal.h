@@ -91,6 +91,7 @@ bool isValidFormValue(const Json& form);             // form.js isValidForm
 double formLengthOf(const Json& form);               // form.js formLength
 std::string jsStringOf(const Json* v);               // String(v); a null pointer is undefined
 bool isObjectPrototypeNameOf(const std::string& name); // 'toString', 'constructor' ...: a name every object has, which `CHORDS[name]` finds although the register has no such entry
+bool isArrayIndexOf(const std::string& key);         // a key that is an array index (0 to 2^32 - 2, no leading zero): Object.keys gives such keys first, ascending
 Json spreadValue(const Json& source);                // {...source}
 Json normalizedTrack(const Json& track);             // track.js normalizeTrack
 Json trackErrors(const Json& track);                 // track.js validateTrack: the list of errors

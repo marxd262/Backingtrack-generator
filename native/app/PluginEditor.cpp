@@ -191,11 +191,13 @@ private:
             if (positionLog.isNotEmpty()) juce::File (positionLog).appendText (message["line"].toString() + "\n");
             return;
         }
-        if (type == "chordDisplays") { // the own songs' page (PROTOKOLL.md section 7): answered here at once, it reads no session and changes nothing
+        if (type == "chordDisplays" || type == "trackView") { // the own songs' page (PROTOKOLL.md section 7): answered here at once, they read no session and change nothing
+            const bool view = type == "trackView";
+            const std::string request = message["json"].toString().toStdString();
             auto* reply = new juce::DynamicObject();
             reply->setProperty ("seq", message["seq"]);
-            reply->setProperty ("json", utf8 (btg::chordDisplays (message["json"].toString().toStdString())));
-            emit ("chordDisplays", juce::var (reply));
+            reply->setProperty ("json", utf8 (view ? btg::trackView (request) : btg::chordDisplays (request)));
+            emit (view ? "trackView" : "chordDisplays", juce::var (reply));
             return;
         }
         if (type == "openFile") {

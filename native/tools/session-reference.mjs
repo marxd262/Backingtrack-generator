@@ -775,6 +775,156 @@ export function chordDisplays(text) {
   });
 }
 
+// ---------- the page of the user's own songs (native/app/ui/track.js at 2f33cc8, before Task 32f): its bars, chord changes, repeating parts and tempo (PROTOKOLL.md section 4c, trackView) ----------
+// The page's lines, copied without the DOM, with their line numbers: plain (66), findSections (67-115), gridOf (120-130, the corrections as a parameter), derive (131-161,
+// the legend's text and places 162-169) and what draw() read of them at the playhead (423-445).
+const plain = (label) => label.split(' ').map((c) => (/^([A-G][#b]?)(m(?!aj))?/.exec(c) ?? [c]).slice(1).join('') || c).join(' '); // 66
+function findSections(labels, keys) { // 67-115
+  const most = (list) => { const votes = {}; for (const x of list) votes[x] = (votes[x] ?? 0) + 1; return Object.keys(votes).sort((x, y) => votes[y] - votes[x])[0]; };
+  // from bar i on: how many bars follow the pattern `ref` (whole repeats; a few misses are forgiven)
+  const reach = (i, ref) => {
+    let miss = 0, good = i;
+    for (let j = i; j < keys.length; j++) {
+      if (keys[j] === ref[(j - i) % ref.length]) { good = j + 1; continue; }
+      if (++miss > 1 + (j - i) / 8) break;
+    }
+    return good - i - ((good - i) % ref.length);
+  };
+  const majority = (i, bars, period, from) => Array.from({ length: period }, (_, k) => most(Array.from({ length: bars / period }, (_, r) => from[i + k + r * period])));
+  const out = [];
+  for (let i = 0; i < keys.length;) {
+    const fits = [];
+    for (let period = 1; period <= 24 && i + 2 * period <= keys.length; period++) {
+      let bars = reach(i, keys.slice(i, i + period));
+      if (bars < 2 * period || (period === 1 && bars < 4)) continue; // one chord held is a pattern only when it lasts
+      bars = Math.max(bars, reach(i, majority(i, bars, period, keys))); // again against the majority: the first pass may hold the misread bar
+      fits.push({ bars, period });
+    }
+    const far = Math.max(0, ...fits.map((f) => f.bars));
+    // phrases are mostly 1, 2 or a multiple of 4 bars long: such a period goes first, then an even one
+    const odd = (f) => (f.period <= 2 || f.period % 4 === 0 ? 0 : f.period % 2 === 0 ? 1 : 2);
+    const best = fits.filter((f) => f.bars >= 0.8 * far).sort((x, y) => odd(x) - odd(y) || x.period - y.period)[0] ?? { bars: 1, period: 1 };
+    const key = majority(i, best.bars, best.period, keys);
+    // shown: at every place the most frequent full name among the bars that agree with the majority
+    const pattern = key.map((k, at) => most(Array.from({ length: best.bars / best.period }, (_, r) => i + at + r * best.period).filter((j) => keys[j] === k).map((j) => labels[j])) ?? k);
+    out.push({ first: i, bars: best.bars, pattern, key, repeats: best.bars / best.period });
+    i += best.bars;
+  }
+  // bars that repeat nothing, next to each other, are one free part
+  const merged = [];
+  for (const s of out) {
+    const last = merged.at(-1);
+    if (s.repeats < 2 && last && last.repeats < 2) { last.bars += s.bars; last.pattern.push(...s.pattern); last.key.push(...s.key); } else merged.push(s);
+  }
+  // The same pattern gets the same letter: also when it starts at another of its bars, and when a quarter of its
+  // bars differ (a part is rarely read the same twice).
+  const alike = (x, y) => x.length === y.length && x.some((_, turn) => x.filter((v, i) => v === y[(i + turn) % y.length]).length >= 0.75 * x.length);
+  const letters = [];
+  for (const s of merged) {
+    if (s.repeats < 2) { s.name = '–'; continue; }
+    let known = letters.find((l) => alike(s.key, l.key));
+    if (!known) letters.push(known = { key: s.key, name: String.fromCharCode(65 + letters.length) });
+    s.name = known.name;
+  }
+  return merged;
+}
+function gridOf(a, fix) { // 120-130
+  if (fix.tempo === 2) { // a beat between every two, every bar becomes two
+    const beats = a.beats.flatMap((t, i) => (i + 1 < a.beats.length ? [t, (t + a.beats[i + 1]) / 2] : [t]));
+    return { beats, bars: a.bars.flatMap((b) => [2 * b, 2 * b + a.beatsPerBar]), bpm: a.bpm * 2 };
+  }
+  if (fix.tempo === 0.5) { // every second beat, every second bar
+    const first = a.bars[0] % 2;
+    return { beats: a.beats.filter((_, i) => i % 2 === first), bars: a.bars.filter((_, k) => k % 2 === 0).map((b) => Math.round((b - first) / 2)), bpm: a.bpm / 2 };
+  }
+  return { beats: a.beats, bars: a.bars, bpm: a.bpm };
+}
+// The request (PROTOKOLL.md section 4c) has what the page held: the analysis as the app gave it (track.analysis), the song's length (track.seconds) and the corrections that
+// derive() read (fix.shift, fix.tempo, fix.edits). Not valid, with an empty answer (where the page threw or read something no analysis of the app and no correction of the
+// page holds): no object; beats that are no list of numbers or go back in time; bars that are no list of whole numbers from 0 on; beatsPerBar no whole number from 1 on; a
+// meter that is no text; a chord without a time or a name; a length that is no number; a shift that is no whole number; edits that are no object of names; a name that every
+// object of JavaScript has as a property (`toString`, `__proto__`: the page counted the chords by name in an object, where such a name reads the object's own function).
+const named = (v) => typeof v === 'string' && !(v in {});
+function validView(r) {
+  if (!isObject(r) || !isObject(r.analysis)) return false;
+  const { beats, bars, beatsPerBar, meter, chords } = r.analysis;
+  return Array.isArray(beats) && beats.every((t, i) => typeof t === 'number' && (i === 0 || t >= beats[i - 1]))
+    && Array.isArray(bars) && bars.every((b) => Number.isInteger(b) && b >= 0) && Number.isInteger(beatsPerBar) && beatsPerBar >= 1 && typeof meter === 'string'
+    && Array.isArray(chords) && chords.every((c) => isObject(c) && typeof c.t === 'number' && named(c.chord))
+    && typeof r.seconds === 'number' && Number.isInteger(r.shift) && isObject(r.edits) && Object.values(r.edits).every(named);
+}
+// derive (131-163) on the analysis `a`, the song's length (track.seconds) and the corrections: what the page kept in its module's variables (gridBeats, bars, changes, sections)
+// and the names of the legend's patterns (the DOM's buttons, 162-163), returned
+function derive(a, length, fix) {
+  const grid = gridOf(a, fix), beats = grid.beats, per = a.beatsPerBar;
+  const at = (t) => a.chords.findLast((c) => c.t <= t + 0.01) ?? a.chords[0];
+  // bar starts as found, moved by the user's correction; beats before the first one form a short first bar
+  const shift = ((fix.shift % per) + per) % per;
+  const starts = [...new Set([0, ...(shift && grid.bars[0] + shift >= per ? [grid.bars[0] + shift - per] : []), ...grid.bars.map((b) => b + shift)])].filter((b) => b < beats.length);
+  const bars = [];
+  for (let k = 0; k < starts.length; k++) {
+    const i = starts[k], stop = starts[k + 1] ?? beats.length;
+    const edit = fix.edits[i];
+    const byBeat = beats.slice(i, stop).map((t) => ({ t, chord: edit ?? at(t).chord, from: edit != null ? t : at(t).t }));
+    const count = {};
+    for (const b of byBeat) count[plain(b.chord)] = (count[plain(b.chord)] ?? 0) + 1;
+    const main = Object.keys(count).sort((x, y) => count[y] - count[x])[0]; // the chord most of the bar plays, for comparing bars
+    bars.push({ first: i, start: beats[i], end: stop < beats.length ? beats[stop] : length, byBeat, main, label: [...new Set(byBeat.map((b) => b.chord))].join(' ') });
+  }
+  // a change begins where its chord begins in the analysis: on its beat, or an eighth before it (a pushed chord)
+  const changes = [];
+  let before = -Infinity; // the beat before
+  for (const b of bars) for (const s of b.byBeat) {
+    if (changes.at(-1)?.chord !== s.chord) changes.push({ t: s.from > before ? s.from : s.t, chord: s.chord });
+    before = s.t;
+  }
+  const sections = findSections(bars.map((b) => b.label), bars.map((b) => b.main));
+  // the legend: the patterns that fill most of the track, at most eight, in the order they first appear
+  const share = {};
+  for (const s of sections) if (s.repeats >= 2) share[s.name] = (share[s.name] ?? 0) + s.bars;
+  const top = Object.keys(share).sort((x, y) => share[y] - share[x]).slice(0, 8);
+  const names = [...new Set(sections.filter((s) => top.includes(s.name)).map((s) => s.name))];
+  return { beats, bars, changes, sections, names };
+}
+/**
+ * What the page derived and read for its displays, for the request's text { analysis, seconds, shift, tempo, edits }: the beats as counted, per index of the beats up to the
+ * playhead the tempo's text, the bars, the chord changes with the beats up to each, the parts and the legend. '' for a request that is not valid, and where the page threw (an
+ * analysis without chords: derive's at(t).chord; PROTOKOLL.md section 4c).
+ */
+export function trackView(text) {
+  let request;
+  try { request = JSON.parse(text); } catch { return ''; }
+  if (!validView(request)) return '';
+  const { analysis: a, seconds: length, ...fix } = request;
+  try {
+    const { beats, bars, changes, sections, names } = derive(a, length, fix);
+    const n = beats.length;
+    return JSON.stringify({
+      beats,
+      // 433-434: the tempo at the playhead from the beats around it, by the number of beats up to the playhead (findLastIndex + 1); nothing with fewer than ten beats
+      tempo: n > 9 ? Array.from({ length: n + 1 }, (_, up) => {
+        const here = Math.max(4, Math.min(n - 5, up - 1));
+        return `${Math.round(60 * 8 / (beats[here + 4] - beats[here - 4]) / (a.meter.endsWith('/8') ? 3 : 1))} bpm · ${a.meter}`;
+      }) : [],
+      // per bar its part (436), its place in the part's pattern (445) and the turn (444)
+      bars: bars.map((b, bar) => {
+        const part = sections.findIndex((s) => bar >= s.first && bar < s.first + s.bars), s = sections[part];
+        return { first: b.first, start: b.start, end: b.end, beats: b.byBeat.map((x) => x.t), label: b.label, part, place: (bar - s.first) % s.pattern.length, turn: Math.floor((bar - s.first) / s.pattern.length) + 1 };
+      }),
+      // 428: the beats up to a change; the page counted those after the playhead up to the change
+      changes: changes.map((c) => ({ t: c.t, chord: c.chord, beats: beats.filter((b) => b <= c.t + 0.01).length })),
+      // 257-262 (the lane), 442 (the chords sent to chordDisplays), 444-445: a part that does not repeat shows no pattern
+      sections: sections.map((s) => ({ start: bars[s.first].start, end: bars[s.first + s.bars - 1].end, name: s.name, pattern: s.repeats >= 2 ? s.pattern : null, repeats: s.repeats,
+        used: s.repeats >= 2 ? [...new Set(s.pattern.flatMap((p) => p.split(' ')))] : [] })),
+      // 162-169: the text's pieces, the count and the places of each pattern of the legend
+      legend: names.map((name) => {
+        const places = sections.filter((s) => s.name === name);
+        return { name, pattern: places[0].pattern, count: places.reduce((m, s) => m + s.repeats, 0), places: places.map((s) => bars[s.first].start) };
+      }),
+    });
+  } catch { return ''; }
+}
+
 // ---------- what the building blocks show that follows from the state (PROTOKOLL.md section 4: derived, tables) ----------
 // form-ui.js 12-15, 37-47 (levelLabel, densityLabel) with their texts as messages, for the page that translates: a text needs none, { key, params } is t(key, params) after every
 // param that is a message is translated. A transcription; every label is checked against the real function in both languages below.

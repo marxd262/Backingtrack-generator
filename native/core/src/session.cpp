@@ -19,7 +19,9 @@
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <map>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <vector>
@@ -1486,6 +1488,329 @@ std::string chordDisplays(const std::string& requestJson) {
                                         { "fretboard", detail::fretboardNotes(Json::object({ { "key", key }, { "scale", field(r, "scale") }, { "current", current }, { "next", next } })) },
                                         { "name", name(current) }, { "notes", tones(current) }, { "nextName", name(next) }, { "nextNotes", tones(next) } });
         return dump(out); // every number in it is whole: the text is JSON.stringify's
+    } catch (...) { return ""; }
+}
+
+// ---------- the page of the user's own songs (PROTOKOLL.md section 4c): native/app/ui/track.js up to Task 32f, as session-reference.mjs trackView copies it ----------
+namespace {
+
+using Key = std::optional<std::string>; // a bar's main chord; none (the page's undefined) for a bar without beats
+
+std::vector<std::string> pieces(const std::string& text) { // text.split(' ')
+    std::vector<std::string> out;
+    for (size_t from = 0;;) {
+        const size_t cut = text.find(' ', from);
+        out.push_back(text.substr(from, cut - from));
+        if (cut == std::string::npos) return out;
+        from = cut + 1;
+    }
+}
+// track.js 66 (plain): each name of a label by its root and minor third only ("Gm7 C" is "Gm C", "Cmaj7" is "C"); a name without a root stays as it is
+std::string plain(const std::string& label) {
+    const std::vector<std::string> names = pieces(label);
+    std::string out;
+    for (size_t k = 0; k < names.size(); ++k) {
+        const std::string& c = names[k];
+        if (k) out += ' ';
+        if (c.empty() || c[0] < 'A' || c[0] > 'G') { out += c; continue; }
+        const size_t root = c.size() > 1 && (c[1] == '#' || c[1] == 'b') ? 2 : 1; // /^([A-G][#b]?)(m(?!aj))?/
+        out += c.substr(0, root);
+        if (root < c.size() && c[root] == 'm' && c.compare(root + 1, 2, "aj") != 0) out += 'm';
+    }
+    return out;
+}
+// track.js 68 (most), and 144-146 for a bar's main chord: the value most of the list holds, on a tie the first in the order of Object.keys (texts that are array indices
+// first, ascending, then the others as they came). The page counted in an object, so a missing value counts as the text "undefined"; none for an empty list
+Key most(const std::vector<Key>& list) {
+    std::vector<std::pair<std::string, size_t>> votes; // in the order the values came
+    for (const Key& x : list) {
+        const std::string name = x ? *x : "undefined";
+        const auto it = std::find_if(votes.begin(), votes.end(), [&](const auto& v) { return v.first == name; });
+        if (it == votes.end()) votes.emplace_back(name, 1); else ++it->second;
+    }
+    const std::pair<std::string, size_t>* best = nullptr;
+    for (const auto& v : votes)
+        if (best == nullptr || v.second > best->second
+            || (v.second == best->second && detail::isArrayIndexOf(v.first) && (!detail::isArrayIndexOf(best->first) || std::stoull(v.first) < std::stoull(best->first)))) best = &v;
+    return best == nullptr ? Key() : Key(best->first);
+}
+// String.fromCharCode(code) as UTF-8: one code unit (the code modulo 2^16); a surrogate as its three bytes, which stringify writes as JSON.stringify writes a lone one
+std::string fromCharCode(size_t code) {
+    code &= 0xFFFF;
+    if (code < 0x80) return std::string(1, static_cast<char>(code));
+    if (code < 0x800) return { static_cast<char>(0xC0 | code >> 6), static_cast<char>(0x80 | (code & 0x3F)) };
+    return { static_cast<char>(0xE0 | (code >> 12 & 0x0F)), static_cast<char>(0x80 | (code >> 6 & 0x3F)), static_cast<char>(0x80 | (code & 0x3F)) };
+}
+
+struct Part { size_t first = 0, bars = 0; std::vector<std::string> pattern; std::vector<Key> key; size_t repeats = 0; std::string name; };
+
+// track.js 67-115 (findSections): parts in which the bars repeat with a period of 1 to 24 bars, compared by their main chords (`keys`); the pattern of a part is the
+// majority over its repeats; of the periods that fit, the shortest that reaches nearly as far as the best one wins (the comments are the page's)
+std::vector<Part> findSections(const std::vector<std::string>& labels, const std::vector<Key>& keys) {
+    const size_t count = keys.size();
+    // from bar i on: how many bars follow the pattern `ref` (whole repeats; a few misses are forgiven)
+    const auto reach = [&](size_t i, const std::vector<Key>& ref) {
+        size_t miss = 0, good = i;
+        for (size_t j = i; j < count; ++j) {
+            if (keys[j] == ref[(j - i) % ref.size()]) { good = j + 1; continue; }
+            if (static_cast<double>(++miss) > 1 + static_cast<double>(j - i) / 8) break;
+        }
+        return good - i - (good - i) % ref.size();
+    };
+    const auto majority = [&](size_t i, size_t bars, size_t period) {
+        std::vector<Key> out;
+        for (size_t k = 0; k < period; ++k) {
+            std::vector<Key> list;
+            for (size_t r = 0; r < bars / period; ++r) list.push_back(keys[i + k + r * period]);
+            out.push_back(most(list));
+        }
+        return out;
+    };
+    std::vector<Part> out;
+    for (size_t i = 0; i < count;) {
+        struct Fit { size_t bars, period; };
+        std::vector<Fit> fits;
+        for (size_t period = 1; period <= 24 && i + 2 * period <= count; ++period) {
+            size_t bars = reach(i, std::vector<Key>(keys.begin() + static_cast<std::ptrdiff_t>(i), keys.begin() + static_cast<std::ptrdiff_t>(i + period)));
+            if (bars < 2 * period || (period == 1 && bars < 4)) continue; // one chord held is a pattern only when it lasts
+            bars = std::max(bars, reach(i, majority(i, bars, period))); // again against the majority: the first pass may hold the misread bar
+            fits.push_back({ bars, period });
+        }
+        size_t far = 0;
+        for (const Fit& f : fits) far = std::max(far, f.bars);
+        // phrases are mostly 1, 2 or a multiple of 4 bars long: such a period goes first, then an even one
+        const auto odd = [](const Fit& f) { return f.period <= 2 || f.period % 4 == 0 ? 0 : f.period % 2 == 0 ? 1 : 2; };
+        std::optional<Fit> chosen;
+        for (const Fit& f : fits)
+            if (static_cast<double>(f.bars) >= 0.8 * static_cast<double>(far) && (!chosen || odd(f) < odd(*chosen) || (odd(f) == odd(*chosen) && f.period < chosen->period))) chosen = f;
+        const Fit best = chosen.value_or(Fit { 1, 1 });
+        Part part { i, best.bars, {}, majority(i, best.bars, best.period), best.bars / best.period, {} };
+        // shown: at every place the most frequent full name among the bars that agree with the majority
+        for (size_t at = 0; at < part.key.size(); ++at) {
+            std::vector<Key> agree;
+            for (size_t r = 0; r < part.repeats; ++r) if (keys[i + at + r * best.period] == part.key[at]) agree.push_back(labels[i + at + r * best.period]);
+            const Key shown = most(agree);
+            part.pattern.push_back(shown ? *shown : *part.key[at]);
+        }
+        out.push_back(std::move(part));
+        i += best.bars;
+    }
+    // bars that repeat nothing, next to each other, are one free part
+    std::vector<Part> merged;
+    for (Part& s : out) {
+        if (s.repeats < 2 && !merged.empty() && merged.back().repeats < 2) {
+            Part& last = merged.back();
+            last.bars += s.bars;
+            last.pattern.insert(last.pattern.end(), s.pattern.begin(), s.pattern.end());
+            last.key.insert(last.key.end(), s.key.begin(), s.key.end());
+        } else merged.push_back(std::move(s));
+    }
+    // The same pattern gets the same letter: also when it starts at another of its bars, and when a quarter of its bars differ (a part is rarely read the same twice).
+    const auto alike = [](const std::vector<Key>& x, const std::vector<Key>& y) {
+        if (x.size() != y.size()) return false;
+        for (size_t turn = 0; turn < x.size(); ++turn) {
+            size_t same = 0;
+            for (size_t i = 0; i < x.size(); ++i) if (x[i] == y[(i + turn) % y.size()]) ++same;
+            if (static_cast<double>(same) >= 0.75 * static_cast<double>(x.size())) return true;
+        }
+        return false;
+    };
+    std::vector<size_t> letters; // per letter the part whose key it has
+    for (size_t p = 0; p < merged.size(); ++p) {
+        Part& s = merged[p];
+        if (s.repeats < 2) { s.name = "\xE2\x80\x93"; continue; } // '–'
+        size_t known = 0;
+        while (known < letters.size() && !alike(s.key, merged[letters[known]].key)) ++known;
+        if (known == letters.size()) letters.push_back(p);
+        s.name = fromCharCode(65 + known);
+    }
+    return merged;
+}
+
+// track.js 120-130 (gridOf): the beats and bar starts as found, or at half or double the tempo (whether a track is 76 or 152 bpm is a matter of how one counts); the bpm it
+// gives is read by no one and left out
+struct Counted { std::vector<double> beats, bars; };
+Counted gridOf(const Json& a, const Json& fix) {
+    std::vector<double> beats, bars;
+    for (const Json& t : a.at("beats")) beats.push_back(t.get<double>());
+    for (const Json& b : a.at("bars")) bars.push_back(b.get<double>());
+    const Json& tempo = field(fix, "tempo");
+    if (tempo.is_number() && tempo.get<double>() == 2) { // a beat between every two, every bar becomes two
+        Counted out;
+        for (size_t i = 0; i < beats.size(); ++i) {
+            out.beats.push_back(beats[i]);
+            if (i + 1 < beats.size()) out.beats.push_back((beats[i] + beats[i + 1]) / 2);
+        }
+        const double per = a.at("beatsPerBar").get<double>();
+        for (const double b : bars) { out.bars.push_back(2 * b); out.bars.push_back(2 * b + per); }
+        return out;
+    }
+    if (tempo.is_number() && tempo.get<double>() == 0.5) { // every second beat, every second bar
+        Counted out;
+        if (bars.empty()) return out; // a.bars[0] % 2 is NaN: no beat is taken
+        const double first = std::fmod(bars[0], 2);
+        for (size_t i = 0; i < beats.size(); ++i) if (static_cast<double>(i % 2) == first) out.beats.push_back(beats[i]);
+        for (size_t k = 0; k < bars.size(); k += 2) out.bars.push_back(detail::jsRound((bars[k] - first) / 2));
+        return out;
+    }
+    return { std::move(beats), std::move(bars) };
+}
+
+// PROTOKOLL.md section 4c, as session-reference.mjs validView: the request as the page builds it from the analysis the app gives and the corrections it holds. A name that
+// every object of JavaScript has as a property (`toString`, `__proto__`) is none: the page counted the chords by name in an object, where such a name reads the object's own
+bool isWhole(const Json& v) { return v.is_number() && std::isfinite(v.get<double>()) && std::floor(v.get<double>()) == v.get<double>(); }
+bool isChordName(const Json& v) { return v.is_string() && !detail::isObjectPrototypeNameOf(v.get_ref<const std::string&>()); }
+bool validView(const Json& r) {
+    if (!r.is_object() || !field(r, "analysis").is_object()) return false;
+    const Json& a = r.at("analysis");
+    const Json& beats = field(a, "beats");
+    const Json& bars = field(a, "bars");
+    const Json& chords = field(a, "chords");
+    const Json& edits = field(r, "edits");
+    if (!beats.is_array() || !bars.is_array() || !chords.is_array() || !edits.is_object()) return false;
+    for (size_t i = 0; i < beats.size(); ++i) if (!beats[i].is_number() || (i > 0 && !(beats[i].get<double>() >= beats[i - 1].get<double>()))) return false;
+    for (const Json& b : bars) if (!isWhole(b) || b.get<double>() < 0) return false;
+    for (const Json& c : chords) if (!c.is_object() || !field(c, "t").is_number() || !isChordName(field(c, "chord"))) return false;
+    for (const Json& name : edits) if (!isChordName(name)) return false;
+    const Json& per = field(a, "beatsPerBar");
+    return isWhole(per) && per.get<double>() >= 1 && field(a, "meter").is_string() && field(r, "seconds").is_number() && isWhole(field(r, "shift"));
+}
+
+struct Beat { double t; std::string chord; double from; }; // one of a bar's byBeat
+struct Bar { size_t first; double start, end; std::vector<Beat> byBeat; Key main; std::string label; };
+struct ChangeAt { double t; std::string chord; };
+struct Derived { std::vector<double> beats; std::vector<Bar> bars; std::vector<ChangeAt> changes; std::vector<Part> sections; std::vector<std::string> names; };
+
+// track.js 131-163 (derive) on the analysis `a`, the song's length (track.seconds) and the corrections (`fix`: shift, tempo, edits): what the page kept in its module's
+// variables (gridBeats, bars, changes, sections) and the names of the legend's patterns (its buttons, 162-163)
+Derived derive(const Json& a, double length, const Json& fix) {
+    Derived d;
+    const Counted grid = gridOf(a, fix);
+    const std::vector<double>& beats = grid.beats;
+    const double per = a.at("beatsPerBar").get<double>();
+    const Json& chords = a.at("chords");
+    const Json& edits = fix.at("edits");
+    const size_t n = beats.size();
+    // the chord at a time; without chords the page read .chord of undefined and threw
+    const auto at = [&](double t) -> const Json& {
+        for (size_t c = chords.size(); c-- > 0;) if (chords[c].at("t").get<double>() <= t + 0.01) return chords[c];
+        if (chords.empty()) throw std::invalid_argument("trackView: an analysis without chords");
+        return chords[0];
+    };
+    // bar starts as found, moved by the user's correction; beats before the first one form a short first bar
+    const double shift = std::fmod(std::fmod(fix.at("shift").get<double>(), per) + per, per);
+    std::vector<double> starts;
+    std::set<double> seen; // new Set: 0 and -0 are one
+    const auto start = [&](double b) { if (seen.insert(b).second) starts.push_back(b); };
+    start(0);
+    if (shift != 0 && !grid.bars.empty() && grid.bars[0] + shift >= per) start(grid.bars[0] + shift - per); // without bars, grid.bars[0] + shift is NaN
+    for (const double b : grid.bars) start(b + shift);
+    starts.erase(std::remove_if(starts.begin(), starts.end(), [&](double b) { return !(b < static_cast<double>(n)); }), starts.end());
+    for (size_t k = 0; k < starts.size(); ++k) {
+        const size_t i = static_cast<size_t>(starts[k]), stop = k + 1 < starts.size() ? static_cast<size_t>(starts[k + 1]) : n;
+        const Json* edit = detail::member(edits, std::to_string(i));
+        Bar bar { i, beats[i], stop < n ? beats[stop] : length, {}, {}, {} };
+        for (size_t j = i; j < stop; ++j) {
+            if (edit != nullptr) { bar.byBeat.push_back({ beats[j], edit->get<std::string>(), beats[j] }); continue; }
+            const Json& c = at(beats[j]);
+            bar.byBeat.push_back({ beats[j], c.at("chord").get<std::string>(), c.at("t").get<double>() });
+        }
+        std::vector<Key> plains;
+        for (const Beat& b : bar.byBeat) plains.push_back(plain(b.chord));
+        bar.main = most(plains); // the chord most of the bar plays, for comparing bars (the count of 144-146 is most's)
+        std::vector<std::string> distinct;
+        for (const Beat& b : bar.byBeat) if (std::find(distinct.begin(), distinct.end(), b.chord) == distinct.end()) distinct.push_back(b.chord);
+        for (size_t c = 0; c < distinct.size(); ++c) bar.label += (c ? " " : "") + distinct[c];
+        d.bars.push_back(std::move(bar));
+    }
+    // a change begins where its chord begins in the analysis: on its beat, or an eighth before it (a pushed chord)
+    double before = -std::numeric_limits<double>::infinity(); // the beat before
+    for (const Bar& b : d.bars) for (const Beat& s : b.byBeat) {
+        if (d.changes.empty() || d.changes.back().chord != s.chord) d.changes.push_back({ s.from > before ? s.from : s.t, s.chord });
+        before = s.t;
+    }
+    std::vector<std::string> labels;
+    std::vector<Key> mains;
+    for (const Bar& b : d.bars) { labels.push_back(b.label); mains.push_back(b.main); }
+    d.sections = findSections(labels, mains);
+    // the legend: the patterns that fill most of the track, at most eight, in the order they first appear
+    std::vector<std::pair<std::string, size_t>> share; // in the order the names came (no name is an array index)
+    for (const Part& s : d.sections) {
+        if (s.repeats < 2) continue;
+        const auto it = std::find_if(share.begin(), share.end(), [&](const auto& v) { return v.first == s.name; });
+        if (it == share.end()) share.emplace_back(s.name, s.bars); else it->second += s.bars;
+    }
+    std::stable_sort(share.begin(), share.end(), [](const auto& x, const auto& y) { return x.second > y.second; });
+    std::vector<std::string> top;
+    for (size_t k = 0; k < share.size() && k < 8; ++k) top.push_back(share[k].first);
+    for (const Part& s : d.sections)
+        if (std::find(top.begin(), top.end(), s.name) != top.end() && std::find(d.names.begin(), d.names.end(), s.name) == d.names.end()) d.names.push_back(s.name);
+    d.beats = beats;
+    return d;
+}
+
+} // namespace
+
+// PROTOKOLL.md section 4c: what native/app/ui/track.js derived (derive above) and read of it at the playhead (draw, 423-445) and in the lane, line by line on the request;
+// session-reference.mjs trackView holds the page's lines
+std::string trackView(const std::string& requestJson) {
+    try {
+        const Json r = detail::parsedText(requestJson);
+        if (!validView(r)) return "";
+        const Json& a = r.at("analysis");
+        const Derived d = derive(a, r.at("seconds").get<double>(), r); // the request's shift, tempo and edits are the page's fix
+        const std::vector<double>& beats = d.beats;
+        const std::vector<Bar>& bars = d.bars;
+        const std::vector<Part>& sections = d.sections;
+        const std::string& meter = a.at("meter").get_ref<const std::string&>();
+        const size_t n = beats.size();
+        // the answer: what draw() read (423-445) and the lane drew (237-262)
+        Json grid_ = Json::array();
+        for (const double t : beats) grid_.push_back(t);
+        Json tempos = Json::array(); // 433-434: the tempo at the playhead from the beats around it, by the number of beats up to the playhead; none with fewer than ten
+        if (n > 9) {
+            const bool eighths = meter.size() >= 2 && meter.compare(meter.size() - 2, 2, "/8") == 0;
+            for (size_t up = 0; up <= n; ++up) {
+                const long long here = std::max(4LL, std::min(static_cast<long long>(n) - 5, static_cast<long long>(up) - 1));
+                const Json bpm(detail::jsRound(60.0 * 8 / (beats[static_cast<size_t>(here + 4)] - beats[static_cast<size_t>(here - 4)]) / (eighths ? 3 : 1)));
+                tempos.push_back(detail::jsStringOf(&bpm) + " bpm \xC2\xB7 " + meter);
+            }
+        }
+        Json barsOut = Json::array(); // per bar its part (436), its place in the part's pattern (445) and the turn (444)
+        for (size_t k = 0; k < bars.size(); ++k) {
+            size_t part = 0;
+            while (part < sections.size() && !(k >= sections[part].first && k < sections[part].first + sections[part].bars)) ++part;
+            const Part& s = sections.at(part); // findSections covers every bar
+            Json times = Json::array();
+            for (const Beat& b : bars[k].byBeat) times.push_back(b.t);
+            barsOut.push_back(Json::object({ { "first", bars[k].first }, { "start", bars[k].start }, { "end", bars[k].end }, { "beats", std::move(times) }, { "label", bars[k].label },
+                                             { "part", part }, { "place", (k - s.first) % s.pattern.size() }, { "turn", (k - s.first) / s.pattern.size() + 1 } }));
+        }
+        Json changesOut = Json::array(); // 428: the beats up to a change
+        for (const ChangeAt& c : d.changes)
+            changesOut.push_back(Json::object({ { "t", c.t }, { "chord", c.chord }, { "beats", std::count_if(beats.begin(), beats.end(), [&](double b) { return b <= c.t + 0.01; }) } }));
+        Json partsOut = Json::array(); // the lane (257-262), the chords sent to chordDisplays (442), 444-445: a part that does not repeat shows no pattern
+        for (const Part& s : sections) {
+            Json used = Json::array();
+            if (s.repeats >= 2) for (const std::string& p : s.pattern) for (const std::string& c : pieces(p)) if (std::find(used.begin(), used.end(), c) == used.end()) used.push_back(c);
+            partsOut.push_back(Json::object({ { "start", bars[s.first].start }, { "end", bars[s.first + s.bars - 1].end }, { "name", s.name },
+                                              { "pattern", s.repeats >= 2 ? Json(s.pattern) : Json() }, { "repeats", s.repeats }, { "used", std::move(used) } }));
+        }
+        Json legend = Json::array(); // 162-169: per pattern the text's pieces, the count and the places
+        for (const std::string& name : d.names) {
+            const Part* first = nullptr;
+            size_t count = 0;
+            Json places = Json::array();
+            for (const Part& s : sections) {
+                if (s.name != name) continue;
+                if (first == nullptr) first = &s;
+                count += s.repeats;
+                places.push_back(bars[s.first].start);
+            }
+            legend.push_back(Json::object({ { "name", name }, { "pattern", first->pattern }, { "count", count }, { "places", std::move(places) } }));
+        }
+        return detail::stringify(Json::object({ { "beats", std::move(grid_) }, { "tempo", std::move(tempos) }, { "bars", std::move(barsOut) }, { "changes", std::move(changesOut) },
+                                                { "sections", std::move(partsOut) }, { "legend", std::move(legend) } }));
     } catch (...) { return ""; }
 }
 

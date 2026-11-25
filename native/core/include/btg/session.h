@@ -70,4 +70,10 @@ private:
 // counts as no chord; empty for a request without a valid key and if something unexpected throws. Never throws.
 std::string chordDisplays(const std::string& requestJson);
 
+// What the page for the user's own songs shows of a song's analysis and the user's corrections (PROTOKOLL.md section 4c): `requestJson` is { analysis, seconds, shift, tempo,
+// edits }, the analysis as the app gives it to the page (btg::toJson); the answer the beats as counted, the tempo's text by the number of beats up to the playhead, the bars,
+// the chord changes, the repeating parts and the legend, as that page computed them up to Task 32f (native/tools/session-reference.mjs, trackView). Bound to no session: any
+// thread may call it. Empty for a request that is not valid and where that page threw (an analysis without chords); never throws.
+std::string trackView(const std::string& requestJson);
+
 } // namespace btg

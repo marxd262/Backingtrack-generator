@@ -1725,6 +1725,142 @@ add('presetDrive', presetDrive, [...VOICES.chords.organ.variants, 'nope', '', nu
     for (const root of ['Db', 'D#', 'Gb', 'G#', 'A#', 'Cb', 'E#', 'Fb', 'B#']) display({ key: { root, mode: 'minor' }, scale: 'minorPentatonic', chords: [`${root}m`, 'E'], current: `${root}m`, next: 'E7' });
     console.log(`chordDisplays: ${cases.length - before} cases`);
   }
+  // Task 32f: what the own songs' page shows of a song's analysis and the corrections (trackView), as JSON.stringify's text, against the reference: the page's lines (track.js
+  // at 2f33cc8, copied into session-reference.mjs). Synthetic analyses as btg::toJson writes them, seeded. Each case below that names a branch reaches it: `reaches` holds
+  // on the reference's answer, and the export stops when it does not. Then seeded songs of every kind, one of ten minutes at 180 bpm, and requests that are not valid.
+  {
+    const V = createRng(2032).fork('track-view');
+    const before = cases.length;
+    const ms = (x) => Math.round(x * 1000) / 1000; // analysis.cpp toJson: times to the millisecond
+    const ROOT_NAMES = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
+    const KEYS = [...ROOT_NAMES, ...ROOT_NAMES.map((n) => `${n}m`)]; // 24 chords that plain() tells apart
+    // `progression`: per bar its chord, or the list of its beats' chords; `pickup`: beats before the first "one" (with the first bar's chord); `pushed`: the bars whose first
+    // chord comes an eighth before their first beat. The chords as the analysis writes them: one per change, with its end
+    const analysisOf = ({ progression, per = 4, bpm = 120, meter = `${per}/4`, pickup = 0, pushed = [], jitter = 0.008, chords }) => {
+      const beat = 60 / bpm, first = [progression[0]].flat()[0];
+      const names = [...Array(pickup).fill(first), ...progression.flatMap((c) => (Array.isArray(c) ? c : Array(per).fill(c)))];
+      const beats = names.map((_, k) => ms(0.3 + k * beat + (V.next() - 0.5) * jitter));
+      const bars = progression.map((_, m) => pickup + m * per);
+      const found = [];
+      names.forEach((name, k) => {
+        if (k > 0 && name === names[k - 1]) return;
+        const early = pushed.some((m) => pickup + m * per === k);
+        found.push({ t: ms(beats[k] - (early ? beat / 2 : 0)), chord: name });
+      });
+      found.forEach((c, k) => { c.end = found[k + 1]?.t ?? ms(beats.at(-1) + beat); });
+      return { bpm: Math.round(bpm * 10) / 10, beatsPerBar: per, meter, beat1: bars[0] ?? 0, bars, tuningCents: 0, key: { root: 'A', mode: 'minor' }, scale: 'minorPentatonic', beats, chords: chords ?? found };
+    };
+    const request = (a, fix = {}) => JSON.stringify({ analysis: a, seconds: ms((a.beats.at(-1) ?? 0) + 0.5), shift: 0, edits: {}, ...fix });
+    const view = (name, text, reaches) => {
+      const out = ref.trackView(text);
+      if (reaches && !reaches(out === '' ? null : JSON.parse(out))) throw new Error(`trackView: the case "${name}" does not reach its branch: ${out.slice(0, 300)}`);
+      cases.push({ fn: 'trackView', in: text, out });
+    };
+    const times = (list, n) => Array.from({ length: n }, () => list).flat();
+    const P4 = ['Am', 'F', 'C', 'G'];
+    const song = analysisOf({ progression: times(P4, 4) });
+    // the count: every tempo (none, 1 and texts count as none) with every pickup (0 and 2: an even first bar, 1 and 3: an odd one) and shift (both directions, with and
+    // without the short first bar; the extra start before the first one when bars[0] + shift reaches a bar)
+    for (const pickup of [0, 1, 2, 3]) {
+      const a = analysisOf({ progression: times(P4, 4), pickup });
+      for (const tempo of [undefined, 0.5, 2, 1, '2', null]) for (const shift of [0, 1, -1, 3, -3, 5, -6, 4]) view(`count ${pickup} ${tempo} ${shift}`, request(a, { tempo, shift }));
+    }
+    view('half, an odd first bar', request(analysisOf({ progression: times(P4, 4), pickup: 1 }), { tempo: 0.5 }), (v) => v.beats.length === 32 && v.bars.length === 8 && v.bars[0].beats.length === 4);
+    view('half, an even first bar', request(analysisOf({ progression: times(P4, 4), pickup: 2 }), { tempo: 0.5 }), (v) => v.bars[0].beats.length === 1 && v.beats.length === 33);
+    view('double', request(song, { tempo: 2 }), (v) => v.beats.length === 127 && v.bars.length === 32);
+    view('shift on, a short first bar', request(song, { shift: 1 }), (v) => v.bars[0].beats.length === 1 && v.bars[1].first === 1);
+    view('shift back', request(song, { shift: -1 }), (v) => v.bars[0].beats.length === 3 && v.bars[1].first === 3);
+    view('shift with a pickup: a start before the first one', request(analysisOf({ progression: times(P4, 4), pickup: 2 }), { shift: 3 }), (v) => v.bars[1].first === 1 && v.bars[2].first === 5);
+    // the parts: periods 1 (held four bars; held three is none), 2, 3, 4, 6 before 3, 8, 12, 24; a long pattern that is a short one played twice; a misread bar
+    const first = (v) => v.sections[0];
+    view('held four bars', request(analysisOf({ progression: ['C', 'C', 'C', 'C', 'Dm', 'E', 'F#m', 'Ab'] })), (v) => first(v).pattern?.length === 1 && first(v).repeats === 4);
+    view('held three bars', request(analysisOf({ progression: ['C', 'C', 'C', 'Dm', 'E', 'F#m', 'Ab', 'Bb'] })), (v) => first(v).pattern === null);
+    view('period 2', request(analysisOf({ progression: times(['Am', 'E'], 4) })), (v) => first(v).pattern?.length === 2 && first(v).repeats === 4);
+    view('period 3', request(analysisOf({ progression: times(['C', 'F', 'G'], 3), per: 3 })), (v) => first(v).pattern?.length === 3);
+    view('period 4', request(song), (v) => first(v).pattern?.length === 4 && first(v).repeats === 4 && v.sections.length === 1);
+    view('period 6 before 3', request(analysisOf({ progression: times(['C', 'F', 'G', 'C', 'F', 'Am'], 3) })), (v) => first(v).pattern?.length === 6);
+    view('period 12 before 6 and 3', request(analysisOf({ progression: times(['C', 'F', 'G', 'C', 'F', 'Am'], 4) })), (v) => first(v).pattern?.length === 12);
+    view('period 8', request(analysisOf({ progression: times(KEYS.slice(0, 8), 2) })), (v) => first(v).pattern?.length === 8);
+    view('period 12', request(analysisOf({ progression: times(KEYS.slice(0, 12), 2) })), (v) => first(v).pattern?.length === 12);
+    view('period 24', request(analysisOf({ progression: times(KEYS, 2), bpm: 180 })), (v) => first(v).pattern?.length === 24);
+    view('a short pattern played twice', request(analysisOf({ progression: times(P4, 8) })), (v) => first(v).pattern?.length === 4 && first(v).repeats === 8);
+    const misread = times(P4, 4);
+    misread[9] = 'Dm';
+    view('a misread bar', request(analysisOf({ progression: misread })), (v) => v.sections.length === 1 && first(v).pattern.join() === 'Am,F,C,G');
+    view('free bars next to each other', request(analysisOf({ progression: ['C', 'Dm', 'E', 'F#m', 'Ab', 'Bb', ...times(['Am', 'E'], 3)] })), (v) => first(v).pattern === null && first(v).end === v.bars[4].end); // the sixth free bar opens a pattern of two (a miss forgiven)
+    view('the same pattern from another of its bars', request(analysisOf({ progression: [...times(P4, 2), 'D', 'D', 'D', 'D', ...times(['C', 'G', 'Am', 'F'], 2)] })),
+      (v) => v.sections.length === 3 && v.sections[2].name === first(v).name && v.sections[1].name !== first(v).name);
+    const eight = KEYS.slice(0, 8), twoOff = [...eight.slice(0, 6), 'Bm', 'Bbm'], threeOff = [...eight.slice(0, 5), 'Bm', 'Bbm', 'Am'];
+    view('a quarter of the bars different', request(analysisOf({ progression: [...times(eight, 2), 'Gm', 'Gm', 'Gm', 'Gm', ...times(twoOff, 2), 'Dm', 'Dm', 'Dm', 'Dm', ...times(threeOff, 2)] })),
+      (v) => v.sections[2].name === first(v).name && v.sections[4].name !== first(v).name);
+    // more than eight patterns (the legend takes the eight that fill most, in the order they first appear) and more than 26 (the letters go on past Z, and past U+007F)
+    const blocks = [3, 1, 4, 1, 5, 2, 6, 2, 7, 3].map((n, k) => times([KEYS[(2 * k) % 24], KEYS[(2 * k + 1) % 24]], n + 1));
+    view('more than eight patterns', request(analysisOf({ progression: blocks.flat() })), (v) => v.sections.filter((s) => s.pattern).length === 10 && v.legend.length === 8);
+    view('more than 26 patterns', request(analysisOf({ progression: Array.from({ length: 70 }, (_, k) => times([`X${k}`], 4)).flat(), bpm: 200 })),
+      (v) => v.sections.at(-1).name === String.fromCharCode(65 + 69) && v.legend.length === 8);
+    // names: those plain() does not read (N, empty), names that look like numbers (Object.keys puts array indices first: "3" before "7", "1" before "01", "9" before "10"),
+    // and an empty bar (unsorted bar starts at double tempo), whose main chord is undefined, counted as "undefined" like a chord of that name
+    view('names plain does not read', request(analysisOf({ progression: ['N', 'N', 'N', 'N', '', '', '', '', 'Am', ['N', '', 'Am', 'Am'], 'H7', 'am'] })), (v) => v.sections.some((s) => s.pattern?.[0] === 'N'));
+    view('names like numbers, a bar', request(analysisOf({ progression: times([['7', '7', '3', '3'], '3'], 4) })), (v) => first(v).pattern?.length === 1 && first(v).repeats === 8);
+    view('names like numbers, a pattern', request(analysisOf({ progression: ['Am', 'F', '10', 'G', 'Am', 'F', '9', 'G', ['01', '01', '1', '1'], '1'] })), (v) => first(v).pattern?.[2] === '9');
+    view('an empty bar', request({ ...analysisOf({ progression: times(['undefined', 'C'], 4) }), bars: [0, 1, 4, 5, 8, 12, 16, 17, 20, 24, 28] }, { tempo: 2 }), (v) => v.bars.some((b) => b.beats.length === 0));
+    // a pushed chord (its change an eighth before its beat), entered chords (one on a key that is no bar, one on the short first bar, one inside an analysis chord: the next
+    // bar's change is on its beat, as that chord began before the beat before), /8 meters, fewer than ten beats, beats at the same time, no chords, one bar, no bars
+    view('a pushed chord', request(analysisOf({ progression: times(P4, 4), pushed: [1, 5, 9] })), (v) => v.changes[1].t < v.bars[1].start && v.changes[1].chord === 'F');
+    view('entered chords', request(analysisOf({ progression: times(['Am', 'Am', 'F', 'G'], 4), pickup: 2 }), { edits: { 0: 'C', 2: 'Dm', 999: 'E', 18: 'Bb' } }),
+      (v) => v.bars[0].label === 'C' && v.bars[1].label === 'Dm' && v.changes.some((c) => c.t === v.bars[2].start && c.chord === 'Am'));
+    for (const [per, meter, bpm] of [[6, '6/8', 240], [12, '12/8', 300], [3, '3/8', 180]])
+      view(`meter ${meter}`, request(analysisOf({ progression: times(['Am', 'E'], 4), per, meter, bpm, jitter: 0 })), (v) => v.tempo[12] === `${Math.round(bpm / 3)} bpm · ${meter}`);
+    const twelve = analysisOf({ progression: ['Am', 'C', 'G', 'E'], per: 3 });
+    for (const beats of [8, 9, 10]) view(`${beats} beats`, request({ ...twelve, beats: twelve.beats.slice(0, beats) }), (v) => v.tempo.length === (beats > 9 ? beats + 1 : 0));
+    view('beats at the same time', request({ ...song, beats: song.beats.map((t, k) => (k < 12 ? 0.5 : t)) }), (v) => v.tempo[0] === 'Infinity bpm · 4/4');
+    view('no chords', request({ ...song, chords: [] }), (v) => v === null);
+    view('no chords and no beats', request({ ...song, chords: [], beats: [], bars: [] }), (v) => v.bars.length === 0 && v.sections.length === 0);
+    view('no chords, every bar entered', request({ ...analysisOf({ progression: ['Am', 'C'] }), chords: [] }, { edits: { 0: 'Am', 4: 'C' } }), (v) => v.changes.length === 2);
+    view('one bar', request(analysisOf({ progression: ['Am'] })), (v) => v.bars.length === 1 && v.sections.length === 1 && v.tempo.length === 0);
+    view('one bar, the half tempo', request(analysisOf({ progression: ['Am'] }), { tempo: 0.5 }), (v) => v.beats.length === 2);
+    view('no bars', request({ ...song, bars: [] }), (v) => v.bars.length === 1);
+    view('no bars, the half tempo', request({ ...song, bars: [] }, { tempo: 0.5 }), (v) => v.beats.length === 0 && v.bars.length === 0);
+    view('no bars, the one moved', request({ ...song, bars: [] }, { shift: 1 }), (v) => v.bars.length === 1); // grid.bars[0] + shift is NaN: no start before the first one
+    view('no chord yet at the first beats: the first of the list', request({ ...song, chords: [{ t: 5, chord: 'E' }, { t: 3, chord: 'Am' }] }), (v) => v.changes[0].chord === 'E' && v.changes[0].t === 5);
+    // seeded songs: sections of every period with repeats, misreads, bars of two chords, pushed chords, pickups, meters; each with a correction the page can hold
+    const SUFFIX = ['', 'm', '7', 'm7', 'maj7', 'sus4', '5', 'dim'];
+    for (let n = 0; n < 80; n++) {
+      const per = V.pick([4, 4, 4, 3, 6, 12, 5, 2]), pool = Array.from({ length: 6 }, () => V.pick(ROOT_NAMES) + V.pick(SUFFIX)), progression = [];
+      while (progression.length < 24 + V.int(0, 60)) {
+        const period = V.pick([1, 1, 2, 3, 4, 4, 6, 8, 8, 12, 16, 24]), pattern = Array.from({ length: period }, () => V.pick(pool)), repeats = V.int(1, 4);
+        for (let r = 0; r < repeats; r++) for (const c of pattern) progression.push(V.next() < 0.05 ? V.pick(pool) : V.next() < 0.1 ? [...Array(per - 1).fill(c), V.pick(pool)] : c);
+      }
+      const a = analysisOf({ progression, per, meter: `${per}/${per % 3 === 0 && per > 3 ? 8 : 4}`, bpm: V.int(60, 200), pickup: V.int(0, per - 1),
+        pushed: Array.from({ length: V.int(0, 4) }, () => V.int(1, progression.length - 1)) });
+      const edits = Object.fromEntries(Array.from({ length: V.int(0, 3) }, () => [a.bars[V.int(0, a.bars.length - 1)] + V.int(0, 1), V.pick(KEYS)]));
+      view(`seeded ${n}`, request(a, { shift: V.int(-3, 3), tempo: V.pick([undefined, undefined, 0.5, 2]), edits }));
+    }
+    // ten minutes at 180 bpm: 1800 beats, 450 bars, a form of free bars, verses, a bridge and choruses, misreads, bars of two chords and pushed chords
+    const form = [['Am', 'C', 'G', 'F'], ['Am', 'F', 'C', 'G', 'Am', 'F', 'E', 'E'], ['Dm', 'F', 'G', 'C', 'Dm', 'F', 'Bb', 'E'], ['C', 'G', 'Am', 'F']];
+    const long = ['Am', 'E7', 'Am', 'G'];
+    while (long.length < 450) {
+      const part = form[V.int(0, 3)];
+      for (let r = V.int(2, 4); r > 0 && long.length < 450; r--) for (const c of part) if (long.length < 450) long.push(V.next() < 0.02 ? V.pick(KEYS) : V.next() < 0.05 ? [c, c, c, V.pick(part)] : c);
+    }
+    const tenMinutes = analysisOf({ progression: long, bpm: 180, pushed: Array.from({ length: 40 }, () => V.int(1, 449)) });
+    view('ten minutes at 180 bpm', request(tenMinutes), (v) => v.beats.length === 1800 && v.bars.length === 450);
+    view('ten minutes at 180 bpm, corrected', request(tenMinutes, { shift: 1, edits: { 101: 'Dm', 205: 'C' } }), (v) => v.bars.length === 451);
+    // requests that are not valid: no JSON, no object, an analysis without beats or of a wrong type in any field the page reads, corrections of a wrong type, a name
+    // every object has; and the edges that are valid (an empty edits object, beats of the same time, a bar start beyond the beats)
+    const fields = JSON.parse(request(song));
+    const without = (path) => { const r = structuredClone(fields); const [o, k] = path.length === 1 ? [r, path[0]] : [r.analysis, path[1]]; delete o[k]; return JSON.stringify(r); };
+    const set = (path, value) => { const r = structuredClone(fields); if (path.length === 1) r[path[0]] = value; else r.analysis[path[1]] = value; return JSON.stringify(r); };
+    for (const text of ['', 'x', '[]', 'null', '5', '"a"', '{}', '{"analysis":null}', `${request(song)}x`]) view('not valid', text, (v) => v === null);
+    for (const path of [['analysis'], ['seconds'], ['shift'], ['edits'], ['a', 'beats'], ['a', 'bars'], ['a', 'beatsPerBar'], ['a', 'meter'], ['a', 'chords']]) view(`without ${path}`, without(path), (v) => v === null);
+    for (const [path, value] of [[['analysis'], []], [['seconds'], '200'], [['shift'], 0.5], [['shift'], '1'], [['edits'], []], [['edits'], { 4: 5 }], [['edits'], { 4: 'constructor' }],
+      [['edits'], { 4: null }], [['a', 'beats'], 'x'], [['a', 'beats'], [0.5, '1']], [['a', 'beats'], [1, 0.5]], [['a', 'bars'], [0, 4.5]], [['a', 'bars'], [-4, 0]], [['a', 'bars'], ['0']],
+      [['a', 'beatsPerBar'], 0], [['a', 'beatsPerBar'], 2.5], [['a', 'beatsPerBar'], '4'], [['a', 'meter'], 4], [['a', 'chords'], {}], [['a', 'chords'], [{ chord: 'Am' }]],
+      [['a', 'chords'], [{ t: 0, chord: 5 }]], [['a', 'chords'], [{ t: 0, chord: 'toString' }]], [['a', 'chords'], [{ t: 0, chord: '__proto__' }]], [['a', 'chords'], ['Am']]])
+      view(`${path} ${JSON.stringify(value)}`, set(path, value), (v) => v === null);
+    for (const [path, value] of [[['edits'], {}], [['tempo'], 'half'], [['a', 'bars'], [0, 4, 2000]], [['a', 'chords'], [{ t: 0, chord: 'Hm' }, { t: 3, chord: 'valueOf2' }]]]) view(`${path} ${JSON.stringify(value)}`, set(path, value), (v) => v !== null);
+    console.log(`trackView: ${cases.length - before} cases`);
+  }
   // texts that are no action, and the reader's edges (track.cpp's Reader, JSON.parse's rules): a key twice (the last value), a field more (not read), a byte order
   // mark (no JSON), a lone surrogate in a field not read, a field nested so that the text is 64 levels deep (the reader's limit, see PROTOKOLL.md: deeper is no JSON there)
   sequence(['', ' ', 'x', '{', '}', '[]', '5', 'null', 'true', '"start"', '{}', '{"action":5}', '{"action":null}', '{"action":"nope"}', '{"action":"toString"}', '{"action":"__proto__"}', '{"action":"constructor"}',

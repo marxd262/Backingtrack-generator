@@ -357,6 +357,8 @@ json playSession(const json& in) {
 // field (the list of the fields that changed, in the text's order: at the first step all of them, so the order of the fields counts too), byte for byte
 long long derivedChecks = 0, derivedWrong = 0;
 double displaysMs = 0, displaysLongest = 0; // Task 32c: the time chordDisplays took over the cases, and its longest call
+double songsMs = 0, songsLongest = 0;       // Task 32f: the same for trackView, and the size of the request of its longest call
+size_t songsLongestBytes = 0;
 json withoutDerived(const json& c, json& got) {
     json want = c.at("out");
     const json& steps = c.at("in").is_array() ? c.at("in") : c.at("in").at("steps");
@@ -605,6 +607,16 @@ const std::map<std::string, std::function<json(const json&)>> FUNCTIONS {
         displaysMs += ms;
         displaysLongest = std::max(displaysLongest, ms);
         return json(std::move(text)); } },
+    // Task 32f: what the own songs' page shows of a song's analysis and the corrections, the text byte for byte; `in` is the request's text. Each call is timed (the summary
+    // line `songs`)
+    { "trackView", [](const json& in) {
+        const std::string request = in.get<std::string>();
+        const auto begin = std::chrono::steady_clock::now();
+        std::string text = btg::trackView(request);
+        const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin).count();
+        songsMs += ms;
+        if (ms > songsLongest) { songsLongest = ms; songsLongestBytes = request.size(); }
+        return json(std::move(text)); } },
 };
 
 } // namespace
@@ -636,7 +648,7 @@ int main(int argc, char** argv) {
     if (listed != count(manifest.at("total"))) { std::printf("%s lists %zu cases in its chunks, its total is %zu\n", argv[1], listed, count(manifest.at("total"))); return 1; }
     if (listed == 0) { std::printf("%s has no case: nothing was checked\n", argv[1]); return 1; } // a gate must not pass on nothing
     const std::filesystem::path directory = std::filesystem::path(argv[1]).parent_path();
-    long long identical = 0, close = 0, different = 0, closeString = 0, displaysChecks = 0, displaysWrong = 0;
+    long long identical = 0, close = 0, different = 0, closeString = 0, displaysChecks = 0, displaysWrong = 0, songsChecks = 0, songsWrong = 0;
     std::map<std::string, int> seen; // cases per function in the file
     size_t read = 0;                 // cases read so far: the number of the next case
     for (const json& chunk : manifest.at("chunks")) {
@@ -661,6 +673,7 @@ int main(int argc, char** argv) {
                 else if (c.at("fn") == "session") { got = fn->second(c.at("in")); want = withoutDerived(c, got); compare.value("out", want, got); }
                 else { got = fn->second(c.at("in")); compare.value("out", c.at("out"), got); }
                 if (c.at("fn") == "chordDisplays") { ++displaysChecks; if (compare.result != btg::test::Match::identical) ++displaysWrong; }
+                if (c.at("fn") == "trackView") { ++songsChecks; if (compare.result != btg::test::Match::identical) ++songsWrong; }
                 if (compare.result == btg::test::Match::identical) { ++identical; continue; }
                 if (compare.result == btg::test::Match::close && c.at("fn") == "renderString") { // the ruled exception (above): passes, counted
                     ++closeString;
@@ -669,7 +682,7 @@ int main(int argc, char** argv) {
                 }
                 if (compare.result == btg::test::Match::close) { ++close; std::printf("close: %s #%zu %s by %.3g\n", c.at("fn").get<std::string>().c_str(), i, compare.field.c_str(), compare.delta); continue; }
                 if (different < 20 && c.at("fn") == "session") printSessionStep(c, want, got);
-                if (different < 20 && (c.at("fn") == "tables" || c.at("fn") == "chordDisplays") && c.at("out").is_string() && got.is_string())
+                if (different < 20 && (c.at("fn") == "tables" || c.at("fn") == "chordDisplays" || c.at("fn") == "trackView") && c.at("out").is_string() && got.is_string())
                     std::printf("%s: the text differs %s\n", c.at("fn").get<std::string>().c_str(), firstDifference(c.at("out").get<std::string>(), got.get<std::string>()).c_str());
                 if (++different <= 20) std::printf("different: %s #%zu %s: in %s, want %s, got %s\n", c.at("fn").get<std::string>().c_str(), i, compare.field.c_str(),
                                                    c.at("in").dump().c_str(), c.at("out").dump().c_str(), got.dump().c_str());
@@ -1302,6 +1315,9 @@ int main(int argc, char** argv) {
     for (const auto& entry : FUNCTIONS) if (!seen.count(entry.first)) { std::printf("no case for %s in %s\n", entry.first.c_str(), argv[1]); ++untested; }
     std::printf("displays: %lld of %lld cases wrong (chordDisplays: what the displays of the own songs' page show, against the old page's track.js and the web's functions);"
                 " %.3f ms per call, the longest %.3f ms\n", displaysWrong, displaysChecks, displaysChecks ? displaysMs / static_cast<double>(displaysChecks) : 0.0, displaysLongest);
+    std::printf("songs: %lld of %lld cases wrong (trackView: the bars, chord changes, parts and tempo of the own songs' page, against that page's track.js up to Task 32f);"
+                " %.3f ms per call, the longest %.3f ms (a request of %zu bytes)\n", songsWrong, songsChecks, songsChecks ? songsMs / static_cast<double>(songsChecks) : 0.0, songsLongest,
+                songsLongestBytes);
     std::printf("logic: functions %zu, cases %zu, identical %lld, close %lld, different %lld\n", FUNCTIONS.size(), read, identical, close, different);
     std::printf("renderString: %lld of %d cases close, passed by the ruled exception (a C runtime function's last bit against V8's)\n", closeString, seen["renderString"]);
     // A close is a difference in the last bits (possibly another platform's math library): it fails too. An exception has to be ruled
