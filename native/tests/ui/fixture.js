@@ -147,10 +147,11 @@ async function start(run, { folder, port, locale, viewport, reducedMotion, probl
   if (reducedMotion) await page.emulateMedia({ reducedMotion });
   if (viewport) await page.setViewportSize(viewport);
   // for answered() and settled(): the number of the page's last action, of the last answer, whether its profiles are due, the display's ticks
-  // since the last answer, the engine's reports in all
+  // since the last answer, the engine's reports in all; for the reload below: whether a key press has reached the document
   await page.addInitScript(() => {
     const backend = window.__JUCE__.backend;
-    const btg = (window.__btg = { sent: 0, answered: 0, profilesDue: false, ticks: 0, reports: 0 });
+    const btg = (window.__btg = { sent: 0, answered: 0, profilesDue: false, ticks: 0, reports: 0, keyed: false });
+    addEventListener('keydown', () => { btg.keyed = true; }, { capture: true, once: true });
     const emit = backend.emitEvent.bind(backend);
     backend.emitEvent = (name, data) => { if (data?.type === 'action') btg.sent = data.seq; return emit(name, data); };
     backend.addEventListener('state', (m) => {
@@ -171,6 +172,16 @@ async function start(run, { folder, port, locale, viewport, reducedMotion, probl
     await drawn(page);
     run.step = 'the fonts after the new load';
     await page.evaluate(() => document.fonts.ready);
+    // Input sent over the debug port before the new document has drawn a frame is dropped, key presses and raw mouse clicks alike (Task 33h:
+    // after the fixture's reload in about 1 start in 4, for at most 48 ms in 400 starts; a press is then acked without reaching the page,
+    // the text of a fill does arrive; never after a later reload; a locator's click waits for frames first and never met it). So the page is
+    // handed over once a Shift, pressed as the tests press keys (one every 2 to 3 ms), has reached it: 12 ms more per start on average.
+    // Shift types nothing, starts no default action, no handler of the pages takes it, and the user activation it might give the page has
+    // already (Playwright evaluates with a user gesture); for :focus-visible it counts as a key press, which a page nobody touched shows
+    // alike (a focus by script gets the ring), and a click on a control resets it. shortcut: why WebView2 drops the input is not known (it fits
+    // Chromium's paint holding, which keeps the old picture until the reloaded document paints), upgrade: when it is, wait for that instead.
+    run.step = 'a key press reaches the page';
+    do await page.keyboard.press('Shift'); while (!(await page.evaluate(() => window.__btg.keyed)));
     run.step = 'the test';
     return response;
   };
