@@ -4,7 +4,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createServer } from 'node:net';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 // btg_desktop_run <desktop> <exe> [arguments...] (native/platform/win/desktop_run.cpp) starts the program on the Windows desktop of that name (it
 // makes one if there is none): its windows do not appear on the user's screen nor take the keyboard focus. It waits for the program and ends with
@@ -57,7 +57,9 @@ export async function passGate(spawnApp) {
  *  starts never failed); gives the spawned child (the runner: its exit code is the app's, kill() ends the app). */
 export async function startApp(exe, desktop, options) {
   for (const file of shown ? [exe] : [exe, desktopRun]) if (!existsSync(file)) throw new Error(`no app at ${file}: build it first (native/build.ps1)`);
-  return shown ? spawn(exe, [], options) : passGate(() => spawn(desktopRun, [desktop, exe], options));
+  // windowsHide: the runner is a console program, and a parent without a console (an IDE's test runner) would get a console window of it on the
+  // user's screen per start; not for the app itself (BTG_SHOW=1), whose first window would then be hidden
+  return shown ? spawn(exe, [], options) : passGate(() => spawn(desktopRun, [desktop, exe], { ...options, windowsHide: true }));
 }
 
 const SW = { minimise: 6, restore: 9 };
@@ -77,13 +79,16 @@ const powershell = join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0
  *  a minimise leaves it not minimised. A process on another desktop does not find the window: on a desktop of its own the script runs there, through
  *  the runner, and the app is the process the runner started. */
 export function showWindow(app, how) {
-  const id = shown ? app.pid : `(Get-CimInstance Win32_Process -Filter 'ParentProcessId = ${app.pid}').ProcessId`;
+  // shortcut: the app is the runner's child of the app's file name (the runner, started without a console window, has its console host as a child
+  // too), upgrade: when the runner starts more than one such program, or the app starts itself anew. shortcut: an app that has ended reads as "the
+  // app has no main window" (exit 2), upgrade: when a check must tell the two apart
+  const id = shown ? app.pid : `(Get-CimInstance Win32_Process -Filter 'ParentProcessId = ${app.pid}' | Where-Object Name -eq '${basename(app.spawnargs[2])}').ProcessId`;
   const script = `Add-Type -Namespace Btg -Name User32 -MemberDefinition '[DllImport("user32.dll")] public static extern bool ShowWindowAsync(System.IntPtr window, int how); [DllImport("user32.dll")] public static extern bool IsIconic(System.IntPtr window);'
 $id = ${id}
 if ($id) { $window = (Get-Process -Id $id -ErrorAction SilentlyContinue).MainWindowHandle }
 if (-not $window -or $window -eq [System.IntPtr]::Zero) { exit 2 }
 [Btg.User32]::ShowWindowAsync($window, ${SW[how]}) | Out-Null${CONFIRM[how]}`;
   const args = ['-NoProfile', '-NonInteractive', '-Command', script];
-  const ran = shown ? spawnSync(powershell, args, { encoding: 'utf8' }) : spawnSync(desktopRun, [app.spawnargs[1], powershell, ...args], { encoding: 'utf8' });
+  const ran = shown ? spawnSync(powershell, args, { encoding: 'utf8', windowsHide: true }) : spawnSync(desktopRun, [app.spawnargs[1], powershell, ...args], { encoding: 'utf8', windowsHide: true });
   if (ran.status !== 0) throw new Error(`the app's window could not be ${how}d: ${FAILED[ran.status] ?? `exit code ${ran.status}`} ${ran.stdout}${ran.stderr}${ran.error ?? ''}`.trim());
 }

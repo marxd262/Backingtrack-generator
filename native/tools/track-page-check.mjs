@@ -11,7 +11,7 @@
 // part's pattern with its place, the legend and the lane's parts are what the core's answer to the page's last trackView question says (the count,
 // the tempo, the turn and the place as the page computed them before), and that answer is the reference's for the question; so after the
 // corrections; and in the free part of a song of two places. Two quick inputs count as two: the play key and Space, ArrowRight twice, a
-// pattern's key twice. The events forced into the other order: an
+// pattern's key twice, ArrowRight and a chord in the bar select (it goes into the bar sought). The events forced into the other order: an
 // analysis before the lists (tables) keeps its scale and throws nothing; a click on the wheel before any answer throws nothing, and an answer that
 // was lost is asked for again on pageshow. The pages share the language: the one opposite to the system's, chosen on the generator's page as the
 // app's strip chooses it, shows here; the system's, chosen here, shows on the generator's page after "Zum Generator", which leads there. No error
@@ -310,6 +310,22 @@ try {
     return window.sent.slice(from).filter((s) => s.type === 'seek').map((s) => s.beats);
   });
   await sleep(300);
+  // ... and a seek and an entry at once (ArrowRight in the lane, then a chord in the bar select, in one task): the chord goes into the bar sought, not
+  // into the one the engine reported last (the page's last wish, of the keys above, has given way after a second)
+  await sleep(1100);
+  await seek(0);
+  result.quick.edit = await page.evaluate(() => {
+    const select = document.getElementById('edit'), firsts = JSON.parse(window.got.trackView.at(-1).json).bars.slice(0, 2).map((b) => b.first);
+    document.getElementById('lane').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    select.value = select.options[1].value;
+    select.dispatchEvent(new Event('change'));
+    const edits = Object.entries(localStorage).filter(([key]) => key.startsWith('btg.track.')).map(([, v]) => JSON.parse(v).edits ?? {});
+    return { firsts, edited: edits.flatMap((e) => Object.keys(e).map(Number)) };
+  });
+  await page.locator('#reset').click(); // the song as analysed for the steps below
+  await sleep(300);
+  if (JSON.stringify(result.quick.edit.edited) !== JSON.stringify([result.quick.edit.firsts[1]]))
+    problems.push(`ArrowRight and at once a chord in the bar select: the chord went into the bars starting at beat ${JSON.stringify(result.quick.edit.edited)}, not into the second bar (${result.quick.edit.firsts[1]})`);
   if (!(result.quick.late.length === 2 && result.quick.late[1] > result.quick.late[0])) problems.push(`ArrowRight twice at once near a bar's end, a late report between, sought ${JSON.stringify(result.quick.late)}, not two bars on`);
   if (JSON.stringify(result.quick.play) !== '["playFile","stop"]') problems.push(`the play key and then Space at once sent ${JSON.stringify(result.quick.play)}, not a start and a stop`);
   if (!(result.quick.arrows.length === 2 && result.quick.arrows[1] > result.quick.arrows[0])) problems.push(`ArrowRight twice at once sought ${JSON.stringify(result.quick.arrows)}, not two bars on`);

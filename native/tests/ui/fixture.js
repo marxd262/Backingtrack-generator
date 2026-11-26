@@ -86,7 +86,9 @@ async function start(run, { folder, port, locale, viewport, reducedMotion, probl
   const downloads = join(folder, 'downloads');
   mkdirSync(downloads, { recursive: true });
   run.step = 'wait at the gate of startApp (no two spawns within START_GAP_MS)';
-  const app = (run.app = await startApp(exe, `btg-tests-${port}`, { stdio: 'ignore', env: { ...process.env, BTG_MUTE: '1', BTG_STORAGE_DIR: folder,
+  // BTG_NO_CACHE: a track the app loads is analysed anew and its analysis not kept (the kept ones lie in the user's %APPDATA% whatever
+  // BTG_STORAGE_DIR says, PluginProcessor.cpp run()); no page test loads a track today, so none behaves otherwise for it
+  const app = (run.app = await startApp(exe, `btg-tests-${port}`, { stdio: 'ignore', env: { ...process.env, BTG_MUTE: '1', BTG_NO_CACHE: '1', BTG_STORAGE_DIR: folder,
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port} --lang=${locale} --disable-features=msSmartScreenProtection --disable-accelerated-2d-canvas` } }));
   if (run.closing) { app.kill(); return; } // the deadline came during the wait, and quit() found no app to end
   run.step = `attach to the app's WebView2 on port ${port}`;
@@ -130,8 +132,9 @@ async function start(run, { folder, port, locale, viewport, reducedMotion, probl
   await page.evaluate(() => document.fonts.ready); // nothing of the first load is under way when it loads again
   page.on('console', (m) => { if (!run.closing && m.type() === 'error') problems.push(`console: ${m.text()}`); });
   page.on('pageerror', (e) => { if (!run.closing) problems.push(`pageerror: ${e.message}`); });
-  // shortcut: the fixture's own reload is aborted now and then (about 1 start in 500, 6 ms after it was asked for; it is the only navigation asked
-  // for, and a whole new document with the init script loads all the same); who aborts it is not known: an aborted navigation belongs to no
+  // shortcut: the fixture's own reload is aborted now and then (about 1 start in 500, 6 ms after it was asked for; apart from a test's own reload,
+  // which page.reload below treats alike, it is the only navigation asked for, and a whole new document with the init script loads all the same);
+  // who aborts it is not known: an aborted navigation belongs to no
   // document, so a navigation that fails while the reload stands is not counted, every problem of the document that then loads is, upgrade: when
   // the cause is found. Any other failed navigation names the step and the time.
   const reloading = () => run.step === 'load the page again' || run.step === 'the drawing after the new load';
@@ -158,12 +161,21 @@ async function start(run, { folder, port, locale, viewport, reducedMotion, probl
     backend.addEventListener('profiles', () => { btg.profilesDue = false; });
     backend.addEventListener('engine', () => { btg.ticks++; btg.reports++; });
   });
-  run.step = 'load the page again';
+  // every reload of the page, this one and a test's own, within the tolerance above for the aborted reload, then the drawing and the fonts (the
+  // layout may still move until they are there)
+  const reload = page.reload.bind(page);
+  page.reload = async (...args) => {
+    run.step = 'load the page again';
+    const response = await reload(...args);
+    run.step = 'the drawing after the new load';
+    await drawn(page);
+    run.step = 'the fonts after the new load';
+    await page.evaluate(() => document.fonts.ready);
+    run.step = 'the test';
+    return response;
+  };
   await page.reload();
-  run.step = 'the drawing after the new load';
-  await drawn(page);
   if (viewport) expect(await page.evaluate(() => [innerWidth, innerHeight]), 'the viewport in the WebView').toEqual([viewport.width, viewport.height]);
-  run.step = 'the test';
 }
 
 async function quit(run, port) {

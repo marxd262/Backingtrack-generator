@@ -612,6 +612,33 @@ int main(int argc, char** argv) {
     CHECK(play(480, true, 0.0).peak == 0.0);                // muted layers are silent
     CHECK(play(480, false, 64.0).rms > 0.01);               // starting inside the song plays
 
+    // The fader's square law (the web mixer's gain is the fader's square: 0.5 gives 0.25, "Gesamt" 0.3 gives 0.09): the bass alone (drums muted),
+    // dry, no limiter, from beat 64; the level and the master set after 1 s of play, then 0.5 s for the 20 ms smoothing to settle (25 of its time
+    // constants), then the RMS of 1.5 s against the same span at level and master 1. What follows the fader is linear (balance, the sum's gain,
+    // the shelf, the master), so the ratios are 0.25 and 0.09 up to float rounding: the tolerance, named before measuring, is 1e-4 of each. Measured
+    // 0.250014 and 0.090004: the smoothing in float stops where a step is below half an ulp of the gain (1.4e-5 from 0.25), a linear fader 0.5 and 0.3.
+    {
+        const auto settled = [&](float level, float master) {
+            btg::Engine engine;
+            engine.setPackSource(source);
+            engine.setSound(DRY);
+            engine.setTrack(track);
+            engine.setMuted(btg::Engine::drums, true);
+            engine.setLimiter(false);
+            engine.prepare(rate);
+            btg::Transport t;
+            t.play(64.0, engine.bpm());
+            render(engine, t, 1.0, 480);
+            engine.setLevel(btg::Engine::bass, level);
+            engine.setMaster(master);
+            render(engine, t, 0.5, 480);
+            return render(engine, t, 1.5, 480).rms;
+        };
+        const double full = settled(1.0f, 1.0f), half = settled(0.5f, 1.0f), quiet = settled(1.0f, 0.3f);
+        std::printf("fader: level 0.5 gives %.6f of the RMS at 1, master 0.3 gives %.6f\n", half / full, quiet / full);
+        CHECK(full > 0.01 && std::fabs(half / full / 0.25 - 1) < 1e-4 && std::fabs(quiet / full / 0.09 - 1) < 1e-4);
+    }
+
     // mix/bus on 0 takes the old limiter alone (-10 dB with its make-up), on 1 the glue and the limiter: both finite, below 1.0, not the same.
     // The fine value's default is on 0 (tunables.js, MIX_TUNABLES), so no tuning is the old limiter.
     {

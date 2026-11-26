@@ -4,13 +4,12 @@
 // Geometrie der Seite (native/app/ui/wheel-geometry.js) und derived().wheel; die Sprache wählt die Leiste der App, die eigenen Sprachtasten der
 // Seite stehen dort verborgen; Fokus/Einstellen merkt der Speicher der WebView (backingtrack.layout): ein Neuladen bleibt ein Neuladen.
 import { test, expect, answered, chooseLanguage, fromSession, settled } from './fixture.js';
-import { addChordByName } from './chord-helpers.js';
+import { addChordByName, wheelPoint } from './chord-helpers.js';
 import { openTags } from './style-helpers.js';
 import { contexts, countContexts, failStarts } from './count-helpers.js';
 import { layoutWheel } from '../../app/ui/wheel-geometry.js';
 
 const BAR_TIMEOUT = 10_000; // ein Takt bei 100 bpm dauert 2,4 s; unter Last großzügig
-const SYMBOLS = { maj: '', min: 'm', dim: 'dim' };
 
 test.use({ locale: 'de-DE' });
 
@@ -35,19 +34,6 @@ async function openWithGo(page) {
   await expect(play(page)).toBeVisible();
   await playGo(page).click();
   await expect(playGo(page)).toHaveText('Los');
-}
-
-// Knotenmitte im Canvas: der Platz aus der Geometrie der Seite, der Knoten aus derived().wheel (der erlaubte Akkord an ihm, sonst seine Beschriftung)
-async function wheelPoint(page, root, quality, ring = 'outer') {
-  const canvas = page.locator('#wheel');
-  await canvas.scrollIntoViewIfNeeded();
-  const box = await canvas.boundingBox();
-  await answered(page);
-  const { nodes } = (await fromSession(page, 'derived')).wheel;
-  const at = nodes.findIndex((n) => n.ring === ring && (n.allowed ? n.allowed.root === root && n.allowed.quality === quality : n.short === root + SYMBOLS[quality]));
-  if (at < 0) throw new Error(`no node of ${root} ${quality} ${ring} in derived().wheel`);
-  const node = layoutWheel(box.width).nodes[at];
-  return { x: node.x, y: node.y };
 }
 
 test('beim Laden: Startseite sichtbar, Spielseite versteckt', async ({ page }) => {
@@ -476,6 +462,7 @@ test('Zwei schnelle Klicks auf Stopp auf der Spielseite: die Wiedergabe hält an
   expect(engine.run).toBeGreaterThan(run);
   expect(lead.length, 'Meldungen zwischen den Klicks und dem ersten Takt').toBeGreaterThan(0);
   expect(lead.filter((shown) => shown !== ' |  | '), 'Takt, Akkord, Countdown bei diesen Meldungen').toEqual([]);
+  await expect(page.locator('#play-position'), 'die Anzeige nach dem neuen Start').toHaveText(/^Takt \d+ von 96$/, { timeout: BAR_TIMEOUT });
   await expect(playGo(page)).toHaveText('Stopp');
   await playGo(page).click();
 });

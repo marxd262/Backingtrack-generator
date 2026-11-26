@@ -4,14 +4,12 @@
 // (native/app/ui/wheel-geometry.js) und derived().wheel; gelesen wird, wenn die Seite die Antworten auf ihre Aktionen zeigt; AudioContexts und
 // Instrumentensätze zählt count-helpers.js an den Meldungen der Hülle; die Sprache wählt die Leiste der App.
 import { test, expect, answered, chooseLanguage, fromSession, settled } from './fixture.js';
-import { addChordByName, openAddPop } from './chord-helpers.js';
+import { addChordByName, openAddPop, wheelPoint } from './chord-helpers.js';
 import { chooseStyle, currentStyle, openTags } from './style-helpers.js';
-import { layoutWheel } from '../../app/ui/wheel-geometry.js';
 import { contexts, countContexts, recordPositions, positionsSince, sets, shownBar, expectContinuous } from './count-helpers.js';
 
 const RAW_KEY = /^(ui|tag|style|err|layer|scale|mode|category|view|group|timbre|chord|chordGroup|chordColor|groove|meter)\.[A-Za-z.]+$/;
 const BAR_TIMEOUT = 10_000; // ein Takt bei 100 bpm dauert 2,4 s; unter Last großzügig
-const SYMBOLS = { maj: '', min: 'm', dim: 'dim' };
 
 test.use({ locale: 'de-DE' });
 
@@ -71,20 +69,6 @@ async function rawKeysIn(page) {
     for (const el of document.querySelectorAll('option')) if (re.test(el.textContent.trim())) found.push(`option=${el.textContent}`);
     return found;
   }, RAW_KEY.source);
-}
-
-// Knotenmitte im Canvas (CSS-Pixel relativ zur linken oberen Ecke): der Platz aus der Geometrie der Seite, der Knoten aus derived().wheel (der
-// erlaubte Akkord an ihm, sonst seine Beschriftung)
-async function wheelPoint(page, root, quality, ring = 'outer') {
-  const canvas = page.locator('#wheel');
-  await canvas.scrollIntoViewIfNeeded();
-  const box = await canvas.boundingBox();
-  await answered(page);
-  const { nodes } = (await fromSession(page, 'derived')).wheel;
-  const at = nodes.findIndex((n) => n.ring === ring && (n.allowed ? n.allowed.root === root && n.allowed.quality === quality : n.short === root + SYMBOLS[quality]));
-  if (at < 0) throw new Error(`no node of ${root} ${quality} ${ring} in derived().wheel`);
-  const node = layoutWheel(box.width).nodes[at];
-  return { x: node.x, y: node.y };
 }
 
 test('Feintuning öffnet die Spielseite, zurück zur Startseite: Navigation ohne aria-expanded, hidden, Fokus', async ({ page }) => {

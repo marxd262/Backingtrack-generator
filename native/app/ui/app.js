@@ -166,6 +166,7 @@ $('surprise').addEventListener('click', () => send({ action: 'surprise', variant
 
 // Weitermachen: die Sitzung stellt die gemerkte wieder her, die Hülle spielt sie am gemerkten Takt; dann die Spielseite im Fokus
 $('resume').addEventListener('click', async () => {
+  stopped = false; // ein Start nach dem Stopp davor: ein Klick auf „Stopp“ hält ihn an (in der Web-App spielt er gleich)
   const answer = await send({ action: 'resume' });
   errorsHidden = false;
   startFailed = false;

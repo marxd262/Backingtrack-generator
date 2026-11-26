@@ -84,8 +84,9 @@ int wmain(int argc, wchar_t** argv) {
     // the environment is this program's (nullptr): the caller sets the app's variables on it
     if (!CreateProcessW(argv[2], command.data(), nullptr, nullptr, FALSE, CREATE_SUSPENDED, nullptr, nullptr, &si, &pi)) return fail("CreateProcessW");
     if (!AssignProcessToJobObject(job, pi.hProcess)) {
+        const int failed = fail("AssignProcessToJobObject"); // its error, before TerminateProcess sets the last error anew
         TerminateProcess(pi.hProcess, 125);
-        return fail("AssignProcessToJobObject");
+        return failed;
     }
     ResumeThread(pi.hThread);
     CloseHandle(pi.hThread);

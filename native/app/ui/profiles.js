@@ -242,7 +242,7 @@ export function initProfiles() {
   // --- Laden ---
   load.addEventListener('click', () => request({ action: 'loadProfile' }));
   // wie Speichern: die Kopie wird gewählt und „Meine Profile“ geht auf
-  factoryCopy.addEventListener('click', () => act({ action: 'copyFactory', name: t(`style.${selected().styleId}`), id: newId() }, { taken: focusSelection }));
+  factoryCopy.addEventListener('click', () => whenAnswered(factoryCopy, () => act({ action: 'copyFactory', name: t(`style.${selected().styleId}`), id: newId() }, { taken: focusSelection })));
 
   // --- Austausch ---
   // Export folgt der Auswahl: Sitzung (alle 10 Teile), Werksprofil, Profil, Ordner samt Inhalt; "Meine Profile" = alles. Den Text gibt die
@@ -265,10 +265,11 @@ export function initProfiles() {
     say('ui.profileFileSaved');
   }
 
-  file.addEventListener('click', async () => download(await exportOf(p().selection)));
+  // „Als Datei“ und „Kopieren“ nehmen die Auswahl, die die Antworten davor zeigen (ein Klick auf eine andere Zeile gleich davor zählt)
+  file.addEventListener('click', () => whenAnswered(file, async () => download(await exportOf(p().selection))));
   backup.addEventListener('click', async () => download(await exportOf('mine')));
 
-  copy.addEventListener('click', async () => {
+  copy.addEventListener('click', () => whenAnswered(copy, async () => {
     const json = await exportOf(p().selection);
     if (!json) { say('ui.profileNothing'); return; }
     text.value = json; // steht danach auch im Feld: zum Kopieren von Hand, falls die Zwischenablage gesperrt ist
@@ -279,7 +280,7 @@ export function initProfiles() {
       text.select();
       say('ui.profileCopyFailed');
     }
-  });
+  }));
 
   // Import in den gewählten Ordner (Profil gewählt: dessen Ordner; sonst "Meine Profile"); ein einzelnes Profil wird gewählt, nicht geladen.
   // Die Ids für alles, was er anlegt, bringt die Aktion: höchstens so viele, wie noch in den Baum passen

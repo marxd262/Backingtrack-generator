@@ -10,6 +10,8 @@
 #include <chrono>
 #include <cstdio>
 #include <functional>
+#include <memory>
+#include <string>
 #include <thread>
 
 // The test calls the system itself to make the conditions it checks (a file held by another handle with a share mode JUCE does not offer, held for
@@ -38,7 +40,7 @@ bool throws (const std::function<void()>& f, const char* containing = "") {
 }
 std::string contentOf (const juce::File& f) { return f.existsAsFile() ? f.loadFileAsString().toStdString() : std::string ("(none)"); }
 // what read gives as a text, a throw included, for the checks that expect a text (a throw fails the check instead of ending the test)
-std::string readText (FileStorage storage, const char* name) {
+std::string readText (FileStorage& storage, const char* name) {
     try { return storage.read (name).value_or ("(nothing)"); } catch (const std::exception& e) { return std::string ("(threw: ") + e.what() + ")"; }
 }
 juce::File freshFolder (const char* utf8Name) {
@@ -151,8 +153,9 @@ void lookups() {
 #endif
     const auto base = freshFolder ("lookups");
     base.createDirectory();
-    check (readText (FileStorage (base.getChildFile ("missing")), "profiles.json") == "(nothing)", "the storage's folder missing (a first start): nothing stored");
-    check (readText (FileStorage (base), "profiles.json") == "(nothing)", "the folder there, the file missing: nothing stored");
+    FileStorage missing (base.getChildFile ("missing")), there (base);
+    check (readText (missing, "profiles.json") == "(nothing)", "the storage's folder missing (a first start): nothing stored");
+    check (readText (there, "profiles.json") == "(nothing)", "the folder there, the file missing: nothing stored");
     putFile (base.getChildFile ("plain"), "a file");
     check (throws ([&] { FileStorage (base.getChildFile ("plain")).read ("profiles.json"); }), "a component of the folder's path that is a file: unreadable");
     check (throws ([&] { FileStorage (base.getChildFile ("missing").getChildFile ("deeper")).read ("profiles.json"); }),
@@ -161,6 +164,80 @@ void lookups() {
     check (throws ([&] { FileStorage (base.getChildFile ("in<valid")).read ("profiles.json"); }), "a folder whose name the system calls invalid: unreadable");
 #endif
     base.deleteRecursively();
+}
+
+// Two storages on one folder, as two apps on the user's folder (PROTOKOLL.md section 7, "Speicher"): the first holds the folder's lock, the second
+// reads but writes nothing, and the first's file stays whole; once the first is gone, a new one writes. The second is built on a thread of its
+// own, as the second app's is in another process: the system's lock is the thread's, and the thread that holds it would get it again.
+void twoOnOneFolder() {
+#if JUCE_WINDOWS
+    const auto folder = freshFolder ("two");
+    const auto at = [&] (const char* n) { return folder.getChildFile (n); };
+    {
+        FileStorage first (folder);
+        check (first.write ("profiles.json", "first"), "the first storage on a folder writes");
+        {
+            std::unique_ptr<FileStorage> second;
+            const auto began = juce::Time::getMillisecondCounterHiRes();
+            std::thread ([&] { second = std::make_unique<FileStorage> (folder); }).join();
+            const double waited = juce::Time::getMillisecondCounterHiRes() - began;
+            std::printf ("a second storage on the same folder gave up on the lock after %.0f ms\n", waited);
+            check (waited >= FileStorage::lockWaitMs - 20, "a second storage on the same folder waits the whole bound for the lock");
+            check (! second->write ("profiles.json", "second") && ! second->write ("mix.json", "second"), "a second storage on the same folder writes nothing");
+            check (readText (*second, "profiles.json") == "first", "a second storage on the same folder reads");
+        }
+        check (contentOf (at ("profiles.json")) == "first" && ! at ("profiles.json.bak").exists() && ! at ("profiles.json.tmp").exists() && ! at ("mix.json").exists(),
+               "the first storage's file is whole, the second left nothing");
+        check (first.write ("profiles.json", "first again"), "the first storage still writes once the second is gone");
+    }
+    FileStorage next (folder);
+    check (next.write ("profiles.json", "next") && contentOf (at ("profiles.json")) == "next", "once the first storage is gone, a new one on the folder writes");
+    folder.deleteRecursively();
+#else
+    // POSIX record locks (JUCE's InterProcessLock there) do not exclude within one process: two apps are two processes, this test is one
+    std::printf ("skipped: two storages on one folder in one process (Windows only)\n");
+#endif
+}
+
+// The lock after an end (the page tests' restart; an app closed and opened again at once): a child (this program again: --hold <folder in base64>)
+// takes the folder's lock and writes held.json, the test kills it and at once builds a storage on the folder, while the child is still ending (its
+// process is not yet signalled: checked each time, before the storage is built); that storage gets the lock and writes. Ten times.
+void lockAfterAnEnd (const juce::File& exe) {
+#if JUCE_WINDOWS
+    const auto folder = freshFolder ("ended");
+    folder.createDirectory();
+    const auto held = folder.getChildFile ("held.json");
+    const auto path = folder.getFullPathName();
+    const auto command = "\"" + exe.getFullPathName() + "\" --hold " + juce::Base64::toBase64 (path.toRawUTF8(), path.getNumBytesAsUTF8());
+    int ending = 0, written = 0;
+    const int times = 10;
+    for (int i = 0; i < times; ++i) {
+        held.deleteFile();
+        std::wstring line (command.toWideCharPointer());
+        STARTUPINFOW si {};
+        si.cb = sizeof si;
+        PROCESS_INFORMATION pi {};
+        if (! CreateProcessW (nullptr, line.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) { check (false, "the child that holds the lock starts"); break; }
+        CloseHandle (pi.hThread);
+        for (int t = 0; t < 600 && ! held.existsAsFile(); ++t) juce::Thread::sleep (20);
+        check (held.existsAsFile(), "the child holds the folder's lock (it wrote)");
+        TerminateProcess (pi.hProcess, 1);
+        ending += WaitForSingleObject (pi.hProcess, 0) == WAIT_TIMEOUT;
+        {
+            FileStorage next (folder);
+            written += next.write ("profiles.json", "after " + std::to_string (i)) ? 1 : 0;
+        }
+        WaitForSingleObject (pi.hProcess, 10000);
+        CloseHandle (pi.hProcess);
+    }
+    std::printf ("lock after an end: the storage was built while the child was still ending %d of %d times, and wrote %d of %d times\n", ending, times, written, times);
+    check (ending == times, "every storage after the kill was built while the child was still ending");
+    check (written == times, "a storage built at once after the end of the process that held the folder's lock gets the lock and writes");
+    folder.deleteRecursively();
+#else
+    (void) exe;
+    std::printf ("skipped: the lock after an end (Windows only)\n");
+#endif
 }
 
 // The abort test: five profiles saved, then the child saves the sixth and ends itself after `step` of the write.
@@ -201,6 +278,13 @@ void abortAfter (int step, const juce::File& exe) {
 } // namespace
 
 int main (int argc, char** argv) {
+    if (argc == 3 && juce::String (argv[1]) == "--hold") { // the child of lockAfterAnEnd: holds the folder's lock until it is killed
+        juce::MemoryOutputStream path;
+        if (! juce::Base64::convertFromBase64 (path, argv[2])) return 8;
+        FileStorage storage (juce::File (juce::String::fromUTF8 (static_cast<const char*> (path.getData()), static_cast<int> (path.getDataSize()))));
+        if (! storage.write ("held.json", "held")) return 9;
+        for (;;) juce::Thread::sleep (1000);
+    }
     if (argc == 5 && juce::String (argv[1]) == "--abort") { // the child of the abort test
         const int step = juce::String (argv[2]).getIntValue();
         juce::MemoryOutputStream path;
@@ -215,7 +299,9 @@ int main (int argc, char** argv) {
     }
     rules();
     lookups();
+    twoOnOneFolder();
     const auto exe = juce::File::getSpecialLocation (juce::File::currentExecutableFile);
+    lockAfterAnEnd (exe);
     for (int step = 1; step <= 3; ++step) abortAfter (step, exe);
     std::printf ("storage: %d of %d checks wrong (the rules of read and write; the abort after each step of a write: the stored text whole, every profile there)\n", failures, checks);
     return failures ? 1 : 0;

@@ -1716,3 +1716,21 @@ test('Baum: Pfeil rechts und gleich Pfeil ab auf einem zugeklappten Ordner gehen
   await expect(item(page, 'Z')).toHaveAttribute('aria-expanded', 'true');
   await expect(item(page, 'Innen')).toBeFocused();
 });
+
+test('Klick auf ein anderes Profil und gleich „Als Datei“: die Datei ist die des angeklickten Profils', async ({ page }) => {
+  // die Web-App: der Klick wählt das Profil und zeichnet sofort (onSelect 52), „Als Datei“ gibt die Datei der Auswahl (exportOf, 299–322)
+  page = await seed([prof('a', 'A'), { ...prof('b', 'B'), parts: { tempo: { bpm: 120 } } }]);
+  await pickRow(page, 'A');
+  const [download] = await Promise.all([page.waitForEvent('download'), rowThen(page, 'b', 'profile-file')]);
+  const file = JSON.parse(await readFile(await download.path(), 'utf8'));
+  expect([file.name, file.parts.tempo.bpm]).toEqual(['B', 120]);
+  await expect(item(page, 'B')).toHaveAttribute('aria-selected', 'true');
+});
+
+test('Klick auf ein anderes Werksprofil und gleich „Kopie speichern“: die Kopie hat Namen und Inhalt des angeklickten Stils', async ({ page }) => {
+  // die Web-App: der Klick wählt das Werksprofil und zeichnet sofort (onSelect 52), „Kopie speichern“ nimmt Name und Teile der Auswahl (290–295)
+  await pickRow(page, 'Funk-Rock');
+  await acted(page, rowThen(page, 'factory:reggae', 'profile-factory-copy'));
+  expect((await storedTree(page)).items.map((n) => [n.name, n.parts.style.style])).toEqual([['Reggae', 'reggae']]);
+  await expect(item(page, 'Reggae').last()).toHaveAttribute('aria-selected', 'true');
+});

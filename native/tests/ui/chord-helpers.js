@@ -2,6 +2,24 @@
 // Portiert aus tests/e2e/chord-helpers.js: Register und Namen aus der Sitzung (tables().CHORDS: die Gruppe je Art; derived().chordOptions: der
 // Name jeder Art auf jedem Grundton der Tonart) statt aus src/core/chords.js.
 import { answered, fromSession } from './fixture.js';
+import { layoutWheel } from '../../app/ui/wheel-geometry.js';
+
+const SYMBOLS = { maj: '', min: 'm', dim: 'dim' };
+
+/** Knotenmitte im Canvas des Akkordrads (CSS-Pixel relativ zur linken oberen Ecke): der Platz aus der Geometrie der Seite, der Knoten aus
+ *  derived().wheel (der erlaubte Akkord an ihm, sonst seine Beschriftung). Erst die Antworten, dann die Größe des Canvas: eine Antwort kann das
+ *  Modul umbauen (ein Akkord mehr in der Folge), und ein Punkt aus der Größe davor träfe neben das Rad. */
+export async function wheelPoint(page, root, quality, ring = 'outer') {
+  await answered(page);
+  const canvas = page.locator('#wheel');
+  await canvas.scrollIntoViewIfNeeded();
+  const box = await canvas.boundingBox();
+  const { nodes } = (await fromSession(page, 'derived')).wheel;
+  const at = nodes.findIndex((n) => n.ring === ring && (n.allowed ? n.allowed.root === root && n.allowed.quality === quality : n.short === root + SYMBOLS[quality]));
+  if (at < 0) throw new Error(`no node of ${root} ${quality} ${ring} in derived().wheel`);
+  const node = layoutWheel(box.width).nodes[at];
+  return { x: node.x, y: node.y };
+}
 
 /** Zerlegt einen Akkordnamen wie 'Gm7' oder 'Edim' über die Namen der Tonart in Grundton und Art-ID. */
 async function parseChord(page, name) {

@@ -39,8 +39,9 @@ const seconds = () => Math.min(track ? track.seconds : 0, ran(engine));
 // when it plays as asked within a quarter second of the place asked for, run on since; one that never does (a loop moved the place) gives way
 // after a second. A wish within half a second of a place a late report could still show (the last report's, the wish before) is `near`: such a
 // report would look like it, so only the second ends it (two keys from the last tenth of a bar are two bars). The displays follow the reports.
-// shortcut: a message that waits in the shell's queue longer than a second lets the next input count from the report before it again, upgrade: when
-// the engine's report names the last message the shell took
+// shortcut: a message that waits in the shell's queue longer than a second lets the next input count from the report before it again, and a near
+// wish lasts its full second even when the engine reached it at once: an input within it counts from the wish, also when the transport moved by
+// itself meanwhile (the song's end, a loop's wrap), upgrade: when the engine's report names the last message the shell took
 let wished = null; // { playing, beats, at, near }
 const intended = () => (wished ? Math.min(track.seconds, ran(wished)) : seconds());
 function wish(type, fields, playing, beats) {
@@ -105,7 +106,7 @@ function save() {
 }
 function editBar(chord) {
   if (!track) return;
-  const bar = bars.find((b) => seconds() < b.end) ?? bars.at(-1);
+  const bar = bars.find((b) => intended() < b.end) ?? bars.at(-1); // the bar of the place last sought: a seek and an entry at once are two
   if (!bar) return; // the core's answer for this song has not come yet
   fix.edits[bar.first] = chord;
   save();

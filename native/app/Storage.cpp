@@ -104,7 +104,11 @@ juce::File FileStorage::defaultFolder() {
     return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("BackingtrackGenerator");
 }
 
-FileStorage::FileStorage (juce::File f, std::function<void (int)> step) : folder (std::move (f)), afterStep (std::move (step)) {}
+// The lock's name: the folder's path (NTFS ignores case) as a hash, since a name of the system's locks has no backslash and a limited length.
+// Waited for up to lockWaitMs (Storage.h): an app that ended just before holds it until its process is gone.
+FileStorage::FileStorage (juce::File f, std::function<void (int)> step)
+    : folder (std::move (f)), afterStep (std::move (step)),
+      lock ("BackingtrackGenerator-storage-" + juce::String::toHexString (folder.getFullPathName().toLowerCase().hashCode64())), owner (lock.enter (lockWaitMs)) {}
 
 std::optional<std::string> FileStorage::read (const std::string& name) {
     if (! plainName (name)) throw std::invalid_argument ("not a plain file name: " + name);
@@ -131,7 +135,7 @@ std::optional<std::string> FileStorage::read (const std::string& name) {
 // replaces <name>; (4) <name>.bak.tmp replaces <name>.bak. The process may end after any step: <name> is always whole, the old text until (3), the new
 // one after it. Each step gets three tries (a scanner holding a file for a moment).
 bool FileStorage::write (const std::string& name, const std::string& text) {
-    if (! plainName (name)) return false;
+    if (! owner || ! plainName (name)) return false;
     const auto child = [this] (const std::string& n) { return folder.getChildFile (juce::String::fromUTF8 (n.c_str())); };
     const auto target = child (name), side = child (name + ".tmp"), bak = child (name + ".bak"), bakSide = child (name + ".bak.tmp");
     const auto failed = [&] { side.deleteFile(); bakSide.deleteFile(); return false; };

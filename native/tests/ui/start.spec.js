@@ -4,7 +4,7 @@
 // zeigt; die Sprache wählt die Leiste der App.
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { test, expect, answered, chooseLanguage, settled } from './fixture.js';
+import { test, expect, answered, chooseLanguage, fromSession, settled } from './fixture.js';
 
 const BAR_TIMEOUT = 15_000;
 
@@ -149,4 +149,17 @@ test('Zuletzt gespielt: kaputter oder unvollständiger Speicher zeigt nichts und
     await expect(page.locator('#go')).toHaveText(/\S/);
     await expect(page.locator('#last'), raw).toBeHidden();
   }
+});
+
+test('Stopp, gleich Weitermachen und gleich wieder Stopp auf der Startseite: die Wiedergabe steht', async ({ page }) => {
+  // die Web-App: Stopp hält an und merkt die Sitzung (stop() 159–169), Weitermachen spielt sie gleich wieder (resume 226–236, die Packs sind
+  // geladen: start() im Klick), der dritte Klick findet sie spielend und hält an (go 316–320). Alle drei in einer Aufgabe der Seite: keine
+  // Meldung der Engine kommt dazwischen
+  await page.locator('#go').click();
+  await expect.poll(() => shownBar(page), { timeout: BAR_TIMEOUT }).toBeGreaterThanOrEqual(1);
+  await page.locator('#play-back').click();
+  await settled(page);
+  await page.evaluate(() => { for (const id of ['go', 'resume', 'go']) document.getElementById(id).click(); });
+  await settled(page);
+  expect((await fromSession(page, 'engine')).playing).toBe(false);
 });

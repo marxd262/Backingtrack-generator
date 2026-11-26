@@ -534,3 +534,29 @@ test('Modul Gesamtklang: eigenes Modul neben dem Mixer mit dem Schalter Alle Sam
   await expect(page.locator('#mod-master-title')).toHaveText('Master sound');
   await expect(page.locator('#mod-mixer').getByRole('slider', { name: 'Pan Bass', exact: true })).toHaveAttribute('aria-valuetext', 'centre');
 });
+
+test('Gespeicherte Pegel beim Start: die Engine spielt mit ihnen, das Schlagzeug auf 0 bleibt unter −60 dB, der Bass klingt', async ({ app }) => {
+  // die Web-App: die Pegel gehen mit dem Bau der Instrumente an die Knoten (start(), app.js 123–131); die App: die Hülle gibt der Engine bei jedem
+  // Start die Pegel der Sitzung (PROTOKOLL.md Abschnitt 7, „Mit allem“), und die Engine meldet je Schicht den Pegel hinter dem Fader (`peaks`).
+  // Nicht genau 0: eine Engine, die still steht, führt ihre Fader nicht nach (engine.cpp, `quiet`); bekam sie den Pegel, als sie schon bereit
+  // war, gleitet er beim ersten Spielen von 1 auf 0 (Zeitkonstante 20 ms, auf 1e-3 nach etwa 0,14 s), und der erste Schlag des Schlagzeugs nach
+  // dem Vorlauf von 0,15 s hat noch etwa 2e-4 (gesehen 1,8e-4, −75 dB).
+  // Die Grenze 1e-3 (−60 dB) trennt das von einem Pegel, der nicht ankam (dann 0,1 bis 0,7)
+  const page = await app.restart({ 'mix.json': JSON.stringify({ drums: 0, bass: 1, chords: 1, pad: 1, lead: 1, percussion: 1, master: 1, pan: { drums: 0, bass: 0, chords: 0.3, pad: -0.2, lead: 0, percussion: -0.4 } }) });
+  await openPlayPage(page);
+  await showMixer(page);
+  await expect(slider(page, 'drums')).toHaveValue('0');
+  await page.locator('#form-template').selectOption('off'); // ohne Form spielt das Schlagzeug vom ersten Takt an
+  await answered(page);
+  await page.evaluate(async () => {
+    const { on } = await import('./session.js');
+    window.__peaks = [];
+    on('engine', (m) => { if (m.playing && !m.standing) window.__peaks.push(m.peaks); });
+  });
+  await playGo(page).click();
+  await expect(position(page)).toHaveText(/^Takt 1 von/, { timeout: BAR_TIMEOUT });
+  await settled(page);
+  await expect.poll(() => page.evaluate(() => window.__peaks.filter((p) => p.bass > 0).length), { message: 'Meldungen mit Pegel am Bass', timeout: BAR_TIMEOUT }).toBeGreaterThan(30);
+  expect(await page.evaluate(() => window.__peaks.filter((p) => p.drums >= 1e-3).map((p) => p.drums)), 'Pegel am Schlagzeug ab 1e-3').toEqual([]);
+  await playGo(page).click();
+});
