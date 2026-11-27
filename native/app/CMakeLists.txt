@@ -13,7 +13,7 @@ juce_add_plugin(BackingtrackApp
     NEEDS_WEBVIEW2 TRUE
     NEEDS_CURL FALSE)
 
-target_sources(BackingtrackApp PRIVATE PluginProcessor.cpp PluginEditor.cpp Storage.cpp)
+target_sources(BackingtrackApp PRIVATE PluginProcessor.cpp PluginEditor.cpp Storage.cpp StandaloneApp.cpp)
 
 get_filename_component(BTG_REPO_ROOT "${CMAKE_SOURCE_DIR}/.." ABSOLUTE)
 
@@ -23,6 +23,7 @@ target_compile_definitions(BackingtrackApp
         JUCE_USE_WIN_WEBVIEW2_WITH_STATIC_LINKING=1
         JUCE_USE_CURL=0
         JUCE_VST3_CAN_REPLACE_VST2=0
+        JUCE_USE_CUSTOM_PLUGIN_STANDALONE_APP=1 # StandaloneApp.cpp: its settings file in the storage's folder
     PRIVATE
         # the repository's packs (under src/assets/samples) and pages: where appFolder (PluginProcessor.cpp) looks last, while developing
         BTG_WEB_ROOT="${BTG_REPO_ROOT}/src"

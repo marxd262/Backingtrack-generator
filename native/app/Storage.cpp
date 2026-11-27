@@ -104,6 +104,12 @@ juce::File FileStorage::defaultFolder() {
     return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("BackingtrackGenerator");
 }
 
+juce::File FileStorage::settingsFile (const juce::File& folder, bool named, const juce::File& old) {
+    const auto file = folder.getChildFile ("Backingtrack Generator.settings");
+    if (! named && ! file.exists() && old.existsAsFile() && folder.createDirectory().wasOk()) old.copyFileTo (file); // a failed copy: JUCE's defaults
+    return file;
+}
+
 // The lock's name: the folder's path (NTFS ignores case) as a hash, since a name of the system's locks has no backslash and a limited length.
 // Waited for up to lockWaitMs (Storage.h): an app that ended just before holds it until its process is gone.
 FileStorage::FileStorage (juce::File f, std::function<void (int)> step)

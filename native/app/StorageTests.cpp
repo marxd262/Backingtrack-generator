@@ -1,5 +1,5 @@
 // Checks of the app's storage (Storage.h, native/PROTOKOLL.md section 7) on fresh folders in the temp directory, removed afterwards: the rules of
-// read and write, and the abort test of Review Focus 3. There a child process (this program again: --abort <step> <folder in base64 of UTF-8> <n>)
+// read and write, the take-over of the settings file, and the abort test of Review Focus 3. There a child process (this program again: --abort <step> <folder in base64 of UTF-8> <n>)
 // saves profile n through a session and ends itself after step <step> of the write; afterwards a fresh storage reads the old text whole (the new
 // one after step 3), a fresh session has every profile, and the next write works. Its folder has characters outside ASCII and outside the ANSI
 // code page (a user named Jürgen or Łucja): the child gets the path in base64, since Windows hands main() its arguments in the ANSI code page.
@@ -199,6 +199,36 @@ void twoOnOneFolder() {
 #endif
 }
 
+// The settings file of the app's window (FileStorage::settingsFile) on two fresh folders for the old place and the new: on the default folder the
+// old file is copied once and left byte for byte; a settings file there is never replaced; on a folder a variable names nothing is copied.
+void settingsTakeOver() {
+    const auto base = freshFolder ("settings");
+    const auto old = base.getChildFile ("old").getChildFile ("Backingtrack Generator.settings");
+    const std::string text = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<PROPERTIES>\r\n  <VALUE name=\"audioSetup\"><DEVICESETUP deviceType=\"J\xc3\xbcrgen\"/></VALUE>\r\n</PROPERTIES>\r\n";
+    putFile (old, text);
+    const auto oldTime = old.getLastModificationTime();
+    const auto sameAsBefore = [&] {
+        juce::MemoryBlock bytes;
+        return old.loadFileAsData (bytes) && bytes == juce::MemoryBlock (text.data(), text.size()) && old.getLastModificationTime() == oldTime
+            && old.getParentDirectory().getNumberOfChildFiles (juce::File::findFilesAndDirectories) == 1;
+    };
+
+    const auto empty = base.getChildFile ("empty");
+    check (FileStorage::settingsFile (empty, false, base.getChildFile ("none.settings")) == empty.getChildFile ("Backingtrack Generator.settings") && ! empty.exists(),
+           "on the default folder without an old file: the settings file's place in the storage's folder, nothing made");
+    const auto mine = base.getChildFile ("mine");
+    const auto file = FileStorage::settingsFile (mine, false, old);
+    check (file == mine.getChildFile ("Backingtrack Generator.settings") && contentOf (file) == text, "on the default folder without a settings file the old one is copied there");
+    check (sameAsBefore(), "the old file is left byte for byte after the copy");
+    putFile (file, "changed");
+    check (contentOf (FileStorage::settingsFile (mine, false, old)) == "changed", "a settings file in the default folder is never replaced by the old one");
+    const auto named = base.getChildFile ("named");
+    check (FileStorage::settingsFile (named, true, old) == named.getChildFile ("Backingtrack Generator.settings") && ! named.exists(),
+           "on a folder a variable names the old file is not copied");
+    check (sameAsBefore(), "the old file is left byte for byte at the end");
+    base.deleteRecursively();
+}
+
 // The lock after an end (the page tests' restart; an app closed and opened again at once): a child (this program again: --hold <folder in base64>)
 // takes the folder's lock and writes held.json, the test kills it and at once builds a storage on the folder, while the child is still ending (its
 // process is not yet signalled: checked each time, before the storage is built); that storage gets the lock and writes. Ten times.
@@ -300,6 +330,7 @@ int main (int argc, char** argv) {
     rules();
     lookups();
     twoOnOneFolder();
+    settingsTakeOver();
     const auto exe = juce::File::getSpecialLocation (juce::File::currentExecutableFile);
     lockAfterAnEnd (exe);
     for (int step = 1; step <= 3; ++step) abortAfter (step, exe);

@@ -19,10 +19,16 @@ public:
     // An app that ended keeps the lock until its process is gone: measured 45 to 63 ms after a kill on a quiet machine (30 times, killed as the
     // page tests' restart kills it); under the load of four test workers it outlasted the next app's start
     // (a few hundred ms) in 5 of about 450 restarts. An app closed normally lets it go when its processor is deleted, after a running job of its
-    // loader (a pack's load, up to about a second). 3 s holds all of these with a margin; a true second app starts that much later.
+    // loader (a pack's load, up to about a second) and the end of a track's analysis: measured from the window's close (Task 34b, ten closes each)
+    // 14 to 19 ms idle, 29 to 32 ms while a song plays, 16 to 426 ms while a track is analysed (the beat model's step). 3 s holds all of these with
+    // a margin; a true second app starts that much later.
     static constexpr int lockWaitMs = 3000;
     // %APPDATA%\BackingtrackGenerator (JUCE's userApplicationDataDirectory), or the folder BTG_STORAGE_DIR names (checks: never the user's profiles)
     static juce::File defaultFolder();
+    // The settings file of the app's window (StandaloneApp.cpp: the audio device's setup, the processor's state, the window's place) in `folder`. On
+    // the default folder (`named` false: no BTG_STORAGE_DIR) that has none yet, `old` is copied there first, once: the file JUCE's own application
+    // class kept, which nothing here changes.
+    static juce::File settingsFile (const juce::File& folder, bool named, const juce::File& old);
     // afterStep: for the abort test only, called after the steps 1 (side file on the disk), 2 (previous version copied) and 3 (target replaced) of a write
     explicit FileStorage (juce::File folder, std::function<void (int step)> afterStep = {});
 

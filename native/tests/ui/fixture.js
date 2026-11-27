@@ -75,8 +75,8 @@ async function launch(options) {
 async function start(run, { folder, port, locale, viewport, reducedMotion, problems, env = {} }, retry) {
   if (await portOpen(port)) throw new Error(`port ${port} is taken: does an app of an earlier run still run?`);
   if (run.closing) return; // the deadline came meanwhile and quit() found no app to end: none is started after it
-  // shortcut: every start reads the user's %APPDATA%\Backingtrack Generator\Backingtrack Generator.settings (JUCE's StandaloneFilterApp, as in
-  // every check of native/tools); kill() keeps the app from writing it, upgrade: when the app gets its own window or a variable for that file.
+  // The app's settings file (the audio device's setup) lies in the test's folder too (settings.spec.js): on the new folder there is none, and the
+  // app opens the system's default device.
   // Without SmartScreen: on a new profile WebView2 holds its port and folder until about 6.5 s after its start, also after the app was ended.
   // A 2D canvas drawn in software: an accelerated one goes over to software after the test's first reads (toDataURL), and the same drawing
   // then has other pixels; a test that compares pictures of a canvas would compare the two ways of drawing it.
