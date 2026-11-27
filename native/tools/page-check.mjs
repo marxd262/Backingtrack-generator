@@ -244,17 +244,22 @@ try {
   delete result.moves.bars;
 
   // the window minimised for a moment while the song plays, then restored, as a user does: the page stays loaded (the shell keeps it while the window
-  // is hidden). The same document (its timeOrigin), no navigation, the play page still shows, the position line has moved on, no second sync sent
+  // is hidden). The same document (its timeOrigin), no navigation, the play page still shows, the position line has moved on, no second sync sent.
+  // That the app's window was minimised, the page itself tells: its place on the screen (screenX, screenY) is another while minimised, and the old
+  // one after the restore (its visibility stays "visible", and it draws frames all the same)
   const hiddenLook = () => page.evaluate(() => ({ origin: performance.timeOrigin, playPage: !document.getElementById('play')?.hidden,
-    position: document.getElementById('play-position')?.textContent ?? null, syncs: window.sent.filter((s) => s.type === 'sync').length })).catch((e) => ({ failed: e.message.split('\n')[0] }));
+    position: document.getElementById('play-position')?.textContent ?? null, syncs: window.sent.filter((s) => s.type === 'sync').length, at: [screenX, screenY] })).catch((e) => ({ failed: e.message.split('\n')[0] }));
   const navigatedBefore = run.navigations.length, beforeHidden = await hiddenLook();
   showWindow(run.app, 'minimise');
   await sleep(1500);
+  const minimised = await hiddenLook();
   showWindow(run.app, 'restore');
   await sleep(2000);
-  result.hidden = { before: beforeHidden, after: await hiddenLook(), navigations: run.navigations.slice(navigatedBefore) };
+  result.hidden = { before: beforeHidden, minimised, after: await hiddenLook(), navigations: run.navigations.slice(navigatedBefore) };
   const h = result.hidden;
-  if (h.after.failed || h.after.origin !== h.before.origin || h.navigations.length || !h.after.playPage || h.after.position === h.before.position || h.after.syncs !== h.before.syncs)
+  if (h.minimised.failed) problems.push(`(b) the page could not be read while the window was minimised: ${h.minimised.failed}`);
+  else if (h.after.failed || h.after.origin !== h.before.origin || h.navigations.length || !h.after.playPage || h.after.position === h.before.position || h.after.syncs !== h.before.syncs
+    || String(h.minimised.at) === String(h.before.at) || String(h.after.at) !== String(h.before.at))
     problems.push(`(b) the window minimised and restored while it plays: the page did not stay as it was: ${JSON.stringify(h)}`);
 
   // while it plays, the fretboard, its text version, the wheel, the strip and the progression show the bar of the last position() the page got:

@@ -119,5 +119,6 @@ export const beatsNow = () => {
 };
 
 // After every load (pageshow comes with the first load too, and when the browser returns to the page from its history with the back key): everything
-// the page draws from. Its answer carries its number: a hold of a control from before the return ends with it.
-addEventListener('pageshow', () => post('sync', { seq: ++sent }));
+// the page draws from. Its answer carries its number: a hold of a control from before the return ends with it. `track` says which page this is:
+// the shell's strip follows it, and the sound of the other page stops.
+addEventListener('pageshow', () => post('sync', { seq: ++sent, track: location.pathname.endsWith('/track.html') }));

@@ -14,8 +14,9 @@
 // pattern's key twice, ArrowRight and a chord in the bar select (it goes into the bar sought). The events forced into the other order: an
 // analysis before the lists (tables) keeps its scale and throws nothing; a click on the wheel before any answer throws nothing, and an answer that
 // was lost is asked for again on pageshow. The pages share the language: the one opposite to the system's, chosen on the generator's page as the
-// app's strip chooses it, shows here; the system's, chosen here, shows on the generator's page after "Zum Generator", which leads there. No error
-// in the page's console. Writes .superpowers/native-screens/track-page-check.json and prints it.
+// app's strip chooses it, shows here; the system's, chosen here, shows on the generator's page after "Zum Generator", which leads there. Task 34c:
+// the track plays and the browser goes back to the generator's page by itself: the track stops, and the strip's button leads to the own songs'
+// page again. No error in the page's console. Writes .superpowers/native-screens/track-page-check.json and prints it.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -25,7 +26,7 @@ import de from '../app/ui/i18n/de.js';
 import en from '../app/ui/i18n/en.js';
 import TEXT from '../app/ui/track-text.js';
 import { renderSong } from './render-song.mjs';
-import { showWindow, startApp } from './app-window.mjs';
+import { showWindow, startApp, stripButton } from './app-window.mjs';
 import { trackView } from './session-reference.mjs';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -331,16 +332,20 @@ try {
   if (!(result.quick.arrows.length === 2 && result.quick.arrows[1] > result.quick.arrows[0])) problems.push(`ArrowRight twice at once sought ${JSON.stringify(result.quick.arrows)}, not two bars on`);
 
   // the window minimised for a moment and restored, as a user does: the page stays loaded with the song and its view (the same document, no
-  // navigation, the song's name, its parts and the scale as before)
+  // navigation, the song's name, its parts and the scale as before). That the app's window was minimised, the page tells: its place on the screen
+  // (screenX, screenY) is another while minimised (as in page-check.mjs)
   const view = () => page.evaluate(() => ({ origin: performance.timeOrigin, title: document.getElementById('title').textContent,
-    parts: [...document.getElementById('sections').children].map((b) => b.textContent), scale: document.getElementById('scale').value })).catch((e) => ({ failed: e.message.split('\n')[0] }));
+    parts: [...document.getElementById('sections').children].map((b) => b.textContent), scale: document.getElementById('scale').value, at: [screenX, screenY] })).catch((e) => ({ failed: e.message.split('\n')[0] }));
   const navigatedBefore = navigated.length, beforeHidden = await view();
   showWindow(run.app, 'minimise');
   await sleep(1500);
+  const minimised = await view();
   showWindow(run.app, 'restore');
   await sleep(2000);
-  result.hidden = { before: beforeHidden, after: await view(), navigations: navigated.slice(navigatedBefore) };
-  if (result.hidden.after.failed || JSON.stringify(result.hidden.after) !== JSON.stringify(beforeHidden) || result.hidden.navigations.length || !beforeHidden.parts.length)
+  result.hidden = { before: beforeHidden, minimised: minimised.failed ?? minimised.at, after: await view(), navigations: navigated.slice(navigatedBefore) };
+  if (minimised.failed) problems.push(`the page could not be read while the window was minimised: ${minimised.failed}`);
+  else if (result.hidden.after.failed || JSON.stringify(result.hidden.after) !== JSON.stringify(beforeHidden) || result.hidden.navigations.length || !beforeHidden.parts.length
+    || String(minimised.at) === String(beforeHidden.at))
     problems.push(`the window minimised and restored: the page did not stay as it was: ${JSON.stringify(result.hidden)}`);
 
   // An analysis as the app gives it: two bars, Am F C G twice, Dm held four bars, Am F C G twice, in which the page finds free parts and a pattern at two places
@@ -417,6 +422,23 @@ try {
   if (!result.newSong.partsBefore?.length || result.newSong.buttons || result.newSong.position !== '–' || result.newSong.parts.length || result.newSong.askedOnAnalysis !== 1 || result.newSong.dropped !== 1)
     problems.push(`a song that comes anew, its answer held back: the page does not show it without bars, changes and parts: ${JSON.stringify(result.newSong)}`);
   if (result.newSong.askedOnPageshow !== 1 || result.newSong.wrong.length) problems.push(`a song whose answer was lost, then pageshow: ${JSON.stringify(result.newSong)}`);
+
+  // Task 34c: the track plays and the browser goes back to the generator's page by itself (history.back(), as its back key does): once that page
+  // shows, the track no longer plays and the strip's button leads to the own songs' page (read through UI Automation); forward again for the step below
+  await page.evaluate(() => window.bridge('playFile', { from: 0, rate: 1 }));
+  await sleep(1500);
+  const leave = { playing: await page.evaluate(() => window.got.engine.at(-1).playing), strip: stripButton(run.app) };
+  await page.evaluate(() => history.back());
+  await page.waitForURL(/\/app\/index\.html$/, { timeout: 15000 });
+  await page.waitForFunction(() => document.getElementById('variant')?.value, null, { timeout: 15000 });
+  await sleep(1000);
+  result.back = { before: leave, after: { playing: await page.evaluate(() => window.got.engine.at(-1).playing), strip: stripButton(run.app) } };
+  const ownTrack = system === 'en' ? 'Own track' : 'Eigener Track';
+  if (JSON.stringify(result.back) !== JSON.stringify({ before: { playing: true, strip: 'Generator' }, after: { playing: false, strip: ownTrack } }))
+    problems.push(`the track plays and the browser goes back to the generator's page: ${JSON.stringify(result.back)} (before: playing, the strip "Generator"; after: stopped, the strip "${ownTrack}")`);
+  await page.evaluate(() => history.forward());
+  await page.waitForURL(/\/app\/track\.html$/, { timeout: 15000 });
+  await ready();
 
   // "Zum Generator" leads to the generator's page, drawn (from the session: its variant; its title is written by the page) in the language chosen here
   await Promise.all([page.waitForURL(/\/app\/index\.html$/, { timeout: 15000 }), page.locator('#generator').click()]);

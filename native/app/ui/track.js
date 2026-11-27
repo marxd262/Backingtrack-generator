@@ -269,7 +269,7 @@ $('video-toggle').addEventListener('click', () => {
   showVideo(on);
 });
 $('open').addEventListener('click', () => send('openFile'));
-$('generator').addEventListener('click', () => { send('stop'); send('page', { track: false }); location.href = 'index.html'; });
+$('generator').addEventListener('click', () => { send('stop'); location.href = 'index.html'; });
 $('play').addEventListener('click', () => { // starts or stops from what the page last asked for: two quick presses start and stop
   if ((wished ?? engine).playing) { wish('stop', {}, false, intended()); return; }
   const from = intended() >= track.seconds - 0.5 ? 0 : intended();

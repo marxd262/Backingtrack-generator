@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test as base, expect, chromium } from '@playwright/test';
-import { shown, startApp } from '../../tools/app-window.mjs';
+import { shown, startApp, stripButton } from '../../tools/app-window.mjs';
 
 const exe = join(import.meta.dirname, '../../build/app/BackingtrackApp_artefacts/Release/Standalone/Backingtrack Generator.exe');
 // The app runs on a Windows desktop of its own (startApp; BTG_SHOW=1 starts the app itself, to watch a test).
@@ -213,9 +213,10 @@ async function remove(folder) {
 }
 
 export const test = base.extend({
-  // { page, folder, restart(files, env) }: restart ends the app, writes `files` ({ name: text }) into its storage folder and starts it again on the
-  // folder, with `env` added to its environment (BTG_PACKS_DIR: a packs folder of the test's); it gives the new page. Console errors, page errors
-  // and failed requests of every page fail the test.
+  // { page, folder, restart(files, env), strip(press) }: restart ends the app, writes `files` ({ name: text }) into its storage folder and starts it
+  // again on the folder, with `env` added to its environment (BTG_PACKS_DIR: a packs folder of the test's); it gives the new page. strip gives the
+  // text of the button in the app's strip (a JUCE component, not the page's) and with `press` presses it (stripButton in app-window.mjs). Console
+  // errors, page errors and failed requests of every page fail the test.
   app: [async ({ locale, viewport, reducedMotion }, use, testInfo) => {
     const folder = mkdtempSync(join(tmpdir(), 'btg-ui-test-'));
     const port = 9340 + testInfo.parallelIndex;
@@ -234,6 +235,7 @@ export const test = base.extend({
           run = await launch({ ...options, env });
           return run.page;
         },
+        strip: (press = false) => stripButton(run.app, press),
       });
     } finally {
       if (run) await quit(run, port);

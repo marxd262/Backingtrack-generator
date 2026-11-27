@@ -1,9 +1,10 @@
-// How the checks of native/tools and the page tests (native/tests/ui/fixture.js) start the app, never two at the same instant, and the app's main
-// window minimised and restored through Win32 (ShowWindowAsync on the app's main window, from PowerShell), for the checks that hide the window as a
-// user does (page-check.mjs, track-page-check.mjs).
+// How the checks of native/tools and the page tests (native/tests/ui/fixture.js) start the app, never two at the same instant; the app's window
+// minimised and restored through Win32 (ShowWindowAsync, from PowerShell), for the checks that hide the window as a user does (page-check.mjs,
+// track-page-check.mjs); and the button of the app's strip read and pressed through UI Automation (pages.spec.js, track-page-check.mjs).
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
+import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
 // btg_desktop_run <desktop> <exe> [arguments...] (native/platform/win/desktop_run.cpp) starts the program on the Windows desktop of that name (it
@@ -66,6 +67,41 @@ export async function startApp(exe, desktop, options) {
   return shown ? spawn(exe, [], options) : passGate(() => spawn(desktopRun, [desktop, exe], { ...options, windowsHide: true }));
 }
 
+const powershell = join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe');
+
+// Runs the PowerShell `script` where the app's window is (on a desktop of its own through the runner: a process on another desktop does not find
+// it), with $window set to the app's window: the visible top-level window of a JUCE class (JUCE_...) that the app's process owns. Not the process's
+// MainWindowHandle: on a desktop of its own that was seen to be the input indicator's overlay (UAC_InputIndicatorOverlayWnd, Task 34b), which a
+// minimise hides while the app's window stays as it was. Gives the script's exit code (the runner passes it on, not the output); 2: no such window.
+function onAppDesktop(app, script) {
+  // shortcut: the app is the runner's child of the app's file name (the runner, started without a console window, has its console host as a child
+  // too), upgrade: when the runner starts more than one such program, or the app starts itself anew. shortcut: an app that has ended reads as "the
+  // app has no window" (exit 2), upgrade: when a check must tell the two apart
+  const id = shown ? app.pid : `(Get-CimInstance Win32_Process -Filter 'ParentProcessId = ${app.pid}' | Where-Object Name -eq '${basename(app.spawnargs[2])}').ProcessId`;
+  const find = `Add-Type -Namespace Btg -Name User32 -MemberDefinition @"
+[DllImport("user32.dll")] public static extern bool ShowWindowAsync(System.IntPtr window, int how);
+[DllImport("user32.dll")] public static extern bool IsIconic(System.IntPtr window);
+public delegate bool Visit(System.IntPtr h, System.IntPtr p);
+[DllImport("user32.dll")] public static extern bool EnumWindows(Visit visit, System.IntPtr p);
+[DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(System.IntPtr h, out uint id);
+[DllImport("user32.dll")] public static extern bool IsWindowVisible(System.IntPtr h);
+[DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(System.IntPtr h, System.Text.StringBuilder s, int n);
+public static System.IntPtr Find(uint id) {
+  System.IntPtr found = System.IntPtr.Zero;
+  EnumWindows((h, p) => { uint owner; GetWindowThreadProcessId(h, out owner); var s = new System.Text.StringBuilder(256); GetClassName(h, s, 256);
+    if (owner == id && IsWindowVisible(h) && s.ToString().StartsWith("JUCE_")) { found = h; return false; } return true; }, System.IntPtr.Zero);
+  return found;
+}
+"@
+$id = ${id}
+if ($id) { $window = [Btg.User32]::Find([uint32]$id) }
+if (-not $window -or $window -eq [System.IntPtr]::Zero) { exit 2 }
+`;
+  const args = ['-NoProfile', '-NonInteractive', '-Command', find + script];
+  const ran = shown ? spawnSync(powershell, args, { encoding: 'utf8', windowsHide: true }) : spawnSync(desktopRun, [app.spawnargs[1], powershell, ...args], { encoding: 'utf8', windowsHide: true });
+  return { ...ran, why: `${ran.stdout}${ran.stderr}${ran.error ?? ''}`.trim() };
+}
+
 const SW = { minimise: 6, restore: 9 };
 // ShowWindowAsync returns before the window changes: a minimise is confirmed in the same call (IsIconic within 2 s), so that a minimise that does nothing
 // stops the check instead of letting it test a window that never hid
@@ -75,24 +111,33 @@ for ($i = 0; $i -lt 40 -and -not ([Btg.User32]::IsIconic($window)); $i++) { Star
 if (-not ([Btg.User32]::IsIconic($window))) { exit 3 }`,
   restore: '',
 };
-// the script's exit codes: the runner passes them on, not the output
-const FAILED = { 2: 'the app has no main window', 3: 'the window is not minimised' };
-const powershell = join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe');
+const FAILED = { 2: 'the app has no window of its own (a visible top-level JUCE window)', 3: 'the window is not minimised' };
 
-/** Shows the main window of the app that `app` (the child startApp gave) runs minimised or restored; throws when the app has no main window, or when
- *  a minimise leaves it not minimised. A process on another desktop does not find the window: on a desktop of its own the script runs there, through
- *  the runner, and the app is the process the runner started. */
+/** Shows the window of the app that `app` (the child startApp gave) runs minimised or restored; throws when the app has no window of its own, or
+ *  when a minimise leaves it not minimised. */
 export function showWindow(app, how) {
-  // shortcut: the app is the runner's child of the app's file name (the runner, started without a console window, has its console host as a child
-  // too), upgrade: when the runner starts more than one such program, or the app starts itself anew. shortcut: an app that has ended reads as "the
-  // app has no main window" (exit 2), upgrade: when a check must tell the two apart
-  const id = shown ? app.pid : `(Get-CimInstance Win32_Process -Filter 'ParentProcessId = ${app.pid}' | Where-Object Name -eq '${basename(app.spawnargs[2])}').ProcessId`;
-  const script = `Add-Type -Namespace Btg -Name User32 -MemberDefinition '[DllImport("user32.dll")] public static extern bool ShowWindowAsync(System.IntPtr window, int how); [DllImport("user32.dll")] public static extern bool IsIconic(System.IntPtr window);'
-$id = ${id}
-if ($id) { $window = (Get-Process -Id $id -ErrorAction SilentlyContinue).MainWindowHandle }
-if (-not $window -or $window -eq [System.IntPtr]::Zero) { exit 2 }
-[Btg.User32]::ShowWindowAsync($window, ${SW[how]}) | Out-Null${CONFIRM[how]}`;
-  const args = ['-NoProfile', '-NonInteractive', '-Command', script];
-  const ran = shown ? spawnSync(powershell, args, { encoding: 'utf8', windowsHide: true }) : spawnSync(desktopRun, [app.spawnargs[1], powershell, ...args], { encoding: 'utf8', windowsHide: true });
-  if (ran.status !== 0) throw new Error(`the app's window could not be ${how}d: ${FAILED[ran.status] ?? `exit code ${ran.status}`} ${ran.stdout}${ran.stderr}${ran.error ?? ''}`.trim());
+  const ran = onAppDesktop(app, `[Btg.User32]::ShowWindowAsync($window, ${SW[how]}) | Out-Null${CONFIRM[how]}`);
+  if (ran.status !== 0) throw new Error(`the app's window could not be ${how}d: ${FAILED[ran.status] ?? `exit code ${ran.status}`} ${ran.why}`.trim());
+}
+
+let reads = 0;
+/** The text of the button of the app's strip (the JUCE button before the language box, which leads to the other page), read through UI Automation
+ *  in the app's window (about 0.5 s a read); with `press` the button is pressed after the read, as a click does (UI Automation's Invoke). Throws
+ *  when the window or the button is not found. */
+export function stripButton(app, press = false) {
+  // the runner passes no output on: the text comes through a file
+  const file = join(tmpdir(), `btg-strip-${process.pid}-${++reads}.txt`);
+  try {
+    const ran = onAppDesktop(app, `Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+$A = [System.Windows.Automation.AutomationElement]
+$box = $A::FromHandle($window).FindFirst([System.Windows.Automation.TreeScope]::Children, (New-Object System.Windows.Automation.PropertyCondition($A::NameProperty, 'Sprache / Language')))
+if ($box) { $button = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetPreviousSibling($box) }
+if (-not $button -or $button.Current.ControlType -ne [System.Windows.Automation.ControlType]::Button) { exit 4 }
+[System.IO.File]::WriteAllText('${file.replace(/'/g, "''")}', $button.Current.Name)
+${press ? '$button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()' : ''}`);
+    if (ran.status !== 0) throw new Error(`the strip's button could not be read: ${{ ...FAILED, 4: 'no button before the language box' }[ran.status] ?? `exit code ${ran.status}`} ${ran.why}`.trim());
+    return readFileSync(file, 'utf8');
+  } finally {
+    rmSync(file, { force: true });
+  }
 }

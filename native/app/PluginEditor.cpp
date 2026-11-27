@@ -110,8 +110,7 @@ public:
         // The strip: what holds for every page (which page, the language) and the measurements.
         addAndMakeVisible (page);
         page.onClick = [this] {
-            processor.loader.addJob ([&p = processor] { p.stopTransport(); }); // in order with the queued transport messages; the page is left (pagehide)
-            lastKey.clear(); // a job between two steps of one knob: neither is dropped
+            leave();
             shows (! ownTrack);
             browser.goToURL (juce::WebBrowserComponent::getResourceProviderRoot() + (ownTrack ? trackPage : generatorPage));
         };
@@ -148,6 +147,12 @@ private:
     // The strip's own texts in the language chosen.
     juce::String text (const char* german, const char* inEnglish) const { return juce::String::fromUTF8 (english ? inEnglish : german); }
 
+    // The page that shows is left: its sound stops, in order with the queued transport messages.
+    void leave() {
+        processor.loader.addJob ([&p = processor] { p.stopTransport(); });
+        lastKey.clear(); // a job between two steps of one knob: neither is dropped
+    }
+
     // Which page shows: the button leads to the other one.
     void shows (bool track) {
         ownTrack = track;
@@ -157,6 +162,10 @@ private:
     // UI -> engine. Messages come from the pages' door native/app/ui/session.js (native/PROTOKOLL.md section 7).
     void handle (const juce::var& message) {
         const auto type = message["type"].toString();
+        if (type == "sync" && (bool) message["track"] != ownTrack) { // another page than the one that showed loaded: the browser went there itself (back, forward)
+            leave();
+            shows (! ownTrack);
+        }
         if (queued.contains (type)) {
             auto& p = processor;
             // An action whose next queued message is a newer action of the same Session::replaceKey (one knob's steps) is dropped when its job starts:
@@ -217,10 +226,7 @@ private:
             english = message["lang"].toString() == "en";
             language.setSelectedId (english ? 2 : 1, juce::dontSendNotification);
             shows (ownTrack);
-        } else if (type == "page") { // a page says it is leaving for the other one
-            shows ((bool) message["track"]);
         } else if (type == "hello") {
-            shows (true);
             sentTrack = -1; // a page that just opened gets the analysis of the loaded track again
         } else if (type == "buffer") { // measurement only: another buffer size of the audio device
             if (auto* devices = deviceManager()) {
