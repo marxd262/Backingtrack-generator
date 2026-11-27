@@ -233,14 +233,23 @@ std::string BackingtrackProcessor::exportNow (const std::string& key, const std:
     return session.exportFile (key, name);
 }
 
-// shortcut: packs read from the repository of the build machine (BTG_WEB_ROOT); a release installs them next to the program (Task 34).
-static const char* const packsPath = BTG_WEB_ROOT "/assets/samples";
+juce::File appFolder (const char* variable, const char* name, const char* repository) {
+    const auto given = juce::SystemStats::getEnvironmentVariable (variable, {});
+    if (given.isNotEmpty()) return juce::File::getCurrentWorkingDirectory().getChildFile (given);
+    // shortcut: beside the program is the executable's folder, in a macOS bundle Contents/MacOS, not Contents/Resources where a bundle keeps its
+    // files, upgrade: when the app is built for macOS
+    const auto beside = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getSiblingFile (name);
+    return beside.isDirectory() ? beside : juce::File (repository);
+}
 
-juce::File BackingtrackProcessor::packsFolder() { return juce::File (packsPath); }
+juce::File BackingtrackProcessor::packsFolder() {
+    static const juce::File folder = appFolder ("BTG_PACKS_DIR", "samples", BTG_WEB_ROOT "/assets/samples");
+    return folder;
+}
 
 std::shared_ptr<const btg::Pack> BackingtrackProcessor::pack (const std::string& id) {
     auto& held = packs[id];
-    if (held == nullptr) held = btg::loadPackFiles (packsPath, id);
+    if (held == nullptr) held = btg::loadPackFiles (packsFolder().getFullPathName().toStdString(), id);
     return held;
 }
 
@@ -312,8 +321,8 @@ void BackingtrackProcessor::run() {
     // Beats and bars from the beat model when it is there (next to the program, or in the repository while
     // developing), then tempo, chords and key in the core. Without the model the core tracks the beats itself.
     // The result is kept per file (path, size, date) and version of the analysis, so a track opened again is there
-    // at once. BTG_NO_CACHE=1 (the automatic checks) analyses every time.
-    const auto kept = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("BackingtrackGenerator/analysis")
+    // at once, in the storage's folder (a check's BTG_STORAGE_DIR moves them). BTG_NO_CACHE=1 analyses every time.
+    const auto kept = FileStorage::defaultFolder().getChildFile ("analysis")
         .getChildFile (juce::String::toHexString ((trackFile.getFullPathName() + "|" + juce::String (trackFile.getSize()) + "|"
                                                    + juce::String (trackFile.getLastModificationTime().toMilliseconds()) + "|" + analysisVersion).hashCode64()) + ".json");
     const bool useKept = juce::SystemStats::getEnvironmentVariable ("BTG_NO_CACHE", {}).isEmpty();

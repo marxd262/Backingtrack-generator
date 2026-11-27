@@ -72,7 +72,7 @@ async function launch(options) {
   }
 }
 
-async function start(run, { folder, port, locale, viewport, reducedMotion, problems }, retry) {
+async function start(run, { folder, port, locale, viewport, reducedMotion, problems, env = {} }, retry) {
   if (await portOpen(port)) throw new Error(`port ${port} is taken: does an app of an earlier run still run?`);
   if (run.closing) return; // the deadline came meanwhile and quit() found no app to end: none is started after it
   // shortcut: every start reads the user's %APPDATA%\Backingtrack Generator\Backingtrack Generator.settings (JUCE's StandaloneFilterApp, as in
@@ -86,9 +86,10 @@ async function start(run, { folder, port, locale, viewport, reducedMotion, probl
   const downloads = join(folder, 'downloads');
   mkdirSync(downloads, { recursive: true });
   run.step = 'wait at the gate of startApp (no two spawns within START_GAP_MS)';
-  // BTG_NO_CACHE: a track the app loads is analysed anew and its analysis not kept (the kept ones lie in the user's %APPDATA% whatever
-  // BTG_STORAGE_DIR says, PluginProcessor.cpp run()); no page test loads a track today, so none behaves otherwise for it
-  const app = (run.app = await startApp(exe, `btg-tests-${port}`, { stdio: 'ignore', env: { ...process.env, BTG_MUTE: '1', BTG_NO_CACHE: '1', BTG_STORAGE_DIR: folder,
+  // BTG_NO_CACHE: a track the app loads is analysed anew, as in a new browser context; without it the analysis would be kept in the test's
+  // folder (PluginProcessor.cpp run()) and go with it. No page test loads a track today, so none behaves otherwise for it
+  // a test's env first: it cannot move the fixture's own (the storage onto the user's folder, the sound on)
+  const app = (run.app = await startApp(exe, `btg-tests-${port}`, { stdio: 'ignore', env: { ...process.env, ...env, BTG_MUTE: '1', BTG_NO_CACHE: '1', BTG_STORAGE_DIR: folder,
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port} --lang=${locale} --disable-features=msSmartScreenProtection --disable-accelerated-2d-canvas` } }));
   if (run.closing) { app.kill(); return; } // the deadline came during the wait, and quit() found no app to end
   run.step = `attach to the app's WebView2 on port ${port}`;
@@ -212,8 +213,9 @@ async function remove(folder) {
 }
 
 export const test = base.extend({
-  // { page, folder, restart(files) }: restart ends the app, writes `files` ({ name: text }) into its storage folder and starts it again on the
-  // folder; it gives the new page. Console errors, page errors and failed requests of every page fail the test.
+  // { page, folder, restart(files, env) }: restart ends the app, writes `files` ({ name: text }) into its storage folder and starts it again on the
+  // folder, with `env` added to its environment (BTG_PACKS_DIR: a packs folder of the test's); it gives the new page. Console errors, page errors
+  // and failed requests of every page fail the test.
   app: [async ({ locale, viewport, reducedMotion }, use, testInfo) => {
     const folder = mkdtempSync(join(tmpdir(), 'btg-ui-test-'));
     const port = 9340 + testInfo.parallelIndex;
@@ -225,11 +227,11 @@ export const test = base.extend({
       await use({
         page: run.page,
         folder,
-        async restart(files = {}) {
+        async restart(files = {}, env = {}) {
           await quit(run, port);
           run = null;
           for (const [name, text] of Object.entries(files)) writeFileSync(join(folder, name), text);
-          run = await launch(options);
+          run = await launch({ ...options, env });
           return run.page;
         },
       });

@@ -2,8 +2,8 @@
 // chordDisplays) in the real app, in one step (after native/build.ps1 with the app):
 //   node native/tools/track-page-check.mjs [app.exe]
 // A generator song (render-song.mjs: btg_render, in a temporary folder) is loaded as the user's own song, analysed and played. The app runs muted,
-// on a storage folder of its own (BTG_STORAGE_DIR, removed afterwards with its WebView2 profile) and analyses anew (BTG_NO_CACHE: nothing is kept in
-// the user's folder). At places of the song (inside every chord the analysis found, and before its end) the page shows what the core's answer to
+// on a storage folder of its own (BTG_STORAGE_DIR, removed afterwards with its WebView2 profile and the analyses the app keeps there) and analyses
+// anew (BTG_NO_CACHE). At places of the song (inside every chord the analysis found, and before its end) the page shows what the core's answer to
 // the page's own last request says: it asks for the chord and the next chord it shows, and its fretboard (the drawn dots with their roles and labels,
 // the text version) and its wheel (the nodes marked as the chord that sounds and the next one) are the answer's. A click on a wheel node enters the
 // name the answer allows for that node into the bar; the scale select has the entries of tables(); the window minimised for a moment and restored

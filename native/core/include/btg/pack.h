@@ -43,7 +43,7 @@ struct Pack {
 // Throws std::runtime_error when the pack is not valid.
 Pack loadPack(const std::string& json, const unsigned char* audio, size_t size);
 
-// Reads <folder>/<id>.json and the audio file next to it (<id>.pcm, or the name in the JSON).
+// Reads <folder>/<id>.json and the audio file next to it (<id>.pcm, or the name in the JSON). `folder` is UTF-8.
 std::shared_ptr<const Pack> loadPackFiles(const std::string& folder, const std::string& id);
 
 } // namespace btg

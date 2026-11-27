@@ -3,8 +3,9 @@
 // the speed control and the corrections.
 //   node native/tools/track-check.mjs [track.mp3] [app.exe] [output folder]
 // Without a track it renders a generator song of 96 bars, 230 s (render-song.mjs), and checks with that.
-// The app runs muted (BTG_MUTE) and analyses every file anew (BTG_NO_CACHE), unless BTG_KEEP=1 asks for the kept results. Needs ffmpeg for the format test files.
-// It runs on a storage folder of its own (BTG_STORAGE_DIR, removed afterwards with the rendered song): the developer's profiles are never touched.
+// The app runs muted (BTG_MUTE) and analyses every file anew (BTG_NO_CACHE), unless BTG_KEEP=1 lets it keep the results (in the storage folder below,
+// new at every run: kept only within the run). Needs ffmpeg for the format test files.
+// It runs on a storage folder of its own (BTG_STORAGE_DIR, removed afterwards with the rendered song): the developer's profiles and analyses are never touched.
 // Its debug port 9333 is ui-check.mjs's too: the two cannot run at once.
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';

@@ -6,7 +6,7 @@
 // Neuladen, das das Merken beweist, ist ein Neustart der App. Die Web-App sah an den Audioknoten, wie die Pegel ankommen (setTargetAtTime live,
 // AudioParam.value beim Start); die App hat kein Web Audio: hier zählt, was die Seite der Sitzung schickt, was die Sitzung daraus macht und dass
 // ihre Antwort den Merker mix trägt (auf ihn gibt die Hülle der Engine Pegel und Panorama, PROTOKOLL.md Abschnitt 7).
-import { readFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test, expect, answered, chooseLanguage, fromSession, settled } from './fixture.js';
 import { openSetup } from './style-helpers.js';
@@ -338,37 +338,37 @@ test('Alle Samples: Standard sind Samples; schaltet jede Schicht auf Synth und z
   for (const layer of ['drums', 'bass', 'chords', 'pad']) await expect(page.locator(`#voice-${layer}`)).toHaveValue(/^sample\//);
 });
 
-// Die Web-App ließ das Pack des Fingerbasses mit page.route scheitern oder warten. Die Engine der App liest ihre Packs von der Platte, aus einem
-// Ordner, der beim Bau feststeht (native/app/PluginProcessor.cpp, packsPath): nichts lässt sich umleiten. Beide Zustände gibt es in der App ("nicht
-// verfügbar" einer Stimme, "lädt …" an der Taste, solange Packs laden); herbeigeführt werden sie hier mit den Ereignissen der Hülle in der Seite,
-// wie failStarts einen Start, der scheitert (Entscheidung des Controllers, Task 33c).
+// Die Web-App ließ das Pack des Fingerbasses mit page.route scheitern oder warten. Die App liest ihre Packs aus dem Ordner, den BTG_PACKS_DIR
+// nennt (sonst neben dem Programm): ein Test kann ihr einen eigenen geben.
 
-// Ab dem nächsten Laden meldet die Hülle den Fingerbass, als ließe sich sein Pack nicht lesen (der Text der Engine, engine.cpp 506), solange die
-// Sitzung ihn gewählt hat (derived().voices.bass); alle anderen Meldungen gehen, wie sie kommen.
-// shortcut: the shell's report is faked, so the test proves the page's part only, not the engine's and the shell's (a pack that cannot be read
-// leaves its layer silent, names the pack, the others play: btg_engine_tests, test_engine.cpp 1489-1508; the shell sends that report), upgrade:
-// Task 34, when the packs have their place: a folder of the test with a broken pack.
-const packFails = (page) => page.addInitScript(() => {
-  const backend = window.__JUCE__.backend;
-  let bass = null;
-  backend.addEventListener('derived', (m) => { bass = JSON.parse(m.json).voices.bass; });
-  const emit = backend.emitByBackend.bind(backend);
-  backend.emitByBackend = (id, text) => {
-    if (id !== 'voices' || bass?.id !== 'sample' || bass?.variant !== 'finger') return emit(id, text);
-    return emit(id, JSON.stringify({ ...JSON.parse(text), bass: 'error: bass-finger: pack: cannot open bass-finger.json' }));
-  };
-});
-
-test('Pack lädt nicht: Fehler im Display des Instruments, die übrigen werden bereit, Los wartet und spielt, Seite bleibt bedienbar', async ({ page }) => {
-  await packFails(page);
-  await page.reload(); // die Packs der Startwahl meldet die Hülle beim Laden: erst mit dem nachgestellten Fehler
-  await expect(page.locator('#go')).toHaveText(/\S/);
+// Ein Ordner der Packs im Ordner des Tests: die Packs dieser Sample-Stimmen (je JSON und PCM, zusammen etwa 5,6 MB, nicht die 66 MB aller Packs),
+// nur das des Fingerbasses ist eine kaputte JSON-Datei. Die App startet neu auf ihm, der Test wählt die Stimmen (die Startwahl hängt vom
+// gewürfelten Stil ab); was die App über die Stimmen meldet, ist das der Engine und der Hülle.
+const REPO_PACKS = join(import.meta.dirname, '../../../src/assets/samples');
+// je Schicht die Sample-Stimme und ihr Pack (native/core/data/sound.json, packs)
+const IN_FOLDER = { drums: ['legacy', 'drums-standard'], bass: ['finger', 'bass-finger'], chords: ['guitar', 'chords-guitar'], pad: ['strings', 'pad-strings'],
+  lead: ['flute', 'lead-flute'], percussion: ['studio', 'percussion-studio'] };
+async function onBrokenBass(app) {
+  const packs = join(app.folder, 'packs');
+  mkdirSync(packs);
+  for (const [layer, [, id]] of Object.entries(IN_FOLDER)) {
+    if (layer !== 'bass') for (const file of [`${id}.json`, `${id}.pcm`]) copyFileSync(join(REPO_PACKS, file), join(packs, file));
+  }
+  writeFileSync(join(packs, 'bass-finger.json'), '{ kein JSON');
+  const page = await app.restart({}, { BTG_PACKS_DIR: packs });
   await openPlayPage(page);
   await showMixer(page);
+  for (const [layer, [variant]] of Object.entries(IN_FOLDER)) await page.locator(`#voice-${layer}`).selectOption(`sample/${variant}`);
+  await answered(page);
+  return page;
+}
+
+test('Pack lädt nicht: Fehler im Display des Instruments, die übrigen werden bereit, Los wartet und spielt, Seite bleibt bedienbar', async ({ app }) => {
+  const page = await onBrokenBass(app);
   await expect(page.locator('#voice-status-bass')).toHaveText('nicht verfügbar', { timeout: BAR_TIMEOUT });
   for (const layer of ['drums', 'chords', 'pad']) await expect(page.locator(`#voice-status-${layer}`)).toHaveText('bereit', { timeout: 30_000 });
   await expect(allVoices(page)).toHaveAttribute('aria-pressed', 'true'); // die Wahl steht, nur das Pack fehlt
-  // Los versucht das fehlende Pack noch einmal und spielt dann (der Bass als Synth)
+  // Los versucht das fehlende Pack noch einmal und spielt dann (der Bass schweigt: die Engine lässt die Schicht eines kaputten Packs still)
   await playGo(page).click();
   await expect(position(page)).toHaveText(/^Takt 1 von/, { timeout: BAR_TIMEOUT });
   await playGo(page).click();
@@ -382,8 +382,9 @@ test('Pack lädt nicht: Fehler im Display des Instruments, die übrigen werden b
 // Ab jetzt hält die Seite die Meldungen `voices` der Hülle und ihre eigenen playSession zurück, bis window.__release() sie der Reihe nach
 // weitergibt: so lädt eine gewählte Stimme für die Seite, bis release() kommt.
 // shortcut: the load is faked, so the test proves the page's part only (the key's "lädt …" and aria-busy while a chosen voice has no report,
-// the second click), not that the shell's start waits for the load of a voice chosen before it (held by no check), upgrade: Task 34, when the
-// packs have their place: a folder of the test with a pack whose load the test holds.
+// the second click), not that the shell's start waits for the load of a voice chosen before it (held by no check): a packs folder of the test's
+// own (BTG_PACKS_DIR, as above) loads in milliseconds, and a load that takes as long as the test needs would want a hook in the app, upgrade:
+// when the app gets such a hook or a slow source of packs.
 const holdLoads = (page) => page.evaluate(() => {
   const backend = window.__JUCE__.backend;
   const held = [];

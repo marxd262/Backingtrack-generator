@@ -24,8 +24,24 @@ target_compile_definitions(BackingtrackApp
         JUCE_USE_CURL=0
         JUCE_VST3_CAN_REPLACE_VST2=0
     PRIVATE
-        BTG_WEB_ROOT="${BTG_REPO_ROOT}/src" # the packs (PluginProcessor.cpp, Task 34 moves them)
+        # the repository's packs (under src/assets/samples) and pages: where appFolder (PluginProcessor.cpp) looks last, while developing
+        BTG_WEB_ROOT="${BTG_REPO_ROOT}/src"
         BTG_APP_UI="${CMAKE_CURRENT_SOURCE_DIR}/ui")
+
+# What the app reads at run time, beside the program at every build (a custom target is never up to date): the pages anew, so that a file removed
+# from native/app/ui goes; the packs (66 MB) and the beat model only where they differ.
+set(btg_app_dir $<TARGET_FILE_DIR:BackingtrackApp_Standalone>)
+set(btg_model ${CMAKE_SOURCE_DIR}/models/beat_this.onnx) # native/tools/get-models.mjs, which native/build.ps1 runs before it configures
+if(BTG_BEAT_MODEL AND EXISTS ${btg_model})
+    set(btg_copy_model COMMAND ${CMAKE_COMMAND} -E copy_if_different ${btg_model} ${btg_app_dir}/models/beat_this.onnx)
+endif()
+add_custom_target(btg_app_files ALL
+    COMMAND ${CMAKE_COMMAND} -E rm -rf ${btg_app_dir}/ui
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/ui ${btg_app_dir}/ui
+    COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different ${BTG_REPO_ROOT}/src/assets/samples ${btg_app_dir}/samples
+    ${btg_copy_model}
+    VERBATIM)
+add_dependencies(btg_app_files BackingtrackApp_Standalone)
 if(BTG_BEAT_MODEL)
     target_link_libraries(BackingtrackApp PRIVATE btg_beats)
     if(WIN32) # next to the program itself, which is the target JUCE derives from the plugin

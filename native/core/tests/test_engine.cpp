@@ -1584,6 +1584,23 @@ int main(int argc, char** argv) {
         CHECK(btg::loadPack(fine, audio, sizeof audio).samples.size() == 1);
     }
 
+    // Task 34: the packs' folder comes as UTF-8, also with characters outside the system's code page (the app's packs beside a program in a
+    // user's folder whose name has them): a copy of a pack of the repository (beside native/, as the sound cases below find theirs) in such a folder loads.
+    {
+        const auto samples = std::filesystem::path(argv[1]).parent_path().parent_path().parent_path().parent_path() / "src" / "assets" / "samples";
+        const auto folder = std::filesystem::temp_directory_path() / std::filesystem::path(u8"btg-packs-\u00f6-\u017e-\u65e5");
+        std::filesystem::remove_all(folder);
+        std::filesystem::create_directories(folder);
+        for (const char* file : { "percussion-studio.json", "percussion-studio.pcm" }) std::filesystem::copy_file(samples / file, folder / file);
+        const std::u8string name = folder.u8string();
+        std::string reason;
+        std::shared_ptr<const btg::Pack> pack;
+        try { pack = btg::loadPackFiles(std::string(name.begin(), name.end()), "percussion-studio"); } catch (const std::exception& error) { reason = error.what(); }
+        CHECK(pack != nullptr && !pack->zones.empty());
+        if (pack == nullptr) std::printf("  a pack in a folder named in UTF-8: %s\n", reason.c_str());
+        std::filesystem::remove_all(folder);
+    }
+
     // Review Focus 2: the bass changes its voice in every block for 10 s. Old tones ring out and nothing clicks: the second
     // difference of these sines stays below 0.01; a cut tone jumps by its amplitude (0.1 and more). The voice does change:
     // the pick's test pack has half the amplitude, so the run is clearly quieter than with the finger voice alone.

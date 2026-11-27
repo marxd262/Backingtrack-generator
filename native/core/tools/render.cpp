@@ -50,6 +50,7 @@ int main(int argc, char** argv) {
         const std::string track((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 
         btg::Engine engine;
+        // read as UTF-8 (loadPackFiles), where Windows passes argv in its code page: the same for the tools, whose folders are the repository's (ASCII)
         const std::string folder = argv[2];
         engine.setPackSource([folder](const std::string& id) { return btg::loadPackFiles(folder, id); });
         if (!tuningFile.empty()) {

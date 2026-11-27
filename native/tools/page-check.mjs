@@ -32,7 +32,7 @@
 // cannot be read (or is damaged) at the first start leaves no mark, and a later start on a working storage takes the profiles.
 // Writes .superpowers/native-screens/page-check.json and prints it.
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -43,6 +43,8 @@ import { showWindow, startApp } from './app-window.mjs';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const exe = process.argv[3] ?? join(repo, 'native/build/app/BackingtrackApp_artefacts/Release/Standalone/Backingtrack Generator.exe');
+// the packs' folder the app reads (appFolder, PluginProcessor.cpp): the variable's, else beside the program, else the repository's
+const packs = process.env.BTG_PACKS_DIR ? resolve(process.env.BTG_PACKS_DIR) : [join(dirname(exe), 'samples'), join(repo, 'src/assets/samples')].find((d) => existsSync(d));
 const program = join(repo, 'native/build/core/Release/btg_session.exe');
 const out = join(repo, '.superpowers/native-screens');
 mkdirSync(out, { recursive: true });
@@ -914,7 +916,7 @@ try {
   result.credits = licences.map(({ href, status, type, text }) => ({ href, status, type, chars: text?.length ?? null }));
   if (licences.length !== 4) problems.push(`credits.html links ${licences.length} licence texts, not the packs' 4`);
   for (const l of licences) {
-    const file = join(repo, 'src/assets/samples', l.href.slice('/samples/'.length));
+    const file = join(packs, l.href.slice('/samples/'.length));
     if (l.text !== readFileSync(file, 'utf8') || !l.type?.startsWith('text/plain')) problems.push(`credits.html: ${l.href} gives ${l.status} ${l.type}, not the text of ${file}`);
   }
 

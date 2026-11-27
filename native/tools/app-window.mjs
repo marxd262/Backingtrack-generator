@@ -11,6 +11,8 @@ import { basename, join } from 'node:path';
 // its exit code, and does not pass its output on. The program runs in a job: killing the runner, or the end of the process that started the runner,
 // ends it with everything it started (the app's WebView2). BTG_SHOW=1 starts the app itself, on the user's desktop.
 const desktopRun = join(import.meta.dirname, '../build/platform/Release/btg_desktop_run.exe');
+// The repository's pages, not the copy the build put beside the program: a changed page is tested without a build.
+const repositoryPages = join(import.meta.dirname, '../app/ui');
 export const shown = process.env.BTG_SHOW === '1';
 
 // Apps spawned through the runner within about 100 ms of each other now and then stand with their WebView2 running and no page at all (Task 33g:
@@ -54,9 +56,11 @@ export async function passGate(spawnApp) {
 
 /** Starts the app `exe` as spawn(exe, [], options) does, through the runner on the desktop `desktop` (one per debug port: no two apps share one),
  *  START_GAP_MS after any other start through the runner on this machine, or itself with BTG_SHOW=1 (at once: on the user's desktop coincident
- *  starts never failed); gives the spawned child (the runner: its exit code is the app's, kill() ends the app). */
+ *  starts never failed); gives the spawned child (the runner: its exit code is the app's, kill() ends the app). The app reads the repository's
+ *  pages (BTG_UI_DIR), unless the environment of `options` names a folder already, or asks for none (BTG_UI_DIR empty: the pages beside the program). */
 export async function startApp(exe, desktop, options) {
   for (const file of shown ? [exe] : [exe, desktopRun]) if (!existsSync(file)) throw new Error(`no app at ${file}: build it first (native/build.ps1)`);
+  options = { ...options, env: { BTG_UI_DIR: repositoryPages, ...(options.env ?? process.env) } };
   // windowsHide: the runner is a console program, and a parent without a console (an IDE's test runner) would get a console window of it on the
   // user's screen per start; not for the app itself (BTG_SHOW=1), whose first window would then be hidden
   return shown ? spawn(exe, [], options) : passGate(() => spawn(desktopRun, [desktop, exe], { ...options, windowsHide: true }));

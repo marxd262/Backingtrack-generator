@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <stdexcept>
@@ -89,8 +90,8 @@ Pack loadPack(const std::string& text, const unsigned char* audio, size_t size) 
 }
 
 std::shared_ptr<const Pack> loadPackFiles(const std::string& folder, const std::string& id) {
-    const auto read = [](const std::string& path) {
-        std::ifstream file(path, std::ios::binary);
+    const auto read = [](const std::string& path) { // UTF-8: a narrow path would be read in Windows' code page
+        std::ifstream file(std::filesystem::path(std::u8string(path.begin(), path.end())), std::ios::binary);
         if (!file) throw std::runtime_error("pack: cannot open " + path);
         return std::string(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
     };

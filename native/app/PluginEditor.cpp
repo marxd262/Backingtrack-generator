@@ -15,9 +15,12 @@
 
 namespace {
 
-// The app's pages (native/app/ui), served from disk under /app/: at the root they would lie at the paths the web's files had (/assets/fonts/...).
-// shortcut: an absolute build-machine path, works only where it was built; a release embeds or installs these files.
-const juce::File appRoot { BTG_APP_UI };
+// The app's pages (native/app/ui, which the build copies beside the program as ui/), served from disk under /app/: at the root they would lie at
+// the paths the web's files had (/assets/fonts/...).
+const juce::File& appRoot() {
+    static const juce::File root = appFolder ("BTG_UI_DIR", "ui", BTG_APP_UI);
+    return root;
+}
 const juce::String generatorPage = "app/index.html";
 const juce::String trackPage = "app/track.html";
 
@@ -35,7 +38,7 @@ std::optional<juce::WebBrowserComponent::Resource> resource (const juce::String&
     const auto path = url.upToFirstOccurrenceOf ("?", false, false);
     const bool page = path.startsWith ("/app/");
     if (! page && ! path.startsWith ("/samples/LICENSE-")) return std::nullopt;
-    const auto root = page ? appRoot : BackingtrackProcessor::packsFolder();
+    const auto root = page ? appRoot() : BackingtrackProcessor::packsFolder();
     const auto file = root.getChildFile (path.fromFirstOccurrenceOf (page ? "/app/" : "/samples/", false, false));
     // stay inside the roots (getChildFile takes ".." and an absolute path as they are); of the packs' folder only its own files
     if (path.contains ("..") || ! file.isAChildOf (root) || (! page && file.getParentDirectory() != root)) return std::nullopt;

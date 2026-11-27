@@ -12,6 +12,10 @@
 #include <map>
 #include <optional>
 
+// A folder of the files the app reads: the one the variable `variable` names (tests and checks; relative to the working folder), else `name` beside
+// the program (where the build puts them), else `repository` (the build machine's: while developing).
+juce::File appFolder (const char* variable, const char* name, const char* repository);
+
 class BackingtrackProcessor final : public juce::AudioProcessor, private juce::Thread {
 public:
     BackingtrackProcessor();
@@ -46,7 +50,7 @@ public:
     // Sample packs by id, read once and kept for the app's life (the engine's tones point into them). Loader thread only;
     // throws like btg::loadPackFiles.
     std::shared_ptr<const btg::Pack> pack (const std::string& id);
-    static juce::File packsFolder(); // where pack() reads them, with the packs' licence texts (LICENSE-*.md)
+    static juce::File packsFolder(); // where pack() reads them, with the packs' licence texts (LICENSE-*.md); appFolder of BTG_PACKS_DIR, samples/
     // Speed of the loaded track (1 = as recorded). Here, not in the editor: the queued messages playFile and fileRate set and
     // read it, so it is touched on the loader thread only.
     double fileRate = 1.0;
